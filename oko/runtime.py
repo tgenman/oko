@@ -284,11 +284,8 @@ class Runtime:
 
     async def retry_theses(self, item: str) -> None:
         async with self._actions:
-            current = self.require_store()
-            if not current.material(item) or not current.thesis_signature(item):
+            if not self.require_store().retry_theses(item):
                 raise ActionError('missing', 'Тезисы для материала не включены')
-            with current.db:
-                current.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
 
     async def _execute_ai(self, job: Job) -> None:
         current: Store | None = None
@@ -300,7 +297,7 @@ class Runtime:
                 prepared = current.processing_request(job)
                 config = current.processor_config()
                 if not prepared:
-                    return
+                    raise ProcessingError('Исходник недоступен для тезисов')
                 request, signature, public_ai = prepared
                 if request.processor not in ('ollama', 'ollama:' + (config.model if config else '')) or not config:
                     raise ProcessingError('Ожидание выбранного обработчика; Ollama не настроен или не выбран')

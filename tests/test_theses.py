@@ -281,3 +281,25 @@ def test_process_death_after_theses_move_retries_without_publishing_orphan(tmp_p
         server.shutdown()
         server.server_close()
         worker.join(2)
+
+
+def test_reader_can_retry_theses_after_model_response_is_fixed(tmp_path: Path):
+    calls = []
+    fixed = False
+    good = model_transport(calls)
+
+    def respond(request):
+        if request.url.path == '/api/chat' and not fixed:
+            return httpx.Response(200, json={'done': False})
+        return good.handler(request)
+
+    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
+        item = setup_reader(client)
+        client.put('/api/processors/ollama', json={'endpoint': 'http://127.0.0.1:11434', 'model': 'local:latest'})
+        client.patch('/api/settings/oko/global', json={'processor': 'ollama', 'theses': True})
+        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('ai', {}).get('error'))
+        fixed = True
+        assert client.post('/api/materials/' + item + '/theses/retry').status_code == 200
+        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        client.post('/api/materials/' + item + '/viewed')
+        assert client.post('/api/materials/' + item + '/theses/retry').status_code == 404

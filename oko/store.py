@@ -360,6 +360,13 @@ class Store:
         request = ProcessingRequest(sources=(InputSource(id=job.item, version=self.content_version(job.item), url=material['url'], title=material['title'], text=material['text']),), settings_version=self.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, settings['feed']['public_ai']
 
+    def retry_theses(self, item: str) -> bool:
+        if not self.material(item) or not self.thesis_signature(item):
+            return False
+        with self.db:
+            self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
+        return True
+
     def thesis_status(self, item: str) -> dict[str, Any] | None:
         if not self.thesis_signature(item):
             return None
