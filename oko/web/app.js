@@ -101,7 +101,7 @@ async function refresh() {
       return button;
     }));
   } catch (error) { clear(); byId('progress').textContent = error.message; }
-  finally { if (!stopped) refreshTimer = setTimeout(refresh, 500); }
+  finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
 byId('copy').onclick = async () => {
   if (!selected) return;
@@ -195,7 +195,7 @@ async function loadSettings() {
       else if (type === 'text') { input = element('textarea'); input.value = effective.value; input.rows = 3; }
       else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = '3650'; } }
       input.id = 'setting-' + field;
-      const info = element('small', 'Эффективное значение: ' + String(effective.value) + ' · ' + describeOwner(effective.scope, effective.owner));
+      const info = element('small', 'Эффективное значение: ' + (type === 'boolean' ? (effective.value ? 'Включено' : 'Выключено') : String(effective.value)) + ' · ' + describeOwner(effective.scope, effective.owner));
       const save = element('button', 'Сохранить поле');
       const reset = element('button', 'Сбросить');
       reset.disabled = !(field in result.overrides);

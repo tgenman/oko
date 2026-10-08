@@ -33,8 +33,9 @@ class Store:
             raise sqlite3.DatabaseError('integrity')
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS items (
-          id TEXT PRIMARY KEY, source_id TEXT UNIQUE, url TEXT UNIQUE,
-          published REAL, viewed INTEGER DEFAULT 0, complete INTEGER DEFAULT 0);
+          id TEXT PRIMARY KEY, source_id TEXT UNIQUE, url TEXT,
+          published REAL, viewed INTEGER DEFAULT 0, complete INTEGER DEFAULT 0,
+          feed_id TEXT DEFAULT 'demo', UNIQUE(feed_id,url));
         CREATE TABLE IF NOT EXISTS jobs (
           id INTEGER PRIMARY KEY, kind TEXT, item TEXT DEFAULT '',
           status TEXT DEFAULT 'pending', attempt INTEGER DEFAULT 0,
@@ -46,6 +47,22 @@ class Store:
         if 'feed_id' not in columns:
             self.db.execute("ALTER TABLE items ADD COLUMN feed_id TEXT DEFAULT 'demo'")
             self.db.commit()
+        global_url_index = any(
+            index['unique'] and [column['name'] for column in self.db.execute(
+                'SELECT name FROM pragma_index_info(?)', (index['name'],))] == ['url']
+            for index in self.db.execute('PRAGMA index_list(items)').fetchall())
+        if global_url_index:
+            # Rebuild in one transaction. IDs, tombstones, paths and jobs retain
+            # their identities; a crash exposes either the old or new schema.
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                self.db.execute('''CREATE TABLE items_scoped (
+                  id TEXT PRIMARY KEY, source_id TEXT UNIQUE, url TEXT,
+                  published REAL, viewed INTEGER DEFAULT 0, complete INTEGER DEFAULT 0,
+                  feed_id TEXT DEFAULT 'demo', UNIQUE(feed_id,url))''')
+                self.db.execute('INSERT INTO items_scoped SELECT id,source_id,url,published,viewed,complete,feed_id FROM items')
+                self.db.execute('DROP TABLE items')
+                self.db.execute('ALTER TABLE items_scoped RENAME TO items')
         self.subscriptions = Subscriptions(self.db)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)

@@ -50,6 +50,10 @@ def key(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:32]
 
 
+def folder_path(parts: list[str]) -> str:
+    return ' / '.join(part.replace('\\', '\\\\').replace('/', '\\/') for part in parts)
+
+
 def identify(url: str) -> tuple[str, str, str]:
     """Only exact recognisable routes merge; ambiguous routes remain unconnected."""
     parsed = urlsplit(url)
@@ -98,7 +102,7 @@ def preview(opml: str) -> dict[str, Any]:
             url = outline.get('xmlUrl')
             if url:
                 identity, kind, connection = identify(url)
-                folder = ' / '.join(path) or 'Без папки'
+                folder = folder_path(path) or 'Без папки'
                 if folder not in folders:
                     folders.append(folder)
                 feed = feeds.setdefault(identity, dict(identity=identity, title=title, kind=kind,
@@ -108,7 +112,7 @@ def preview(opml: str) -> dict[str, Any]:
                 if folder not in feed['folders']:
                     feed['folders'].append(folder)
             else:
-                folder = ' / '.join([*path, title])
+                folder = folder_path([*path, title])
                 if folder not in folders:
                     folders.append(folder)
                 walk(outline, [*path, title], depth + 1)
@@ -229,9 +233,9 @@ class Subscriptions:
                                     (scope, owner, field, json.dumps(value)))
         return self.effective(scope, owner)
 
-    def update_feed(self, identity: str, patch: FeedPatch) -> dict[str, Any]:
-        self.check_owner('feed', identity)
-        feed = next(f for f in self.feeds() if f['id'] == identity)
+    def update_feed(self, feed_id: str, patch: FeedPatch) -> dict[str, Any]:
+        self.check_owner('feed', feed_id)
+        feed = next(f for f in self.feeds() if f['id'] == feed_id)
         values = patch.model_dump(exclude_unset=True)
         if any(value is None for field, value in values.items() if field not in ('auto_read', 'transport')):
             raise ValueError('Поле не может быть пустым')
@@ -246,8 +250,8 @@ class Subscriptions:
             raise ValueError('Для этого источника нет RSS-подключения')
         with self.db:
             for field, value in values.items():
-                self.db.execute(f'UPDATE feeds SET {field}=? WHERE id=?', (value, identity))
+                self.db.execute(f'UPDATE feeds SET {field}=? WHERE id=?', (value, feed_id))
             if 'transport' in values:
                 connection = 'ambiguous' if feed['kind'] == 'unresolved' and transport is None else 'needs_connection'
-                self.db.execute('UPDATE feeds SET connection=? WHERE id=?', (connection, identity))
-        return next(f for f in self.feeds() if f['id'] == identity)
+                self.db.execute('UPDATE feeds SET connection=? WHERE id=?', (connection, feed_id))
+        return next(f for f in self.feeds() if f['id'] == feed_id)
