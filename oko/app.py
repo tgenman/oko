@@ -6,10 +6,13 @@ import re
 import secrets
 import sqlite3
 import time
+
+import httpx
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from .rss import RSSSource, SourceError
 from .sources import Source
 from .store import Job, Store
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
@@ -18,10 +21,13 @@ from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, p
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str) -> None:
+                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None) -> None:
         self.root, self.source, self.clock, self.fault = root, source, clock, fault
         self.shutdown, self.lease, self.grace = shutdown, lease, grace
         self.source_feed = source_feed
+        self.rss_enabled, self.rss_transport = rss_enabled, rss_transport
+        self.sources: dict[str, Source] = {source_feed: source} if source else {}
+        self.last_collection = clock()
         self.tabs: dict[str, float] = {}
         self.stopped = False
         self.idle_since: float | None = None
@@ -65,23 +71,45 @@ class Runtime:
 
                 task.add_done_callback(completed)
 
+    def sync_sources(self) -> None:
+        if not self.store or not self.rss_enabled:
+            return
+        for feed in self.store.subscriptions.feeds():
+            if feed['transport'] != 'rss' or feed['id'] == self.source_feed and self.source:
+                continue
+            if feed['id'] not in self.sources:
+                self.sources[feed['id']] = RSSSource(feed['original_urls'][0], feed['initial_days'], self.rss_transport)
+                self.store.enqueue_discovery(feed['id'])
+            source = self.sources[feed['id']]
+            if isinstance(source, RSSSource):
+                source.initial_days = feed['initial_days']
+        active = {f['id'] for f in self.store.subscriptions.feeds() if f['transport'] == 'rss'}
+        self.sources = {key: source for key, source in self.sources.items() if key in active or key == self.source_feed and self.source}
+
     async def execute(self, job: Job) -> None:
         assert self.store is not None
+        feed = (job.item or 'demo') if job.kind == 'discover' else self.store.item_feed(job.item) if job.kind == 'fetch' else ''
+        source = self.sources.get(feed)
         try:
             if job.kind == 'delete':
                 self.store.delete(job)
-            elif self.source and job.kind == 'discover':
-                items, cursor = await self.source.discover(self.store.cursor(self.source_feed))
+            elif source and job.kind == 'discover':
+                items, cursor = await source.discover(self.store.cursor(feed))
                 if self.live() and self.store.valid(job):
-                    self.store.discovered(items, cursor, job, self.source_feed)
-            elif self.source and job.kind == 'fetch':
+                    self.store.discovered(items, cursor, job, feed)
+                    self.store.feed_status(feed, error=None, gap=source.gap if isinstance(source, RSSSource) else None)
+            elif source and job.kind == 'fetch':
                 publication = self.store.publication(job.item)
                 if publication:
-                    material = await self.source.fetch(publication)
+                    material = await source.fetch(publication)
                     if self.live():
                         self.store.save(job, material)
         except asyncio.CancelledError:
             raise
+        except SourceError as error:
+            if not self.stopped and self.store.valid(job):
+                self.store.retry(job, self.clock(), error.label, error.delay)
+                self.store.feed_status(feed, error=error.label, gap=None)
         except Exception:
             # Never persist exception text: providers can put content/secrets in it.
             if not self.stopped and self.store.valid(job):
@@ -121,7 +149,12 @@ class Runtime:
                         self.active = None
                     if self.active is None:
                         status = self.store.status()
-                        job = self.store.next_job(now, deleting_only=status['deleting'] or self.source is None, source_feed=self.source_feed)
+                        self.sync_sources()
+                        if now - self.last_collection >= 300:
+                            for feed in self.sources:
+                                self.store.enqueue_discovery(feed)
+                            self.last_collection = now
+                        job = self.store.next_job(now, deleting_only=status['deleting'] or not self.sources, feeds=list(self.sources))
                         if job:
                             self.active = asyncio.create_task(self.execute(job))
                 await asyncio.sleep(.02)
@@ -137,9 +170,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                clock: Callable[[], float] = time.monotonic,
                fault: Callable[[str], None] = lambda _: None,
                shutdown: Callable[[], None] = lambda: None,
-               lease: float = 6, grace: float = 15, source_feed: str = 'demo') -> FastAPI:
+               lease: float = 6, grace: float = 15, source_feed: str = 'demo',
+               rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed)
+    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -167,7 +201,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                 return JSONResponse({'detail': 'Требуется локальная сессия'}, status_code=403)
         response: Response = await call_next(request)
         response.headers['Cache-Control'] = 'no-store'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
         return response
@@ -183,12 +217,13 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def status() -> dict[str, Any]:
         state: dict[str, Any] = runtime.store.status() if runtime.store and not runtime.stopped else dict(jobs=[], errors=[], deleting=False)
         pending = any(j['status'] in ('pending', 'running') for j in state['jobs'])
-        return dict(**state, error=runtime.error, stopped=runtime.stopped,
+        source_states = runtime.store.source_statuses() if runtime.store else []
+        return dict(**state, sources=source_states, error=runtime.error, stopped=runtime.stopped,
                     live_tabs=len(runtime.tabs), stage='Остановлено' if runtime.stopped else
                     'Ошибка хранилища' if runtime.error else 'Завершено с ошибками' if state['errors'] else
-                    'Удаление' if state['deleting'] else 'Источник не подключён' if pending and not runtime.source else 'Сбор' if pending else 'Готово',
-                    ready_sources=0 if pending or state['errors'] else int(runtime.source is not None),
-                    total_sources=int(runtime.source is not None))
+                    'Удаление' if state['deleting'] else 'Источник не подключён' if pending and not runtime.sources else 'Сбор' if pending else 'Готово',
+                    ready_sources=sum(1 for feed in runtime.sources if runtime.store and not runtime.store.db.execute("SELECT 1 FROM jobs WHERE status IN ('pending','running') AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))", ('' if feed == 'demo' else feed, feed)).fetchone()),
+                    total_sources=len(runtime.sources))
 
     @app.post('/api/tabs/{tab}/heartbeat')
     async def heartbeat(tab: str) -> dict[str, bool]:
@@ -250,7 +285,11 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.patch('/api/feeds/{identity}')
     async def feed_patch(identity: str, body: FeedPatch) -> dict[str, Any]:
         try:
-            return subscriptions().update_feed(identity, body)
+            result = subscriptions().update_feed(identity, body)
+            if 'transport' in body.model_fields_set:
+                await runtime.cancel()
+                runtime.sync_sources()
+            return result
         except LookupError as error:
             raise HTTPException(404, str(error)) from None
         except ValueError as error:
@@ -275,6 +314,33 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         else:
             result.sort(key=lambda c: (c['published'] if sort == 'oldest' else -c['published'], c['id']))
         return result
+
+    @app.post('/api/collect')
+    async def collect() -> dict[str, bool]:
+        current = store()
+        runtime.sync_sources()
+        for feed in runtime.sources:
+            current.enqueue_discovery(feed)
+        return {'ok': True}
+
+    @app.post('/api/materials/{item}/retry')
+    async def retry_material(item: str) -> dict[str, bool]:
+        if not store().retry_material(item):
+            raise HTTPException(404, 'Материал недоступен')
+        return {'ok': True}
+
+    @app.get('/api/materials/{item}/images/{name}')
+    async def image(item: str, name: str) -> Response:
+        current = store()
+        if not re.fullmatch(r'image-[0-9]+\.(png|jpg|gif|webp)', name) or current.material(item) is None:
+            raise HTTPException(404, 'Изображение недоступно')
+        path = current.path(item).parent / name
+        if not path.is_file():
+            raise HTTPException(404, 'Изображение недоступно')
+        # Read before yielding: a viewed/delete operation cannot race FileResponse.
+        data = path.read_bytes()
+        mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'}[path.suffix]
+        return Response(data, media_type=mime)
 
     @app.get('/api/materials/{item}')
     async def material(item: str) -> dict[str, Any]:

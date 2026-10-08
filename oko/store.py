@@ -106,8 +106,15 @@ class Store:
             for p in publications:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
                 source_id = p.id if feed == 'demo' else feed + ':' + p.id
-                self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id) VALUES (?,?,?,?,?)',
+                existing = self.db.execute('SELECT url FROM items WHERE source_id=?', (source_id,)).fetchone()
+                if existing and existing['url'] != p.url:
+                    source_id = feed + ':' + p.url
+                    item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
+                inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id) VALUES (?,?,?,?,?)',
                                 (item, source_id, p.url, p.published, feed))
+                if inserted.rowcount and p.teaser:
+                    self.write_material(item, p.teaser)
+                    self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and not row['viewed']:
                     self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('fetch',?)", (row['id'],))
@@ -115,14 +122,33 @@ class Store:
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('cursor' if feed == 'demo' else 'cursor:' + feed, cursor))
             self.finish(job)
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo') -> Job | None:
+    def retry_material(self, item: str) -> bool:
+        if self.publication(item) is None:
+            return False
+        with self.db:
+            self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (item,))
+        return True
+
+    def item_feed(self, item: str) -> str:
+        return str(self.db.execute('SELECT feed_id FROM items WHERE id=?', (item,)).fetchone()[0])
+
+    def feed_status(self, feed: str, **state: Any) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('feed-status:' + feed, json.dumps(state)))
+
+    def source_statuses(self) -> list[dict[str, Any]]:
+        return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key LIKE 'feed-status:%'")]
+
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if deleting_only:
             query += " AND kind='delete'"
         else:
-            query += " AND (kind='delete' OR (kind='discover' AND item=?) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id=?)))"
+            available = feeds if feeds is not None else [source_feed]
+            placeholders = ','.join('?' for _ in available) or "''"
+            query += f" AND (kind='delete' OR (kind='discover' AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 ELSE 2 END,id LIMIT 1"
-        params = (now,) if deleting_only else (now, '' if source_feed == 'demo' else source_feed, source_feed)
+        params = (now,) if deleting_only else (now, *('' if f == 'demo' else f for f in available), *available)
         row = self.db.execute(query, params).fetchone()
         if not row:
             return None
@@ -140,19 +166,37 @@ class Store:
 
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
-        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published']) if row else None
+        fallback = self.material(item) if row else None
+        teaser = Material(fallback['title'], fallback['text'], False) if fallback else None
+        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser) if row else None
 
     def save(self, job: Job, material: Material) -> None:
         item = job.item
         if not self.valid(job) or self.publication(item) is None:
             return
+        self.write_material(item, material)
+        self.fault('after_file_move')
+        with self.db:
+            self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
+            self.finish(job)
+
+    def write_material(self, item: str, material: Material) -> None:
         stage = self.root / 'staging' / item
-        stage.mkdir(exist_ok=True)
+        if stage.exists():
+            shutil.rmtree(stage)
+        stage.mkdir()
         # Header is content too, and deliberately lives outside SQLite.
         with (stage / 'original.md').open('w', encoding='utf-8') as f:
-            f.write(json.dumps({'title': material.title}, ensure_ascii=False) + '\n\n' + material.text)
+            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason}, ensure_ascii=False) + '\n\n' + material.text)
             f.flush()
             os.fsync(f.fileno())
+        for image in material.images:
+            if Path(image.name).name != image.name or not image.name.startswith('image-'):
+                raise ValueError('image name')
+            with (stage / image.name).open('wb') as output:
+                output.write(image.data)
+                output.flush()
+                os.fsync(output.fileno())
         destination = self.path(item).parent
         destination.parent.mkdir(exist_ok=True)
         if destination.exists():
@@ -164,10 +208,6 @@ class Store:
                 os.fsync(fd)
             finally:
                 os.close(fd)
-        self.fault('after_file_move')
-        with self.db:
-            self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
-            self.finish(job)
 
     def viewed(self, item: str) -> bool:
         with self.db:
@@ -188,10 +228,10 @@ class Store:
         with self.db:
             self.finish(job)
 
-    def retry(self, job: Job, now: float, error: str) -> None:
+    def retry(self, job: Job, now: float, error: str, delay: float = 1) -> None:
         with self.db:
             self.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=? AND generation=? AND status='running'",
-                            (now + 1, error, job.id, job.generation))
+                            (now + delay, error, job.id, job.generation))
 
     def interrupted(self) -> None:
         with self.db:
@@ -205,7 +245,7 @@ class Store:
             return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True)
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True), reason=json.loads(header).get('reason', ''), images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 

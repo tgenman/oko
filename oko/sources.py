@@ -8,12 +8,22 @@ class Publication:
     id: str
     url: str
     published: float
+    teaser: 'Material | None' = None
+
+
+@dataclass(frozen=True)
+class Image:
+    name: str
+    data: bytes
 
 
 @dataclass(frozen=True)
 class Material:
     title: str
     text: str
+    full: bool = True
+    reason: str = ''
+    images: tuple[Image, ...] = ()
 
 
 class Source(Protocol):

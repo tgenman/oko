@@ -10,6 +10,8 @@ let stopped = false;
 let ids = new Set();
 let folderId = null;
 let refreshTimer = null;
+let imageUrls = [];
+function clearImages() { imageUrls.forEach(url => URL.revokeObjectURL(url)); imageUrls = []; byId('images').replaceChildren(); }
 async function api(path, method = 'GET', body = undefined) {
   const response = await fetch('/api/' + path, {method, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
   const result = await response.json();
@@ -21,6 +23,7 @@ async function api(path, method = 'GET', body = undefined) {
   return result;
 }
 function clear() {
+  clearImages();
   generation++;
   selected = null;
   byId('material').hidden = true;
@@ -36,6 +39,7 @@ function stopUi(message) {
   byId('count').textContent = '0';
   byId('progress').textContent = message;
   byId('stop').disabled = true;
+  byId('collect').disabled = true;
   byId('settings-dialog').close();
   byId('settings-open').disabled = true;
 }
@@ -56,11 +60,21 @@ async function open(id) {
     selected = material;
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
-    byId('completeness').textContent = material.complete ? 'Тестовый источник · Полностью сохранено' : 'Загрузка материала';
+    byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? 'Анонс сохранён · загрузка статьи' : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
+    byId('retry').hidden = !material.complete || material.full !== false || material.loading;
+    clearImages();
     byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
     byId('message').textContent = '';
     byId('material').hidden = false;
     byId('empty').hidden = true;
+    for (const path of material.images || []) {
+      const response = await fetch(path, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}});
+      if (!response.ok) continue;
+      const blob = await response.blob();
+      if (stamp !== generation || stopped || !ids.has(id)) return;
+      const url = URL.createObjectURL(blob); imageUrls.push(url);
+      const img = document.createElement('img'); img.src = url; img.alt = 'Изображение статьи'; byId('images').append(img);
+    }
   } catch (error) { clear(); byId('progress').textContent = error.message; }
 }
 async function refresh() {
@@ -72,6 +86,7 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch) return;
     if (state.stopped) { stopUi('Око остановлено'); return; }
     byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (state.errors.length ? ' · ' + state.errors.join(', ') : '');
+    byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => { const p = document.createElement('p'); p.textContent = source.error || source.gap; return p; }));
     if (state.error) { clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
     if (folderId) params.set('folder', folderId);
@@ -79,7 +94,7 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
     if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && card.complete !== selected.complete)) await open(selected.id);
+    if (selected && cards.some(card => card.id === selected.id && (card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason))) await open(selected.id);
     byId('count').textContent = cards.length;
     byId('cards').replaceChildren(...cards.map(card => {
       const button = document.createElement('button');
@@ -103,6 +118,8 @@ async function refresh() {
   } catch (error) { clear(); byId('progress').textContent = error.message; }
   finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
+byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { byId('progress').textContent = error.message; } };
+byId('retry').onclick = async () => { if (!selected) return; try { await api('materials/' + selected.id + '/retry', 'POST'); byId('retry').hidden = true; refresh(); } catch (error) { byId('message').textContent = error.message; } };
 byId('copy').onclick = async () => {
   if (!selected) return;
   try {
@@ -215,7 +232,7 @@ async function loadSettings() {
 function renderFeed(feed) {
   const container = byId('feed-options');
   container.append(element('h2', 'Подключение фида'));
-  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
+  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
   container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
   const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
   const importance = selectControl(Object.entries(importanceNames), feed.importance);
