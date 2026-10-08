@@ -15,6 +15,7 @@ import httpx
 from .rss import RSSSource, SourceError
 from .sources import Source
 from .processing import Ollama, ProcessorConfig, ProcessingError
+from .codex import UNAVAILABLE, check as check_codex
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from .subscriptions import ImportRequest, Overrides, FeedPatch
@@ -282,6 +283,24 @@ class Runtime:
             self._check_request(current, epoch)
         return result
 
+    async def check_codex(self) -> dict[str, Any]:
+        async with self._actions:
+            current = self.require_store()
+            if not self._live():
+                raise ActionError('conflict', 'Откройте читатель для подключения')
+            epoch = self._epoch
+            task = asyncio.create_task(check_codex())
+            self._requests.add(task)
+        try:
+            result = await task
+        except asyncio.CancelledError:
+            raise ActionError('conflict', 'Проверка Codex прервана') from None
+        finally:
+            self._requests.discard(task)
+        async with self._actions:
+            self._check_request(current, epoch)
+        return result
+
     async def retry_theses(self, item: str) -> None:
         async with self._actions:
             if not self.require_store().retry_theses(item):
@@ -294,6 +313,12 @@ class Runtime:
                 current = self._store
                 if not current or not current.valid(job) or not self._live():
                     return
+                policy = current.processing_policy(job.item)
+                if policy and policy[0] == 'codex':
+                    if not policy[1]:
+                        raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
+                    # No input is prepared and no child inference process is started.
+                    raise ProcessingError(UNAVAILABLE)
                 prepared = current.processing_request(job)
                 config = current.processor_config()
                 if not prepared:
@@ -333,7 +358,7 @@ class Runtime:
         if self.stopped or self._store is not current or not self._live():
             raise ActionError('conflict', 'Око остановлено')
         if epoch != self._epoch:
-            raise ActionError('conflict', 'Подключение Telegram прервано; повторите действие')
+            raise ActionError('conflict', 'Проверка подключения прервана; повторите действие')
 
     async def _call_telegram(self, call: Callable[[TelegramClient], Awaitable[T]]) -> tuple[T, Store, int]:
         async with self._actions:

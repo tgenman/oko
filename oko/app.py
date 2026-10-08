@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from .sources import Source
 from .processing import ProcessorConfig
+from .codex import status as codex_status
 from .store import Store
 from .telegram import TelegramClient, ConnectTelegram
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
@@ -90,6 +91,15 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     def subscriptions() -> Subscriptions:
         return store().subscriptions
+
+    @app.get('/api/processors/codex')
+    async def codex_state() -> dict[str, Any]:
+        store()
+        return codex_status()
+
+    @app.post('/api/processors/codex/check')
+    async def codex_check() -> dict[str, Any]:
+        return await runtime.check_codex()
 
     @app.get('/api/processors/ollama')
     async def processor_config() -> dict[str, Any] | None:

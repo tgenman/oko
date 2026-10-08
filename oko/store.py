@@ -349,6 +349,13 @@ class Store:
                 else:
                     self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
 
+    def processing_policy(self, item: str) -> tuple[str, bool] | None:
+        row = self.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
+        if not row:
+            return None
+        settings = self.subscriptions.effective('feed', row['feed_id'])
+        return settings['effective']['processor']['value'], settings['feed']['public_ai']
+
     def processing_request(self, job: Job) -> tuple[ProcessingRequest, str, bool] | None:
         signature = self.thesis_signature(job.item)
         row = self.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (job.item,)).fetchone()
