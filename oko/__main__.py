@@ -12,7 +12,7 @@ import webbrowser
 
 import uvicorn
 from .app import create_app
-from .sources import DemoSource
+from .sources import DemoSource, Source
 
 
 def existing(root: Path, browser: bool) -> None:
@@ -33,7 +33,7 @@ def existing(root: Path, browser: bool) -> None:
     raise SystemExit('Экземпляр Око занят или останавливается. Повторите запуск через несколько секунд.')
 
 
-def run(*, fault: Callable[[str], None] = lambda _: None) -> None:
+def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None = None) -> None:
     parser = argparse.ArgumentParser(description='Око — локальный читатель')
     parser.add_argument('--data', type=Path, default=Path('data'))
     parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
@@ -66,7 +66,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None) -> None:
                 if server:
                     server.should_exit = True
 
-            app = create_app(root, source=DemoSource() if args.demo else None,
+            app = create_app(root, source=source or (DemoSource() if args.demo else None),
                              token=token, fault=fault, shutdown=shutdown,
                              lease=args.lease, grace=args.grace)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2)
@@ -86,7 +86,21 @@ def run(*, fault: Callable[[str], None] = lambda _: None) -> None:
                         await asyncio.to_thread(webbrowser.open, url + '/#token=' + token)
                 await task
 
-            asyncio.run(serve())
+            # asyncio.run waits indefinitely for cancellation-resistant tasks.
+            # This loop belongs solely to Oko; closing it bounds owned work.
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.set_exception_handler(lambda _loop, _context: None)
+            try:
+                loop.run_until_complete(serve())
+            finally:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.wait(pending, timeout=.25))
+                loop.close()
+                asyncio.set_event_loop(None)
         finally:
             sock.close()
             for name in ('runtime.json', 'runtime.tmp'):

@@ -6,6 +6,7 @@ import sys
 import time
 
 import httpx
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,6 +91,10 @@ def test_pending_deletion_survives_process_death(tmp_path: Path):
             assert client.get(f'/api/materials/{item}').status_code == 404
             client.post('/api/tabs/a/heartbeat')
             assert len(wait_cards(client, 2)) == 2
+            for _ in range(100):
+                if not client.get('/api/status').json()['deleting']:
+                    break
+                time.sleep(.02)
             assert not (tmp_path / 'content' / item).exists()
             assert all('Око: первый материал'.encode() not in p.read_bytes()
                        for p in tmp_path.rglob('*') if p.is_file())
@@ -121,5 +126,25 @@ def test_single_instance_and_real_shutdown(tmp_path: Path):
         with connect(tmp_path, process) as client:
             client.post('/api/stop')
         assert process.wait(timeout=2) == 0
+    finally:
+        cleanup(process)
+
+
+@pytest.mark.parametrize('action', ['stop', 'last-close'])
+def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path, action):
+    process = launch(tmp_path, 'resist_cancel', lease='.2', grace='.3')
+    try:
+        with connect(tmp_path, process) as client:
+            client.post('/api/tabs/a/heartbeat')
+            for _ in range(100):
+                if (tmp_path / 'fetch-started').exists():
+                    break
+                time.sleep(.02)
+            assert (tmp_path / 'fetch-started').exists()
+            started = time.monotonic()
+            path = '/api/stop' if action == 'stop' else '/api/tabs/a/close'
+            assert client.post(path).status_code == 200
+        assert process.wait(timeout=3) == 0
+        assert time.monotonic() - started < 3
     finally:
         cleanup(process)

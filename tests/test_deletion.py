@@ -91,3 +91,39 @@ def test_repeated_discovery_does_not_download_viewed_identity(tmp_path: Path):
         assert source.downloaded == []
         assert len(client.get('/api/cards').json()) == 2
         assert client.get(f'/api/materials/{item}').status_code == 404
+
+
+def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path: Path):
+    class CountingSource(DemoSource):
+        def __init__(self):
+            self.calls = 0
+        async def discover(self, cursor):
+            self.calls += 1
+            return await super().discover(cursor)
+    fail = True
+    def fault(point):
+        if point == 'before_delete' and fail:
+            raise OSError('temporary disk error')
+    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault), headers=HEADERS) as client:
+        client.post('/api/tabs/a/heartbeat')
+        for _ in range(100):
+            cards = client.get('/api/cards').json()
+            if len(cards) == 3 and all(c['complete'] for c in cards):
+                break
+            time.sleep(.02)
+        item = cards[0]['id']
+        client.post(f'/api/materials/{item}/viewed')
+    source = CountingSource()
+    with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault), headers=HEADERS) as client:
+        client.post('/api/tabs/a/heartbeat')
+        time.sleep(.1)
+        status = client.get('/api/status').json()
+        assert status['error'] is None
+        assert status['errors'] == ['Ошибка удаления']
+        assert source.calls == 0
+        assert (tmp_path / 'content' / item).exists()
+        fail = False
+        time.sleep(1.2)
+        assert not (tmp_path / 'content' / item).exists()
+        assert source.calls == 1
+        assert client.get('/api/status').json()['errors'] == []

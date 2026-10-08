@@ -5,6 +5,7 @@ const byId = id => document.getElementById(id);
 const bus = new BroadcastChannel('oko-reader');
 let selected = null;
 let generation = 0;
+let contentEpoch = 0;
 let stopped = false;
 let ids = new Set();
 async function api(path, method = 'GET') {
@@ -21,6 +22,7 @@ function clear() {
 }
 function stopUi(message) {
   stopped = true;
+  contentEpoch++;
   clear();
   byId('cards').replaceChildren();
   byId('folders').replaceChildren();
@@ -30,7 +32,12 @@ function stopUi(message) {
 }
 bus.onmessage = event => {
   if (event.data === 'stop') stopUi('Око остановлено');
-  else if (selected && event.data === selected.id) clear();
+  else {
+    contentEpoch++;
+    generation++;
+    ids.delete(event.data);
+    if (selected && event.data === selected.id) clear();
+  }
 };
 async function open(id) {
   const stamp = ++generation;
@@ -49,12 +56,15 @@ async function open(id) {
 }
 async function refresh() {
   if (stopped) return;
+  const epoch = contentEpoch;
   try {
     const state = await api('status');
+    if (stopped || epoch !== contentEpoch) return;
     if (state.stopped) { stopUi('Око остановлено'); return; }
     byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (state.errors.length ? ' · ' + state.errors.join(', ') : '');
     if (state.error) { clear(); return; }
     const cards = await api('cards');
+    if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
     if (selected && !ids.has(selected.id)) clear();
     if (selected && cards.some(card => card.id === selected.id && card.complete !== selected.complete)) await open(selected.id);
@@ -70,6 +80,7 @@ async function refresh() {
       return button;
     }));
     const folders = await api('folders');
+    if (stopped || epoch !== contentEpoch) return;
     byId('folders').replaceChildren(...folders.map(folder => {
       const button = document.createElement('button');
       button.textContent = `${folder.title} · ${folder.count}`;
@@ -77,7 +88,7 @@ async function refresh() {
       return button;
     }));
   } catch (error) { clear(); byId('progress').textContent = error.message; }
-  if (!stopped) setTimeout(refresh, 500);
+  finally { if (!stopped) setTimeout(refresh, 500); }
 }
 byId('copy').onclick = async () => {
   if (!selected) return;
@@ -91,6 +102,8 @@ byId('viewed').onclick = async () => {
   const id = selected.id;
   try {
     await api('materials/' + id + '/viewed', 'POST');
+    contentEpoch++;
+    ids.delete(id);
     bus.postMessage(id);
     clear();
   } catch (error) { byId('message').textContent = error.message; }

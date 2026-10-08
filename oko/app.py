@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from .sources import Source
-from .store import Store
+from .store import Job, Store
 
 
 class Runtime:
@@ -26,6 +26,7 @@ class Runtime:
         self.store: Store | None = None
         self.error: str | None = None
         self.active: asyncio.Task[None] | None = None
+        self.detached: set[asyncio.Task[None]] = set()
         self.previous_tick = clock()
         self.previous_wall = time.time()
 
@@ -41,27 +42,38 @@ class Runtime:
         return bool(self.tabs) and not self.stopped
 
     async def cancel(self) -> None:
-        if self.active:
-            self.active.cancel()
-            try:
-                await self.active
-            except asyncio.CancelledError:
-                pass
-            self.active = None
+        # Invalidate before waiting: even an adapter suppressing cancellation may
+        # not publish its old generation when another tab is still alive.
         if self.store:
             self.store.interrupted()
+        task, self.active = self.active, None
+        if task:
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=.25)
+            if task in done:
+                if not task.cancelled():
+                    task.exception()
+            else:
+                self.detached.add(task)
 
-    async def execute(self, job: dict[str, Any]) -> None:
+                def completed(finished: asyncio.Task[None]) -> None:
+                    self.detached.discard(finished)
+                    if not finished.cancelled():
+                        finished.exception()
+
+                task.add_done_callback(completed)
+
+    async def execute(self, job: Job) -> None:
         assert self.store is not None
         try:
-            if job['kind'] == 'delete':
+            if job.kind == 'delete':
                 self.store.delete(job)
-            elif self.source and job['kind'] == 'discover':
+            elif self.source and job.kind == 'discover':
                 items, cursor = await self.source.discover(self.store.cursor())
                 if self.live() and self.store.valid(job):
                     self.store.discovered(items, cursor, job)
-            elif self.source and job['kind'] == 'fetch':
-                publication = self.store.publication(job['item'])
+            elif self.source and job.kind == 'fetch':
+                publication = self.store.publication(job.item)
                 if publication:
                     material = await self.source.fetch(publication)
                     if self.live():
@@ -70,7 +82,8 @@ class Runtime:
             raise
         except Exception:
             # Never persist exception text: providers can put content/secrets in it.
-            self.store.retry(job, self.clock(), 'Ошибка удаления' if job['kind'] == 'delete' else 'Ошибка сбора')
+            if not self.stopped and self.store.valid(job):
+                self.store.retry(job, self.clock(), 'Ошибка удаления' if job.kind == 'delete' else 'Ошибка сбора')
 
     async def run(self) -> None:
         try:
@@ -102,7 +115,7 @@ class Runtime:
                         self.active = None
                     if self.active is None:
                         status = self.store.status()
-                        job = self.store.next_job(now, deleting_only=status['deleting'])
+                        job = self.store.next_job(now, deleting_only=status['deleting'] or self.source is None)
                         if job:
                             self.active = asyncio.create_task(self.execute(job))
                 await asyncio.sleep(.02)
@@ -110,6 +123,7 @@ class Runtime:
             await self.cancel()
             if self.store:
                 self.store.db.close()
+                self.store = None
             self.shutdown()
 
 
@@ -166,7 +180,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return dict(**state, error=runtime.error, stopped=runtime.stopped,
                     live_tabs=len(runtime.tabs), stage='Остановлено' if runtime.stopped else
                     'Ошибка хранилища' if runtime.error else 'Завершено с ошибками' if state['errors'] else
-                    'Удаление' if state['deleting'] else 'Сбор' if pending else 'Готово',
+                    'Удаление' if state['deleting'] else 'Источник не подключён' if pending and not runtime.source else 'Сбор' if pending else 'Готово',
                     ready_sources=0 if pending or state['errors'] else int(runtime.source is not None),
                     total_sources=int(runtime.source is not None))
 

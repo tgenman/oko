@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -8,6 +9,14 @@ from collections.abc import Callable
 from typing import Any
 
 from .sources import Material, Publication
+
+
+@dataclass(frozen=True)
+class Job:
+    id: int
+    kind: str
+    item: str
+    generation: int
 
 
 class Store:
@@ -42,9 +51,14 @@ class Store:
     def recover_files(self) -> None:
         # Never promote orphaned output: the pending fetch must produce a fresh result.
         for p in (self.root / 'staging').iterdir():
+            row = self.db.execute('SELECT viewed FROM items WHERE id=?', (p.name,)).fetchone()
+            if row and row['viewed']:
+                continue  # The durable deletion job owns retries and error reporting.
             shutil.rmtree(p) if p.is_dir() else p.unlink()
         for p in (self.root / 'content').iterdir():
             row = self.db.execute('SELECT * FROM items WHERE id=?', (p.name,)).fetchone()
+            if row and row['viewed']:
+                continue
             if row is None or not row['complete']:
                 shutil.rmtree(p)
         with self.db:
@@ -64,7 +78,7 @@ class Store:
         row = self.db.execute("SELECT value FROM state WHERE key='cursor'").fetchone()
         return row[0] if row else None
 
-    def discovered(self, publications: list[Publication], cursor: str, job: dict[str, Any]) -> None:
+    def discovered(self, publications: list[Publication], cursor: str, job: Job) -> None:
         with self.db:
             for p in publications:
                 item = hashlib.sha256(('demo:' + p.id).encode()).hexdigest()[:32]
@@ -77,7 +91,7 @@ class Store:
             self.db.execute("INSERT INTO state VALUES ('cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (cursor,))
             self.finish(job)
 
-    def next_job(self, now: float, deleting_only: bool = False) -> dict[str, Any] | None:
+    def next_job(self, now: float, deleting_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if deleting_only:
             query += " AND kind='delete'"
@@ -87,21 +101,22 @@ class Store:
             return None
         with self.db:
             self.db.execute("UPDATE jobs SET status='running',attempt=attempt+1,generation=generation+1 WHERE id=?", (row['id'],))
-        return dict(self.db.execute('SELECT * FROM jobs WHERE id=?', (row['id'],)).fetchone())
+        current = self.db.execute('SELECT * FROM jobs WHERE id=?', (row['id'],)).fetchone()
+        return Job(current['id'], current['kind'], current['item'], current['generation'])
 
-    def finish(self, job: dict[str, Any]) -> None:
-        self.db.execute("UPDATE jobs SET status='done',error=NULL WHERE id=? AND generation=? AND status='running'", (job['id'], job['generation']))
+    def finish(self, job: Job) -> None:
+        self.db.execute("UPDATE jobs SET status='done',error=NULL WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
 
-    def valid(self, job: dict[str, Any]) -> bool:
-        row = self.db.execute('SELECT status,generation FROM jobs WHERE id=?', (job['id'],)).fetchone()
-        return bool(row and row['status'] == 'running' and row['generation'] == job['generation'])
+    def valid(self, job: Job) -> bool:
+        row = self.db.execute('SELECT status,generation FROM jobs WHERE id=?', (job.id,)).fetchone()
+        return bool(row and row['status'] == 'running' and row['generation'] == job.generation)
 
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         return Publication(row['source_id'], row['url'], row['published']) if row else None
 
-    def save(self, job: dict[str, Any], material: Material) -> None:
-        item = job['item']
+    def save(self, job: Job, material: Material) -> None:
+        item = job.item
         if not self.valid(job) or self.publication(item) is None:
             return
         stage = self.root / 'staging' / item
@@ -138,18 +153,18 @@ class Store:
         self.fault('after_viewed_commit')
         return True
 
-    def delete(self, job: dict[str, Any]) -> None:
+    def delete(self, job: Job) -> None:
         self.fault('before_delete')
-        for path in (self.root / 'content' / job['item'], self.root / 'staging' / job['item']):
+        for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item):
             if path.exists():
                 shutil.rmtree(path)
         with self.db:
             self.finish(job)
 
-    def retry(self, job: dict[str, Any], now: float, error: str) -> None:
+    def retry(self, job: Job, now: float, error: str) -> None:
         with self.db:
             self.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=? AND generation=? AND status='running'",
-                            (now + 1, error, job['id'], job['generation']))
+                            (now + 1, error, job.id, job.generation))
 
     def interrupted(self) -> None:
         with self.db:
