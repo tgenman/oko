@@ -137,7 +137,7 @@ class TelegramSource:
                 continue
             text = '\n\n'.join(m['text'] for m in messages if m['text'])
             id = messages[0]['id']
-            publications.append(Publication(str(id), self.url(id), messages[0]['date'],
+            publications.append(Publication('album:' + str(messages[0]['group']) if messages[0]['group'] else str(id), self.url(id), messages[0]['date'],
                                            Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, False),
                                            tuple(m['id'] for m in messages)))
         state['after'] = max([state['after']] + [m for p in publications for m in p.members])
@@ -174,4 +174,4 @@ class TelegramSource:
         if any(msg['group'] and time.time()-msg['date'] < 5 for msg in rows):
             reasons.append('Альбом ещё публикуется; повторите загрузку')
         return Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, not reasons,
-                        '; '.join(dict.fromkeys(reasons)), attachments=tuple(attachments))
+                        '; '.join(dict.fromkeys(reasons)), attachments=tuple(attachments), members=tuple(sorted({m['id'] for m in rows} | set(publication.members))))

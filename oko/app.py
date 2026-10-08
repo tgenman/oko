@@ -36,11 +36,12 @@ class Runtime:
         self.store: Store | None = None
         self.error: str | None = None
         self.active: asyncio.Task[None] | None = None
+        self.cancelling = 0
         self.detached: set[asyncio.Task[None]] = set()
         self.previous_tick = clock()
         self.previous_wall = time.time()
         if isinstance(telegram_client, LocalTelegram):
-            telegram_client.allowed = self.live
+            telegram_client.allowed = lambda: self.live() and not self.cancelling
 
     def heartbeat(self, tab: str) -> None:
         if self.stopped:
@@ -54,28 +55,32 @@ class Runtime:
         return bool(self.tabs) and not self.stopped
 
     async def cancel(self) -> None:
-        # Invalidate before waiting: even an adapter suppressing cancellation may
-        # not publish its old generation when another tab is still alive.
-        if self.store:
-            self.store.interrupted()
-        task, self.active = self.active, None
-        if task:
-            task.cancel()
-            done, _ = await asyncio.wait({task}, timeout=.25)
-            if task in done:
-                if not task.cancelled():
-                    task.exception()
-            else:
-                self.detached.add(task)
+        self.cancelling += 1
+        try:
+            # Invalidate before waiting: even an adapter suppressing cancellation may
+            # not publish its old generation when another tab is still alive.
+            if self.store:
+                self.store.interrupted()
+            task, self.active = self.active, None
+            if task:
+                task.cancel()
+                done, _ = await asyncio.wait({task}, timeout=.25)
+                if task in done:
+                    if not task.cancelled():
+                        task.exception()
+                else:
+                    self.detached.add(task)
 
-                def completed(finished: asyncio.Task[None]) -> None:
-                    self.detached.discard(finished)
-                    if not finished.cancelled():
-                        finished.exception()
+                    def completed(finished: asyncio.Task[None]) -> None:
+                        self.detached.discard(finished)
+                        if not finished.cancelled():
+                            finished.exception()
 
-                task.add_done_callback(completed)
-        if self.telegram_client:
-            await self.telegram_client.close()
+                    task.add_done_callback(completed)
+            if self.telegram_client:
+                await self.telegram_client.close()
+        finally:
+            self.cancelling -= 1
 
     def sync_sources(self) -> None:
         if not self.store:
@@ -169,7 +174,7 @@ class Runtime:
                     if self.active and self.active.done():
                         await self.active
                         self.active = None
-                    if self.active is None:
+                    if self.active is None and not self.cancelling:
                         status = self.store.status()
                         self.sync_sources()
                         if now - self.last_collection >= 300:

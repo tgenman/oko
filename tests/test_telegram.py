@@ -325,7 +325,6 @@ def test_switching_rss_transport_keeps_telegram_cursor_separate(tmp_path: Path):
 
 def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Path):
     failed = False
-    from oko.sources import Material
     class Photo(Telegram):
         async def page(self, account, peer, after, since):
             return dict(messages=[dict(id=11, date=time.time()-60, text='Фото', group=None, media=dict(kind='image', mime='image/jpeg', extension='jpg'))], more=False)
@@ -352,3 +351,48 @@ def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Pat
         assert client.get(card['attachments'][0]['url']).content == b'media'
         client.post('/api/materials/' + card['id'] + '/viewed')
         assert not (tmp_path / 'content' / card['id']).exists()
+
+
+def test_new_album_part_updates_existing_material_and_member_ids(tmp_path: Path):
+    class Growing(Telegram):
+        rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777, media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
+        async def page(self, account, peer, after, since):
+            return dict(messages=self.rows, more=False)
+        async def messages(self, account, peer, ids):
+            return self.rows
+    tg = Growing()
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        connect(client)
+        original = settled(client)[0]
+        tg.rows = tg.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=dict(kind='video', mime='video/mp4', extension='mp4'))]
+        client.post('/api/collect')
+        for _ in range(150):
+            material = client.get('/api/materials/' + original['id']).json()
+            if not material.get('loading') and len(material.get('attachments', [])) == 2:
+                break
+            time.sleep(.02)
+        assert len(client.get('/api/cards').json()) == 1
+        assert material['members'] == [11, 12]
+        assert material['full'] is True and len(material['attachments']) == 2
+
+
+def test_viewed_album_stays_deleted_when_first_part_is_removed(tmp_path: Path):
+    class Album(Telegram):
+        rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777, media=None), dict(id=12, date=time.time()-60, text='', group=777, media=None)]
+        async def page(self, account, peer, after, since):
+            return dict(messages=self.rows, more=False)
+        async def messages(self, account, peer, ids):
+            return self.rows
+    tg = Album()
+    kwargs = dict(token='test-token', telegram_client=tg)
+    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        connect(client)
+        card = settled(client)[0]
+        client.post('/api/materials/' + card['id'] + '/viewed')
+    tg.rows = [dict(id=13, date=time.time()-60, text='Поздняя часть', group=777, media=None)]
+    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        time.sleep(.15)
+        assert client.get('/api/cards').json() == []

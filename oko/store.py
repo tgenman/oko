@@ -114,7 +114,7 @@ class Store:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
                 source_id = p.id if feed == 'demo' else feed + ':' + p.id
                 existing = self.db.execute('SELECT url FROM items WHERE source_id=?', (source_id,)).fetchone()
-                if existing and existing['url'] != p.url:
+                if existing and existing['url'] != p.url and not (p.members and p.id.startswith('album:')):
                     source_id = feed + ':' + p.url
                     item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
                 inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members) VALUES (?,?,?,?,?,?)',
@@ -124,6 +124,10 @@ class Store:
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and not row['viewed']:
+                    members = sorted(set(json.loads(row['members'])) | set(p.members))
+                    if members != json.loads(row['members']):
+                        self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
+                        self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (row['id'],))
                     self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('fetch',?)", (row['id'],))
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
@@ -190,6 +194,8 @@ class Store:
         self.fault('after_file_move')
         with self.db:
             self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
+            if material.members:
+                self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
             self.finish(job)
 
     def write_material(self, item: str, material: Material) -> None:
@@ -199,7 +205,7 @@ class Store:
         stage.mkdir()
         # Header is content too, and deliberately lives outside SQLite.
         with (stage / 'original.md').open('w', encoding='utf-8') as f:
-            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason, 'attachments': [dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments]}, ensure_ascii=False) + '\n\n' + material.text)
+            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason, 'members': list(material.members), 'attachments': [dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments]}, ensure_ascii=False) + '\n\n' + material.text)
             f.flush()
             os.fsync(f.fileno())
         for image in material.images:
@@ -264,7 +270,7 @@ class Store:
             return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True), reason=json.loads(header).get('reason', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 

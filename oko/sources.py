@@ -34,6 +34,7 @@ class Material:
     reason: str = ''
     images: tuple[Image, ...] = ()
     attachments: tuple[Attachment, ...] = ()
+    members: tuple[int, ...] = ()
 
 
 class Source(Protocol):
