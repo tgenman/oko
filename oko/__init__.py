@@ -1,0 +1,1 @@
+"""Око — local reader."""
