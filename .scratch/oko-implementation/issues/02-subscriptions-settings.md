@@ -4,7 +4,7 @@
 
 **Blocked by:** [01: Первый путь читателя](01-first-reader-path.md)
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Label:** ready-for-agent
 

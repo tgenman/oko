@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .sources import Material, Publication
+from .subscriptions import Subscriptions
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,11 @@ class Store:
           UNIQUE(kind,item));
         CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
         ''')
+        columns = {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}
+        if 'feed_id' not in columns:
+            self.db.execute("ALTER TABLE items ADD COLUMN feed_id TEXT DEFAULT 'demo'")
+            self.db.commit()
+        self.subscriptions = Subscriptions(self.db)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
@@ -70,33 +76,37 @@ class Store:
     def path(self, item: str) -> Path:
         return self.root / 'content' / item / '1' / 'original.md'
 
-    def enqueue_discovery(self) -> None:
+    def enqueue_discovery(self, feed: str = 'demo') -> None:
         with self.db:
-            self.db.execute("INSERT INTO jobs(kind) VALUES ('discover') ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL WHERE jobs.status='done'")
+            self.db.execute("INSERT INTO jobs(kind,item) VALUES ('discover',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed,))
 
-    def cursor(self) -> str | None:
-        row = self.db.execute("SELECT value FROM state WHERE key='cursor'").fetchone()
+    def cursor(self, feed: str = 'demo') -> str | None:
+        row = self.db.execute("SELECT value FROM state WHERE key=?", ('cursor' if feed == 'demo' else 'cursor:' + feed,)).fetchone()
         return row[0] if row else None
 
-    def discovered(self, publications: list[Publication], cursor: str, job: Job) -> None:
+    def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo') -> None:
         with self.db:
             for p in publications:
-                item = hashlib.sha256(('demo:' + p.id).encode()).hexdigest()[:32]
-                self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published) VALUES (?,?,?,?)',
-                                (item, p.id, p.url, p.published))
-                row = self.db.execute('SELECT * FROM items WHERE source_id=?', (p.id,)).fetchone()
+                item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
+                source_id = p.id if feed == 'demo' else feed + ':' + p.id
+                self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id) VALUES (?,?,?,?,?)',
+                                (item, source_id, p.url, p.published, feed))
+                row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and not row['viewed']:
                     self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('fetch',?)", (row['id'],))
             self.fault('before_discovery_commit')
-            self.db.execute("INSERT INTO state VALUES ('cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (cursor,))
+            self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('cursor' if feed == 'demo' else 'cursor:' + feed, cursor))
             self.finish(job)
 
-    def next_job(self, now: float, deleting_only: bool = False) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo') -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if deleting_only:
             query += " AND kind='delete'"
+        else:
+            query += " AND (kind='delete' OR (kind='discover' AND item=?) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id=?)))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 ELSE 2 END,id LIMIT 1"
-        row = self.db.execute(query, (now,)).fetchone()
+        params = (now,) if deleting_only else (now, '' if source_feed == 'demo' else source_feed, source_feed)
+        row = self.db.execute(query, params).fetchone()
         if not row:
             return None
         with self.db:
@@ -113,7 +123,7 @@ class Store:
 
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
-        return Publication(row['source_id'], row['url'], row['published']) if row else None
+        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published']) if row else None
 
     def save(self, job: Job, material: Material) -> None:
         item = job.item
@@ -175,10 +185,10 @@ class Store:
         if not row:
             return None
         if not row['complete']:
-            return dict(id=item, url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
-            return dict(id=item, url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True)
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True)
         except (OSError, ValueError, KeyError):
             return None
 

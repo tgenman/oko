@@ -6,20 +6,22 @@ import re
 import secrets
 import sqlite3
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from .sources import Source
 from .store import Job, Store
+from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
 
 
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float) -> None:
+                 lease: float, grace: float, source_feed: str) -> None:
         self.root, self.source, self.clock, self.fault = root, source, clock, fault
         self.shutdown, self.lease, self.grace = shutdown, lease, grace
+        self.source_feed = source_feed
         self.tabs: dict[str, float] = {}
         self.stopped = False
         self.idle_since: float | None = None
@@ -69,9 +71,9 @@ class Runtime:
             if job.kind == 'delete':
                 self.store.delete(job)
             elif self.source and job.kind == 'discover':
-                items, cursor = await self.source.discover(self.store.cursor())
+                items, cursor = await self.source.discover(self.store.cursor(self.source_feed))
                 if self.live() and self.store.valid(job):
-                    self.store.discovered(items, cursor, job)
+                    self.store.discovered(items, cursor, job, self.source_feed)
             elif self.source and job.kind == 'fetch':
                 publication = self.store.publication(job.item)
                 if publication:
@@ -88,8 +90,12 @@ class Runtime:
     async def run(self) -> None:
         try:
             self.store = Store(self.root, self.fault)
+            config = self.store.subscriptions
+            if (self.source and self.source_feed == 'demo') or any(c['feed_id'] == 'demo' for c in self.store.cards()):
+                config.ensure_demo()
             if self.source:
-                self.store.enqueue_discovery()
+                self.store.subscriptions.check_owner('feed', self.source_feed)
+                self.store.enqueue_discovery(self.source_feed)
         except (sqlite3.DatabaseError, OSError):
             self.error = 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'
         self.idle_since = self.clock()
@@ -115,7 +121,7 @@ class Runtime:
                         self.active = None
                     if self.active is None:
                         status = self.store.status()
-                        job = self.store.next_job(now, deleting_only=status['deleting'] or self.source is None)
+                        job = self.store.next_job(now, deleting_only=status['deleting'] or self.source is None, source_feed=self.source_feed)
                         if job:
                             self.active = asyncio.create_task(self.execute(job))
                 await asyncio.sleep(.02)
@@ -131,9 +137,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                clock: Callable[[], float] = time.monotonic,
                fault: Callable[[str], None] = lambda _: None,
                shutdown: Callable[[], None] = lambda: None,
-               lease: float = 6, grace: float = 15) -> FastAPI:
+               lease: float = 6, grace: float = 15, source_feed: str = 'demo') -> FastAPI:
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace)
+    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -202,13 +208,73 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         await runtime.cancel()
         return {'ok': True}
 
+    def subscriptions() -> Subscriptions:
+        return store().subscriptions
+
+    @app.get('/api/subscriptions')
+    async def subscription_list() -> dict[str, Any]:
+        config = subscriptions()
+        return dict(folders=config.folders(), feeds=config.feeds())
+
+    @app.post('/api/import/preview')
+    async def import_preview(body: ImportRequest) -> dict[str, Any]:
+        try:
+            return preview(body.opml)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+
+    @app.post('/api/import')
+    async def import_subscriptions(body: ImportRequest) -> dict[str, Any]:
+        try:
+            result = subscriptions().import_opml(body)
+            if 'conflicts' in result:
+                raise HTTPException(409, result)
+            return result
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+
+    @app.get('/api/settings/{scope}/{owner}')
+    async def effective_settings(scope: str, owner: str) -> dict[str, Any]:
+        try:
+            return subscriptions().effective(scope, owner)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
+
+    @app.patch('/api/settings/{scope}/{owner}')
+    async def settings_patch(scope: str, owner: str, body: Overrides) -> dict[str, Any]:
+        try:
+            return subscriptions().update_settings(scope, owner, body)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
+
+    @app.patch('/api/feeds/{identity}')
+    async def feed_patch(identity: str, body: FeedPatch) -> dict[str, Any]:
+        try:
+            return subscriptions().update_feed(identity, body)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+
     @app.get('/api/folders')
     async def folders() -> list[dict[str, Any]]:
-        return [dict(id='demo', title='Тестовый источник', count=len(store().cards()))] if runtime.source or store().cards() else []
+        config = subscriptions()
+        cards = reader_cards()
+        return [dict(**folder, count=sum(c['folder_id'] == folder['id'] for c in cards)) for folder in config.folders()]
+
+    def reader_cards() -> list[dict[str, Any]]:
+        feeds = {f['id']: f for f in subscriptions().feeds()}
+        return [dict(**card, folder_id=feeds[card['feed_id']]['folder_id'], importance=feeds[card['feed_id']]['importance'])
+                for card in store().cards() if card['feed_id'] in feeds]
 
     @app.get('/api/cards')
-    async def cards() -> list[dict[str, Any]]:
-        return store().cards()
+    async def cards(folder: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest') -> list[dict[str, Any]]:
+        result = [card for card in reader_cards() if folder is None or card['folder_id'] == folder]
+        if sort == 'importance':
+            result.sort(key=lambda c: (-{'normal': 0, 'elevated': 1, 'high': 2}[c['importance']], -c['published'], c['id']))
+        else:
+            result.sort(key=lambda c: (c['published'] if sort == 'oldest' else -c['published'], c['id']))
+        return result
 
     @app.get('/api/materials/{item}')
     async def material(item: str) -> dict[str, Any]:
