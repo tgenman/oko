@@ -11,6 +11,7 @@ from typing import Any
 
 from .sources import Attachment, Material, Publication
 from .subscriptions import Subscriptions
+from .processing import InputSource, ProcessingRequest, ProcessorConfig, Theses
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class Store:
           next REAL DEFAULT 0, generation INTEGER DEFAULT 0, error TEXT,
           UNIQUE(kind,item));
         CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY, signature TEXT);
         ''')
         columns = {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}
         if 'members' not in columns:
@@ -155,16 +157,18 @@ class Store:
             "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
-        if deleting_only:
+        if ai_only:
+            query += " AND kind='theses'"
+        elif deleting_only:
             query += " AND kind='delete'"
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             query += f" AND (kind='delete' OR (kind='discover' AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 ELSE 2 END,id LIMIT 1"
-        params = (now,) if deleting_only else (now, *('' if f == 'demo' else f for f in available), *available)
+        params = (now,) if deleting_only or ai_only else (now, *('' if f == 'demo' else f for f in available), *available)
         row = self.db.execute(query, params).fetchone()
         if not row:
             return None
@@ -197,6 +201,7 @@ class Store:
             if material.members:
                 self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
             self.finish(job)
+        self.sync_theses()
 
     def write_material(self, item: str, material: Material) -> None:
         stage = self.root / 'staging' / item
@@ -239,6 +244,7 @@ class Store:
             row = self.db.execute('SELECT id FROM items WHERE id=?', (item,)).fetchone()
             if not row:
                 return False
+            self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
             self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (item,))
             self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (item,))
             self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (item,))
@@ -270,7 +276,7 @@ class Store:
             return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 
@@ -289,3 +295,106 @@ class Store:
         errors = sorted({r['error'] for r in rows if r['error']})
         pending_deletes = any(r['kind'] == 'delete' and r['status'] != 'done' for r in rows)
         return dict(jobs=jobs, errors=errors, deleting=pending_deletes)
+
+
+    def processor_config(self) -> ProcessorConfig | None:
+        row = self.db.execute("SELECT value FROM state WHERE key='processor:ollama'").fetchone()
+        return ProcessorConfig.model_validate_json(row[0]) if row else None
+
+    def configure_processor(self, config: ProcessorConfig) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO state VALUES ('processor:ollama',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
+        self.settings_changed()
+
+    def settings_version(self) -> int:
+        row = self.db.execute("SELECT value FROM state WHERE key='settings-version'").fetchone()
+        return int(row[0]) if row else 0
+
+    def settings_changed(self) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO state VALUES ('settings-version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(self.settings_version() + 1),))
+        self.sync_theses()
+
+    def content_version(self, item: str) -> str:
+        return hashlib.sha256(self.path(item).read_bytes()).hexdigest()
+
+    def thesis_signature(self, item: str) -> str | None:
+        row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
+        if not row or not self.path(item).is_file():
+            return None
+        settings = self.subscriptions.effective('feed', row['feed_id'])
+        values = {k: v['value'] for k, v in settings['effective'].items()}
+        if not values['theses']:
+            return None
+        config = self.processor_config()
+        payload = [self.content_version(item), row['members'], self.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    def sync_theses(self) -> None:
+        for row in self.db.execute('SELECT id FROM items WHERE viewed=0').fetchall():
+            item = row['id']
+            signature = self.thesis_signature(item)
+            old = self.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
+            if old and old[0] == signature:
+                state = self.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+                if state and (state[0] != 'done' or self.theses(item) is not None):
+                    continue
+            path = self.path(item).parent / 'theses.md'
+            path.unlink(missing_ok=True)
+            with self.db:
+                self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='theses' AND item=?", (item,))
+                if signature:
+                    self.db.execute('INSERT INTO thesis_inputs VALUES (?,?) ON CONFLICT(item) DO UPDATE SET signature=excluded.signature', (item, signature))
+                    self.db.execute("INSERT INTO jobs(kind,item) VALUES ('theses',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0,error=NULL", (item,))
+                else:
+                    self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
+
+    def processing_request(self, job: Job) -> tuple[ProcessingRequest, str, bool] | None:
+        signature = self.thesis_signature(job.item)
+        row = self.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (job.item,)).fetchone()
+        material = self.material(job.item)
+        if not signature or not row or row[0] != signature or not material:
+            return None
+        settings = self.subscriptions.effective('feed', material['feed_id'])
+        values = settings['effective']
+        request = ProcessingRequest(sources=(InputSource(id=job.item, version=self.content_version(job.item), url=material['url'], title=material['title'], text=material['text']),), settings_version=self.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        return request, signature, settings['feed']['public_ai']
+
+    def thesis_status(self, item: str) -> dict[str, Any] | None:
+        if not self.thesis_signature(item):
+            return None
+        row = self.db.execute("SELECT status,error FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+        return dict(row) if row else dict(status='pending', error=None)
+
+    def theses(self, item: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+        if not row or row[0] != 'done':
+            return None
+        try:
+            header = json.loads((self.path(item).parent / 'theses.md').read_text().split('\n\n', 1)[0])
+            if header['signature'] != self.thesis_signature(item):
+                return None
+            return Theses.model_validate(header['result']).model_dump()
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def save_theses(self, job: Job, signature: str, theses: Theses) -> None:
+        if not self.valid(job) or signature != self.thesis_signature(job.item):
+            return
+        stage = self.root / 'staging' / job.item
+        stage.mkdir(exist_ok=True)
+        pending = stage / 'theses.md'
+        with pending.open('w') as output:
+            output.write(json.dumps(dict(signature=signature, result=theses.model_dump()), ensure_ascii=False) + '\n\n' + '\n'.join('- ' + p.text for p in theses.points))
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(pending, self.path(job.item).parent / 'theses.md')
+        stage.rmdir()
+        fd = os.open(self.path(job.item).parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        self.fault('after_theses_move')
+        with self.db:
+            self.finish(job)

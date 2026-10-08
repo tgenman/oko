@@ -14,6 +14,7 @@ import httpx
 
 from .rss import RSSSource, SourceError
 from .sources import Source
+from .processing import Ollama, ProcessorConfig, ProcessingError
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from .subscriptions import ImportRequest, Overrides, FeedPatch
@@ -30,7 +31,11 @@ class ActionError(Exception):
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None) -> None:
+                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None) -> None:
+        self._ai_transport = ai_transport
+        self._ai: asyncio.Task[None] | None = None
+        self._ai_sync = 0.0
+        self._ai_stage = 'Проверка обработчика'
         self._root, self._source, self._clock, self._fault = root, source, clock, fault
         self._shutdown, self._lease, self._grace = shutdown, lease, grace
         self._source_feed = source_feed
@@ -50,6 +55,7 @@ class Runtime:
         self._active: asyncio.Task[None] | None = None
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()
+        self._detached_ai: set[asyncio.Task[None]] = set()
         self._previous_tick = clock()
         self._previous_wall = time.time()
         if isinstance(telegram_client, LocalTelegram):
@@ -76,8 +82,10 @@ class Runtime:
             # not publish its old generation when another tab is still alive.
             if self._store:
                 self._store.interrupted()
-            task, self._active = self._active, None
-            if task:
+            ai_task = self._ai
+            tasks = [t for t in (self._active, self._ai) if t]
+            self._active = self._ai = None
+            for task in tasks:
                 task.cancel()
                 done, _ = await asyncio.wait({task}, timeout=.25)
                 if task in done:
@@ -85,9 +93,12 @@ class Runtime:
                         task.exception()
                 else:
                     self._detached.add(task)
+                    if task is ai_task:
+                        self._detached_ai.add(task)
 
                     def completed(finished: asyncio.Task[None]) -> None:
                         self._detached.discard(finished)
+                        self._detached_ai.discard(finished)
                         if not finished.cancelled():
                             finished.exception()
 
@@ -146,6 +157,10 @@ class Runtime:
             stage = 'Ошибка хранилища'
         elif state['deleting']:
             stage = 'Удаление'
+        elif any(j['kind'] == 'theses' and j['status'] == 'running' for j in state['jobs']):
+            stage = self._ai_stage
+        elif any(j['kind'] == 'theses' and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
+            stage = 'Ожидание обработчика' if state['errors'] else 'Подготовка тезисов'
         elif pending and not self._sources:
             stage = 'Источник не подключён'
         elif pending and state['errors']:
@@ -196,7 +211,7 @@ class Runtime:
             current = self.require_store()
             if not current.viewed(item):
                 raise ActionError('missing', 'Материал не найден')
-            if self._active or self._requests:
+            if self._active or self._ai or self._requests:
                 await self._cancel()
             job = current.next_job(self._clock(), deleting_only=True)
             if job:
@@ -212,8 +227,9 @@ class Runtime:
                 raise ActionError('missing', str(error)) from None
             except ValueError as error:
                 raise ActionError('invalid', str(error)) from None
+            current.settings_changed()
+            await self._cancel()
             if 'transport' in body.model_fields_set:
-                await self._cancel()
                 self._sync_sources()
             return result
 
@@ -230,9 +246,83 @@ class Runtime:
     async def update_settings(self, scope: str, owner: str, body: Overrides) -> dict[str, Any]:
         async with self._actions:
             try:
-                return self.require_store().subscriptions.update_settings(scope, owner, body)
+                current = self.require_store()
+                result = current.subscriptions.update_settings(scope, owner, body)
+                current.settings_changed()
+                await self._cancel()
+                return result
             except LookupError as error:
                 raise ActionError('missing', str(error)) from None
+
+    async def configure_processor(self, config: ProcessorConfig) -> None:
+        async with self._actions:
+            self.require_store().configure_processor(config)
+            await self._cancel()
+
+    async def check_processor(self) -> dict[str, Any]:
+        async with self._actions:
+            current = self.require_store()
+            if not self._live():
+                raise ActionError('conflict', 'Откройте читатель для подключения')
+            config = current.processor_config()
+            if not config:
+                raise ActionError('conflict', 'Ollama не настроен')
+            epoch = self._epoch
+            task = asyncio.create_task(Ollama(config, self._ai_transport).check())
+            self._requests.add(task)
+        try:
+            result = await task
+        except ProcessingError as error:
+            raise ActionError('conflict', error.label) from None
+        except asyncio.CancelledError:
+            raise ActionError('conflict', 'Проверка прервана') from None
+        finally:
+            self._requests.discard(task)
+        async with self._actions:
+            self._check_request(current, epoch)
+        return result
+
+    async def retry_theses(self, item: str) -> None:
+        async with self._actions:
+            current = self.require_store()
+            if not current.material(item) or not current.thesis_signature(item):
+                raise ActionError('missing', 'Тезисы для материала не включены')
+            with current.db:
+                current.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
+
+    async def _execute_ai(self, job: Job) -> None:
+        current: Store | None = None
+        try:
+            async with self._actions:
+                current = self._store
+                if not current or not current.valid(job) or not self._live():
+                    return
+                prepared = current.processing_request(job)
+                config = current.processor_config()
+                if not prepared:
+                    return
+                request, signature, public_ai = prepared
+                if request.processor not in ('ollama', 'ollama:' + (config.model if config else '')) or not config:
+                    raise ProcessingError('Ожидание выбранного обработчика; Ollama не настроен или не выбран')
+                adapter = Ollama(config, self._ai_transport)
+            self._ai_stage = 'Проверка обработчика'
+            checked = await adapter.check()
+            async with self._actions:
+                if self._store is not current or not self._live() or not current.valid(job) or signature != current.thesis_signature(job.item):
+                    return
+                if not checked['local'] and not public_ai:
+                    raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
+            self._ai_stage = 'Подготовка тезисов'
+            theses = await adapter.generate(request)
+            async with self._actions:
+                if self._store is current and self._live():
+                    current.save_theses(job, signature, theses)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            async with self._actions:
+                if current and self._store is current and not self.stopped and current.valid(job):
+                    current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка подготовки тезисов', 30)
 
     def _telegram_ready(self) -> tuple[Store, TelegramClient]:
         current = self.require_store()
@@ -371,6 +461,16 @@ class Runtime:
                             break
                     elif self._store:
                         self._idle_since = None
+                        if now - self._ai_sync >= .5:
+                            self._store.sync_theses()
+                            self._ai_sync = now
+                        if self._ai and self._ai.done():
+                            await self._ai
+                            self._ai = None
+                        if self._ai is None and not self._detached_ai and not self._store.status()['deleting']:
+                            ai_job = self._store.next_job(now, ai_only=True)
+                            if ai_job:
+                                self._ai = asyncio.create_task(self._execute_ai(ai_job))
                         if self._active and self._active.done():
                             await self._active
                             self._active = None

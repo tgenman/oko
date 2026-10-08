@@ -12,6 +12,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from .sources import Source
+from .processing import ProcessorConfig
 from .store import Store
 from .telegram import TelegramClient, ConnectTelegram
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
@@ -24,9 +25,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                shutdown: Callable[[], None] = lambda: None,
                lease: float = 6, grace: float = 15, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
-               telegram_client: TelegramClient | None = None) -> FastAPI:
+               telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client)
+    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -89,6 +90,25 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     def subscriptions() -> Subscriptions:
         return store().subscriptions
+
+    @app.get('/api/processors/ollama')
+    async def processor_config() -> dict[str, Any] | None:
+        config = store().processor_config()
+        return config.model_dump() if config else None
+
+    @app.put('/api/processors/ollama')
+    async def processor_save(body: ProcessorConfig) -> dict[str, Any]:
+        await runtime.configure_processor(body)
+        return body.model_dump()
+
+    @app.post('/api/processors/ollama/check')
+    async def processor_check() -> dict[str, Any]:
+        return await runtime.check_processor()
+
+    @app.post('/api/materials/{item}/theses/retry')
+    async def retry_theses(item: str) -> dict[str, bool]:
+        await runtime.retry_theses(item)
+        return {'ok': True}
 
     @app.get('/api/telegram/accounts')
     async def telegram_accounts() -> list[str]:

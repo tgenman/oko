@@ -25,10 +25,12 @@ async function api(path, method = 'GET', body = undefined) {
 function clear() {
   clearImages();
   generation++;
+  byId('theses').replaceChildren();
+  byId('theses-panel').hidden = true;
   selected = null;
   byId('material').hidden = true;
   byId('empty').hidden = false;
-  ['title', 'text', 'date', 'message'].forEach(id => { byId(id).textContent = ''; });
+  ['title', 'text', 'date', 'message', 'ai-status'].forEach(id => { byId(id).textContent = ''; });
 }
 function stopUi(message) {
   stopped = true;
@@ -60,6 +62,15 @@ async function open(id) {
     selected = material;
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
+    byId('theses-panel').hidden = !material.ai && !material.theses;
+    byId('ai-status').textContent = material.theses ? 'Тезисы готовы' : material.ai?.error || (material.ai?.status === 'running' ? 'Подготовка тезисов' : 'Ожидание обработчика');
+    byId('theses-retry').hidden = !material.ai?.error;
+    byId('theses').replaceChildren(...(material.theses?.points || []).map(point => {
+      const li = element('li', point.text);
+      for (const ref of point.sources) { const link = element('a', ' Источник'); link.href = ref.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; li.append(link); }
+      return li;
+    }));
+    byId('original-panel').open = !material.theses;
     byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? 'Текст сохранён · загрузка вложений' : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
     byId('retry').hidden = !material.complete || material.full !== false || material.loading;
     clearImages();
@@ -110,7 +121,7 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
     if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && (card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
     byId('count').textContent = cards.length;
     byId('cards').replaceChildren(...cards.map(card => {
       const button = document.createElement('button');
@@ -178,7 +189,7 @@ const fields = {
   digests: ['Обзоры за период', 'boolean'], prompt_theses: ['Промпт тезисов', 'text'],
   prompt_digest: ['Промпт обзора', 'text'], prompt_filters: ['Правила фильтрации (промпт)', 'text'],
   schedule: ['Расписание обзора (off или ЧЧ:ММ, местное время)', 'string'],
-  digest_days: ['Период обзора, дней', 'number'], processor: ['Обработчик (например codex или ollama:модель)', 'string']
+  digest_days: ['Период обзора, дней', 'number'], processor: ['Обработчик', 'processor']
 };
 const importanceNames = {normal: 'Обычная', elevated: 'Повышенная', high: 'Высокая'};
 let subscriptions = {folders: [], feeds: []};
@@ -225,6 +236,7 @@ async function loadSettings() {
       const row = element('div'); row.className = 'setting-row';
       let input;
       if (type === 'boolean') input = selectControl([['true', 'Включено'], ['false', 'Выключено']], effective.value);
+      else if (type === 'processor') input = selectControl([['codex', 'Codex (следующий этап)'], ['ollama', 'Ollama · подключённая модель'], ...(!['codex', 'ollama'].includes(effective.value) ? [[effective.value, effective.value]] : [])], effective.value);
       else if (type === 'text') { input = element('textarea'); input.value = effective.value; input.rows = 3; }
       else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = '3650'; } }
       input.id = 'setting-' + field;
@@ -302,7 +314,7 @@ function showConflicts(conflicts) {
 byId('settings-open').onclick = async () => {
   byId('settings-dialog').showModal();
   byId('settings-message').textContent = '';
-  try { await loadSubscriptions(); } catch (error) { byId('settings-message').textContent = error.message; }
+  try { await loadSubscriptions(); const config = await api('processors/ollama'); if (config) { byId('ollama-endpoint').value = config.endpoint; byId('ollama-model').value = config.model; } } catch (error) { byId('settings-message').textContent = error.message; }
 };
 byId('settings-close').onclick = () => byId('settings-dialog').close();
 byId('settings-owner').onchange = loadSettings;
@@ -343,4 +355,18 @@ byId('telegram-add').onclick = async () => {
     await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
     byId('settings-message').textContent = 'Источник подключён; отметки прочитанного пока не отправляются';
   } catch (error) { byId('settings-message').textContent = error.message; }
+};
+
+byId('ollama-save').onclick = async () => {
+  try { await api('processors/ollama', 'PUT', {endpoint: byId('ollama-endpoint').value, model: byId('ollama-model').value}); byId('ollama-status').textContent = 'Подключение сохранено. Выберите Ollama и включите тезисы для Око, папки или фида.'; }
+  catch (error) { byId('ollama-status').textContent = error.message; }
+};
+byId('ollama-check').onclick = async () => {
+  try { byId('ollama-status').textContent = 'Проверка…'; const result = await api('processors/ollama/check', 'POST'); if (stopped) return; byId('ollama-status').textContent = result.mode + ' · ' + result.model; byId('ollama-models').replaceChildren(...result.models.map(name => { const option = element('option'); option.value = name; return option; })); }
+  catch (error) { byId('ollama-status').textContent = error.message; }
+};
+byId('theses-retry').onclick = async () => {
+  if (!selected) return;
+  try { await api('materials/' + selected.id + '/theses/retry', 'POST'); refresh(); }
+  catch (error) { byId('message').textContent = error.message; }
 };
