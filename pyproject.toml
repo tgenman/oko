@@ -2,7 +2,7 @@
 name = "oko"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi==0.142.4", "uvicorn==0.54.0", "httpx==0.28.1"]
+dependencies = ["fastapi==0.142.4", "uvicorn==0.54.0", "httpx==0.28.1", "telethon==1.45.0", "python-dotenv==1.2.2", "python-socks[asyncio]==2.8.2"]
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "httpx==0.28.1", "mypy==2.4.0"]

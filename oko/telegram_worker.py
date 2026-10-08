@@ -1,4 +1,4 @@
-"""Private JSON pipe, executed only by the existing telegram-mcp interpreter.
+"""Private JSON pipe to the Oko-owned Telethon client.
 
 No MCP listing helpers: those can prefetch public-AI transcriptions. This worker
 only resolves peers, reads history and downloads originals with Telethon.
@@ -37,18 +37,17 @@ def record(msg: Any) -> dict[str, Any]:
 
 
 async def main() -> None:
-    # Import the existing client from its own working directory and .env. stdout
+    # Read the explicit existing .env without importing the external project. stdout
     # is reserved for the pipe; neither SDK errors nor content are logged.
     output = sys.stdout
     logging.disable(logging.CRITICAL)
     os.umask(0o077)
-    sys.path.insert(0, os.getcwd())
     try:
         with open(os.devnull, 'w') as sink, redirect_stdout(sink):
-            from telegram_mcp import runtime  # type: ignore[import-not-found]
-            from telegram_mcp.singleton import SessionLock, SessionLockError, session_identity  # type: ignore[import-not-found]
-            from telethon import types, utils  # type: ignore[import-not-found]
-            from telethon.errors import FloodWaitError  # type: ignore[import-not-found]
+            from .telegram_client import ClientRegistry, SessionLock, SessionLockError, session_identity
+            registry = ClientRegistry(Path(sys.argv[2]))
+            from telethon import types, utils  # type: ignore[import-untyped]
+            from telethon.errors import FloodWaitError  # type: ignore[import-untyped]
     except BaseException:
         output.write(json.dumps(dict(error='Окружение Telegram-клиента недоступно')) + '\n')
         output.flush()
@@ -58,9 +57,9 @@ async def main() -> None:
     peers: dict[tuple[str, str], Any] = {}
 
     async def client_for(account: str) -> Any:
-        if account not in runtime.clients:
+        if account not in registry.config:
             raise ValueError('account')
-        cl = runtime.get_client(account)
+        cl = registry.client(account)
         if account not in locks:
             lock = SessionLock(account, session_identity(cl))
             lock.acquire(grace_seconds=0)
@@ -81,12 +80,12 @@ async def main() -> None:
             # Numeric private peers require an existing access_hash. Populate the
             # client's cache once, without exporting dialogs into Oko.
             try:
-                entity = await runtime.resolve_entity(peer, cl)
+                entity = await cl.get_entity(peer)
             except ValueError:
                 if not isinstance(peer, int):
                     raise
                 await cl.get_dialogs(limit=None)
-                entity = await runtime.resolve_entity(peer, cl)
+                entity = await cl.get_entity(peer)
             if not isinstance(entity, (types.Channel, types.Chat)):
                 raise ValueError('peer type')
             if getattr(entity, 'forum', False):
@@ -114,7 +113,7 @@ async def main() -> None:
                 body = json.loads(line)
                 op = body['op']
                 if op == 'accounts':
-                    value: Any = sorted(runtime.clients)
+                    value: Any = registry.accounts()
                 else:
                     cl = await client_for(body['account'])
                     entity = await entity_for(cl, body['account'], body['peer'])
@@ -188,7 +187,7 @@ async def main() -> None:
             output.flush()
     finally:
         for account, lock in locks.items():
-            await runtime.clients[account].disconnect()
+            await registry.clients[account].disconnect()
             lock.release()
         (spool / 'media.bin').unlink(missing_ok=True)
 

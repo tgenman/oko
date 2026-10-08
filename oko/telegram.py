@@ -1,10 +1,11 @@
-"""Telegram source; credentials and Telethon stay in the existing client process."""
+"""Telegram source and cancellable worker for Oko-owned Telethon client."""
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
 import json
 from pathlib import Path
 import shutil
+import sys
 import time
 from typing import Any, Protocol
 
@@ -33,9 +34,10 @@ class ConnectTelegram(BaseModel):
 
 
 class LocalTelegram:
-    """One serialized pipe to the existing venv; no new session or login flow."""
-    def __init__(self, project: Path, root: Path) -> None:
-        self.project, self.root = project.resolve(), root.resolve()
+    """Oko-owned Telethon worker; existing credentials remain at their original path."""
+    def __init__(self, env_file: Path, root: Path) -> None:
+        self.env_file = (env_file / '.env' if env_file.is_dir() else env_file).resolve()
+        self.root = root.resolve()
         self.process: asyncio.subprocess.Process | None = None
         self.lock = asyncio.Lock()
         self.spool = self.root / 'staging' / '_telegram'
@@ -49,13 +51,12 @@ class LocalTelegram:
                 if generation != self.generation or not self.allowed():
                     raise SourceError('Подключение Telegram остановлено')
                 if not self.process or self.process.returncode is not None:
-                    interpreter = self.project / '.venv' / 'bin' / 'python'
-                    if not interpreter.is_file():
+                    if not self.env_file.is_file():
                         raise SourceError('Окружение Telegram-клиента недоступно')
                     self.spool.mkdir(parents=True, exist_ok=True, mode=0o700)
                     self.process = await asyncio.create_subprocess_exec(
-                        str(interpreter), str(Path(__file__).with_name('telegram_worker.py')),
-                        str(self.spool), cwd=self.project, stdin=asyncio.subprocess.PIPE,
+                        sys.executable, '-m', 'oko.telegram_worker', str(self.spool), str(self.env_file),
+                        cwd=Path(__file__).resolve().parent.parent, stdin=asyncio.subprocess.PIPE,
                         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=4*1024*1024)
                 process = self.process
                 assert process.stdin and process.stdout

@@ -231,24 +231,18 @@ def test_discovery_interruption_keeps_album_identity_and_files_recover(tmp_path:
         assert len(client.get('/api/cards').json()) == 1
 
 
-def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Path):
-    """Real pipe/worker, fake external Telethon SDK and existing-client runtime."""
-    import sys
-    from oko.telegram import LocalTelegram
-    project = tmp_path / 'existing-client'
-    (project / '.venv' / 'bin').mkdir(parents=True)
-    (project / '.venv' / 'bin' / 'python').symlink_to(sys.executable)
-    (project / 'telegram_mcp').mkdir()
-    (project / 'telegram_mcp' / '__init__.py').write_text('')
-    (project / 'telegram_mcp' / 'singleton.py').write_text('''class SessionLockError(Exception): pass
-class SessionLock:
-    def __init__(self, *args): pass
-    def acquire(self, **kwargs): pass
-    def release(self): pass
-def session_identity(client): return 'synthetic-session-identity'
-''')
-    (project / 'telethon').mkdir()
-    (project / 'telethon' / '__init__.py').write_text('''from types import SimpleNamespace
+def fake_sdk_project(tmp_path: Path, monkeypatch):
+    """Real Oko worker and configuration, fake external Telethon SDK only."""
+    import os
+    project = tmp_path / 'sdk-fixture'
+    (project / 'telethon').mkdir(parents=True)
+    (project / '.env').write_text('TELEGRAM_API_ID=123\nTELEGRAM_API_HASH=synthetic\nTELEGRAM_SESSION_STRING_FIXTURE=synthetic-session\n')
+    (project / 'telethon' / 'sessions.py').write_text("class StringSession:\n    def __init__(self, value): self.value = value\n    def save(self): return self.value\n")
+    (project / 'telethon' / 'errors.py').write_text('class FloodWaitError(Exception): pass\n')
+    (project / 'telethon' / '__init__.py').write_text('''import asyncio
+import os
+from datetime import datetime, timezone
+from types import SimpleNamespace
 class Channel:
     id = 1234567890
     title = 'Synthetic channel'
@@ -258,16 +252,12 @@ class Channel:
 class Chat: pass
 types = SimpleNamespace(Channel=Channel, Chat=Chat)
 utils = SimpleNamespace(get_peer_id=lambda entity: -1001234567890)
-''')
-    (project / 'telethon' / 'errors.py').write_text('class FloodWaitError(Exception): pass\n')
-    (project / 'telegram_mcp' / 'runtime.py').write_text('''import asyncio
-from datetime import datetime, timezone
-from types import SimpleNamespace
-from telethon import types
-class Client:
+class TelegramClient:
+    def __init__(self, session, *args, **kwargs): self.session = session
     async def connect(self): pass
     async def disconnect(self): pass
-    async def is_user_authorized(self): return True
+    async def is_user_authorized(self): return os.environ.get('SDK_FIXTURE_UNAUTHORIZED') != 'yes'
+    async def get_entity(self, peer): return Channel()
     async def get_messages(self, entity, **params):
         def msg(id):
             return SimpleNamespace(id=id, date=datetime.now(timezone.utc), message='Album' if id == 11 else '', grouped_id=99, photo=True, document=None, media=True, file=SimpleNamespace(size=100))
@@ -280,12 +270,16 @@ class Client:
         file.write(b'partial-download')
         file.flush()
         await asyncio.sleep(100)
-clients = {'fixture': Client()}
-def get_client(account): return clients[account]
-async def resolve_entity(peer, cl): return types.Channel()
 ''')
+    monkeypatch.setenv('PYTHONPATH', str(project) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    return project
+
+
+def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Path, monkeypatch):
+    from oko.telegram import LocalTelegram
+    project = fake_sdk_project(tmp_path, monkeypatch)
     root = tmp_path / 'data'
-    bridge = LocalTelegram(project, root)
+    bridge = LocalTelegram(project / '.env', root)
     with TestClient(create_app(root, token='test-token', telegram_client=bridge), headers=HEADERS) as client:
         client.post('/api/tabs/test/heartbeat')
         connect(client)
@@ -396,3 +390,31 @@ def test_viewed_album_stays_deleted_when_first_part_is_removed(tmp_path: Path):
         client.post('/api/tabs/test/heartbeat')
         time.sleep(.15)
         assert client.get('/api/cards').json() == []
+
+
+def test_local_client_uses_env_without_external_project_or_venv(tmp_path: Path):
+    from oko.telegram import LocalTelegram
+    # Account listing parses configuration without contacting Telegram or copying it.
+    env = tmp_path / 'credentials.env'
+    env.write_text('TELEGRAM_API_ID=123\nTELEGRAM_API_HASH=synthetic\nTELEGRAM_SESSION_STRING_FIXTURE=synthetic-session\n')
+    root = tmp_path / 'data'
+    with TestClient(create_app(root, token='test-token', telegram_client=LocalTelegram(env, root)), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        result = client.get('/api/telegram/accounts')
+        assert result.status_code == 200, result.json()
+        assert result.json() == ['fixture']
+        assert not list(root.rglob('*.session')) and not list(root.rglob('*.env'))
+
+
+def test_direct_client_never_logs_in_or_copies_an_unauthorized_session(tmp_path: Path, monkeypatch):
+    from oko.telegram import LocalTelegram
+    project = fake_sdk_project(tmp_path, monkeypatch)
+    monkeypatch.setenv('SDK_FIXTURE_UNAUTHORIZED', 'yes')
+    root = tmp_path / 'data'
+    with TestClient(create_app(root, token='test-token', telegram_client=LocalTelegram(project / '.env', root)), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=False))
+        assert response.status_code == 409
+        assert response.json()['detail'] == 'Требуется авторизация существующего Telegram-клиента'
+        assert client.get('/api/subscriptions').json()['feeds'] == []
+        assert not list(root.rglob('*.session')) and not list(root.rglob('*.env'))
