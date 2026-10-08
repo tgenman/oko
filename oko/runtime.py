@@ -300,21 +300,23 @@ class Runtime:
                 current.retry(job, self._clock(), 'Ошибка удаления')
 
     async def _execute(self, job: Job) -> None:
-        async with self._actions:
-            current = self._store
-            if not current or not current.valid(job) or not self._live():
-                return
-            if job.kind == 'delete':
-                self._delete(job, current)
-                return
-            feed = (job.item or 'demo') if job.kind == 'discover' else current.item_feed(job.item)
-            source = self._sources.get(feed)
-            publication = current.publication(job.item) if job.kind == 'fetch' else None
-            namespace = 'telegram' if isinstance(source, TelegramSource) else ''
-            cursor = current.cursor(feed, namespace) if job.kind == 'discover' else None
-        if not source:
-            return
+        current: Store | None = None
+        feed = ''
         try:
+            async with self._actions:
+                current = self._store
+                if not current or not current.valid(job) or not self._live():
+                    return
+                if job.kind == 'delete':
+                    self._delete(job, current)
+                    return
+                feed = (job.item or 'demo') if job.kind == 'discover' else current.item_feed(job.item)
+                source = self._sources.get(feed)
+                publication = current.publication(job.item) if job.kind == 'fetch' else None
+                namespace = 'telegram' if isinstance(source, TelegramSource) else ''
+                cursor = current.cursor(feed, namespace) if job.kind == 'discover' else None
+            if not source:
+                return
             if job.kind == 'discover':
                 items, next_cursor = await source.discover(cursor)
                 async with self._actions:
@@ -335,7 +337,7 @@ class Runtime:
             raise
         except Exception as error:
             async with self._actions:
-                if self._store is current and not self.stopped and current.valid(job):
+                if current and self._store is current and not self.stopped and current.valid(job):
                     label = error.label if isinstance(error, SourceError) else 'Ошибка сбора'
                     current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1)
                     if isinstance(error, SourceError):

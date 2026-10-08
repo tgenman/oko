@@ -104,3 +104,33 @@ def test_repeated_close_does_not_extend_shutdown_grace(tmp_path: Path):
                 break
             time.sleep(.01)
         assert client.get('/api/status').json()['stopped'] is True
+
+
+def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
+    from tests.test_telegram import settled
+    class Client(Telegram):
+        rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777,
+                     media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
+        async def page(self, account, peer, after, since):
+            return dict(messages=self.rows, more=False)
+        async def messages(self, account, peer, ids):
+            return self.rows
+    source = Client()
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
+        client.post('/api/tabs/a/heartbeat')
+        connect(client)
+        card = settled(client)[0]
+        # External loss of a stored file must not turn a preparation failure into
+        # an unhandled task exception which closes the whole reader.
+        (tmp_path / 'content' / card['id'] / '1' / 'media-11.jpg').unlink()
+        source.rows = source.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=None)]
+        client.post('/api/collect')
+        for _ in range(100):
+            state = client.get('/api/status').json()
+            if state['errors'] or state['stopped']:
+                break
+            time.sleep(.01)
+        assert state['stopped'] is False
+        assert state['errors'] == ['Ошибка сбора']
+        assert client.get('/api/cards').status_code == 200
+        assert client.post('/api/materials/' + card['id'] + '/viewed').status_code == 200
