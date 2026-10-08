@@ -236,7 +236,7 @@ async function loadSettings() {
       const row = element('div'); row.className = 'setting-row';
       let input;
       if (type === 'boolean') input = selectControl([['true', 'Включено'], ['false', 'Выключено']], effective.value);
-      else if (type === 'processor') input = selectControl([['codex', 'Codex · обработка недоступна'], ['ollama', 'Ollama · подключённая модель'], ...(!['codex', 'ollama'].includes(effective.value) ? [[effective.value, effective.value]] : [])], effective.value);
+      else if (type === 'processor') input = selectControl([['codex', 'Codex · существующий вход CLI'], ['ollama', 'Ollama · подключённая модель'], ...(!['codex', 'ollama'].includes(effective.value) ? [[effective.value, effective.value]] : [])], effective.value);
       else if (type === 'text') { input = element('textarea'); input.value = effective.value; input.rows = 3; }
       else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = '3650'; } }
       input.id = 'setting-' + field;
@@ -379,7 +379,7 @@ byId('codex-check').onclick = async () => {
     const result = await api('processors/codex/check', 'POST');
     if (stopped) return;
     const auth = {chatgpt: 'вход через ChatGPT', api_key: 'вход через API key', missing: 'вход отсутствует', unknown: 'способ входа не распознан', unchecked: 'вход не проверен'};
-    byId('codex-status').textContent = (result.version ? 'CLI ' + result.version + ' · ' : '') + auth[result.auth] + '. Лимиты и доступ к модели не проверены. ' + result.reason;
+    byId('codex-status').textContent = (result.version ? 'CLI ' + result.version + ' · ' : '') + auth[result.auth] + '. Лимиты проверяются при выполнении задания. ' + (result.available ? 'Изолированный запуск доступен.' : result.reason);
   } catch (error) {
     if (!stopped) byId('codex-status').textContent = error.message;
   } finally {

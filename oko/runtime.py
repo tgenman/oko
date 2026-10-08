@@ -15,7 +15,7 @@ import httpx
 from .rss import RSSSource, SourceError
 from .sources import Source
 from .processing import Ollama, ProcessorConfig, ProcessingError
-from .codex import UNAVAILABLE, check as check_codex
+from .codex import Codex, CodexClient, LocalCodex, status as codex_status
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from .subscriptions import ImportRequest, Overrides, FeedPatch
@@ -32,7 +32,9 @@ class ActionError(Exception):
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None) -> None:
+        self._codex_client = codex_client or LocalCodex()
+        self._codex_status = codex_status()
         self._ai_transport = ai_transport
         self._ai: asyncio.Task[None] | None = None
         self._ai_sync = 0.0
@@ -283,13 +285,17 @@ class Runtime:
             self._check_request(current, epoch)
         return result
 
+    def codex_status(self) -> dict[str, Any]:
+        self.require_store()
+        return self._codex_status.copy()
+
     async def check_codex(self) -> dict[str, Any]:
         async with self._actions:
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения')
             epoch = self._epoch
-            task = asyncio.create_task(check_codex())
+            task = asyncio.create_task(self._codex_client.check())
             self._requests.add(task)
         try:
             result = await task
@@ -299,6 +305,7 @@ class Runtime:
             self._requests.discard(task)
         async with self._actions:
             self._check_request(current, epoch)
+            self._codex_status = result
         return result
 
     async def retry_theses(self, item: str) -> None:
@@ -317,16 +324,19 @@ class Runtime:
                 if policy and policy[0] == 'codex':
                     if not policy[1]:
                         raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
-                    # No input is prepared and no child inference process is started.
-                    raise ProcessingError(UNAVAILABLE)
+
                 prepared = current.processing_request(job)
                 config = current.processor_config()
                 if not prepared:
                     raise ProcessingError('Исходник недоступен для тезисов')
                 request, signature, public_ai = prepared
-                if request.processor not in ('ollama', 'ollama:' + (config.model if config else '')) or not config:
+                adapter: Codex | Ollama
+                if request.processor == 'codex':
+                    adapter = Codex(self._codex_client)
+                elif request.processor in ('ollama', 'ollama:' + (config.model if config else '')) and config:
+                    adapter = Ollama(config, self._ai_transport)
+                else:
                     raise ProcessingError('Ожидание выбранного обработчика; Ollama не настроен или не выбран')
-                adapter = Ollama(config, self._ai_transport)
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:
@@ -335,7 +345,8 @@ class Runtime:
                 if not checked['local'] and not public_ai:
                     raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
             self._ai_stage = 'Подготовка тезисов'
-            theses = await adapter.generate(request)
+            theses = (await adapter.generate(request, self._root / 'staging' / job.item)
+                      if isinstance(adapter, Codex) else await adapter.generate(request))
             async with self._actions:
                 if self._store is current and self._live():
                     current.save_theses(job, signature, theses)

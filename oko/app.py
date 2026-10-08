@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from .sources import Source
 from .processing import ProcessorConfig
-from .codex import status as codex_status
+from .codex import CodexClient
 from .store import Store
 from .telegram import TelegramClient, ConnectTelegram
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
@@ -26,9 +26,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                shutdown: Callable[[], None] = lambda: None,
                lease: float = 6, grace: float = 15, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
-               telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+               telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None) -> FastAPI:
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport)
+    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -94,8 +94,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.get('/api/processors/codex')
     async def codex_state() -> dict[str, Any]:
-        store()
-        return codex_status()
+        return runtime.codex_status()
 
     @app.post('/api/processors/codex/check')
     async def codex_check() -> dict[str, Any]:
