@@ -101,6 +101,8 @@ def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: 
         assert {c['title'] for c in cards} == {'Atom', 'Заголовок'}
         state = client.get('/api/status').json()
         assert state['total_sources'] == 5 and state['ready_sources'] == 2
+        assert state['stage'] != 'Завершено с ошибками'
+        assert any(job['status'] == 'pending' for job in state['jobs'])
         assert set(state['errors']) == {'Требуется авторизация', 'Ограничение частоты', 'Источник недоступен'}
         assert any(s['gap'] for s in state['sources'])
     # The old cursor is not a date cutoff advanced to "now"; an out-of-order
@@ -259,3 +261,21 @@ def test_reader_allows_authenticated_blob_images_without_remote_images(tmp_path:
         csp = client.get('/').headers['content-security-policy']
         assert "img-src 'self' blob:;" in csp
         assert 'https:' not in csp
+
+
+def test_reused_guid_cannot_replace_saved_teaser_with_another_url(tmp_path: Path):
+    reads = 0
+    def response(request):
+        nonlocal reads
+        if request.url.path == '/feed':
+            reads += 1
+            body = rss(url='https://source.test/old') if reads == 1 else rss(url='https://source.test/new').replace('Заголовок', 'Другой заголовок').replace('Анонс статьи', 'Другой анонс')
+            return httpx.Response(200, text=body)
+        return httpx.Response(404)
+    with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
+        import_feed(client)
+        client.post('/api/tabs/test/heartbeat')
+        card = wait_cards(client)[0]
+        material = client.get('/api/materials/' + card['id']).json()
+        assert material['title'] == 'Заголовок' and material['text'] == 'Анонс статьи'
+        assert material['url'] == 'https://source.test/old'

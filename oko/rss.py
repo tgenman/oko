@@ -188,7 +188,7 @@ class RSSSource:
             batch = await self.read_entries()
         except SourceError:
             batch = []
-        entry = next((e for e in batch if e.publication.id == publication.id or e.publication.url == publication.url), None)
+        entry = next((e for e in batch if e.publication.url == publication.url), None)
         title, excerpt = (entry.title, entry.excerpt) if entry else (publication.teaser.title, publication.teaser.text) if publication.teaser else ('Статья', '')
         fallback = Article()
         fallback.feed('<article>' + excerpt + '</article>')

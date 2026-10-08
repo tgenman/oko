@@ -139,6 +139,11 @@ class Store:
     def source_statuses(self) -> list[dict[str, Any]]:
         return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key LIKE 'feed-status:%'")]
 
+    def ready_sources(self, feeds: list[str]) -> int:
+        return sum(1 for feed in feeds if not self.db.execute(
+            "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
+            ('' if feed == 'demo' else feed, feed)).fetchone())
+
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if deleting_only:

@@ -86,7 +86,7 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch) return;
     if (state.stopped) { stopUi('Око остановлено'); return; }
     byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (state.errors.length ? ' · ' + state.errors.join(', ') : '');
-    byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => { const p = document.createElement('p'); p.textContent = source.error || source.gap; return p; }));
+    byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => { const p = document.createElement('p'); p.textContent = source.title + ': ' + (source.error || source.gap); return p; }));
     if (state.error) { clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
     if (folderId) params.set('folder', folderId);

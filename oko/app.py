@@ -218,11 +218,25 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         state: dict[str, Any] = runtime.store.status() if runtime.store and not runtime.stopped else dict(jobs=[], errors=[], deleting=False)
         pending = any(j['status'] in ('pending', 'running') for j in state['jobs'])
         source_states = runtime.store.source_statuses() if runtime.store else []
+        names = {f['id']: f['title'] for f in runtime.store.subscriptions.feeds()} if runtime.store else {}
+        source_states = [dict(**s, title=names.get(s['feed_id'], s['feed_id'])) for s in source_states if s['feed_id'] in runtime.sources]
+        if runtime.stopped:
+            stage = 'Остановлено'
+        elif runtime.error:
+            stage = 'Ошибка хранилища'
+        elif state['deleting']:
+            stage = 'Удаление'
+        elif pending and not runtime.sources:
+            stage = 'Источник не подключён'
+        elif pending and state['errors']:
+            stage = 'Сбор с ошибками' if runtime.active and not runtime.active.done() else 'Ожидание повтора'
+        elif pending:
+            stage = 'Сбор'
+        else:
+            stage = 'Завершено с ошибками' if state['errors'] else 'Готово'
         return dict(**state, sources=source_states, error=runtime.error, stopped=runtime.stopped,
-                    live_tabs=len(runtime.tabs), stage='Остановлено' if runtime.stopped else
-                    'Ошибка хранилища' if runtime.error else 'Завершено с ошибками' if state['errors'] else
-                    'Удаление' if state['deleting'] else 'Источник не подключён' if pending and not runtime.sources else 'Сбор' if pending else 'Готово',
-                    ready_sources=sum(1 for feed in runtime.sources if runtime.store and not runtime.store.db.execute("SELECT 1 FROM jobs WHERE status IN ('pending','running') AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))", ('' if feed == 'demo' else feed, feed)).fetchone()),
+                    live_tabs=len(runtime.tabs), stage=stage,
+                    ready_sources=runtime.store.ready_sources(list(runtime.sources)) if runtime.store and not runtime.stopped else 0,
                     total_sources=len(runtime.sources))
 
     @app.post('/api/tabs/{tab}/heartbeat')
