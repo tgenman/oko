@@ -21,13 +21,13 @@ class SessionLockError(Exception):
 
 
 class SessionLock:
-    def __init__(self, label: str, identity: str) -> None:
+    def __init__(self, identity: str) -> None:
         directory = Path(tempfile.gettempdir()) / 'telegram-mcp-locks'
         directory.mkdir(parents=True, exist_ok=True)
         self.path = directory / ('session-' + hashlib.sha256(identity.encode()).hexdigest()[:16] + '.lock')
         self.file: TextIO | None = None
 
-    def acquire(self, *, grace_seconds: float = 0) -> None:
+    def acquire(self) -> None:
         file = self.path.open('a+')
         try:
             fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -64,10 +64,12 @@ class ClientRegistry:
         for kind in ('NAME', 'STRING'):
             prefix = 'TELEGRAM_SESSION_' + kind
             for name, value in self.values.items():
-                if name == prefix:
-                    self.config.setdefault('default', (kind, value))
-                elif name.startswith(prefix + '_') and name != 'TELEGRAM_SESSION_STRINGS':
+                if name.startswith(prefix + '_'):
                     self.config[name[len(prefix)+1:].lower()] = (kind, value)
+        for kind in ('STRING', 'NAME'):
+            default_value = self.values.get('TELEGRAM_SESSION_' + kind)
+            if default_value:
+                self.config.setdefault('default', (kind, default_value))
         if self.values.get('TELEGRAM_SESSION_STRINGS'):
             # Never silently pick a pool slot already used by another process.
             raise ValueError('session pools are not supported')
@@ -77,6 +79,10 @@ class ClientRegistry:
 
     def accounts(self) -> list[str]:
         return sorted(self.config)
+
+    async def close(self) -> None:
+        for client in self.clients.values():
+            await client.disconnect()
 
     def client(self, account: str) -> Any:
         if account not in self.config:

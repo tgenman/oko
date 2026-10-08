@@ -1,7 +1,7 @@
 """Private JSON pipe to the Oko-owned Telethon client.
 
-No MCP listing helpers: those can prefetch public-AI transcriptions. This worker
-only resolves peers, reads history and downloads originals with Telethon.
+This worker only resolves peers, reads history and downloads originals with
+Telethon. It does not perform transcription or AI processing.
 """
 import asyncio
 from contextlib import redirect_stdout
@@ -57,12 +57,10 @@ async def main() -> None:
     peers: dict[tuple[str, str], Any] = {}
 
     async def client_for(account: str) -> Any:
-        if account not in registry.config:
-            raise ValueError('account')
         cl = registry.client(account)
         if account not in locks:
-            lock = SessionLock(account, session_identity(cl))
-            lock.acquire(grace_seconds=0)
+            lock = SessionLock(session_identity(cl))
+            lock.acquire()
             locks[account] = lock
             try:
                 await cl.connect()
@@ -186,9 +184,11 @@ async def main() -> None:
             output.write(json.dumps(response, ensure_ascii=False) + '\n')
             output.flush()
     finally:
-        for account, lock in locks.items():
-            await registry.clients[account].disconnect()
-            lock.release()
+        try:
+            await registry.close()
+        finally:
+            for lock in locks.values():
+                lock.release()
         (spool / 'media.bin').unlink(missing_ok=True)
 
 

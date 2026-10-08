@@ -418,3 +418,16 @@ def test_direct_client_never_logs_in_or_copies_an_unauthorized_session(tmp_path:
         assert response.json()['detail'] == 'Требуется авторизация существующего Telegram-клиента'
         assert client.get('/api/subscriptions').json()['feeds'] == []
         assert not list(root.rglob('*.session')) and not list(root.rglob('*.env'))
+
+
+def test_direct_client_prefers_existing_string_session_to_stale_file_setting(tmp_path: Path, monkeypatch):
+    from oko.telegram import LocalTelegram
+    project = fake_sdk_project(tmp_path, monkeypatch)
+    (project / '.env').write_text('TELEGRAM_API_ID=123\nTELEGRAM_API_HASH=synthetic\nTELEGRAM_SESSION_NAME=missing-old-file\nTELEGRAM_SESSION_STRING=synthetic-session\n')
+    root = tmp_path / 'data'
+    with TestClient(create_app(root, token='test-token', telegram_client=LocalTelegram(project / '.env', root)), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        response = client.post('/api/telegram/connect', json=dict(account='default', peer='@fixture', folder='Новости', auto_read=False))
+        assert response.status_code == 200, response.json()
+        assert response.json()['telegram_account'] == 'default'
+        assert not list(project.rglob('*.session'))
