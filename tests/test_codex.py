@@ -118,7 +118,7 @@ class CodexService:
         self.inputs = []
 
     async def check(self):
-        return dict(available=True, local=False, auth='chatgpt', version='0.136.0', reason='', limits_checked=False)
+        return dict(available=True, local=False, auth='chatgpt', version='0.136.0', reason='', limits_checked=True)
 
     async def complete(self, prompt, schema, directory):
         import json
@@ -232,3 +232,66 @@ def test_codex_cancellation_on_view_keeps_late_result_deleted(tmp_path):
         assert client.get('/api/materials/'+item).status_code==404
         assert not (tmp_path/'content'/item).exists()
         assert not (tmp_path/'staging'/item).exists()
+
+
+def test_missing_login_is_reported_as_authorization_in_material(tmp_path,monkeypatch):
+    fake_cli(tmp_path,monkeypatch,"""
+case "$*" in
+  --version) echo 'codex-cli 0.136.0' ;;
+  'exec --help') echo '--ephemeral --ignore-user-config --ignore-rules --output-schema' ;;
+  'login status') exit 1 ;;
+  *) exit 99 ;;
+esac
+""")
+    with TestClient(create_app(tmp_path/'store',source=DemoSource(),token='test'),headers=HEADERS) as client:
+        item=setup_reader(client)
+        client.patch('/api/feeds/demo',json={'public_ai':True})
+        client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
+        material=wait_for(client,lambda: (m if (m:=client.get('/api/materials/'+item).json()).get('ai',{}).get('error') else None))
+        assert 'Авторизация' in material['ai']['error']
+        assert material['theses'] is None
+
+
+def test_codex_unknown_quota_prevents_source_transfer(tmp_path):
+    class UnknownQuota(CodexService):
+        async def check(self):
+            return dict(available=True,local=False,auth='chatgpt',version='0.136.0',reason='',limits_checked=False)
+    service=UnknownQuota()
+    with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
+        item=setup_reader(client)
+        client.patch('/api/feeds/demo',json={'public_ai':True})
+        client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
+        material=wait_for(client,lambda: (m if (m:=client.get('/api/materials/'+item).json()).get('theses') or m.get('ai',{}).get('error') else None))
+        assert not service.inputs
+        assert 'Лимиты' in material['ai']['error']
+
+
+def test_codex_exhausted_quota_is_visible_without_source_transfer(tmp_path):
+    class Exhausted(CodexService):
+        async def check(self):
+            return dict(available=False,local=False,auth='chatgpt',version='0.136.0',reason='Лимит Codex исчерпан; ожидание сброса',limits_checked=True)
+    service=Exhausted()
+    with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
+        item=setup_reader(client)
+        client.patch('/api/feeds/demo',json={'public_ai':True})
+        client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
+        material=wait_for(client,lambda: (m if (m:=client.get('/api/materials/'+item).json()).get('ai',{}).get('error') else None))
+        assert 'Лимит Codex исчерпан' in material['ai']['error']
+        assert not service.inputs and material['theses'] is None
+
+
+def test_large_cli_output_cannot_block_connection_check(tmp_path,monkeypatch):
+    import concurrent.futures
+    fake_cli(tmp_path,monkeypatch,"/usr/bin/head -c 10000000 /dev/zero\n")
+    with TestClient(create_app(tmp_path/'store',token='test'),headers=HEADERS) as client:
+        client.post('/api/tabs/r/heartbeat')
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            pending=pool.submit(client.post,'/api/processors/codex/check')
+            try:
+                response=pending.result(timeout=3)
+            finally:
+                if not pending.done():
+                    client.post('/api/stop')
+                    pending.result(timeout=3)
+            assert response.status_code==200
+            assert 'Проверка Codex не завершена' in response.json()['reason']

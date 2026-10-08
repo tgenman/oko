@@ -1,6 +1,7 @@
 """Ephemeral Codex CLI connection, isolated by an audited macOS OS profile."""
 
 import asyncio
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -53,7 +54,7 @@ async def _probe(binary: str, directory: str, *args: str) -> tuple[int, str]:
                 pass
         elif process.returncode is None:
             process.kill()
-        await process.wait()
+        await process.communicate()
 
 
 async def diagnose() -> dict[str, Any]:
@@ -176,17 +177,95 @@ async def run_isolated(args: list[str], prompt: bytes, directory: Path) -> tuple
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        await process.wait()
-        group.cancel()
-        await asyncio.gather(group, return_exceptions=True)
         for task in [*readers, writer, waiter]:
             task.cancel()
+        group.cancel()
+        await asyncio.gather(group, return_exceptions=True)
         await asyncio.gather(*readers, writer, waiter, return_exceptions=True)
+        # Producers are dead, so residual output is bounded by pipe buffers.
+        await process.communicate()
+
+
+async def quota_before_turn(binary: Path, work: Path, auth: Path) -> list[dict[str, Any]]:
+    # Only initialize and account/rateLimits/read. No thread/turn is created and
+    # there is no source input. Config reads remain blocked by the OS profile.
+    args = ['/usr/bin/sandbox-exec', '-p', sandbox_profile(binary, work, auth),
+            str(binary), 'app-server']
+    for feature in FEATURES:
+        args.extend(['--disable', feature])
+    args.extend(['-c', 'mcp_servers={}', '-c', 'sqlite_home=' + json.dumps(str(work)),
+                 '-c', 'log_dir=' + json.dumps(str(work)), '-c', 'analytics.enabled=false'])
+    env = {k: v for k, v in os.environ.items() if k in ('HOME', 'CODEX_HOME', 'PATH', 'LANG', 'LC_ALL')}
+    env.update(RUST_LOG='off', TMPDIR=str(work), RUST_BACKTRACE='0')
+    process = await asyncio.create_subprocess_exec(*args, cwd=work, env=env,
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL, start_new_session=True, limit=2_000_000)
+    async def receive() -> dict[str, Any]:
+        assert process.stdin is not None and process.stdout is not None
+        messages = [{'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'oko_quota', 'version': '1'}}},
+                    {'method': 'initialized'}, {'id': 2, 'method': 'account/rateLimits/read'}]
+        for message in messages:
+            process.stdin.write((json.dumps(message) + '\n').encode())
+        await process.stdin.drain()
+        total = 0
+        while line := await process.stdout.readline():
+            total += len(line)
+            if total > 2_000_000:
+                raise ValueError('quota response too large')
+            message = json.loads(line)
+            if not isinstance(message, dict):
+                raise ValueError('quota response is not an object')
+            if message.get('id') == 2:
+                result = message.get('result')
+                if not isinstance(result, dict):
+                    raise ProcessingError('Не удалось проверить лимиты Codex; проверьте вход')
+                return result
+        raise ProcessingError('Проверка лимитов Codex прервана')
+    try:
+        response = await asyncio.wait_for(receive(), timeout=15)
+        buckets = response.get('rateLimitsByLimitId')
+        if not isinstance(buckets, dict) or not buckets:
+            buckets = {'codex': response.get('rateLimits')}
+        windows = []
+        for bucket in buckets.values():
+            if not isinstance(bucket, dict):
+                raise ProcessingError('Лимиты Codex не определены; материалы не отправлены')
+            if bucket.get('rateLimitReachedType'):
+                raise ProcessingError('Лимит Codex исчерпан; ожидание сброса')
+            found = False
+            for name in ('primary', 'secondary'):
+                window = bucket.get(name)
+                if window is None:
+                    continue
+                if not isinstance(window, dict):
+                    raise ProcessingError('Лимиты Codex не определены; материалы не отправлены')
+                used = window.get('usedPercent')
+                if not isinstance(used, (int, float)) or isinstance(used, bool) or not 0 <= used <= 100:
+                    raise ProcessingError('Лимиты Codex не определены; материалы не отправлены')
+                found = True
+                if used >= 100:
+                    raise ProcessingError('Лимит Codex исчерпан; ожидание сброса')
+                windows.append(dict(used_percent=used, resets_at=window.get('resetsAt')))
+            if not found:
+                raise ProcessingError('Лимиты Codex не определены; материалы не отправлены')
+        return windows
+    except (OSError, ValueError, TypeError, asyncio.TimeoutError):
+        raise ProcessingError('Не удалось проверить лимиты Codex; материалы не отправлены') from None
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await process.communicate()
 
 
 class LocalCodex:
     async def check(self) -> dict[str, Any]:
         result = await diagnose()
+        if result.get('auth') == 'missing':
+            return dict(result, reason='Авторизация Codex отсутствует; выполните вход в CLI')
+        if result.get('auth') == 'unknown':
+            return dict(result, reason='Способ авторизации Codex не подтверждён')
         binary = await asyncio.to_thread(supported_binary)
         if not binary or result.get('auth') not in ('chatgpt', 'api_key'):
             return result
@@ -199,9 +278,14 @@ class LocalCodex:
                     sandbox_profile(binary, work, auth), str(binary), '--version'], b'', work)
                 if code:
                     return dict(result, reason='Внешний sandbox Codex недоступен. ' + UNAVAILABLE)
-        except (OSError, ProcessingError):
+                if result['auth'] != 'chatgpt':
+                    return dict(result, reason='Предварительная проверка лимитов требует входа ChatGPT')
+                windows = await quota_before_turn(binary, work, auth)
+        except ProcessingError as error:
+            return dict(result, reason=error.label)
+        except OSError:
             return dict(result, reason='Внешний sandbox Codex недоступен. ' + UNAVAILABLE)
-        return dict(result, available=True, local=False, reason='')
+        return dict(result, available=True, local=False, reason='', limits_checked=True, quota_windows=windows)
 
     async def complete(self, prompt: str, schema: dict[str, Any], directory: Path) -> str:
         binary = await asyncio.to_thread(supported_binary)
@@ -226,7 +310,7 @@ class LocalCodex:
                 # Logs are disabled even though CLI requires an empty logs DB.
                 log = work / 'logs_2.sqlite'
                 if log.exists():
-                    with sqlite3.connect('file:' + str(log) + '?mode=ro', uri=True) as db:
+                    with closing(sqlite3.connect('file:' + str(log) + '?mode=ro', uri=True)) as db:
                         if db.execute('SELECT count(*) FROM logs').fetchone()[0]:
                             raise ProcessingError('Codex создал журнал; результат не принят')
                 allowed = {'schema.json', 'state_5.sqlite', 'state_5.sqlite-wal', 'state_5.sqlite-shm',
@@ -281,6 +365,8 @@ class Codex:
         result = await self.client.check()
         if not result['available']:
             raise ProcessingError(result['reason'])
+        if result.get('limits_checked') is not True:
+            raise ProcessingError('Лимиты Codex не проверены; материалы не отправлены')
         return dict(result, local=False)
 
     async def generate(self, request: ProcessingRequest, directory: Path) -> Theses:

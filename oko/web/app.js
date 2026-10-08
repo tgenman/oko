@@ -379,7 +379,7 @@ byId('codex-check').onclick = async () => {
     const result = await api('processors/codex/check', 'POST');
     if (stopped) return;
     const auth = {chatgpt: 'вход через ChatGPT', api_key: 'вход через API key', missing: 'вход отсутствует', unknown: 'способ входа не распознан', unchecked: 'вход не проверен'};
-    byId('codex-status').textContent = (result.version ? 'CLI ' + result.version + ' · ' : '') + auth[result.auth] + '. Лимиты проверяются при выполнении задания. ' + (result.available ? 'Изолированный запуск доступен.' : result.reason);
+    byId('codex-status').textContent = (result.version ? 'CLI ' + result.version + ' · ' : '') + auth[result.auth] + (result.limits_checked ? '. Лимиты проверены. ' : '. Лимиты не проверены. ') + (result.available ? 'Изолированный запуск доступен.' : result.reason);
   } catch (error) {
     if (!stopped) byId('codex-status').textContent = error.message;
   } finally {
