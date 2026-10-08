@@ -9,6 +9,7 @@ class Publication:
     url: str
     published: float
     teaser: 'Material | None' = None
+    members: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -18,12 +19,21 @@ class Image:
 
 
 @dataclass(frozen=True)
+class Attachment:
+    name: str
+    data: bytes
+    kind: str
+    mime: str
+
+
+@dataclass(frozen=True)
 class Material:
     title: str
     text: str
     full: bool = True
     reason: str = ''
     images: tuple[Image, ...] = ()
+    attachments: tuple[Attachment, ...] = ()
 
 
 class Source(Protocol):

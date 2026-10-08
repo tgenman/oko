@@ -15,17 +15,19 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from .rss import RSSSource, SourceError
 from .sources import Source
 from .store import Job, Store
+from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
 
 
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None) -> None:
+                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None) -> None:
         self.root, self.source, self.clock, self.fault = root, source, clock, fault
         self.shutdown, self.lease, self.grace = shutdown, lease, grace
         self.source_feed = source_feed
         self.rss_enabled, self.rss_transport = rss_enabled, rss_transport
+        self.telegram_client = telegram_client
         self.sources: dict[str, Source] = {source_feed: source} if source else {}
         self.last_collection = clock()
         self.tabs: dict[str, float] = {}
@@ -37,6 +39,8 @@ class Runtime:
         self.detached: set[asyncio.Task[None]] = set()
         self.previous_tick = clock()
         self.previous_wall = time.time()
+        if isinstance(telegram_client, LocalTelegram):
+            telegram_client.allowed = self.live
 
     def heartbeat(self, tab: str) -> None:
         if self.stopped:
@@ -70,20 +74,32 @@ class Runtime:
                         finished.exception()
 
                 task.add_done_callback(completed)
+        if self.telegram_client:
+            await self.telegram_client.close()
 
     def sync_sources(self) -> None:
-        if not self.store or not self.rss_enabled:
+        if not self.store:
             return
         for feed in self.store.subscriptions.feeds():
-            if feed['transport'] != 'rss' or feed['id'] == self.source_feed and self.source:
+            if feed['id'] == self.source_feed and self.source:
                 continue
-            if feed['id'] not in self.sources:
+            if feed['transport'] == 'telegram' and self.telegram_client and feed.get('telegram_peer'):
+                if not isinstance(self.sources.get(feed['id']), TelegramSource):
+                    self.sources[feed['id']] = TelegramSource(self.telegram_client, feed['telegram_account'], feed['telegram_peer'], feed['initial_days'])
+                    self.store.enqueue_discovery(feed['id'])
+                telegram_source = self.sources[feed['id']]
+                if isinstance(telegram_source, TelegramSource):
+                    telegram_source.initial_days = feed['initial_days']
+                continue
+            if feed['transport'] != 'rss' or not self.rss_enabled:
+                continue
+            if not isinstance(self.sources.get(feed['id']), RSSSource):
                 self.sources[feed['id']] = RSSSource(feed['original_urls'][0], feed['initial_days'], self.rss_transport)
                 self.store.enqueue_discovery(feed['id'])
             source = self.sources[feed['id']]
-            if isinstance(source, RSSSource):
+            if isinstance(source, (RSSSource, TelegramSource)):
                 source.initial_days = feed['initial_days']
-        active = {f['id'] for f in self.store.subscriptions.feeds() if f['transport'] == 'rss'}
+        active = {f['id'] for f in self.store.subscriptions.feeds() if (f['transport'] == 'rss' and self.rss_enabled) or (f['transport'] == 'telegram' and self.telegram_client and f.get('telegram_peer'))}
         self.sources = {key: source for key, source in self.sources.items() if key in active or key == self.source_feed and self.source}
 
     async def execute(self, job: Job) -> None:
@@ -94,16 +110,22 @@ class Runtime:
             if job.kind == 'delete':
                 self.store.delete(job)
             elif source and job.kind == 'discover':
-                items, cursor = await source.discover(self.store.cursor(feed))
+                namespace = 'telegram' if isinstance(source, TelegramSource) else ''
+                items, cursor = await source.discover(self.store.cursor(feed, namespace))
                 if self.live() and self.store.valid(job):
-                    self.store.discovered(items, cursor, job, feed)
-                    self.store.feed_status(feed, error=None, gap=source.gap if isinstance(source, RSSSource) else None)
+                    self.store.discovered(items, cursor, job, feed, namespace)
+                    if getattr(source, 'more', False):
+                        self.store.enqueue_discovery(feed)
+                    self.store.feed_status(feed, error=None, gap=getattr(source, 'gap', None))
             elif source and job.kind == 'fetch':
                 publication = self.store.publication(job.item)
                 if publication:
+                    if isinstance(source, (RSSSource, TelegramSource)) and bool(publication.members) != isinstance(source, TelegramSource):
+                        raise SourceError('Материал получен другим способом; верните исходный транспорт для загрузки')
                     material = await source.fetch(publication)
-                    if self.live():
+                    if self.live() and self.store.valid(job):
                         self.store.save(job, material)
+                        self.store.feed_status(feed, error=None, gap=getattr(source, 'gap', None))
         except asyncio.CancelledError:
             raise
         except SourceError as error:
@@ -163,6 +185,8 @@ class Runtime:
             if self.store:
                 self.store.db.close()
                 self.store = None
+            if self.telegram_client:
+                await self.telegram_client.close()
             self.shutdown()
 
 
@@ -171,9 +195,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                fault: Callable[[str], None] = lambda _: None,
                shutdown: Callable[[], None] = lambda: None,
                lease: float = 6, grace: float = 15, source_feed: str = 'demo',
-               rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+               rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
+               telegram_client: TelegramClient | None = None) -> FastAPI:
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport)
+    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -201,7 +226,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                 return JSONResponse({'detail': 'Требуется локальная сессия'}, status_code=403)
         response: Response = await call_next(request)
         response.headers['Cache-Control'] = 'no-store'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
         return response
@@ -259,6 +284,43 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     def subscriptions() -> Subscriptions:
         return store().subscriptions
+
+    @app.get('/api/telegram/accounts')
+    async def telegram_accounts() -> list[str]:
+        store()
+        if not runtime.live():
+            raise HTTPException(409, 'Откройте читатель для подключения')
+        if not runtime.telegram_client:
+            raise HTTPException(409, 'Telegram-клиент не настроен')
+        try:
+            return await runtime.telegram_client.accounts()
+        except SourceError as error:
+            raise HTTPException(409, error.label) from None
+
+    @app.post('/api/telegram/connect')
+    async def telegram_connect(body: ConnectTelegram) -> dict[str, Any]:
+        current = store()
+        if not runtime.live():
+            raise HTTPException(409, 'Откройте читатель для подключения')
+        if not runtime.telegram_client:
+            raise HTTPException(409, 'Telegram-клиент не настроен')
+        try:
+            info = await runtime.telegram_client.info(body.account, int(body.peer) if body.peer.startswith('-') else body.peer)
+            if info.get('forum'):
+                raise HTTPException(409, 'Forum topics пока не поддерживаются')
+            if info['kind'] not in ('channel', 'group'):
+                raise HTTPException(400, 'Поддерживаются каналы и обычные группы')
+            if runtime.stopped or runtime.store is not current or not runtime.live():
+                raise HTTPException(409, 'Око остановлено')
+            result = current.subscriptions.connect_telegram(body, info)
+            await runtime.cancel()
+            runtime.sources.pop(result['id'], None)
+            runtime.sync_sources()
+            return result
+        except SourceError as error:
+            raise HTTPException(409, error.label) from None
+        except (LookupError, ValueError) as error:
+            raise HTTPException(400, str(error)) from None
 
     @app.get('/api/subscriptions')
     async def subscription_list() -> dict[str, Any]:
@@ -355,6 +417,18 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         data = path.read_bytes()
         mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'}[path.suffix]
         return Response(data, media_type=mime)
+
+    @app.get('/api/materials/{item}/media/{name}')
+    async def attachment(item: str, name: str) -> Response:
+        current = store()
+        if not re.fullmatch(r'media-[0-9]+\.[a-z0-9]+', name):
+            raise HTTPException(404, 'Вложение недоступно')
+        material = current.material(item)
+        media = next((a for a in material.get('attachments', []) if a['url'].endswith('/' + name)), None) if material else None
+        path = current.path(item).parent / name
+        if not media or not path.is_file():
+            raise HTTPException(404, 'Вложение недоступно')
+        return Response(path.read_bytes(), media_type=media['mime'], headers={'Content-Disposition': 'inline'})
 
     @app.get('/api/materials/{item}')
     async def material(item: str) -> dict[str, Any]:

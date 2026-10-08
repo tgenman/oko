@@ -2,13 +2,14 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sqlite3
 from collections.abc import Callable
 from typing import Any
 
-from .sources import Material, Publication
+from .sources import Attachment, Material, Publication
 from .subscriptions import Subscriptions
 
 
@@ -44,6 +45,9 @@ class Store:
         CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
         ''')
         columns = {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}
+        if 'members' not in columns:
+            self.db.execute("ALTER TABLE items ADD COLUMN members TEXT DEFAULT '[]'")
+            self.db.commit()
         if 'feed_id' not in columns:
             self.db.execute("ALTER TABLE items ADD COLUMN feed_id TEXT DEFAULT 'demo'")
             self.db.commit()
@@ -59,8 +63,8 @@ class Store:
                 self.db.execute('''CREATE TABLE items_scoped (
                   id TEXT PRIMARY KEY, source_id TEXT UNIQUE, url TEXT,
                   published REAL, viewed INTEGER DEFAULT 0, complete INTEGER DEFAULT 0,
-                  feed_id TEXT DEFAULT 'demo', UNIQUE(feed_id,url))''')
-                self.db.execute('INSERT INTO items_scoped SELECT id,source_id,url,published,viewed,complete,feed_id FROM items')
+                  feed_id TEXT DEFAULT 'demo', members TEXT DEFAULT '[]', UNIQUE(feed_id,url))''')
+                self.db.execute('INSERT INTO items_scoped SELECT id,source_id,url,published,viewed,complete,feed_id,members FROM items')
                 self.db.execute('DROP TABLE items')
                 self.db.execute('ALTER TABLE items_scoped RENAME TO items')
         self.subscriptions = Subscriptions(self.db)
@@ -97,11 +101,14 @@ class Store:
         with self.db:
             self.db.execute("INSERT INTO jobs(kind,item) VALUES ('discover',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed,))
 
-    def cursor(self, feed: str = 'demo') -> str | None:
-        row = self.db.execute("SELECT value FROM state WHERE key=?", ('cursor' if feed == 'demo' else 'cursor:' + feed,)).fetchone()
+    def cursor_key(self, feed: str, namespace: str) -> str:
+        return 'cursor:' + namespace + ':' + feed if namespace else 'cursor' if feed == 'demo' else 'cursor:' + feed
+
+    def cursor(self, feed: str = 'demo', namespace: str = '') -> str | None:
+        row = self.db.execute("SELECT value FROM state WHERE key=?", (self.cursor_key(feed, namespace),)).fetchone()
         return row[0] if row else None
 
-    def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo') -> None:
+    def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo', namespace: str = '') -> None:
         with self.db:
             for p in publications:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
@@ -110,8 +117,8 @@ class Store:
                 if existing and existing['url'] != p.url:
                     source_id = feed + ':' + p.url
                     item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
-                inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id) VALUES (?,?,?,?,?)',
-                                (item, source_id, p.url, p.published, feed))
+                inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members) VALUES (?,?,?,?,?,?)',
+                                (item, source_id, p.url, p.published, feed, json.dumps(p.members)))
                 if inserted.rowcount and p.teaser:
                     self.write_material(item, p.teaser)
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
@@ -119,7 +126,7 @@ class Store:
                 if row and not row['viewed']:
                     self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('fetch',?)", (row['id'],))
             self.fault('before_discovery_commit')
-            self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('cursor' if feed == 'demo' else 'cursor:' + feed, cursor))
+            self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
 
     def retry_material(self, item: str) -> bool:
@@ -172,8 +179,8 @@ class Store:
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         fallback = self.material(item) if row else None
-        teaser = Material(fallback['title'], fallback['text'], False) if fallback else None
-        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser) if row else None
+        teaser = Material(fallback['title'], fallback['text'], False, attachments=tuple(Attachment(Path(a['url']).name, (self.path(item).parent / Path(a['url']).name).read_bytes(), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
+        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members']))) if row else None
 
     def save(self, job: Job, material: Material) -> None:
         item = job.item
@@ -192,7 +199,7 @@ class Store:
         stage.mkdir()
         # Header is content too, and deliberately lives outside SQLite.
         with (stage / 'original.md').open('w', encoding='utf-8') as f:
-            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason}, ensure_ascii=False) + '\n\n' + material.text)
+            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason, 'attachments': [dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments]}, ensure_ascii=False) + '\n\n' + material.text)
             f.flush()
             os.fsync(f.fileno())
         for image in material.images:
@@ -200,6 +207,13 @@ class Store:
                 raise ValueError('image name')
             with (stage / image.name).open('wb') as output:
                 output.write(image.data)
+                output.flush()
+                os.fsync(output.fileno())
+        for attachment in material.attachments:
+            if not re.fullmatch(r'media-[0-9]+\.[a-z0-9]+', attachment.name):
+                raise ValueError('attachment name')
+            with (stage / attachment.name).open('wb') as output:
+                output.write(attachment.data)
                 output.flush()
                 os.fsync(output.fileno())
         destination = self.path(item).parent
@@ -250,7 +264,7 @@ class Store:
             return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True), reason=json.loads(header).get('reason', ''), images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True), reason=json.loads(header).get('reason', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 

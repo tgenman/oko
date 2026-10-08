@@ -11,7 +11,7 @@ let ids = new Set();
 let folderId = null;
 let refreshTimer = null;
 let imageUrls = [];
-function clearImages() { imageUrls.forEach(url => URL.revokeObjectURL(url)); imageUrls = []; byId('images').replaceChildren(); }
+function clearImages() { byId('images').querySelectorAll('video,audio').forEach(media => { media.pause(); media.removeAttribute('src'); media.load(); }); imageUrls.forEach(url => URL.revokeObjectURL(url)); imageUrls = []; byId('images').replaceChildren(); }
 async function api(path, method = 'GET', body = undefined) {
   const response = await fetch('/api/' + path, {method, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
   const result = await response.json();
@@ -60,7 +60,7 @@ async function open(id) {
     selected = material;
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
-    byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? 'Анонс сохранён · загрузка статьи' : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
+    byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? 'Текст сохранён · загрузка вложений' : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
     byId('retry').hidden = !material.complete || material.full !== false || material.loading;
     clearImages();
     byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
@@ -73,7 +73,23 @@ async function open(id) {
       const blob = await response.blob();
       if (stamp !== generation || stopped || !ids.has(id)) return;
       const url = URL.createObjectURL(blob); imageUrls.push(url);
-      const img = document.createElement('img'); img.src = url; img.alt = 'Изображение статьи'; byId('images').append(img);
+      const img = document.createElement('img'); img.src = url; img.alt = 'Изображение материала'; byId('images').append(img);
+    }
+    for (const attachment of material.attachments || []) {
+      const response = await fetch(attachment.url, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}});
+      if (!response.ok) continue;
+      const blob = await response.blob();
+      if (stamp !== generation || stopped || !ids.has(id)) return;
+      const url = URL.createObjectURL(blob); imageUrls.push(url);
+      let node;
+      if (attachment.kind === 'image') { node = element('img'); node.alt = 'Изображение публикации'; }
+      else if (attachment.kind === 'video' || attachment.kind === 'circle' || attachment.kind === 'audio') {
+        node = element(attachment.kind === 'audio' ? 'audio' : 'video'); node.controls = true; node.preload = 'metadata';
+        node.setAttribute('aria-label', attachment.kind === 'circle' ? 'Кружочек Telegram' : attachment.kind === 'audio' ? 'Аудио публикации' : 'Видео публикации');
+        if (attachment.kind === 'circle') node.classList.add('circle');
+      } else { node = element('a', 'Скачать вложение'); node.href = url; node.download = attachment.url.split('/').pop(); }
+      if (node.tagName !== 'A') node.src = url;
+      byId('images').append(node);
     }
   } catch (error) { clear(); byId('progress').textContent = error.message; }
 }
@@ -232,7 +248,7 @@ async function loadSettings() {
 function renderFeed(feed) {
   const container = byId('feed-options');
   container.append(element('h2', 'Подключение фида'));
-  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
+  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
   container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
   const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
   const importance = selectControl(Object.entries(importanceNames), feed.importance);
@@ -243,10 +259,10 @@ function renderFeed(feed) {
   if (feed.kind === 'telegram') {
     auto = selectControl([['', 'Выберите режим'], ['true', 'Автопрочитывать после полного сохранения'], ['false', 'Отмечать только после «Просмотрено»']], feed.auto_read === null ? '' : feed.auto_read);
     history = element('input'); history.type = 'checkbox'; history.checked = feed.read_history;
-    container.append(labelled('Автопрочитывание в Telegram', auto), labelled('Отметить историю до начала импорта прочитанной', history), element('p', 'Без разрешения очистки старая непрочитанная история может задержать отметки Telegram. Сохранение настроек не отправляет отметки.'));
+    container.append(element('p', 'Отметки прочитанного в Telegram пока не отправляются. Режим сохраняется для следующего этапа.'), labelled('Автопрочитывание в Telegram', auto), labelled('Отметить историю до начала импорта прочитанной', history), element('p', 'Без разрешения очистки старая непрочитанная история может задержать отметки Telegram. Сохранение настроек не отправляет отметки.'));
   }
   if (feed.kind === 'telegram' || feed.kind === 'unresolved') {
-    transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'telegram' ? [['telegram', 'Telegram (требуется авторизация)']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']], feed.transport || '');
+    transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'telegram' ? [['telegram', 'Telegram с локальными медиа']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']], feed.transport || '');
     container.append(labelled('Способ сбора', transport));
   }
   const save = element('button', 'Сохранить фид');
@@ -262,6 +278,18 @@ function renderFeed(feed) {
     } catch (error) { byId('settings-message').textContent = error.message; }
   };
   container.append(save);
+  if (feed.kind === 'telegram') {
+    const peer = element('input'); peer.value = feed.telegram_peer || feed.identity.replace(/^telegram:/, '@');
+    const account = element('input'); account.value = feed.telegram_account || '';
+    const connect = element('button', 'Подключить Telegram-фид');
+    connect.onclick = async () => {
+      try {
+        await api('telegram/connect', 'POST', {account: account.value, peer: peer.value, folder: subscriptions.folders.find(f => f.id === feed.folder_id).title, feed_id: feed.id, auto_read: auto.value === 'true'});
+        await loadSubscriptions('feed/' + feed.id); byId('settings-message').textContent = 'Подключён; отметки прочитанного пока не отправляются';
+      } catch (error) { byId('settings-message').textContent = error.message; }
+    };
+    container.append(labelled('Аккаунт существующего клиента', account), labelled('Username или ID Telegram', peer), connect);
+  }
 }
 function showConflicts(conflicts) {
   const container = byId('import-plan');
@@ -303,4 +331,16 @@ byId('import-confirm').onclick = async () => {
     if (error.detail?.conflicts) { byId('import-plan').replaceChildren(element('p', 'Выберите одну папку для каждого конфликта и повторите импорт.')); showConflicts(error.detail.conflicts); }
     else byId('settings-message').textContent = error.message;
   }
+};
+
+byId('telegram-accounts').onclick = async () => {
+  try { byId('settings-message').textContent = 'Доступные аккаунты: ' + (await api('telegram/accounts')).join(', '); }
+  catch (error) { byId('settings-message').textContent = error.message; }
+};
+byId('telegram-add').onclick = async () => {
+  try {
+    const feed = await api('telegram/connect', 'POST', {account: byId('telegram-account').value, peer: byId('telegram-peer').value, folder: byId('telegram-folder').value, auto_read: byId('telegram-auto').checked});
+    await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
+    byId('settings-message').textContent = 'Источник подключён; отметки прочитанного пока не отправляются';
+  } catch (error) { byId('settings-message').textContent = error.message; }
 };

@@ -13,6 +13,7 @@ import webbrowser
 import uvicorn
 from .app import create_app
 from .sources import DemoSource, Source
+from .telegram import LocalTelegram
 
 
 def existing(root: Path, browser: bool) -> None:
@@ -36,6 +37,7 @@ def existing(root: Path, browser: bool) -> None:
 def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None = None) -> None:
     parser = argparse.ArgumentParser(description='Око — локальный читатель')
     parser.add_argument('--data', type=Path, default=Path('data'))
+    parser.add_argument('--telegram-project', type=Path, help='Путь к существующему telegram-mcp с .env и .venv')
     parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--port', type=int, default=0)
@@ -68,7 +70,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
 
             app = create_app(root, source=source or (DemoSource() if args.demo else None),
                              token=token, fault=fault, shutdown=shutdown,
-                             lease=args.lease, grace=args.grace, rss_enabled=not args.demo)
+                             lease=args.lease, grace=args.grace, rss_enabled=not args.demo,
+                             telegram_client=LocalTelegram(args.telegram_project, root) if args.telegram_project and not args.demo else None)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2)
             server = uvicorn.Server(config)
 
@@ -81,7 +84,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                     temporary = root / 'runtime.tmp'
                     temporary.write_text(json.dumps(dict(url=url, token=token, pid=os.getpid())))
                     os.replace(temporary, root / 'runtime.json')
-                    print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS"}).', flush=True)
+                    print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram" if args.telegram_project else "RSS"}).', flush=True)
                     if not args.no_browser:
                         await asyncio.to_thread(webbrowser.open, url + '/#token=' + token)
                 await task

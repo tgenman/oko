@@ -3,3 +3,5 @@ header #settings-open{margin-left:auto}header #stop{margin-left:0}#all-folders{w
 #settings-message:empty{display:none}
 #images img { display: block; max-width: 100%; height: auto; margin: 1rem 0; }
 #source-status { font-size: .8rem; color: #635944; overflow-wrap: anywhere; }
+
+#images video, #images audio {max-width:100%;display:block;margin:16px 0;} #images video {max-height:600px;} #images .circle {width:320px;height:320px;object-fit:cover;border-radius:50%;}

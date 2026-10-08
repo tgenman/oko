@@ -4,7 +4,7 @@
 
 **Blocked by:** [02: Подписки и настройки папок](02-subscriptions-settings.md)
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Label:** ready-for-agent
 

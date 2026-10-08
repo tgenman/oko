@@ -7,6 +7,8 @@ from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit, parse_qs
 import xml.etree.ElementTree as ET
 
+from .telegram import ConnectTelegram
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -134,6 +136,38 @@ class Subscriptions:
         CREATE TABLE IF NOT EXISTS settings (scope TEXT, owner TEXT, field TEXT, value TEXT,
           PRIMARY KEY(scope,owner,field));
         ''')
+
+        columns = {row['name'] for row in db.execute('PRAGMA table_info(feeds)')}
+        for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT')]:
+            if column not in columns:
+                db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
+        db.commit()
+
+    def connect_telegram(self, body: ConnectTelegram, info: dict[str, Any]) -> dict[str, Any]:
+        identity = f"telegram-peer:{body.account}:{info['peer']}"
+        username_identity = 'telegram:' + str(info.get('username') or '').lower()
+        old = next((f for f in self.feeds() if f['identity'] == identity or (f.get('telegram_peer') == info['peer'] and f.get('telegram_account') == body.account) or (f['identity'] == username_identity and not f.get('telegram_peer'))), None)
+        if body.feed_id:
+            self.check_owner('feed', body.feed_id)
+            selected = next(f for f in self.feeds() if f['id'] == body.feed_id)
+            if selected['kind'] != 'telegram':
+                raise ValueError('Выберите Telegram-фид')
+            if old and old['id'] != selected['id']:
+                raise ValueError('Источник уже подключён в другом фиде')
+            if selected.get('telegram_peer') and (selected['telegram_peer'] != info['peer'] or selected['telegram_account'] != body.account):
+                raise ValueError('Для другого источника создайте новый фид')
+            old = selected
+        elif old and next(f for f in self.folders() if f['id'] == old['folder_id'])['title'] != body.folder:
+            raise ValueError('Источник уже в другой папке; переместите существующий фид')
+        id = old['id'] if old else key(identity)
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (key('folder:' + body.folder), body.folder, len(self.folders())))
+            folder = self.db.execute('SELECT id FROM folders WHERE title=?', (body.folder,)).fetchone()[0]
+            if not old:
+                self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls)
+                                VALUES (?,?,?,'telegram',?,?)''', (id, identity, info['title'], folder, json.dumps([str(body.peer)])))
+            self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,auto_read=? WHERE id=?", (info['peer'], body.account, body.auto_read, id))
+        return next(f for f in self.feeds() if f['id'] == id)
 
     def ensure_demo(self) -> None:
         with self.db:
