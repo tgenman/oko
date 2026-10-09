@@ -298,12 +298,12 @@ class Store:
 
 
     def processor_config(self) -> ProcessorConfig | None:
-        row = self.db.execute("SELECT value FROM state WHERE key='processor:ollama'").fetchone()
+        row = self.db.execute("SELECT value FROM state WHERE key='processor:llamacpp'").fetchone()
         return ProcessorConfig.model_validate_json(row[0]) if row else None
 
     def configure_processor(self, config: ProcessorConfig) -> None:
         with self.db:
-            self.db.execute("INSERT INTO state VALUES ('processor:ollama',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
+            self.db.execute("INSERT INTO state VALUES ('processor:llamacpp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
         self.settings_changed()
 
     def settings_version(self) -> int:

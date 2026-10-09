@@ -63,7 +63,7 @@ esac
         assert client.get('/api/processors/codex').json()['available'] is False
 
 
-def test_missing_cli_is_a_visible_blocker_without_ollama_fallback(tmp_path, monkeypatch):
+def test_missing_cli_is_a_visible_blocker_without_local_model_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv('PATH', str(tmp_path))
     with TestClient(create_app(tmp_path / 'store', source=DemoSource(), token='test'), headers=HEADERS) as client:
         setup_reader(client)

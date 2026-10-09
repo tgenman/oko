@@ -100,17 +100,17 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def codex_check() -> dict[str, Any]:
         return await runtime.check_codex()
 
-    @app.get('/api/processors/ollama')
+    @app.get('/api/processors/llamacpp')
     async def processor_config() -> dict[str, Any] | None:
         config = store().processor_config()
         return config.model_dump() if config else None
 
-    @app.put('/api/processors/ollama')
+    @app.put('/api/processors/llamacpp')
     async def processor_save(body: ProcessorConfig) -> dict[str, Any]:
         await runtime.configure_processor(body)
         return body.model_dump()
 
-    @app.post('/api/processors/ollama/check')
+    @app.post('/api/processors/llamacpp/check')
     async def processor_check() -> dict[str, Any]:
         return await runtime.check_processor()
 

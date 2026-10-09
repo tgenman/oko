@@ -41,7 +41,7 @@ def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: P
         feed = next(f for f in saved['feeds'] if f['kind'] == 'telegram')
         folder = feed['folder_id']
         url = '/api/settings/feed/' + feed['id']
-        assert client.patch('/api/settings/oko/global', json={'theses': True, 'processor': 'ollama:local'}).status_code == 200
+        assert client.patch('/api/settings/oko/global', json={'theses': True, 'processor': 'llamacpp:local'}).status_code == 200
         assert client.patch('/api/settings/folder/' + folder, json={'prompt_theses': 'Только темы', 'schedule': '18:30'}).status_code == 200
         result = client.patch(url, json={'digest_days': 7}).json()
         assert result['effective']['theses'] == {'value': True, 'scope': 'oko', 'owner': 'global'}
@@ -64,7 +64,7 @@ def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: P
         restored = next(f for f in client.get('/api/subscriptions').json()['feeds'] if f['id'] == feed['id'])
         for field, value in patch.items():
             assert restored[field] == value
-        assert client.get(url).json()['effective']['processor']['value'] == 'ollama:local'
+        assert client.get(url).json()['effective']['processor']['value'] == 'llamacpp:local'
         assert client.get(url).json()['effective']['digest_days']['value'] == 7
         assert client.get('/api/settings/folder/' + folder).json()['effective']['digest_days']['value'] == 1
 

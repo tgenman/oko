@@ -14,7 +14,7 @@ import httpx
 
 from .rss import RSSSource, SourceError
 from .sources import Source
-from .processing import Ollama, ProcessorConfig, ProcessingError
+from .processing import LlamaCpp, ProcessorConfig, ProcessingError
 from .codex import Codex, CodexClient, LocalCodex, status as codex_status
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
@@ -269,9 +269,9 @@ class Runtime:
                 raise ActionError('conflict', 'Откройте читатель для подключения')
             config = current.processor_config()
             if not config:
-                raise ActionError('conflict', 'Ollama не настроен')
+                raise ActionError('conflict', 'llama.cpp не настроен')
             epoch = self._epoch
-            task = asyncio.create_task(Ollama(config, self._ai_transport).check())
+            task = asyncio.create_task(LlamaCpp(config, self._ai_transport).check())
             self._requests.add(task)
         try:
             result = await task
@@ -330,13 +330,13 @@ class Runtime:
                 if not prepared:
                     raise ProcessingError('Исходник недоступен для тезисов')
                 request, signature, public_ai = prepared
-                adapter: Codex | Ollama
+                adapter: Codex | LlamaCpp
                 if request.processor == 'codex':
                     adapter = Codex(self._codex_client)
-                elif request.processor in ('ollama', 'ollama:' + (config.model if config else '')) and config:
-                    adapter = Ollama(config, self._ai_transport)
+                elif request.processor in ('llamacpp', 'llamacpp:' + (config.model if config else '')) and config:
+                    adapter = LlamaCpp(config, self._ai_transport)
                 else:
-                    raise ProcessingError('Ожидание выбранного обработчика; Ollama не настроен или не выбран')
+                    raise ProcessingError('Ожидание выбранного обработчика; llama.cpp не настроен или не выбран')
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:

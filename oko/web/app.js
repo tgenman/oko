@@ -236,7 +236,7 @@ async function loadSettings() {
       const row = element('div'); row.className = 'setting-row';
       let input;
       if (type === 'boolean') input = selectControl([['true', 'Включено'], ['false', 'Выключено']], effective.value);
-      else if (type === 'processor') input = selectControl([['codex', 'Codex · существующий вход CLI'], ['ollama', 'Ollama · подключённая модель'], ...(!['codex', 'ollama'].includes(effective.value) ? [[effective.value, effective.value]] : [])], effective.value);
+      else if (type === 'processor') input = selectControl([['codex', 'Codex · существующий вход CLI'], ['llamacpp', 'llama.cpp · подключённая модель'], ...(!['codex', 'llamacpp'].includes(effective.value) ? [[effective.value, effective.value]] : [])], effective.value);
       else if (type === 'text') { input = element('textarea'); input.value = effective.value; input.rows = 3; }
       else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = '3650'; } }
       input.id = 'setting-' + field;
@@ -314,7 +314,7 @@ function showConflicts(conflicts) {
 byId('settings-open').onclick = async () => {
   byId('settings-dialog').showModal();
   byId('settings-message').textContent = '';
-  try { await loadSubscriptions(); const config = await api('processors/ollama'); if (config) { byId('ollama-endpoint').value = config.endpoint; byId('ollama-model').value = config.model; } } catch (error) { byId('settings-message').textContent = error.message; }
+  try { await loadSubscriptions(); const config = await api('processors/llamacpp'); if (config) { byId('llamacpp-endpoint').value = config.endpoint; byId('llamacpp-model').value = config.model; byId('llamacpp-local').checked = config.local_execution; } } catch (error) { byId('settings-message').textContent = error.message; }
 };
 byId('settings-close').onclick = () => byId('settings-dialog').close();
 byId('settings-owner').onchange = loadSettings;
@@ -357,13 +357,16 @@ byId('telegram-add').onclick = async () => {
   } catch (error) { byId('settings-message').textContent = error.message; }
 };
 
-byId('ollama-save').onclick = async () => {
-  try { await api('processors/ollama', 'PUT', {endpoint: byId('ollama-endpoint').value, model: byId('ollama-model').value}); byId('ollama-status').textContent = 'Подключение сохранено. Выберите Ollama и включите тезисы для Око, папки или фида.'; }
-  catch (error) { byId('ollama-status').textContent = error.message; }
+for (const id of ['llamacpp-endpoint', 'llamacpp-model']) {
+  byId(id).oninput = () => { byId('llamacpp-local').checked = false; };
+}
+byId('llamacpp-save').onclick = async () => {
+  try { await api('processors/llamacpp', 'PUT', {endpoint: byId('llamacpp-endpoint').value, model: byId('llamacpp-model').value, local_execution: byId('llamacpp-local').checked}); byId('llamacpp-status').textContent = 'Подключение сохранено. Выберите llama.cpp и включите тезисы для Око, папки или фида.'; }
+  catch (error) { byId('llamacpp-status').textContent = error.message; }
 };
-byId('ollama-check').onclick = async () => {
-  try { byId('ollama-status').textContent = 'Проверка…'; const result = await api('processors/ollama/check', 'POST'); if (stopped) return; byId('ollama-status').textContent = result.mode + ' · ' + result.model; byId('ollama-models').replaceChildren(...result.models.map(name => { const option = element('option'); option.value = name; return option; })); }
-  catch (error) { byId('ollama-status').textContent = error.message; }
+byId('llamacpp-check').onclick = async () => {
+  try { byId('llamacpp-status').textContent = 'Проверка…'; const result = await api('processors/llamacpp/check', 'POST'); if (stopped) return; byId('llamacpp-status').textContent = result.mode + ' · ' + result.model; byId('llamacpp-models').replaceChildren(...result.models.map(name => { const option = element('option'); option.value = name; return option; })); }
+  catch (error) { byId('llamacpp-status').textContent = error.message; }
 };
 byId('theses-retry').onclick = async () => {
   if (!selected) return;
