@@ -1,0 +1,140 @@
+"""Folder/window event views. Only current input identities survive in SQLite."""
+import hashlib
+import json
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
+
+from oko.processing.contracts import EventsResult, InputSource, ProcessingRequest, ProcessingError
+
+if TYPE_CHECKING:
+    from oko.storage.store import Job, Store
+
+
+class Events:
+    def __init__(self, store: 'Store') -> None:
+        self.store = store
+        (store.root / 'events').mkdir(exist_ok=True)
+        store.db.executescript('''
+        CREATE TABLE IF NOT EXISTS event_inputs (item TEXT PRIMARY KEY, signature TEXT);
+        ''')
+        for path in (store.root / 'events').glob('*.tmp'):
+            path.unlink()
+
+    def path(self, batch: str) -> Path:
+        return self.store.root / 'events' / (batch + '.md')
+
+    def candidates(self) -> dict[str, dict[str, Any]]:
+        store = self.store
+        feeds = {f['id']: f for f in store.subscriptions.feeds()}
+        folders: dict[str, list[dict[str, Any]]] = {}
+        covered = {m['id'] for v in store.digests.views() for m in v['sources']}
+        for row in store.db.execute('SELECT id FROM items WHERE viewed=0 AND complete=1 ORDER BY published,id').fetchall():
+            if row['id'] in covered:
+                continue
+            material = store.material(row['id'])
+            if not material or material.get('loading') or material['feed_id'] not in feeds:
+                continue
+            if feeds[material['feed_id']]['kind'] == 'youtube' and (material.get('captions') != 'available' or not material['display_text'].strip()):
+                continue
+            filtered = material['filter']
+            if filtered['hidden'] or filtered['status'] not in ('off', 'done'):
+                continue
+            folder = feeds[material['feed_id']]['folder_id']
+            folders.setdefault(folder, []).append(material)
+        result = {}
+        config = store.processor_config()
+        for folder, materials in folders.items():
+            values = store.subscriptions.effective('folder', folder)['effective']
+            if not values['events']['value']:
+                continue
+            windows: list[list[dict[str, Any]]] = []
+            for material in materials:
+                if not windows or material['published'] - windows[-1][-1]['published'] > values['event_hours']['value'] * 3600:
+                    windows.append([])
+                windows[-1].append(material)
+            for window in windows:
+                if len(window) < 2:
+                    continue
+                batch = 'event-' + hashlib.sha256((folder + ':' + window[0]['id']).encode()).hexdigest()[:32]
+                settings = [store.subscriptions.effective('feed', m['feed_id']) for m in window]
+                signature = hashlib.sha256(json.dumps([[(m['id'], m['version'], m['filter'], m['published']) for m in window], settings, values, store.settings_version(), config.model_dump() if config else None], sort_keys=True).encode()).hexdigest()
+                result[batch] = dict(signature=signature, materials=window, folder_id=folder, event_hours=values['event_hours']['value'], processor=values['processor']['value'], public_ai=all(feeds[m['feed_id']]['public_ai'] for m in window), importance=max((feeds[m['feed_id']]['importance'] for m in window), key=lambda value: {'normal': 0, 'elevated': 1, 'high': 2}[value]))
+        return result
+
+    def signature(self, batch: str) -> str | None:
+        candidate = self.candidates().get(batch)
+        return candidate['signature'] if candidate else None
+
+    def sync(self) -> None:
+        store = self.store
+        candidates = self.candidates()
+        for row in store.db.execute('SELECT item,signature FROM event_inputs').fetchall():
+            candidate = candidates.get(row['item'])
+            state = store.db.execute("SELECT status FROM jobs WHERE kind='events' AND item=?", (row['item'],)).fetchone()
+            if candidate and candidate['signature'] == row['signature'] and state and (state[0] != 'done' or self.read(row['item'], candidate)):
+                candidates.pop(row['item'])
+                continue
+            self.invalidate(row['item'])
+        for batch, candidate in candidates.items():
+            with store.db:
+                store.db.execute('INSERT INTO event_inputs VALUES (?,?) ON CONFLICT(item) DO UPDATE SET signature=excluded.signature', (batch, candidate['signature']))
+                store.db.execute("INSERT INTO jobs(kind,item) VALUES ('events',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0,error=NULL", (batch,))
+        for path in (store.root / 'events').glob('*.md'):
+            if not store.db.execute('SELECT 1 FROM event_inputs WHERE item=?', (path.stem,)).fetchone():
+                self.invalidate(path.stem)
+
+    def invalidate(self, batch: str) -> None:
+        with self.store.db:
+            self.store.db.execute('DELETE FROM event_inputs WHERE item=?', (batch,))
+            self.store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='events' AND item=?", (batch,))
+            if self.path(batch).exists() or (self.store.root / 'staging' / batch).exists():
+                self.store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status NOT IN ('pending','running')", (batch,))
+
+    def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
+        candidate = self.candidates().get(job.item)
+        if not candidate:
+            return None
+        if len(candidate['materials']) > 100:
+            raise ProcessingError('Набор событий превышает 100 публикаций; уменьшите окно или разделите папку')
+        request = ProcessingRequest(operation='events', event_hours=candidate['event_hours'], sources=tuple(InputSource(id=m['id'], version=m['version'], url=m['url'], title=m['title'], text=m['display_text'], published=m['published']) for m in candidate['materials']), settings_version=self.store.settings_version(), prompt='Времена публикаций: ' + json.dumps({m['id']: m['published'] for m in candidate['materials']}), processor=candidate['processor'], generation=job.generation)
+        return request, candidate['signature'], candidate['public_ai']
+
+    def read(self, batch: str, candidate: dict[str, Any]) -> EventsResult | None:
+        row = self.store.db.execute("SELECT status FROM jobs WHERE kind='events' AND item=?", (batch,)).fetchone()
+        if not row or row[0] != 'done':
+            return None
+        try:
+            data = json.loads(self.path(batch).read_text().split('\n\n', 1)[0])
+            if data['signature'] != candidate['signature']:
+                return None
+            return EventsResult.model_validate(data['result'])
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def save(self, job: 'Job', signature: str, result: EventsResult) -> None:
+        if not self.store.valid(job) or signature != self.signature(job.item):
+            return
+        request = self.request(job)
+        if not request:
+            return
+        result.validate_sources(request[0])
+        self.store.save_derivative(job, signature, result.model_dump(), '\n'.join(g.title for g in result.groups))
+
+    def views(self) -> list[dict[str, Any]]:
+        views = []
+        feeds = {f['id']: f for f in self.store.subscriptions.feeds()}
+        for batch, candidate in self.candidates().items():
+            result = self.read(batch, candidate)
+            if not result:
+                continue
+            for group in result.groups:
+                if len(group.members) < 2:
+                    continue
+                sources = [m for m in candidate['materials'] if m['id'] in group.members]
+                identity = 'event-' + hashlib.sha256(json.dumps(sorted(group.members)).encode()).hexdigest()[:32]
+                views.append(dict(id=identity, batch=batch, event=group.model_dump(), sources=sources, folder_id=candidate['folder_id'], feed_id=sources[0]['feed_id'], importance=max((feeds[m['feed_id']]['importance'] for m in sources), key=lambda value: {'normal': 0, 'elevated': 1, 'high': 2}[value]), title=group.title, published=max(m['published'] for m in sources), url=sources[0]['url'], complete=True, text='', version=candidate['signature']))
+        return views
+
+    def material(self, identity: str) -> dict[str, Any] | None:
+        return next((v for v in self.views() if v['id'] == identity), None)
+

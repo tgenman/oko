@@ -11,9 +11,10 @@ import urllib.request
 import webbrowser
 
 import uvicorn
-from .app import create_app
-from .sources import DemoSource, Source
-from .telegram import LocalTelegram
+from oko.reader.app import create_app
+from oko.collection.demo import DemoSource
+from oko.collection.contracts import Source
+from oko.collection.telegram.source import LocalTelegram
 
 
 def existing(root: Path, browser: bool) -> None:

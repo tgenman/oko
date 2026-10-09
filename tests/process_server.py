@@ -1,7 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
-from oko.sources import DemoSource
+from oko.collection.demo import DemoSource
 from oko.__main__ import run
 
 
