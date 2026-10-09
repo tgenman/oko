@@ -415,6 +415,9 @@ class Runtime:
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
                     current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка AI-обработки', 30)
+        finally:
+            if current and job.kind == 'digest':
+                current.digests.release(job)
 
     def _telegram_ready(self) -> tuple[Store, TelegramClient]:
         current = self.require_store()

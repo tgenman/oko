@@ -2,9 +2,10 @@
 import hashlib
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -32,9 +33,92 @@ class Progress(BaseModel):
     parts: int = Field(ge=0)
     points: list[Point]
     complete: bool = False
-    reduce_cursor: int = 0
+    reduce_cursor: int = Field(default=0, ge=0)
     reduced: list[Point] = Field(default_factory=list)
-    rounds: int = 0
+    rounds: int = Field(default=0, ge=0, le=8)
+
+    def validate_state(self, chunks: list[list[InputSource]]) -> None:
+        count = len(chunks)
+        if self.parts > count or self.complete and self.parts != count:
+            raise ValueError('Неверное число обработанных частей')
+        if bool(self.points) != bool(self.parts):
+            raise ValueError('Тезисы не соответствуют обработанным частям')
+        reducing = count > 1 and self.parts == count and not self.complete
+        if not reducing and (self.reduce_cursor or self.reduced):
+            raise ValueError('Сжатие вне допустимого этапа')
+        if (count <= 1 or self.parts < count) and self.rounds:
+            raise ValueError('Раунд до завершения частей')
+        if self.complete and len(self.points) > 30:
+            raise ValueError('Готовый обзор превышает размер ответа')
+        if not self.complete and self.rounds == 0 and not self.parts <= len(self.points) <= self.parts * 30:
+            raise ValueError('Неверное число промежуточных тезисов')
+        processed = tuple(source for chunk in chunks[:self.parts] for source in chunk)
+        self._validate_points(self.points, processed)
+        if reducing:
+            groups = review_groups([p.model_dump() for p in self.points])
+            if self.reduce_cursor >= len(groups) or len(groups) <= 1 and self.reduce_cursor:
+                raise ValueError('Указатель за пределами раунда')
+            if not self.reduce_cursor <= len(self.reduced) <= self.reduce_cursor * 30:
+                raise ValueError('Результаты не соответствуют принятым группам')
+            refs = {ref['id'] for group in groups[:self.reduce_cursor] for p in group for ref in p['sources']}
+            self._validate_points(self.reduced, tuple(s for s in processed if s.id in refs))
+
+    @staticmethod
+    def _validate_points(points: list[Point], sources: tuple[InputSource, ...]) -> None:
+        request = ProcessingRequest(sources=sources, settings_version=0, prompt='', processor='', generation=0)
+        for point in points:
+            Theses(points=[point]).validate_sources(request)
+
+    def plan(self, identity: str, signature: str, template: ProcessingRequest, chunks: list[list[InputSource]]) -> 'ReviewStep':
+        """Choose once; acceptance uses this same immutable stage and snapshot."""
+        self.validate_state(chunks)
+        chunk = chunks[self.parts] if self.parts < len(chunks) else []
+        request = template.model_copy(update={'sources': tuple(chunk)})
+        group_count = 0
+        if not self.complete and self.parts == len(chunks) and len(chunks) > 1:
+            groups = review_groups([p.model_dump() for p in self.points])
+            group_count = len(groups)
+            if self.rounds >= 8:
+                raise ProcessingError('Не удалось сжать промежуточные результаты; измените промпт или период')
+            selected = groups[self.reduce_cursor]
+            refs = {r['id'] for point in selected for r in point['sources']}
+            originals = {source.id: source for part in chunks for source in part}
+            chunk = [source.model_copy(update={'text': ''}) for source in originals.values() if source.id in refs]
+            chunk[0] = chunk[0].model_copy(update={'text': json.dumps(selected, ensure_ascii=False)})
+            request = template.model_copy(update={
+                'sources': tuple(chunk),
+                'operation': 'digest_reduce' if group_count > 1 else 'digest_final',
+                'prompt': 'Сожми промежуточные темы максимум в десять тезисов с точными ссылками; сохрани противоречия и атрибуцию.' if group_count > 1 else template.prompt,
+            })
+        return ReviewStep(identity, signature, request, self.model_dump_json(), group_count)
+
+
+@dataclass(frozen=True)
+class ReviewStep:
+    identity: str
+    signature: str
+    request: ProcessingRequest
+    progress: str
+    group_count: int
+
+    def advance(self, result: Theses | None) -> Progress:
+        progress = Progress.model_validate_json(self.progress)
+        if result is None:
+            if self.request.sources:
+                raise ProcessingError('Этап обзора требует ответ обработчика')
+            return progress.model_copy(update={'complete': True})
+        if not self.request.sources:
+            raise ProcessingError('Завершение обзора не требует ответа обработчика')
+        result.validate_sources(self.request)
+        if self.request.operation == 'digest_final':
+            return progress.model_copy(update={'points': result.points, 'complete': True})
+        if self.request.operation == 'digest_reduce':
+            reduced = progress.reduced + result.points
+            cursor = progress.reduce_cursor + 1
+            if cursor == self.group_count:
+                return progress.model_copy(update={'points': reduced, 'reduced': [], 'reduce_cursor': 0, 'rounds': progress.rounds + 1})
+            return progress.model_copy(update={'reduced': reduced, 'reduce_cursor': cursor})
+        return progress.model_copy(update={'points': progress.points + result.points, 'parts': progress.parts + 1})
 
 
 def review_groups(points: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -56,6 +140,7 @@ def review_groups(points: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
 class Digests:
     def __init__(self, store: 'Store') -> None:
         self.store = store
+        self._plans: dict[tuple[int, int], ReviewStep] = {}
         (store.root / 'digests').mkdir(exist_ok=True)
         store.db.executescript('''
         CREATE TABLE IF NOT EXISTS digest_sets (
@@ -153,41 +238,14 @@ class Digests:
         return candidate['signature'] if candidate else None
 
     def invalidate(self, identity: str) -> None:
+        self._forget(identity)
         with self.store.db:
             self.store.db.execute('DELETE FROM digest_sets WHERE id=?', (identity,))
             self.store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='digest' AND item=?", (identity,))
             if self.path(identity).exists() or (self.store.root / 'staging' / identity).exists():
                 self.store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status NOT IN ('pending','running')", (identity,))
 
-    def read(self, identity: str, signature: str) -> dict[str, Any] | None:
-        try:
-            data = json.loads(self.path(identity).read_text().split('\n\n', 1)[0])
-            if data['signature'] == signature:
-                return Progress.model_validate(data['result']).model_dump()
-        except (OSError, ValueError, KeyError):
-            pass
-        return None
-
-    def sync(self) -> None:
-        for row in self.store.db.execute('SELECT * FROM digest_sets').fetchall():
-            candidate = self.candidate(row['id'])
-            if not candidate:
-                self.invalidate(row['id'])
-                continue
-            state = self.store.db.execute("SELECT status FROM jobs WHERE kind='digest' AND item=?", (row['id'],)).fetchone()
-            missing = state and state[0] == 'done' and self.read(row['id'], candidate['signature']) is None
-            if candidate['signature'] != row['signature'] or missing:
-                with self.store.db:
-                    self.store.db.execute('UPDATE digest_sets SET signature=? WHERE id=?', (candidate['signature'], row['id']))
-                    self.store.db.execute("UPDATE jobs SET status='pending',next=0,generation=generation+1,error=NULL WHERE kind='digest' AND item=?", (row['id'],))
-        for path in (self.store.root / 'digests').glob('*.md'):
-            if not self.store.db.execute('SELECT 1 FROM digest_sets WHERE id=?', (path.stem,)).fetchone():
-                self.invalidate(path.stem)
-
-    def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
-        candidate = self.candidate(job.item)
-        if not candidate or any(m['filter']['status'] not in ('off', 'done') for m in candidate['materials']):
-            return None
+    def _chunks(self, candidate: dict[str, Any]) -> list[list[InputSource]]:
         sources = []
         feeds = {f['id']: f for f in self.store.subscriptions.feeds()}
         for m in candidate['materials']:
@@ -201,56 +259,94 @@ class Digests:
             if not chunks or len(chunks[-1]) >= 10 or sum(len(s.text)+len(s.title) for s in chunks[-1])+len(source.text)+len(source.title) > 60000:
                 chunks.append([])
             chunks[-1].append(source)
-        data = self.read(job.item, candidate['signature']) or Progress(parts=0, points=[]).model_dump()
-        part = data['parts']
-        operation: Literal['digest', 'digest_reduce', 'digest_final'] = 'digest'
-        prompt = candidate['values']['prompt_digest']['value']
-        chunk = chunks[part] if part < len(chunks) else []
-        if not data['complete'] and part >= len(chunks) and len(chunks) > 1:
-            groups = review_groups(data['points'])
-            if data['rounds'] >= 8:
-                raise ProcessingError('Не удалось сжать промежуточные результаты; измените промпт или период')
-            selected = groups[data['reduce_cursor']] if len(groups) > 1 else groups[0]
-            refs = {r['id'] for point in selected for r in point['sources']}
-            chunk = [InputSource(id=m['id'], version=m['version'], url=m['url'], title=m['title'], text='', published=m['published']) for m in candidate['materials'] if m['id'] in refs]
-            chunk[0] = chunk[0].model_copy(update={'text': json.dumps(selected, ensure_ascii=False)})
-            operation = 'digest_reduce' if len(groups) > 1 else 'digest_final'
-            if operation == 'digest_reduce':
-                prompt = 'Сожми промежуточные темы максимум в десять тезисов с точными ссылками; сохрани противоречия и атрибуцию.'
-        request = ProcessingRequest(operation=operation, sources=tuple(chunk), settings_version=self.store.settings_version(), prompt=prompt, processor=candidate['values']['processor']['value'], generation=job.generation)
-        return request, candidate['signature'], candidate['public_ai']
+        return chunks
+
+    def read(self, identity: str, signature: str) -> Progress | None:
+        candidate = self.candidate(identity)
+        if not candidate:
+            return None
+        return self._read(identity, signature, self._chunks(candidate))
+
+    def _read(self, identity: str, signature: str, chunks: list[list[InputSource]]) -> Progress | None:
+        try:
+            data = json.loads(self.path(identity).read_text().split('\n\n', 1)[0])
+            if data['signature'] == signature:
+                progress = Progress.model_validate(data['result'])
+                progress.validate_state(chunks)
+                return progress
+        except (OSError, ValueError, KeyError, TypeError, ProcessingError):
+            pass
+        return None
+
+    def _forget(self, identity: str) -> None:
+        self._plans = {key: plan for key, plan in self._plans.items() if plan.identity != identity}
+
+    def release(self, job: 'Job') -> None:
+        self._plans.pop((job.id, job.generation), None)
+
+    def _restart(self, identity: str) -> None:
+        self._forget(identity)
+        self.path(identity).unlink(missing_ok=True)
+        with self.store.db:
+            self.store.db.execute("UPDATE jobs SET status='pending',next=0,generation=generation+1,error=NULL WHERE kind='digest' AND item=?", (identity,))
+
+    def sync(self) -> None:
+        for row in self.store.db.execute('SELECT * FROM digest_sets').fetchall():
+            candidate = self.candidate(row['id'])
+            if not candidate:
+                self.invalidate(row['id'])
+                continue
+            state = self.store.db.execute("SELECT status FROM jobs WHERE kind='digest' AND item=?", (row['id'],)).fetchone()
+            progress = self.read(row['id'], candidate['signature'])
+            missing = (self.path(row['id']).exists() and progress is None) or (state and state[0] == 'done' and (progress is None or not progress.complete))
+            if candidate['signature'] != row['signature'] or missing:
+                with self.store.db:
+                    self.store.db.execute('UPDATE digest_sets SET signature=? WHERE id=?', (candidate['signature'], row['id']))
+                self._restart(row['id'])
+        for path in (self.store.root / 'digests').glob('*.md'):
+            if not self.store.db.execute('SELECT 1 FROM digest_sets WHERE id=?', (path.stem,)).fetchone():
+                self.invalidate(path.stem)
+
+    def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
+        candidate = self.candidate(job.item)
+        if not candidate or any(m['filter']['status'] not in ('off', 'done') for m in candidate['materials']):
+            return None
+        chunks = self._chunks(candidate)
+        progress = self._read(job.item, candidate['signature'], chunks)
+        if progress is None and self.path(job.item).exists():
+            self._restart(job.item)
+            return None
+        progress = progress or Progress(parts=0, points=[])
+        template = ProcessingRequest(operation='digest', sources=(), settings_version=self.store.settings_version(), prompt=candidate['values']['prompt_digest']['value'], processor=candidate['values']['processor']['value'], generation=job.generation)
+        plan = progress.plan(job.item, candidate['signature'], template, chunks)
+        self._forget(job.item)
+        self._plans[(job.id, job.generation)] = plan
+        return plan.request, candidate['signature'], candidate['public_ai']
 
     def save(self, job: 'Job', signature: str, result: Theses | None) -> None:
-        if not self.store.valid(job) or signature != self.signature(job.item):
+        plan = self._plans.pop((job.id, job.generation), None)
+        if plan is None or signature != plan.signature or not self.store.valid(job) or signature != self.signature(job.item):
             return
-        prepared = self.request(job)
-        if not prepared:
+        candidate = self.candidate(job.item)
+        if candidate is None:
             return
-        data = self.read(job.item, signature) or Progress(parts=0, points=[]).model_dump()
-        if result:
-            result.validate_sources(prepared[0])
-            points = [p.model_dump() for p in result.points]
-            if prepared[0].operation == 'digest_final':
-                data['points'] = points
-                data['complete'] = True
-            elif prepared[0].operation == 'digest_reduce':
-                data['reduced'].extend(points)
-                data['reduce_cursor'] += 1
-                # Reconstructing the next request detects completion of this round.
-                groups = review_groups(data['points'])
-                if data['reduce_cursor'] == len(groups):
-                    data['points'] = data['reduced']
-                    data['reduced'] = []
-                    data['reduce_cursor'] = 0
-                    data['rounds'] += 1
-            else:
-                data['points'].extend(points)
-                data['parts'] += 1
-        else:
-            data['complete'] = True
+        chunks = self._chunks(candidate)
+        progress = self._read(job.item, signature, chunks)
+        if progress is None and self.path(job.item).exists():
+            self._restart(job.item)
+            return
+        progress = progress or Progress(parts=0, points=[])
+        if progress.model_dump_json() != plan.progress:
+            # A valid externally changed progress is retained, but its old answer
+            # cannot be applied to a different stage. Re-prepare immediately.
+            with self.store.db:
+                self.store.db.execute("UPDATE jobs SET status='pending',next=0,generation=generation+1,error=NULL WHERE id=? AND generation=?", (job.id, job.generation))
+            return
+        progress = plan.advance(result)
+        progress.validate_state(chunks)
         # Partial results remain inaccessible; all stages use the atomic writer.
-        self.store.save_derivative(job, signature, data, '\n'.join('- '+p['text'] for p in data['points']), finish=data['complete'])
-        if not data['complete']:
+        self.store.save_derivative(job, signature, progress.model_dump(), '\n'.join('- '+p.text for p in progress.points), finish=progress.complete)
+        if not progress.complete:
             with self.store.db:
                 self.store.db.execute("UPDATE jobs SET status='pending',next=0 WHERE id=? AND generation=?", (job.id, job.generation))
         else:
@@ -270,10 +366,10 @@ class Digests:
             if not candidate:
                 continue
             data = self.read(row['id'], candidate['signature'])
-            if data is None:
+            if data is None or not data.complete:
                 continue
             sources = candidate['materials']
-            views.append(dict(id=row['id'], digest=dict(points=data['points']), sources=sources, folder_id=candidate['folder_id'], feed_id=sources[0]['feed_id'], importance=candidate['importance'], title='Обзор за период', published=max(m['published'] for m in sources), url=sources[0]['url'], complete=True, text='', version=candidate['signature']))
+            views.append(dict(id=row['id'], digest=dict(points=[p.model_dump() for p in data.points]), sources=sources, folder_id=candidate['folder_id'], feed_id=sources[0]['feed_id'], importance=candidate['importance'], title='Обзор за период', published=max(m['published'] for m in sources), url=sources[0]['url'], complete=True, text='', version=candidate['signature']))
         return views
 
     def material(self, identity: str) -> dict[str, Any] | None:
