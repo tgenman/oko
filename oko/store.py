@@ -420,20 +420,27 @@ class Store:
     def save_theses(self, job: Job, signature: str, theses: Theses) -> None:
         if not self.valid(job) or signature != self.thesis_signature(job.item):
             return
+        self.save_derivative(job, signature, theses.model_dump(), '\n'.join('- ' + p.text for p in theses.points))
+
+    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str) -> None:
+        """Commit a validated AI result; callers own admission and input signature."""
+        if job.kind not in ('filter', 'theses'):
+            raise ValueError('Unknown derivative')
         stage = self.root / 'staging' / job.item
         stage.mkdir(exist_ok=True)
-        pending = stage / 'theses.md'
-        with pending.open('w') as output:
-            output.write(json.dumps(dict(signature=signature, result=theses.model_dump()), ensure_ascii=False) + '\n\n' + '\n'.join('- ' + p.text for p in theses.points))
+        filename = job.kind + '.md'
+        pending = stage / filename
+        with pending.open('w', encoding='utf-8') as output:
+            output.write(json.dumps(dict(signature=signature, result=result), ensure_ascii=False) + '\n\n' + text)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(pending, self.path(job.item).parent / 'theses.md')
+        os.replace(pending, self.path(job.item).parent / filename)
         stage.rmdir()
         fd = os.open(self.path(job.item).parent, os.O_RDONLY)
         try:
             os.fsync(fd)
         finally:
             os.close(fd)
-        self.fault('after_theses_move')
+        self.fault('after_' + job.kind + '_move')
         with self.db:
             self.finish(job)

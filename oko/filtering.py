@@ -1,7 +1,6 @@
 """Durable filtered views; originals and media remain owned by Store."""
 import hashlib
 import json
-import os
 from typing import Any, TYPE_CHECKING
 
 from .processing import FilterResult, InputSource, ProcessingRequest
@@ -81,23 +80,7 @@ class Filters:
         store = self.store
         if not store.valid(job) or signature != self.signature(job.item):
             return
-        stage = store.root / 'staging' / job.item
-        stage.mkdir(exist_ok=True)
-        pending = stage / 'filter.md'
-        with pending.open('w', encoding='utf-8') as output:
-            output.write(json.dumps(dict(signature=signature, result=result.model_dump()), ensure_ascii=False) + '\n\n' + result.reason)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(pending, store.path(job.item).parent / 'filter.md')
-        stage.rmdir()
-        fd = os.open(store.path(job.item).parent, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        store.fault('after_filter_move')
-        with store.db:
-            store.finish(job)
+        store.save_derivative(job, signature, result.model_dump(), result.reason)
         store.sync_theses()
 
     def restore(self, item: str) -> bool:
