@@ -443,19 +443,26 @@ class Store:
 
     def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str) -> None:
         """Commit a validated AI result; callers own admission and input signature."""
-        if job.kind not in ('filter', 'theses'):
+        stage = None
+        if job.kind == 'events':
+            destination = self.events.path(job.item)
+            pending = destination.with_suffix('.tmp')
+        elif job.kind in ('filter', 'theses'):
+            stage = self.root / 'staging' / job.item
+            stage.mkdir(exist_ok=True)
+            filename = job.kind + '.md'
+            destination = self.path(job.item).parent / filename
+            pending = stage / filename
+        else:
             raise ValueError('Unknown derivative')
-        stage = self.root / 'staging' / job.item
-        stage.mkdir(exist_ok=True)
-        filename = job.kind + '.md'
-        pending = stage / filename
         with pending.open('w', encoding='utf-8') as output:
             output.write(json.dumps(dict(signature=signature, result=result), ensure_ascii=False) + '\n\n' + text)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(pending, self.path(job.item).parent / filename)
-        stage.rmdir()
-        fd = os.open(self.path(job.item).parent, os.O_RDONLY)
+        os.replace(pending, destination)
+        if stage is not None:
+            stage.rmdir()
+        fd = os.open(destination.parent, os.O_RDONLY)
         try:
             os.fsync(fd)
         finally:

@@ -29,7 +29,7 @@ def event_transport(calls):
         groups = []
         library = [(s, r) for s, r in zip(sources, refs) if 'библиотек' in s['text'].lower()]
         if library:
-            groups.append(dict(members=[s['id'] for s, _ in library], title='Открылась библиотека', points=[dict(text='Открылась библиотека.', sources=[r for _, r in library])], updates=[dict(text='Мэрия назвала вместимость 30 мест.', sources=[r]) for s, r in library if '30' in s['text']], conflicts=[dict(text='Источники называют 24 и 30 мест.', sources=[r for _, r in library])] if len(library)>1 else []))
+            groups.append(dict(members=[s['id'] for s, _ in library], title='Открылась библиотека', points=[dict(text='Открылась библиотека.', sources=[r for _, r in library][:1])], updates=[dict(text='Мэрия назвала вместимость 30 мест.', sources=[r]) for s, r in library if '30' in s['text']], conflicts=[dict(text='Источники называют 24 и 30 мест.', sources=[r for _, r in library])] if len(library)>1 else []))
         groups += [dict(members=[s['id']], title=s['title'], points=[dict(text=s['text'], sources=[r])], updates=[], conflicts=[]) for s, r in zip(sources, refs) if 'библиотек' not in s['text'].lower()]
         return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(dict(groups=groups))}}]})
     return httpx.MockTransport(reply)
@@ -353,3 +353,31 @@ def test_view_invalidates_other_event_but_preserves_unrelated_members_and_retrie
         assert remaining[0]['id'] == old_other['id']
         assert all(not (tmp_path / 'content' / s['id']).exists() for s in material['sources'])
         assert client.get('/api/status').json()['errors'] == []
+
+
+@pytest.mark.parametrize('captions_state', ['not_requested', 'unavailable', 'error'])
+def test_two_youtube_titles_without_captions_never_enter_event_ai(tmp_path, captions_state):
+    from tests.test_youtube import subscribe, feed_xml, VIDEO, PNG
+    import time
+    from oko.rss import SourceError
+    class MissingCaptions:
+        async def fetch(self, video):
+            if captions_state == 'error':
+                raise SourceError('Ограничение частоты')
+            return None
+    ai = []
+    entry = feed_xml().split('<entry>', 1)[1].split('</entry>', 1)[0]
+    xml = feed_xml().replace('</feed>', '<entry>' + entry.replace(VIDEO, 'mnopqrstuvw') + '</entry></feed>')
+    def reply(request):
+        if request.url.path == '/feeds/videos.xml':
+            return httpx.Response(200, text=xml)
+        return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=MissingCaptions(), ai_transport=model_transport(ai)), headers=HEADERS) as client:
+        subscribe(client)
+        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': captions_state != 'not_requested'})
+        client.post('/api/tabs/reader/heartbeat')
+        wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 2 and all(x.get('captions') == captions_state and not x.get('loading') for x in c))
+        time.sleep(.7)
+        assert ai == []
+        assert len(client.get('/api/cards').json()) == 2

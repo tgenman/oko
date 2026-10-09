@@ -1,7 +1,6 @@
 """Folder/window event views. Only current input identities survive in SQLite."""
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -31,6 +30,8 @@ class Events:
         for row in store.db.execute('SELECT id FROM items WHERE viewed=0 AND complete=1 ORDER BY published,id').fetchall():
             material = store.material(row['id'])
             if not material or material.get('loading') or material['feed_id'] not in feeds:
+                continue
+            if feeds[material['feed_id']]['kind'] == 'youtube' and (material.get('captions') != 'available' or not material['display_text'].strip()):
                 continue
             filtered = material['filter']
             if filtered['hidden'] or filtered['status'] not in ('off', 'done'):
@@ -114,20 +115,7 @@ class Events:
         if not request:
             return
         result.validate_sources(request[0])
-        pending = self.path(job.item).with_suffix('.tmp')
-        with pending.open('w', encoding='utf-8') as output:
-            output.write(json.dumps(dict(signature=signature, result=result.model_dump()), ensure_ascii=False) + '\n\n' + '\n'.join(g.title for g in result.groups))
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(pending, self.path(job.item))
-        fd = os.open(self.path(job.item).parent, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        self.store.fault('after_events_move')
-        with self.store.db:
-            self.store.finish(job)
+        self.store.save_derivative(job, signature, result.model_dump(), '\n'.join(g.title for g in result.groups))
 
     def views(self) -> list[dict[str, Any]]:
         views = []
