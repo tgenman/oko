@@ -318,3 +318,35 @@ def test_reader_can_retry_theses_after_model_response_is_fixed(tmp_path: Path):
         wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
         client.post('/api/materials/' + item + '/viewed')
         assert client.post('/api/materials/' + item + '/theses/retry').status_code == 404
+
+
+def test_local_router_checks_selected_model_before_sending_forbidden_public_input(tmp_path: Path):
+    calls = []
+    native = model_transport(calls)
+    def reply(request):
+        if request.url.path == '/props' and 'model' not in request.url.params:
+            return httpx.Response(200, json={'role': 'router', 'model_path': 'none', 'build_info': 'b-router'})
+        if request.url.path == '/props':
+            assert request.url.params['model'] == 'local:latest'
+        return native.handler(request)
+    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+        item = setup_reader(client)
+        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        assert client.post('/api/processors/llamacpp/check').json()['local'] is True
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        assert any(r.url.path == '/v1/chat/completions' for r in calls)
+
+
+def test_theses_disable_reasoning_to_leave_budget_for_finished_json(tmp_path: Path):
+    calls = []
+    native = model_transport(calls)
+    def reply(request):
+        if request.url.path == '/v1/chat/completions' and json.loads(request.content).get('reasoning_effort') != 'none':
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'length', 'message': {'role': 'assistant', 'content': '', 'reasoning_content': 'unfinished'}}]})
+        return native.handler(request)
+    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+        item = setup_reader(client)
+        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
