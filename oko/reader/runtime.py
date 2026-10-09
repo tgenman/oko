@@ -20,7 +20,8 @@ from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError, ProcessingRequest, EventsResult, FilterResult, Theses
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
 from oko.reviews.digests import DigestRequest
-from oko.storage.store import FolderContents, Job, Store
+from oko.reader.composition import FolderContents
+from oko.storage.store import Job, Store
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from oko.subscriptions.subscriptions import ImportRequest, Overrides, FeedPatch
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions

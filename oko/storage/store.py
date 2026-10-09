@@ -9,6 +9,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any
 
+from oko.reader.composition import FolderContents, ReadingComposition
 from oko.reviews.events import Events
 from oko.reviews.digests import Digests
 from oko.reviews.filtering import Filters
@@ -24,12 +25,6 @@ class Job:
     kind: str
     item: str
     generation: int
-
-
-@dataclass(frozen=True)
-class FolderContents:
-    members: tuple[tuple[str, str], ...]
-    cards: tuple[str, ...]
 
 
 class Store:
@@ -83,6 +78,7 @@ class Store:
         self.filters = Filters(self)
         self.events = Events(self)
         self.digests = Digests(self)
+        self.reading = ReadingComposition(self)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
@@ -253,25 +249,10 @@ class Store:
                 os.close(fd)
 
     def folder_contents(self, folder: str) -> FolderContents:
-        self.subscriptions.check_owner('folder', folder)
-        feeds = {f['id']: f['folder_id'] for f in self.subscriptions.feeds()}
-        cards = self.cards(True)
-        owned = [c for c in cards if c.get('folder_id', feeds.get(c['feed_id'])) == folder]
-        covered = {source['id'] for c in cards for source in c.get('sources', [])}
-        selected = {source['id'] for c in owned for source in c.get('sources', [])}
-        selected.update(c['id'] for c in owned if not c.get('sources'))
-        rows = self.db.execute('SELECT id,feed_id,members FROM items WHERE viewed=0 ORDER BY id').fetchall()
-        # Frozen folder reviews own their originals even after a feed moves.
-        # Include unreadable/unloaded originals too, unless another folder's
-        # visible review already represents them.
-        members = tuple((r['id'], r['members']) for r in rows if r['id'] in selected
-                        or (feeds.get(r['feed_id']) == folder and r['id'] not in covered))
-        return FolderContents(members, tuple(sorted(c['id'] for c in owned)))
+        return self.reading.folder_contents(folder)
 
     def viewed(self, item: str) -> bool:
-        event = self.events.material(item) or self.digests.material(item)
-        members = [source['id'] for source in event['sources']] if event else [item]
-        return self.viewed_set(members)
+        return self.viewed_set(self.reading.members(item))
 
     def viewed_set(self, members: list[str]) -> bool:
         members = sorted(set(members))
@@ -331,22 +312,7 @@ class Store:
             return None
 
     def cards(self, show_hidden: bool = False) -> list[dict[str, Any]]:
-        cards = []
-        for row in self.db.execute('SELECT id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall():
-            material = self.material(row['id'])
-            if material and (show_hidden or not material.get('filter', {}).get('hidden')):
-                material.pop('display_text', None)
-                del material['text']
-                cards.append(material)
-        events = self.events.views() + self.digests.views()
-        members = {source['id'] for event in events for source in event['sources']}
-        cards = [card for card in cards if card['id'] not in members]
-        for event in events:
-            event = dict(event)
-            event.pop('text')
-            event['sources'] = [dict(id=m['id'], url=m['url']) for m in event['sources']]
-            cards.append(event)
-        return cards
+        return self.reading.cards(show_hidden)
 
     def status(self) -> dict[str, Any]:
         rows = self.db.execute('SELECT kind,status,error,count(*) AS count FROM jobs GROUP BY kind,status,error').fetchall()

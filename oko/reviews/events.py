@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from oko.reader.composition import represented_originals
 from oko.processing.contracts import EventsResult, InputSource, ProcessingRequest, ProcessingError
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ class Events:
         store = self.store
         feeds = {f['id']: f for f in store.subscriptions.feeds()}
         folders: dict[str, list[dict[str, Any]]] = {}
-        covered = {m['id'] for v in store.digests.views() for m in v['sources']}
+        covered = represented_originals(store.digests.views())
         for row in store.db.execute('SELECT id FROM items WHERE viewed=0 AND complete=1 ORDER BY published,id').fetchall():
             if row['id'] in covered:
                 continue

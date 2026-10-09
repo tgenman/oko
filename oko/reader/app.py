@@ -170,17 +170,12 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/api/folders')
     async def folders() -> list[dict[str, Any]]:
         config = subscriptions()
-        cards = reader_cards()
+        cards = store().cards()
         return [dict(**folder, count=sum(c['folder_id'] == folder['id'] for c in cards)) for folder in config.folders()]
-
-    def reader_cards(show_hidden: bool = False) -> list[dict[str, Any]]:
-        feeds = {f['id']: f for f in subscriptions().feeds()}
-        return [dict(card, folder_id=card.get('folder_id', feeds[card['feed_id']]['folder_id']), importance=card.get('importance', feeds[card['feed_id']]['importance']))
-                for card in store().cards(show_hidden) if card['feed_id'] in feeds]
 
     @app.get('/api/cards')
     async def cards(folder: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest', show_hidden: bool = False) -> list[dict[str, Any]]:
-        result = [card for card in reader_cards(show_hidden) if folder is None or card['folder_id'] == folder]
+        result = [card for card in store().cards(show_hidden) if folder is None or card['folder_id'] == folder]
         if sort == 'importance':
             result.sort(key=lambda c: (-{'normal': 0, 'elevated': 1, 'high': 2}[c['importance']], -c['published'], c['id']))
         else:
@@ -233,7 +228,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.get('/api/materials/{item}')
     async def material(item: str) -> dict[str, Any]:
-        result = store().digests.material(item) if item.startswith('digest-') else store().events.material(item) if item.startswith('event-') else store().material(item)
+        result = store().reading.material(item)
         if not result:
             raise HTTPException(404, 'Материал недоступен')
         return result
