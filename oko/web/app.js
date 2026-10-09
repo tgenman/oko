@@ -260,9 +260,9 @@ async function loadSettings() {
 function renderFeed(feed) {
   const container = byId('feed-options');
   container.append(element('h2', 'Подключение фида'));
-  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
+  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.transport === 'youtube' ? 'YouTube подключён: сбор при открытой вкладке' : feed.kind === 'youtube' ? 'YouTube отключён: выберите способ сбора' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
   container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
-  if (feed.kind === 'youtube') container.append(element('p', 'YouTube: обновления собираются при открытой вкладке. Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));
+  if (feed.kind === 'youtube') container.append(element('p', (feed.transport === 'youtube' ? 'YouTube: обновления собираются при открытой вкладке. ' : 'Для сбора выберите способ подключения YouTube. ') + 'Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));
   const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
   const importance = selectControl(Object.entries(importanceNames), feed.importance);
   const days = element('input'); days.type = 'number'; days.min = '1'; days.max = '3650'; days.value = feed.initial_days;
