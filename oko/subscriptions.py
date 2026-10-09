@@ -39,7 +39,7 @@ class FeedPatch(BaseModel):
     public_ai: bool | None = None
     read_history: bool | None = None
     auto_read: bool | None = None
-    transport: Literal['telegram', 'rss'] | None = None
+    transport: Literal['telegram', 'rss', 'youtube'] | None = None
 
 
 DEFAULTS: dict[str, Any] = dict(
@@ -225,7 +225,7 @@ class Subscriptions:
                 VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(identity) DO UPDATE SET
                 folder_id=excluded.folder_id,original_urls=excluded.original_urls''',
                                 (key(identity), identity, feed['title'], feed['kind'], folder,
-                                 json.dumps(urls), feed['connection'], 'rss' if feed['kind'] == 'rss' else None))
+                                 json.dumps(urls), feed['connection'], feed['kind'] if feed['kind'] in ('rss', 'youtube') else None))
         return dict(folders=self.folders(), feeds=self.feeds())
 
     def check_owner(self, scope: str, owner: str) -> None:
@@ -267,6 +267,10 @@ class Subscriptions:
                                     (scope, owner, field, json.dumps(value)))
         return self.effective(scope, owner)
 
+    def youtube_theses(self, feed_id: str) -> bool:
+        settings = self.effective('feed', feed_id)
+        return bool(settings['feed']['kind'] == 'youtube' and (settings['feed']['importance'] == 'high' or settings['effective']['theses']['value']))
+
     def update_feed(self, feed_id: str, patch: FeedPatch) -> dict[str, Any]:
         self.check_owner('feed', feed_id)
         feed = next(f for f in self.feeds() if f['id'] == feed_id)
@@ -280,6 +284,8 @@ class Subscriptions:
         transport = values.get('transport')
         if transport == 'telegram' and feed['kind'] != 'telegram':
             raise ValueError('Telegram-источник не распознан')
+        if transport == 'youtube' and feed['kind'] != 'youtube':
+            raise ValueError('YouTube-источник не распознан')
         if transport == 'rss' and feed['kind'] in ('youtube', 'demo'):
             raise ValueError('Для этого источника нет RSS-подключения')
         with self.db:

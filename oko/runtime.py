@@ -19,6 +19,7 @@ from .codex import Codex, CodexClient, LocalCodex, status as codex_status
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from .subscriptions import ImportRequest, Overrides, FeedPatch
+from .youtube import YouTubeSource, CaptionsClient, LocalCaptions
 
 T = TypeVar('T')
 
@@ -32,7 +33,8 @@ class ActionError(Exception):
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None) -> None:
+                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None) -> None:
+        self._youtube_captions = youtube_captions or LocalCaptions()
         self._codex_client = codex_client or LocalCodex()
         self._codex_status = codex_status()
         self._ai_transport = ai_transport
@@ -117,6 +119,16 @@ class Runtime:
         for feed in self._store.subscriptions.feeds():
             if feed['id'] == self._source_feed and self._source:
                 continue
+            if feed['transport'] == 'youtube' and self._rss_enabled:
+                if not isinstance(self._sources.get(feed['id']), YouTubeSource):
+                    self._sources[feed['id']] = YouTubeSource(feed['original_urls'][0], feed['initial_days'], self._youtube_captions, self._rss_transport)
+                    self._store.enqueue_discovery(feed['id'])
+                youtube = self._sources[feed['id']]
+                if isinstance(youtube, YouTubeSource):
+                    youtube.initial_days = feed['initial_days']
+                    youtube.want_captions = self._store.subscriptions.youtube_theses(feed['id'])
+                    self._store.prepare_youtube(feed['id'], youtube.want_captions)
+                continue
             if feed['transport'] == 'telegram' and self._telegram_client and feed.get('telegram_peer'):
                 if not isinstance(self._sources.get(feed['id']), TelegramSource):
                     self._sources[feed['id']] = TelegramSource(self._telegram_client, feed['telegram_account'], feed['telegram_peer'], feed['initial_days'])
@@ -133,7 +145,7 @@ class Runtime:
             source = self._sources[feed['id']]
             if isinstance(source, (RSSSource, TelegramSource)):
                 source.initial_days = feed['initial_days']
-        active = {f['id'] for f in self._store.subscriptions.feeds() if (f['transport'] == 'rss' and self._rss_enabled) or (f['transport'] == 'telegram' and self._telegram_client and f.get('telegram_peer'))}
+        active = {f['id'] for f in self._store.subscriptions.feeds() if (f['transport'] in ('rss', 'youtube') and self._rss_enabled) or (f['transport'] == 'telegram' and self._telegram_client and f.get('telegram_peer'))}
         self._sources = {key: source for key, source in self._sources.items() if key in active or key == self._source_feed and self._source}
 
     @property

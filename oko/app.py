@@ -18,6 +18,7 @@ from .store import Store
 from .telegram import TelegramClient, ConnectTelegram
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
 from .runtime import Runtime, ActionError
+from .youtube import CaptionsClient
 
 
 def create_app(root: Path, *, source: Source | None = None, token: str | None = None,
@@ -26,9 +27,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                shutdown: Callable[[], None] = lambda: None,
                lease: float = 6, grace: float = 15, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
-               telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None) -> FastAPI:
+               telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
+               youtube_captions: CaptionsClient | None = None) -> FastAPI:
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client)
+    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

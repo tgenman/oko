@@ -35,6 +35,7 @@ class Material:
     images: tuple[Image, ...] = ()
     attachments: tuple[Attachment, ...] = ()
     members: tuple[int, ...] = ()
+    captions: str | None = None
 
 
 class Source(Protocol):

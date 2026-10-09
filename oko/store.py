@@ -210,7 +210,7 @@ class Store:
         stage.mkdir()
         # Header is content too, and deliberately lives outside SQLite.
         with (stage / 'original.md').open('w', encoding='utf-8') as f:
-            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason, 'members': list(material.members), 'attachments': [dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments]}, ensure_ascii=False) + '\n\n' + material.text)
+            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason, 'members': list(material.members), 'captions': material.captions, 'attachments': [dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments]}, ensure_ascii=False) + '\n\n' + material.text)
             f.flush()
             os.fsync(f.fileno())
         for image in material.images:
@@ -276,7 +276,7 @@ class Store:
             return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 
@@ -318,13 +318,25 @@ class Store:
     def content_version(self, item: str) -> str:
         return hashlib.sha256(self.path(item).read_bytes()).hexdigest()
 
+    def prepare_youtube(self, feed: str, want_captions: bool) -> None:
+        if not want_captions:
+            return
+        for row in self.db.execute('SELECT id FROM items WHERE feed_id=? AND viewed=0 AND complete=1', (feed,)).fetchall():
+            material = self.material(row['id'])
+            if material and material.get('captions') == 'not_requested' and not material.get('loading'):
+                self.retry_material(row['id'])
+
     def thesis_signature(self, item: str) -> str | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
         if not row or not self.path(item).is_file():
             return None
         settings = self.subscriptions.effective('feed', row['feed_id'])
         values = {k: v['value'] for k, v in settings['effective'].items()}
-        if not values['theses']:
+        if settings['feed']['kind'] == 'youtube':
+            header = json.loads(self.path(item).read_text().split('\n\n', 1)[0])
+            if not self.subscriptions.youtube_theses(row['feed_id']) or header.get('captions') != 'available':
+                return None
+        elif not values['theses']:
             return None
         config = self.processor_config()
         payload = [self.content_version(item), row['members'], self.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]

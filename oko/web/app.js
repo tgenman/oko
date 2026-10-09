@@ -71,7 +71,7 @@ async function open(id) {
       return li;
     }));
     byId('original-panel').open = !material.theses;
-    byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? 'Текст сохранён · загрузка вложений' : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
+    byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? (material.captions ? 'Получение субтитров и превью' : 'Текст сохранён · загрузка вложений') : material.captions ? (material.reason || 'Субтитры и превью сохранены') : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
     byId('retry').hidden = !material.complete || material.full !== false || material.loading;
     clearImages();
     byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
@@ -262,6 +262,7 @@ function renderFeed(feed) {
   container.append(element('h2', 'Подключение фида'));
   const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
   container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
+  if (feed.kind === 'youtube') container.append(element('p', 'YouTube: обновления собираются при открытой вкладке. Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));
   const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
   const importance = selectControl(Object.entries(importanceNames), feed.importance);
   const days = element('input'); days.type = 'number'; days.min = '1'; days.max = '3650'; days.value = feed.initial_days;
@@ -273,8 +274,8 @@ function renderFeed(feed) {
     history = element('input'); history.type = 'checkbox'; history.checked = feed.read_history;
     container.append(element('p', 'Отметки прочитанного в Telegram пока не отправляются. Режим сохраняется для следующего этапа.'), labelled('Автопрочитывание в Telegram', auto), labelled('Отметить историю до начала импорта прочитанной', history), element('p', 'Без разрешения очистки старая непрочитанная история может задержать отметки Telegram. Сохранение настроек не отправляет отметки.'));
   }
-  if (feed.kind === 'telegram' || feed.kind === 'unresolved') {
-    transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'telegram' ? [['telegram', 'Telegram с локальными медиа']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']], feed.transport || '');
+  if (feed.kind === 'telegram' || feed.kind === 'unresolved' || feed.kind === 'youtube') {
+    transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'youtube' ? [['youtube', 'YouTube: обновления и субтитры']] : [...(feed.kind === 'telegram' ? [['telegram', 'Telegram с локальными медиа']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']])], feed.transport || '');
     container.append(labelled('Способ сбора', transport));
   }
   const save = element('button', 'Сохранить фид');
