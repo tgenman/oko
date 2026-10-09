@@ -14,7 +14,7 @@ import httpx
 
 from .rss import RSSSource, SourceError
 from .sources import Source
-from .processing import LlamaCpp, ProcessorConfig, ProcessingError, FilterResult, Theses
+from .processing import LlamaCpp, ProcessorConfig, ProcessingError, EventsResult, FilterResult, Theses
 from .codex import Codex, CodexClient, LocalCodex, status as codex_status
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
@@ -172,9 +172,9 @@ class Runtime:
             stage = 'Ошибка хранилища'
         elif state['deleting']:
             stage = 'Удаление'
-        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'running' for j in state['jobs']):
+        elif any(j['kind'] in ('theses', 'filter', 'events') and j['status'] == 'running' for j in state['jobs']):
             stage = self._ai_stage
-        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
+        elif any(j['kind'] in ('theses', 'filter', 'events') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
             stage = 'Ожидание обработчика' if state['errors'] else 'Подготовка тезисов'
         elif pending and not self._sources:
             stage = 'Источник не подключён'
@@ -229,9 +229,10 @@ class Runtime:
             if self._active or self._ai or self._requests:
                 await self._cancel()
             job = current.next_job(self._clock(), deleting_only=True)
-            if job:
-                # Store owns the deletion transaction; no external wait is needed.
+            while job:
+                # Drain all member deletions after viewing an event.
                 self._delete(job, current)
+                job = current.next_job(self._clock(), deleting_only=True)
 
     async def patch_feed(self, identity: str, body: FeedPatch) -> dict[str, Any]:
         async with self._actions:
@@ -268,6 +269,8 @@ class Runtime:
                 return result
             except LookupError as error:
                 raise ActionError('missing', str(error)) from None
+            except ValueError as error:
+                raise ActionError('invalid', str(error)) from None
 
     async def configure_processor(self, config: ProcessorConfig) -> None:
         async with self._actions:
@@ -344,12 +347,14 @@ class Runtime:
                 current = self._store
                 if not current or not current.valid(job) or not self._live():
                     return
-                policy = current.processing_policy(job.item)
+                policy = None if job.kind == 'events' else current.processing_policy(job.item)
                 if policy and policy[0] == 'codex':
                     if not policy[1]:
                         raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
 
-                prepared = current.filters.request(job) if job.kind == 'filter' else current.processing_request(job)
+                prepared = current.events.request(job) if job.kind == 'events' else current.filters.request(job) if job.kind == 'filter' else current.processing_request(job)
+                if prepared and prepared[0].processor == 'codex' and not prepared[2]:
+                    raise ProcessingError('Запрещена публичная AI-обработка набора; разрешение требуется от всех фидов')
                 config = current.processor_config()
                 if not prepared:
                     raise ProcessingError('Исходник недоступен для обработки')
@@ -364,16 +369,18 @@ class Runtime:
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:
-                if self._store is not current or not self._live() or not current.valid(job) or signature != (current.filters.signature(job.item) if job.kind == 'filter' else current.thesis_signature(job.item)):
+                if self._store is not current or not self._live() or not current.valid(job) or signature != (current.events.signature(job.item) if job.kind == 'events' else current.filters.signature(job.item) if job.kind == 'filter' else current.thesis_signature(job.item)):
                     return
                 if not checked['local'] and not public_ai:
                     raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
-            self._ai_stage = 'Фильтрация' if job.kind == 'filter' else 'Подготовка тезисов'
+            self._ai_stage = 'Объединение событий' if job.kind == 'events' else 'Фильтрация' if job.kind == 'filter' else 'Подготовка тезисов'
             result = (await adapter.generate(request, self._root / 'staging' / job.item)
                       if isinstance(adapter, Codex) else await adapter.generate(request))
             async with self._actions:
                 if self._store is current and self._live():
-                    if job.kind == 'filter' and isinstance(result, FilterResult):
+                    if job.kind == 'events' and isinstance(result, EventsResult):
+                        current.events.save(job, signature, result)
+                    elif job.kind == 'filter' and isinstance(result, FilterResult):
                         current.filters.save(job, signature, result)
                     elif job.kind == 'theses' and isinstance(result, Theses):
                         current.save_theses(job, signature, result)

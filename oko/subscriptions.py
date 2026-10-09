@@ -20,6 +20,8 @@ class ImportRequest(BaseModel):
 
 class Overrides(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
+    events: bool | None = None
+    event_hours: int | None = Field(default=None, ge=1, le=87600)
     originals: bool | None = None
     theses: bool | None = None
     digests: bool | None = None
@@ -43,7 +45,7 @@ class FeedPatch(BaseModel):
 
 
 DEFAULTS: dict[str, Any] = dict(
-    originals=True, theses=False, digests=False, prompt_theses='Выдели основные тезисы публикации.',
+    events=True, event_hours=24, originals=True, theses=False, digests=False, prompt_theses='Выдели основные тезисы публикации.',
     prompt_digest='Собери темы и основные тезисы за период.', prompt_filters='',
     schedule='off', digest_days=1, processor='codex')
 
@@ -258,6 +260,8 @@ class Subscriptions:
 
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> dict[str, Any]:
         self.check_owner(scope, owner)
+        if scope == 'feed' and {'events', 'event_hours'} & patch.model_fields_set:
+            raise ValueError('Объединение событий настраивается для Око или папки')
         with self.db:
             for field, value in patch.model_dump(exclude_unset=True).items():
                 if value is None:

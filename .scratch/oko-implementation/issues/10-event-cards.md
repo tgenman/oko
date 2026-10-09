@@ -4,7 +4,7 @@
 
 **Blocked by:** [09: Фильтрация и возврат скрытого](09-content-filters.md)
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Label:** ready-for-agent
 

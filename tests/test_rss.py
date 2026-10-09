@@ -17,6 +17,7 @@ def rss(url='https://source.test/article', guid='one', days=0):
 
 
 def import_feed(client, url='https://source.test/feed'):
+    client.patch('/api/settings/oko/global', json={'events': False})
     body = {'opml': f'<opml><body><outline text="Новости"><outline text="Источник" xmlUrl="{url}"/></outline></body></opml>'}
     return client.post('/api/import', json=body).json()['feeds'][0]
 

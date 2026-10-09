@@ -34,6 +34,8 @@ def model_transport(calls):
 
 
 def setup_reader(client):
+    # This fixture exercises single-publication theses independently of events.
+    client.patch('/api/settings/oko/global', json={'events': False})
     client.post('/api/tabs/reader/heartbeat')
     cards = wait_for(client, lambda: (cards if len(cards := client.get('/api/cards').json()) == 3 and all(c['complete'] for c in cards) else None))
     return cards[0]['id']

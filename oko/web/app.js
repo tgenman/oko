@@ -11,7 +11,7 @@ let ids = new Set();
 let folderId = null;
 let refreshTimer = null;
 let imageUrls = [];
-function clearImages() { byId('images').querySelectorAll('video,audio').forEach(media => { media.pause(); media.removeAttribute('src'); media.load(); }); imageUrls.forEach(url => URL.revokeObjectURL(url)); imageUrls = []; byId('images').replaceChildren(); }
+function clearImages() { byId('material').querySelectorAll('video,audio').forEach(media => { media.pause(); media.removeAttribute('src'); media.load(); }); imageUrls.forEach(url => URL.revokeObjectURL(url)); imageUrls = []; byId('images').replaceChildren(); }
 async function api(path, method = 'GET', body = undefined) {
   const response = await fetch('/api/' + path, {method, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
   const result = await response.json();
@@ -25,6 +25,9 @@ async function api(path, method = 'GET', body = undefined) {
 function clear() {
   clearImages();
   generation++;
+  byId('event-panel').hidden = true;
+  byId('event-body').replaceChildren();
+  byId('event-sources').replaceChildren();
   byId('filter-panel').hidden = true;
   ['filtered-text', 'filter-status'].forEach(id => { byId(id).textContent = ''; });
   byId('theses').replaceChildren();
@@ -61,6 +64,13 @@ async function open(id) {
   try {
     const material = await api('materials/' + id);
     if (stamp !== generation || !ids.has(id) || stopped) return;
+    clearImages();
+    byId('event-panel').hidden = !material.event;
+    byId('event-body').replaceChildren();
+    byId('event-sources').replaceChildren();
+    byId('original-panel').hidden = !!material.event;
+    byId('copy').hidden = !!material.event;
+    if (material.event) renderEvent(material);
     selected = material;
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
@@ -82,18 +92,27 @@ async function open(id) {
     byId('original-panel').open = !material.theses && (!filter || filter.status !== 'done' || filter.restored || !filter.removed.length && !filter.hidden);
     byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? (material.captions ? 'Получение субтитров и превью' : 'Текст сохранён · загрузка вложений') : material.captions ? (material.reason || 'Субтитры и превью сохранены') : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
     byId('retry').hidden = !material.complete || material.full !== false || material.loading;
-    clearImages();
     byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
     byId('message').textContent = '';
     byId('material').hidden = false;
     byId('empty').hidden = true;
+    await appendMedia(material, byId('images'), stamp, id);
+    if (material.event) {
+      for (const source of material.sources) {
+        if (stamp !== generation || stopped) return;
+        await appendMedia(source, byId('source-media-' + source.id), stamp, id);
+      }
+    }
+  } catch (error) { clear(); byId('progress').textContent = error.message; }
+}
+async function appendMedia(material, container, stamp, id) {
     for (const path of material.images || []) {
       const response = await fetch(path, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}});
       if (!response.ok) continue;
       const blob = await response.blob();
       if (stamp !== generation || stopped || !ids.has(id)) return;
       const url = URL.createObjectURL(blob); imageUrls.push(url);
-      const img = document.createElement('img'); img.src = url; img.alt = 'Изображение материала'; byId('images').append(img);
+      const img = document.createElement('img'); img.src = url; img.alt = 'Изображение материала'; container.append(img);
     }
     for (const attachment of material.attachments || []) {
       const response = await fetch(attachment.url, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}});
@@ -109,10 +128,10 @@ async function open(id) {
         if (attachment.kind === 'circle') node.classList.add('circle');
       } else { node = element('a', 'Скачать вложение'); node.href = url; node.download = attachment.url.split('/').pop(); }
       if (node.tagName !== 'A') node.src = url;
-      byId('images').append(node);
+      container.append(node);
     }
-  } catch (error) { clear(); byId('progress').textContent = error.message; }
 }
+
 async function refresh() {
   clearTimeout(refreshTimer);
   if (stopped) return;
@@ -131,12 +150,12 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
     if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
     byId('count').textContent = cards.filter(card => !card.filter?.hidden).length;
     byId('cards').replaceChildren(...cards.map(card => {
       const button = document.createElement('button');
       button.classList.toggle('active', selected?.id === card.id);
-      button.textContent = (card.filter?.hidden ? 'Скрыто · ' : '') + card.title;
+      button.textContent = (card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title;
       const date = document.createElement('small');
       date.textContent = new Date(card.published * 1000).toLocaleString('ru');
       button.append(date);
@@ -195,6 +214,7 @@ byId('sort').onchange = () => { contentEpoch++; refresh(); };
 heartbeat().then(refresh);
 
 const fields = {
+  events: ['Объединять события (Око или папка)', 'boolean'], event_hours: ['Окно события, часов (Око или папка)', 'number'],
   originals: ['Оригиналы', 'boolean'], theses: ['Тезисы публикаций', 'boolean'],
   digests: ['Обзоры за период', 'boolean'], prompt_theses: ['Промпт тезисов', 'text'],
   prompt_digest: ['Промпт обзора', 'text'], prompt_filters: ['Правила фильтрации (промпт; пустое поле выключает фильтрацию)', 'text'],
@@ -242,13 +262,14 @@ async function loadSettings() {
     const container = byId('setting-fields');
     container.replaceChildren();
     for (const [field, [title, type]] of Object.entries(fields)) {
+      if (path.startsWith('feed/') && ['events', 'event_hours'].includes(field)) continue;
       const effective = result.effective[field];
       const row = element('div'); row.className = 'setting-row';
       let input;
       if (type === 'boolean') input = selectControl([['true', 'Включено'], ['false', 'Выключено']], effective.value);
       else if (type === 'processor') input = selectControl([['codex', 'Codex · существующий вход CLI'], ['llamacpp', 'llama.cpp · подключённая модель'], ...(!['codex', 'llamacpp'].includes(effective.value) ? [[effective.value, effective.value]] : [])], effective.value);
       else if (type === 'text') { input = element('textarea'); input.value = effective.value; input.rows = 3; }
-      else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = '3650'; } }
+      else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = field === 'event_hours' ? '87600' : '3650'; } }
       input.id = 'setting-' + field;
       const info = element('small', 'Эффективное значение: ' + (type === 'boolean' ? (effective.value ? 'Включено' : 'Выключено') : String(effective.value)) + ' · ' + describeOwner(effective.scope, effective.owner));
       const save = element('button', 'Сохранить поле');
@@ -412,3 +433,37 @@ byId('filter-retry').onclick = async () => {
   try { await api('materials/' + selected.id + '/filter/retry', 'POST'); refresh(); }
   catch (error) { byId('message').textContent = error.message; }
 };
+
+function renderEvent(material) {
+  const body = byId('event-body');
+  for (const [field, title] of [['points', 'Сводка'], ['updates', 'Обновление'], ['conflicts', 'Противоречия источников']]) {
+    const points = material.event[field];
+    if (!points.length) continue;
+    body.append(element('h2', title));
+    const list = element('ul');
+    for (const point of points) {
+      const li = element('li', point.text);
+      for (const ref of point.sources) {
+        const source = material.sources.find(s => s.id === ref.id);
+        const link = element('a', ' · ' + (source?.title || 'Источник'));
+        link.href = ref.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; li.append(link);
+      }
+      list.append(li);
+    }
+    body.append(list);
+  }
+  for (const source of material.sources) {
+    const section = element('section');
+    const link = element('a', source.title); link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    const copy = element('button', 'Скопировать ссылку');
+    copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(source.url); byId('message').textContent = 'Ссылка скопирована'; }
+      catch { byId('message').textContent = 'Браузер не разрешил копирование'; }
+    };
+    const details = element('details');
+    const text = element('p', source.text); text.className = 'source-text';
+    details.append(element('summary', 'Оригинал · ' + new Date(source.published * 1000).toLocaleString('ru')), text);
+    const media = element('div'); media.className = 'source-media'; media.id = 'source-media-' + source.id; details.append(media);
+    section.append(link, copy, details); byId('event-sources').append(section);
+  }
+}

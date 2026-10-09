@@ -14,7 +14,7 @@ import sys
 import tempfile
 from typing import Any, Protocol
 
-from .processing import ProcessingError, ProcessingRequest, Theses, FilterResult, result_type, processing_instruction
+from .processing import ProcessingError, ProcessingRequest, Theses, EventsResult, FilterResult, result_type, processing_instruction
 
 UNAVAILABLE = (
     'Codex недоступен: изоляция файлов и инструментов и отсутствие копий '
@@ -369,7 +369,7 @@ class Codex:
             raise ProcessingError('Лимиты Codex не проверены; материалы не отправлены')
         return dict(result, local=False)
 
-    async def generate(self, request: ProcessingRequest, directory: Path) -> Theses | FilterResult:
+    async def generate(self, request: ProcessingRequest, directory: Path) -> Theses | FilterResult | EventsResult:
         if sum(len(s.text) + len(s.title) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
         prompt = processing_instruction(request) + ' Не используй инструменты.\n' + request.model_dump_json()

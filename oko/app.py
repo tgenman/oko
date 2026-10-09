@@ -168,7 +168,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     def reader_cards(show_hidden: bool = False) -> list[dict[str, Any]]:
         feeds = {f['id']: f for f in subscriptions().feeds()}
-        return [dict(**card, folder_id=feeds[card['feed_id']]['folder_id'], importance=feeds[card['feed_id']]['importance'])
+        return [dict(card, folder_id=card.get('folder_id', feeds[card['feed_id']]['folder_id']), importance=card.get('importance', feeds[card['feed_id']]['importance']))
                 for card in store().cards(show_hidden) if card['feed_id'] in feeds]
 
     @app.get('/api/cards')
@@ -217,7 +217,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.get('/api/materials/{item}')
     async def material(item: str) -> dict[str, Any]:
-        result = store().material(item)
+        result = store().events.material(item) if item.startswith('event-') else store().material(item)
         if not result:
             raise HTTPException(404, 'Материал недоступен')
         return result
