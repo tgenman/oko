@@ -288,5 +288,3 @@ def test_large_intermediate_review_is_reduced_with_bounded_attributed_requests(t
         assert len(material['digest']['points'])==1 and len(material['sources'])==3
         client.post('/api/materials/'+identity+'/viewed')
         assert not list((tmp_path / 'digests').glob('*'))
-
-

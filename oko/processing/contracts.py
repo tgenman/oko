@@ -141,5 +141,3 @@ class ProcessingError(Exception):
     def __init__(self, label: str) -> None:
         self.label = label
         super().__init__(label)
-
-
