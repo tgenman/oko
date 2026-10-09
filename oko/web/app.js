@@ -8,6 +8,7 @@ let generation = 0;
 let contentEpoch = 0;
 let stopped = false;
 let ids = new Set();
+let cardFolders = new Map();
 let folderId = null;
 let refreshTimer = null;
 let imageUrls = [];
@@ -59,8 +60,9 @@ bus.onmessage = event => {
   if (event.data === 'stop') stopUi('Око остановлено');
   else if (event.data?.kind === 'folder-viewed') {
     contentEpoch++;
-    clear();
-    byId('cards').replaceChildren();
+    generation++;
+    if (selected?.folder_id === event.data.folder) clear();
+    for (const [id, folder] of cardFolders) { if (folder === event.data.folder) ids.delete(id); }
     refresh();
   } else {
     contentEpoch++;
@@ -81,7 +83,7 @@ async function open(id) {
     byId('original-panel').hidden = !!(material.event || material.digest);
     byId('copy').hidden = !!(material.event || material.digest);
     if (material.event || material.digest) renderEvent(material);
-    selected = material;
+    selected = {...material, folder_id: material.folder_id || cardFolders.get(id)};
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
     const filter = material.filter;
@@ -159,6 +161,7 @@ async function refresh() {
     const cards = await api('cards?' + params);
     if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
+    cardFolders = new Map(cards.map(card => [card.id, card.folder_id]));
     if (selected && !ids.has(selected.id)) clear();
     if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.originals !== selected.originals || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
     byId('compress').disabled = !folderId;
@@ -553,8 +556,12 @@ byId('completion-confirm').onclick = async () => {
     byId('completion-dialog').close();
     refresh();
   } catch (error) {
-    contentEpoch++; clear(); refresh();
-    bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
+    if (!error.detail?.preview) {
+      contentEpoch++;
+      if (selected?.folder_id === confirmedFolder) clear();
+      bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
+    }
+    refresh();
     if (stamp !== completionGeneration || stopped) return;
     byId('completion-message').textContent = error.detail?.message || error.message;
     if (error.detail?.preview) renderCompletion(error.detail.preview);
