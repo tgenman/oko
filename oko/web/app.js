@@ -48,6 +48,8 @@ function stopUi(message) {
   byId('stop').disabled = true;
   byId('collect').disabled = true;
   byId('compress').disabled = true;
+  byId('folder-viewed').disabled = true;
+  byId('completion-dialog').close();
   byId('digest-now').disabled = true;
   byId('digest-dialog').close();
   byId('settings-dialog').close();
@@ -55,7 +57,12 @@ function stopUi(message) {
 }
 bus.onmessage = event => {
   if (event.data === 'stop') stopUi('Око остановлено');
-  else {
+  else if (event.data?.kind === 'folder-viewed') {
+    contentEpoch++;
+    clear();
+    byId('cards').replaceChildren();
+    refresh();
+  } else {
     contentEpoch++;
     generation++;
     ids.delete(event.data);
@@ -155,6 +162,7 @@ async function refresh() {
     if (selected && !ids.has(selected.id)) clear();
     if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.originals !== selected.originals || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
     byId('compress').disabled = !folderId;
+    byId('folder-viewed').disabled = !folderId;
     byId('digest-now').disabled = !folderId;
     byId('count').textContent = cards.filter(card => !card.filter?.hidden).length;
     byId('cards').replaceChildren(...cards.map(card => {
@@ -505,4 +513,51 @@ byId('digest-run').onclick = async () => {
     byId('digest-dialog').close(); refresh();
   } catch (error) { byId('digest-message').textContent = error.message; }
   finally { button.disabled = stopped; }
+};
+
+let completionFolder = null;
+let completionToken = null;
+let completionGeneration = 0;
+function renderCompletion(preview) {
+  completionToken = preview.token;
+  byId('completion-count').textContent = `Карточек: ${preview.cards}. Исходных публикаций: ${preview.originals}.`;
+  byId('completion-confirm').disabled = stopped || preview.originals === 0;
+}
+byId('folder-viewed').onclick = async () => {
+  if (!folderId || stopped) return;
+  const stamp = ++completionGeneration;
+  completionFolder = folderId;
+  completionToken = null;
+  byId('completion-count').textContent = 'Подсчёт…';
+  byId('completion-message').textContent = '';
+  byId('completion-confirm').disabled = true;
+  byId('completion-dialog').showModal();
+  try {
+    const preview = await api('folders/' + completionFolder + '/completion/preview', 'POST');
+    if (stamp === completionGeneration && !stopped && byId('completion-dialog').open) renderCompletion(preview);
+  } catch (error) { if (stamp === completionGeneration) byId('completion-message').textContent = error.message; }
+};
+byId('completion-dialog').addEventListener('close', () => { completionGeneration++; completionToken = null; });
+byId('completion-close').onclick = () => byId('completion-dialog').close();
+byId('completion-confirm').onclick = async () => {
+  if (!completionToken || stopped) return;
+  const stamp = completionGeneration;
+  const confirmedFolder = completionFolder;
+  byId('completion-confirm').disabled = true;
+  try {
+    await api('folders/' + confirmedFolder + '/completion', 'POST', {token: completionToken});
+    contentEpoch++;
+    clear();
+    byId('cards').replaceChildren();
+    bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
+    byId('completion-dialog').close();
+    refresh();
+  } catch (error) {
+    contentEpoch++; clear(); refresh();
+    bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
+    if (stamp !== completionGeneration || stopped) return;
+    byId('completion-message').textContent = error.detail?.message || error.message;
+    if (error.detail?.preview) renderCompletion(error.detail.preview);
+    else byId('completion-confirm').disabled = false;
+  }
 };

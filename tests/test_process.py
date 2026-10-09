@@ -148,3 +148,36 @@ def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path, action):
         assert time.monotonic() - started < 3
     finally:
         cleanup(process)
+
+
+@pytest.mark.parametrize('fault', ['after_viewed_commit', 'after_delete_files'])
+def test_folder_completion_survives_death_during_atomic_set_or_physical_delete(tmp_path: Path, fault):
+    process = launch(tmp_path, fault)
+    try:
+        with connect(tmp_path, process) as client:
+            client.patch('/api/settings/oko/global', json={'events': False})
+            client.post('/api/tabs/a/heartbeat')
+            originals = wait_cards(client, 3)
+            preview = client.post('/api/folders/demo/completion/preview').json()
+            try:
+                client.post('/api/folders/demo/completion', json={'token': preview['token']})
+            except httpx.TransportError:
+                pass
+        assert process.wait(timeout=5) == 79
+        process = launch(tmp_path)
+        with connect(tmp_path, process) as client:
+            assert client.get('/api/cards').json() == []
+            client.post('/api/tabs/b/heartbeat')
+            for _ in range(150):
+                if not client.get('/api/status').json()['deleting']:
+                    break
+                time.sleep(.02)
+            assert not client.get('/api/status').json()['deleting']
+            for card in originals:
+                assert client.get('/api/materials/' + card['id']).status_code == 404
+                assert not (tmp_path / 'content' / card['id']).exists()
+            client.post('/api/collect')
+            time.sleep(.1)
+            assert client.get('/api/cards').json() == []
+    finally:
+        cleanup(process)

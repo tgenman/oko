@@ -25,6 +25,12 @@ class Job:
     generation: int
 
 
+@dataclass(frozen=True)
+class FolderContents:
+    members: tuple[tuple[str, str], ...]
+    cards: tuple[str, ...]
+
+
 class Store:
     """SQLite owns identity/lifecycle; files own all publication content."""
     def __init__(self, root: Path, fault: Callable[[str], None]) -> None:
@@ -245,11 +251,29 @@ class Store:
             finally:
                 os.close(fd)
 
+    def folder_contents(self, folder: str) -> FolderContents:
+        self.subscriptions.check_owner('folder', folder)
+        feeds = {f['id']: f['folder_id'] for f in self.subscriptions.feeds()}
+        cards = self.cards(True)
+        owned = [c for c in cards if c.get('folder_id', feeds.get(c['feed_id'])) == folder]
+        covered = {source['id'] for c in cards for source in c.get('sources', [])}
+        selected = {source['id'] for c in owned for source in c.get('sources', [])}
+        selected.update(c['id'] for c in owned if not c.get('sources'))
+        rows = self.db.execute('SELECT id,feed_id,members FROM items WHERE viewed=0 ORDER BY id').fetchall()
+        # Frozen folder reviews own their originals even after a feed moves.
+        # Include unreadable/unloaded originals too, unless another folder's
+        # visible review already represents them.
+        members = tuple((r['id'], r['members']) for r in rows if r['id'] in selected
+                        or (feeds.get(r['feed_id']) == folder and r['id'] not in covered))
+        return FolderContents(members, tuple(sorted(c['id'] for c in owned)))
+
     def viewed(self, item: str) -> bool:
         event = self.events.material(item) or self.digests.material(item)
         members = [source['id'] for source in event['sources']] if event else [item]
-        if event and event.get('batch'):
-            self.events.invalidate(event['batch'])
+        return self.viewed_set(members)
+
+    def viewed_set(self, members: list[str]) -> bool:
+        members = sorted(set(members))
         with self.db:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
                 return False
@@ -275,6 +299,7 @@ class Store:
         for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item):
             if path.exists():
                 shutil.rmtree(path)
+        self.fault('after_delete_files')
         with self.db:
             self.finish(job)
 

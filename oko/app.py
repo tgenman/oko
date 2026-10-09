@@ -9,6 +9,8 @@ import time
 import httpx
 from typing import Any, Literal
 
+from pydantic import BaseModel, Field
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from .sources import Source
@@ -20,6 +22,10 @@ from .telegram import TelegramClient, ConnectTelegram
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
 from .runtime import Runtime, ActionError
 from .youtube import CaptionsClient
+
+
+class CompletionRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=100)
 
 
 def create_app(root: Path, *, source: Source | None = None, token: str | None = None,
@@ -180,6 +186,15 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         else:
             result.sort(key=lambda c: (c['published'] if sort == 'oldest' else -c['published'], c['id']))
         return result
+
+    @app.post('/api/folders/{folder}/completion/preview')
+    async def preview_completion(folder: str) -> dict[str, Any]:
+        return await runtime.preview_completion(folder)
+
+    @app.post('/api/folders/{folder}/completion')
+    async def complete_folder(folder: str, body: CompletionRequest) -> dict[str, bool]:
+        await runtime.complete_folder(folder, body.token)
+        return {'ok': True}
 
     @app.post('/api/collect')
     async def collect() -> dict[str, bool]:

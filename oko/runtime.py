@@ -6,6 +6,7 @@ happen outside the action lock; admission, transitions and result commits share 
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+import secrets
 import sqlite3
 import time
 from typing import Any, Literal, TypeVar
@@ -17,7 +18,7 @@ from .sources import Source
 from .processing import LlamaCpp, ProcessorConfig, ProcessingError, ProcessingRequest, EventsResult, FilterResult, Theses
 from .codex import Codex, CodexClient, LocalCodex, status as codex_status
 from .digests import DigestRequest
-from .store import Job, Store
+from .store import FolderContents, Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from .subscriptions import ImportRequest, Overrides, FeedPatch
 from .youtube import YouTubeSource, CaptionsClient, LocalCaptions
@@ -50,6 +51,7 @@ class Runtime:
         self._sources: dict[str, Source] = {source_feed: source} if source else {}
         self._last_collection = clock()
         self._tabs: dict[str, float] = {}
+        self._completions: dict[str, tuple[str, FolderContents | None]] = {}
         self._stop_requested = asyncio.Event()
         self._closed = False
         self._actions = asyncio.Lock()
@@ -239,13 +241,52 @@ class Runtime:
             current = self.require_store()
             if not current.viewed(item):
                 raise ActionError('missing', 'Материал не найден')
-            if self._active or self._ai or self._requests:
-                await self._cancel()
+            await self._drain_deletions(current)
+
+    def _completion_preview(self, folder: str, current: Store) -> dict[str, Any]:
+        try:
+            contents = current.folder_contents(folder)
+        except LookupError as error:
+            raise ActionError('missing', str(error)) from None
+        token = secrets.token_urlsafe(32)
+        # Confirmation handles contain only service IDs, never publication text.
+        # Bound their lifetime to this run and their number to 128 previews.
+        if len(self._completions) >= 128:
+            del self._completions[next(iter(self._completions))]
+        self._completions[token] = (folder, contents)
+        return dict(token=token, cards=len(contents.cards), originals=len(contents.members))
+
+    async def preview_completion(self, folder: str) -> dict[str, Any]:
+        async with self._actions:
+            return self._completion_preview(folder, self.require_store())
+
+    async def complete_folder(self, folder: str, token: str) -> None:
+        async with self._actions:
+            current = self.require_store()
+            saved = self._completions.get(token)
+            if not saved or saved[0] != folder:
+                raise ActionError('conflict', dict(message='Подтверждение устарело. Проверьте количество снова.', preview=self._completion_preview(folder, current)))
+            contents = saved[1]
+            if contents is not None:
+                try:
+                    latest = current.folder_contents(folder)
+                except LookupError as error:
+                    raise ActionError('missing', str(error)) from None
+                if latest != contents:
+                    raise ActionError('conflict', dict(message='Состав папки изменился. Подтвердите новое количество.', preview=self._completion_preview(folder, current)))
+                current.viewed_set([identity for identity, _ in contents.members])
+                self._completions[token] = (folder, None)
+            await self._drain_deletions(current)
+            if current.status()['deleting']:
+                raise ActionError('unavailable', 'Удаление не завершено. Око повторит попытку; ошибка видна в статусе.')
+
+    async def _drain_deletions(self, current: Store) -> None:
+        if self._active or self._ai or self._requests:
+            await self._cancel()
+        job = current.next_job(self._clock(), deleting_only=True)
+        while job:
+            self._delete(job, current)
             job = current.next_job(self._clock(), deleting_only=True)
-            while job:
-                # Drain all member deletions after viewing an event.
-                self._delete(job, current)
-                job = current.next_job(self._clock(), deleting_only=True)
 
     async def patch_feed(self, identity: str, body: FeedPatch) -> dict[str, Any]:
         async with self._actions:
