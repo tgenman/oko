@@ -166,14 +166,14 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         cards = reader_cards()
         return [dict(**folder, count=sum(c['folder_id'] == folder['id'] for c in cards)) for folder in config.folders()]
 
-    def reader_cards() -> list[dict[str, Any]]:
+    def reader_cards(show_hidden: bool = False) -> list[dict[str, Any]]:
         feeds = {f['id']: f for f in subscriptions().feeds()}
         return [dict(**card, folder_id=feeds[card['feed_id']]['folder_id'], importance=feeds[card['feed_id']]['importance'])
-                for card in store().cards() if card['feed_id'] in feeds]
+                for card in store().cards(show_hidden) if card['feed_id'] in feeds]
 
     @app.get('/api/cards')
-    async def cards(folder: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest') -> list[dict[str, Any]]:
-        result = [card for card in reader_cards() if folder is None or card['folder_id'] == folder]
+    async def cards(folder: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest', show_hidden: bool = False) -> list[dict[str, Any]]:
+        result = [card for card in reader_cards(show_hidden) if folder is None or card['folder_id'] == folder]
         if sort == 'importance':
             result.sort(key=lambda c: (-{'normal': 0, 'elevated': 1, 'high': 2}[c['importance']], -c['published'], c['id']))
         else:
@@ -221,6 +221,16 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         if not result:
             raise HTTPException(404, 'Материал недоступен')
         return result
+
+    @app.post('/api/materials/{item}/filter/restore')
+    async def restore_filter(item: str) -> dict[str, bool]:
+        await runtime.restore_filter(item)
+        return {'ok': True}
+
+    @app.post('/api/materials/{item}/filter/retry')
+    async def retry_filter(item: str) -> dict[str, bool]:
+        await runtime.retry_filter(item)
+        return {'ok': True}
 
     @app.post('/api/materials/{item}/viewed')
     async def viewed(item: str) -> dict[str, bool]:

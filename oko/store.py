@@ -9,6 +9,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any
 
+from .filtering import Filters
 from .sources import Attachment, Material, Publication
 from .subscriptions import Subscriptions
 from .processing import InputSource, ProcessingRequest, ProcessorConfig, Theses
@@ -70,6 +71,7 @@ class Store:
                 self.db.execute('DROP TABLE items')
                 self.db.execute('ALTER TABLE items_scoped RENAME TO items')
         self.subscriptions = Subscriptions(self.db)
+        self.filters = Filters(self)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
@@ -160,14 +162,14 @@ class Store:
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if ai_only:
-            query += " AND kind='theses'"
+            query += " AND kind IN ('filter','theses')"
         elif deleting_only:
             query += " AND kind='delete'"
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             query += f" AND (kind='delete' OR (kind='discover' AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
-        query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 ELSE 2 END,id LIMIT 1"
+        query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *('' if f == 'demo' else f for f in available), *available)
         row = self.db.execute(query, params).fetchone()
         if not row:
@@ -245,6 +247,7 @@ class Store:
             if not row:
                 return False
             self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
+            self.filters.forget(item)
             self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (item,))
             self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (item,))
             self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (item,))
@@ -276,15 +279,21 @@ class Store:
             return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            filtered = self.filters.read(item)
+            display_text = text
+            if filtered['status'] == 'done' and not filtered['restored']:
+                for fragment in filtered['removed']:
+                    display_text = display_text.replace(fragment, '')
+            return dict(filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 
-    def cards(self) -> list[dict[str, Any]]:
+    def cards(self, show_hidden: bool = False) -> list[dict[str, Any]]:
         cards = []
         for row in self.db.execute('SELECT id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall():
             material = self.material(row['id'])
-            if material:
+            if material and (show_hidden or not material.get('filter', {}).get('hidden')):
+                material.pop('display_text', None)
                 del material['text']
                 cards.append(material)
         return cards
@@ -330,6 +339,9 @@ class Store:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
         if not row or not self.path(item).is_file():
             return None
+        filtered = self.filters.read(item)
+        if filtered['status'] not in ('off', 'done') or filtered['hidden']:
+            return None
         settings = self.subscriptions.effective('feed', row['feed_id'])
         values = {k: v['value'] for k, v in settings['effective'].items()}
         if settings['feed']['kind'] == 'youtube':
@@ -339,10 +351,11 @@ class Store:
         elif not values['theses']:
             return None
         config = self.processor_config()
-        payload = [self.content_version(item), row['members'], self.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
+        payload = [self.content_version(item), filtered, row['members'], self.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def sync_theses(self) -> None:
+        self.filters.sync()
         for row in self.db.execute('SELECT id FROM items WHERE viewed=0').fetchall():
             item = row['id']
             signature = self.thesis_signature(item)
@@ -376,7 +389,7 @@ class Store:
             return None
         settings = self.subscriptions.effective('feed', material['feed_id'])
         values = settings['effective']
-        request = ProcessingRequest(sources=(InputSource(id=job.item, version=self.content_version(job.item), url=material['url'], title=material['title'], text=material['text']),), settings_version=self.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        request = ProcessingRequest(sources=(InputSource(id=job.item, version=self.content_version(job.item), url=material['url'], title=material['title'], text=material['display_text']),), settings_version=self.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, settings['feed']['public_ai']
 
     def retry_theses(self, item: str) -> bool:

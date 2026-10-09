@@ -14,7 +14,7 @@ import httpx
 
 from .rss import RSSSource, SourceError
 from .sources import Source
-from .processing import LlamaCpp, ProcessorConfig, ProcessingError
+from .processing import LlamaCpp, ProcessorConfig, ProcessingError, FilterResult, Theses
 from .codex import Codex, CodexClient, LocalCodex, status as codex_status
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
@@ -172,9 +172,9 @@ class Runtime:
             stage = 'Ошибка хранилища'
         elif state['deleting']:
             stage = 'Удаление'
-        elif any(j['kind'] == 'theses' and j['status'] == 'running' for j in state['jobs']):
+        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'running' for j in state['jobs']):
             stage = self._ai_stage
-        elif any(j['kind'] == 'theses' and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
+        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
             stage = 'Ожидание обработчика' if state['errors'] else 'Подготовка тезисов'
         elif pending and not self._sources:
             stage = 'Источник не подключён'
@@ -320,6 +320,18 @@ class Runtime:
             self._codex_status = result
         return result
 
+    async def restore_filter(self, item: str) -> None:
+        async with self._actions:
+            if not self.require_store().filters.restore(item):
+                raise ActionError('missing', 'Обработанный материал недоступен')
+            await self._cancel()
+
+    async def retry_filter(self, item: str) -> None:
+        async with self._actions:
+            if not self.require_store().filters.retry(item):
+                raise ActionError('missing', 'Фильтрация не включена')
+            await self._cancel()
+
     async def retry_theses(self, item: str) -> None:
         async with self._actions:
             if not self.require_store().retry_theses(item):
@@ -337,10 +349,10 @@ class Runtime:
                     if not policy[1]:
                         raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
 
-                prepared = current.processing_request(job)
+                prepared = current.filters.request(job) if job.kind == 'filter' else current.processing_request(job)
                 config = current.processor_config()
                 if not prepared:
-                    raise ProcessingError('Исходник недоступен для тезисов')
+                    raise ProcessingError('Исходник недоступен для обработки')
                 request, signature, public_ai = prepared
                 adapter: Codex | LlamaCpp
                 if request.processor == 'codex':
@@ -352,22 +364,25 @@ class Runtime:
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:
-                if self._store is not current or not self._live() or not current.valid(job) or signature != current.thesis_signature(job.item):
+                if self._store is not current or not self._live() or not current.valid(job) or signature != (current.filters.signature(job.item) if job.kind == 'filter' else current.thesis_signature(job.item)):
                     return
                 if not checked['local'] and not public_ai:
                     raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
-            self._ai_stage = 'Подготовка тезисов'
-            theses = (await adapter.generate(request, self._root / 'staging' / job.item)
+            self._ai_stage = 'Фильтрация' if job.kind == 'filter' else 'Подготовка тезисов'
+            result = (await adapter.generate(request, self._root / 'staging' / job.item)
                       if isinstance(adapter, Codex) else await adapter.generate(request))
             async with self._actions:
                 if self._store is current and self._live():
-                    current.save_theses(job, signature, theses)
+                    if job.kind == 'filter' and isinstance(result, FilterResult):
+                        current.filters.save(job, signature, result)
+                    elif job.kind == 'theses' and isinstance(result, Theses):
+                        current.save_theses(job, signature, result)
         except asyncio.CancelledError:
             raise
         except Exception as error:
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
-                    current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка подготовки тезисов', 30)
+                    current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка AI-обработки', 30)
 
     def _telegram_ready(self) -> tuple[Store, TelegramClient]:
         current = self.require_store()

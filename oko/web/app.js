@@ -25,6 +25,8 @@ async function api(path, method = 'GET', body = undefined) {
 function clear() {
   clearImages();
   generation++;
+  byId('filter-panel').hidden = true;
+  ['filtered-text', 'filter-status'].forEach(id => { byId(id).textContent = ''; });
   byId('theses').replaceChildren();
   byId('theses-panel').hidden = true;
   selected = null;
@@ -62,6 +64,13 @@ async function open(id) {
     selected = material;
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
+    const filter = material.filter;
+    byId('filter-panel').hidden = !filter || filter.status === 'off';
+    byId('filter-status').textContent = !filter || filter.status === 'off' ? '' : filter.status === 'done' ? (filter.restored ? 'Возвращено пользователем · ' : filter.hidden ? 'Скрыто · ' : filter.removed.length ? 'Рекламные вставки убраны · ' : 'Фильтрация завершена') + (filter.reason || '') : filter.error || 'Ожидание фильтрации';
+    byId('filter-restore').hidden = !filter || filter.status !== 'done' || filter.restored || !(filter.hidden || filter.removed.length);
+    byId('filter-retry').hidden = !filter?.error;
+    byId('filtered-text').textContent = filter?.status === 'done' && !filter.hidden && !filter.restored && filter.removed.length ? material.display_text : '';
+
     byId('theses-panel').hidden = !material.ai && !material.theses;
     byId('ai-status').textContent = material.theses ? 'Тезисы готовы' : material.ai?.error || (material.ai?.status === 'running' ? 'Подготовка тезисов' : 'Ожидание обработчика');
     byId('theses-retry').hidden = !material.ai?.error;
@@ -70,7 +79,7 @@ async function open(id) {
       for (const ref of point.sources) { const link = element('a', ' Источник'); link.href = ref.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; li.append(link); }
       return li;
     }));
-    byId('original-panel').open = !material.theses;
+    byId('original-panel').open = !material.theses && (!filter || filter.status !== 'done' || filter.restored || !filter.removed.length && !filter.hidden);
     byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? (material.captions ? 'Получение субтитров и превью' : 'Текст сохранён · загрузка вложений') : material.captions ? (material.reason || 'Субтитры и превью сохранены') : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
     byId('retry').hidden = !material.complete || material.full !== false || material.loading;
     clearImages();
@@ -116,17 +125,18 @@ async function refresh() {
     byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => { const p = document.createElement('p'); p.textContent = source.title + ': ' + (source.error || source.gap); return p; }));
     if (state.error) { clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
+    if (byId('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);
     const cards = await api('cards?' + params);
     if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
     if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
-    byId('count').textContent = cards.length;
+    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    byId('count').textContent = cards.filter(card => !card.filter?.hidden).length;
     byId('cards').replaceChildren(...cards.map(card => {
       const button = document.createElement('button');
       button.classList.toggle('active', selected?.id === card.id);
-      button.textContent = card.title;
+      button.textContent = (card.filter?.hidden ? 'Скрыто · ' : '') + card.title;
       const date = document.createElement('small');
       date.textContent = new Date(card.published * 1000).toLocaleString('ru');
       button.append(date);
@@ -187,7 +197,7 @@ heartbeat().then(refresh);
 const fields = {
   originals: ['Оригиналы', 'boolean'], theses: ['Тезисы публикаций', 'boolean'],
   digests: ['Обзоры за период', 'boolean'], prompt_theses: ['Промпт тезисов', 'text'],
-  prompt_digest: ['Промпт обзора', 'text'], prompt_filters: ['Правила фильтрации (промпт)', 'text'],
+  prompt_digest: ['Промпт обзора', 'text'], prompt_filters: ['Правила фильтрации (промпт; пустое поле выключает фильтрацию)', 'text'],
   schedule: ['Расписание обзора (off или ЧЧ:ММ, местное время)', 'string'],
   digest_days: ['Период обзора, дней', 'number'], processor: ['Обработчик', 'processor']
 };
@@ -389,4 +399,16 @@ byId('codex-check').onclick = async () => {
   } finally {
     button.disabled = stopped;
   }
+};
+
+byId('show-hidden').onchange = () => { contentEpoch++; clear(); refresh(); };
+byId('filter-restore').onclick = async () => {
+  if (!selected) return;
+  try { await api('materials/' + selected.id + '/filter/restore', 'POST'); contentEpoch++; refresh(); }
+  catch (error) { byId('message').textContent = error.message; }
+};
+byId('filter-retry').onclick = async () => {
+  if (!selected) return;
+  try { await api('materials/' + selected.id + '/filter/retry', 'POST'); refresh(); }
+  catch (error) { byId('message').textContent = error.message; }
 };
