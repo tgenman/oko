@@ -60,7 +60,6 @@ bus.onmessage = event => {
   if (event.data === 'stop') stopUi('Око остановлено');
   else if (event.data?.kind === 'folder-viewed') {
     contentEpoch++;
-    generation++;
     if (selected?.folder_id === event.data.folder) clear();
     for (const [id, folder] of cardFolders) { if (folder === event.data.folder) ids.delete(id); }
     refresh();
