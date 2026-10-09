@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .events import Events
+from .digests import Digests
 from .filtering import Filters
 from .sources import Attachment, Material, Publication
 from .subscriptions import Subscriptions
@@ -74,6 +75,7 @@ class Store:
         self.subscriptions = Subscriptions(self.db)
         self.filters = Filters(self)
         self.events = Events(self)
+        self.digests = Digests(self)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
@@ -164,7 +166,7 @@ class Store:
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if ai_only:
-            query += " AND kind IN ('filter','theses','events')"
+            query += " AND kind IN ('filter','theses','events','digest')"
         elif deleting_only:
             query += " AND kind='delete'"
         else:
@@ -244,9 +246,9 @@ class Store:
                 os.close(fd)
 
     def viewed(self, item: str) -> bool:
-        event = self.events.material(item)
+        event = self.events.material(item) or self.digests.material(item)
         members = [source['id'] for source in event['sources']] if event else [item]
-        if event:
+        if event and event.get('batch'):
             self.events.invalidate(event['batch'])
         with self.db:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
@@ -257,6 +259,7 @@ class Store:
                 self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (member,))
                 self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))
                 self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (member,))
+        self.digests.sync()
         self.events.sync()
         self.fault('after_viewed_commit')
         return True
@@ -266,6 +269,9 @@ class Store:
         if job.item.startswith('event-'):
             self.events.path(job.item).unlink(missing_ok=True)
             self.events.path(job.item).with_suffix('.tmp').unlink(missing_ok=True)
+        if job.item.startswith('digest-'):
+            self.digests.path(job.item).unlink(missing_ok=True)
+            self.digests.path(job.item).with_suffix('.tmp').unlink(missing_ok=True)
         for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item):
             if path.exists():
                 shutil.rmtree(path)
@@ -306,7 +312,7 @@ class Store:
                 material.pop('display_text', None)
                 del material['text']
                 cards.append(material)
-        events = self.events.views()
+        events = self.events.views() + self.digests.views()
         members = {source['id'] for event in events for source in event['sources']}
         cards = [card for card in cards if card['id'] not in members]
         for event in events:
@@ -374,6 +380,7 @@ class Store:
 
     def sync_theses(self) -> None:
         self.filters.sync()
+        self.digests.sync()
         self.events.sync()
         for row in self.db.execute('SELECT id FROM items WHERE viewed=0').fetchall():
             item = row['id']
@@ -441,11 +448,11 @@ class Store:
             return
         self.save_derivative(job, signature, theses.model_dump(), '\n'.join('- ' + p.text for p in theses.points))
 
-    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str) -> None:
+    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True) -> None:
         """Commit a validated AI result; callers own admission and input signature."""
         stage = None
-        if job.kind == 'events':
-            destination = self.events.path(job.item)
+        if job.kind in ('events', 'digest'):
+            destination = (self.events if job.kind == 'events' else self.digests).path(job.item)
             pending = destination.with_suffix('.tmp')
         elif job.kind in ('filter', 'theses'):
             stage = self.root / 'staging' / job.item
@@ -468,5 +475,6 @@ class Store:
         finally:
             os.close(fd)
         self.fault('after_' + job.kind + '_move')
-        with self.db:
-            self.finish(job)
+        if finish:
+            with self.db:
+                self.finish(job)

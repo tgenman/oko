@@ -47,6 +47,9 @@ function stopUi(message) {
   byId('progress').textContent = message;
   byId('stop').disabled = true;
   byId('collect').disabled = true;
+  byId('compress').disabled = true;
+  byId('digest-now').disabled = true;
+  byId('digest-dialog').close();
   byId('settings-dialog').close();
   byId('settings-open').disabled = true;
 }
@@ -65,12 +68,12 @@ async function open(id) {
     const material = await api('materials/' + id);
     if (stamp !== generation || !ids.has(id) || stopped) return;
     clearImages();
-    byId('event-panel').hidden = !material.event;
+    byId('event-panel').hidden = !(material.event || material.digest);
     byId('event-body').replaceChildren();
     byId('event-sources').replaceChildren();
-    byId('original-panel').hidden = !!material.event;
-    byId('copy').hidden = !!material.event;
-    if (material.event) renderEvent(material);
+    byId('original-panel').hidden = !!(material.event || material.digest);
+    byId('copy').hidden = !!(material.event || material.digest);
+    if (material.event || material.digest) renderEvent(material);
     selected = material;
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
@@ -97,7 +100,7 @@ async function open(id) {
     byId('material').hidden = false;
     byId('empty').hidden = true;
     await appendMedia(material, byId('images'), stamp, id);
-    if (material.event) {
+    if (material.event || material.digest) {
       for (const source of material.sources) {
         if (stamp !== generation || stopped) return;
         await appendMedia(source, byId('source-media-' + source.id), stamp, id);
@@ -150,12 +153,14 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
     if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    byId('compress').disabled = !folderId;
+    byId('digest-now').disabled = !folderId;
     byId('count').textContent = cards.filter(card => !card.filter?.hidden).length;
     byId('cards').replaceChildren(...cards.map(card => {
       const button = document.createElement('button');
       button.classList.toggle('active', selected?.id === card.id);
-      button.textContent = (card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title;
+      button.textContent = (card.digest ? 'Обзор · ' : card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title;
       const date = document.createElement('small');
       date.textContent = new Date(card.published * 1000).toLocaleString('ru');
       button.append(date);
@@ -261,6 +266,14 @@ async function loadSettings() {
     if (feed) renderFeed(feed);
     const container = byId('setting-fields');
     container.replaceChildren();
+    if (path.startsWith('feed/') || path.startsWith('folder/')) {
+      const update = element('button', 'Обновить обзор сейчас');
+      update.onclick = async () => {
+        try { await api('digests/' + path, 'POST', {period: true}); byId('settings-message').textContent = 'Обзор поставлен в обработку'; refresh(); }
+        catch (error) { byId('settings-message').textContent = error.message; }
+      };
+      container.append(update);
+    }
     for (const [field, [title, type]] of Object.entries(fields)) {
       if (path.startsWith('feed/') && ['events', 'event_hours'].includes(field)) continue;
       const effective = result.effective[field];
@@ -437,7 +450,7 @@ byId('filter-retry').onclick = async () => {
 function renderEvent(material) {
   const body = byId('event-body');
   for (const [field, title] of [['points', 'Сводка'], ['updates', 'Обновление'], ['conflicts', 'Противоречия источников']]) {
-    const points = material.event[field];
+    const points = (material.event || material.digest)[field] || [];
     if (!points.length) continue;
     body.append(element('h2', title));
     const list = element('ul');
@@ -467,3 +480,29 @@ function renderEvent(material) {
     section.append(link, copy, details); byId('event-sources').append(section);
   }
 }
+
+let digestPeriod = false;
+function openDigest(period) {
+  if (!folderId || stopped) return;
+  digestPeriod = period;
+  byId('digest-heading').textContent = period ? 'Обновить обзор за период' : 'Сжать историю папки';
+  byId('digest-start').value = ''; byId('digest-end').value = '';
+  byId('digest-message').textContent = period ? 'Без дат используется настроенный период обзора.' : '';
+  byId('digest-dialog').showModal();
+}
+byId('compress').onclick = () => openDigest(false);
+byId('digest-now').onclick = () => openDigest(true);
+byId('digest-close').onclick = () => byId('digest-dialog').close();
+byId('digest-run').onclick = async () => {
+  const button = byId('digest-run'); button.disabled = true;
+  try {
+    const body = {period: digestPeriod};
+    for (const field of ['start', 'end']) {
+      const value = byId('digest-' + field).value;
+      if (value) body[field] = new Date(value).getTime() / 1000;
+    }
+    await api('digests/folder/' + folderId, 'POST', body);
+    byId('digest-dialog').close(); refresh();
+  } catch (error) { byId('digest-message').textContent = error.message; }
+  finally { button.disabled = stopped; }
+};

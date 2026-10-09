@@ -16,6 +16,7 @@ from .rss import RSSSource, SourceError
 from .sources import Source
 from .processing import LlamaCpp, ProcessorConfig, ProcessingError, EventsResult, FilterResult, Theses
 from .codex import Codex, CodexClient, LocalCodex, status as codex_status
+from .digests import DigestRequest
 from .store import Job, Store
 from .telegram import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from .subscriptions import ImportRequest, Overrides, FeedPatch
@@ -172,9 +173,9 @@ class Runtime:
             stage = 'Ошибка хранилища'
         elif state['deleting']:
             stage = 'Удаление'
-        elif any(j['kind'] in ('theses', 'filter', 'events') and j['status'] == 'running' for j in state['jobs']):
+        elif any(j['kind'] in ('theses', 'filter', 'events', 'digest') and j['status'] == 'running' for j in state['jobs']):
             stage = self._ai_stage
-        elif any(j['kind'] in ('theses', 'filter', 'events') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
+        elif any(j['kind'] in ('theses', 'filter', 'events', 'digest') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
             stage = 'Ожидание обработчика' if state['errors'] else 'Подготовка тезисов'
         elif pending and not self._sources:
             stage = 'Источник не подключён'
@@ -220,6 +221,18 @@ class Runtime:
         async with self._actions:
             if not self.require_store().retry_material(item):
                 raise ActionError('missing', 'Материал недоступен')
+
+    async def create_digest(self, scope: str, owner: str, body: DigestRequest) -> str:
+        async with self._actions:
+            current = self.require_store()
+            if not self._live():
+                raise ActionError('conflict', 'Откройте читатель')
+            try:
+                return current.digests.create(scope, owner, body, time.time())
+            except LookupError as error:
+                raise ActionError('missing', str(error)) from None
+            except ValueError as error:
+                raise ActionError('invalid', str(error)) from None
 
     async def viewed(self, item: str) -> None:
         async with self._actions:
@@ -347,18 +360,21 @@ class Runtime:
                 current = self._store
                 if not current or not current.valid(job) or not self._live():
                     return
-                policy = None if job.kind == 'events' else current.processing_policy(job.item)
+                policy = None if job.kind in ('events', 'digest') else current.processing_policy(job.item)
                 if policy and policy[0] == 'codex':
                     if not policy[1]:
                         raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
 
-                prepared = current.events.request(job) if job.kind == 'events' else current.filters.request(job) if job.kind == 'filter' else current.processing_request(job)
+                prepared = current.digests.request(job) if job.kind == 'digest' else current.events.request(job) if job.kind == 'events' else current.filters.request(job) if job.kind == 'filter' else current.processing_request(job)
                 if prepared and prepared[0].processor == 'codex' and not prepared[2]:
                     raise ProcessingError('Запрещена публичная AI-обработка набора; разрешение требуется от всех фидов')
                 config = current.processor_config()
                 if not prepared:
                     raise ProcessingError('Исходник недоступен для обработки')
                 request, signature, public_ai = prepared
+                if job.kind == 'digest' and not request.sources:
+                    current.digests.save(job, signature, None)
+                    return
                 adapter: Codex | LlamaCpp
                 if request.processor == 'codex':
                     adapter = Codex(self._codex_client)
@@ -369,16 +385,18 @@ class Runtime:
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:
-                if self._store is not current or not self._live() or not current.valid(job) or signature != (current.events.signature(job.item) if job.kind == 'events' else current.filters.signature(job.item) if job.kind == 'filter' else current.thesis_signature(job.item)):
+                if self._store is not current or not self._live() or not current.valid(job) or signature != (current.digests.signature(job.item) if job.kind == 'digest' else current.events.signature(job.item) if job.kind == 'events' else current.filters.signature(job.item) if job.kind == 'filter' else current.thesis_signature(job.item)):
                     return
                 if not checked['local'] and not public_ai:
                     raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
-            self._ai_stage = 'Объединение событий' if job.kind == 'events' else 'Фильтрация' if job.kind == 'filter' else 'Подготовка тезисов'
+            self._ai_stage = 'Подготовка обзора' if job.kind == 'digest' else 'Объединение событий' if job.kind == 'events' else 'Фильтрация' if job.kind == 'filter' else 'Подготовка тезисов'
             result = (await adapter.generate(request, self._root / 'staging' / job.item)
                       if isinstance(adapter, Codex) else await adapter.generate(request))
             async with self._actions:
                 if self._store is current and self._live():
-                    if job.kind == 'events' and isinstance(result, EventsResult):
+                    if job.kind == 'digest' and isinstance(result, Theses):
+                        current.digests.save(job, signature, result)
+                    elif job.kind == 'events' and isinstance(result, EventsResult):
                         current.events.save(job, signature, result)
                     elif job.kind == 'filter' and isinstance(result, FilterResult):
                         current.filters.save(job, signature, result)
@@ -530,6 +548,7 @@ class Runtime:
                         self._idle_since = None
                         if now - self._ai_sync >= .5:
                             self._store.sync_theses()
+                            self._store.digests.schedule(wall)
                             self._ai_sync = now
                         if self._ai and self._ai.done():
                             await self._ai

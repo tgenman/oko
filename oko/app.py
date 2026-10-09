@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from .sources import Source
 from .processing import ProcessorConfig
 from .codex import CodexClient
+from .digests import DigestRequest
 from .store import Store
 from .telegram import TelegramClient, ConnectTelegram
 from .subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
@@ -217,7 +218,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.get('/api/materials/{item}')
     async def material(item: str) -> dict[str, Any]:
-        result = store().events.material(item) if item.startswith('event-') else store().material(item)
+        result = store().digests.material(item) if item.startswith('digest-') else store().events.material(item) if item.startswith('event-') else store().material(item)
         if not result:
             raise HTTPException(404, 'Материал недоступен')
         return result
@@ -231,6 +232,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def retry_filter(item: str) -> dict[str, bool]:
         await runtime.retry_filter(item)
         return {'ok': True}
+
+    @app.post('/api/digests/{scope}/{owner}')
+    async def create_digest(scope: str, owner: str, body: DigestRequest) -> dict[str, str]:
+        return {'id': await runtime.create_digest(scope, owner, body)}
 
     @app.post('/api/materials/{item}/viewed')
     async def viewed(item: str) -> dict[str, bool]:

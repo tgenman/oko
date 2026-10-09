@@ -27,7 +27,10 @@ class Events:
         store = self.store
         feeds = {f['id']: f for f in store.subscriptions.feeds()}
         folders: dict[str, list[dict[str, Any]]] = {}
+        covered = {m['id'] for v in store.digests.views() for m in v['sources']}
         for row in store.db.execute('SELECT id FROM items WHERE viewed=0 AND complete=1 ORDER BY published,id').fetchall():
+            if row['id'] in covered:
+                continue
             material = store.material(row['id'])
             if not material or material.get('loading') or material['feed_id'] not in feeds:
                 continue
