@@ -14,7 +14,7 @@ import httpx
 
 from .rss import RSSSource, SourceError
 from .sources import Source
-from .processing import LlamaCpp, ProcessorConfig, ProcessingError, EventsResult, FilterResult, Theses
+from .processing import LlamaCpp, ProcessorConfig, ProcessingError, ProcessingRequest, EventsResult, FilterResult, Theses
 from .codex import Codex, CodexClient, LocalCodex, status as codex_status
 from .digests import DigestRequest
 from .store import Job, Store
@@ -365,7 +365,21 @@ class Runtime:
                     if not policy[1]:
                         raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
 
-                prepared = current.digests.request(job) if job.kind == 'digest' else current.events.request(job) if job.kind == 'events' else current.filters.request(job) if job.kind == 'filter' else current.processing_request(job)
+                operations: dict[str, tuple[
+                    Callable[[Job], tuple[ProcessingRequest, str, bool] | None],
+                    Callable[[str], str | None], str,
+                    Callable[[Job, str, Theses | FilterResult | EventsResult], None]]] = {
+                    'digest': (current.digests.request, current.digests.signature, 'Подготовка обзора',
+                               lambda j, s, r: current.digests.save(j, s, Theses.model_validate(r.model_dump()))),
+                    'events': (current.events.request, current.events.signature, 'Объединение событий',
+                               lambda j, s, r: current.events.save(j, s, EventsResult.model_validate(r.model_dump()))),
+                    'filter': (current.filters.request, current.filters.signature, 'Фильтрация',
+                               lambda j, s, r: current.filters.save(j, s, FilterResult.model_validate(r.model_dump()))),
+                    'theses': (current.processing_request, current.thesis_signature, 'Подготовка тезисов',
+                               lambda j, s, r: current.save_theses(j, s, Theses.model_validate(r.model_dump()))),
+                }
+                prepare, input_signature, stage, save = operations[job.kind]
+                prepared = prepare(job)
                 if prepared and prepared[0].processor == 'codex' and not prepared[2]:
                     raise ProcessingError('Запрещена публичная AI-обработка набора; разрешение требуется от всех фидов')
                 config = current.processor_config()
@@ -385,23 +399,16 @@ class Runtime:
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:
-                if self._store is not current or not self._live() or not current.valid(job) or signature != (current.digests.signature(job.item) if job.kind == 'digest' else current.events.signature(job.item) if job.kind == 'events' else current.filters.signature(job.item) if job.kind == 'filter' else current.thesis_signature(job.item)):
+                if self._store is not current or not self._live() or not current.valid(job) or signature != input_signature(job.item):
                     return
                 if not checked['local'] and not public_ai:
                     raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
-            self._ai_stage = 'Подготовка обзора' if job.kind == 'digest' else 'Объединение событий' if job.kind == 'events' else 'Фильтрация' if job.kind == 'filter' else 'Подготовка тезисов'
+            self._ai_stage = stage
             result = (await adapter.generate(request, self._root / 'staging' / job.item)
                       if isinstance(adapter, Codex) else await adapter.generate(request))
             async with self._actions:
                 if self._store is current and self._live():
-                    if job.kind == 'digest' and isinstance(result, Theses):
-                        current.digests.save(job, signature, result)
-                    elif job.kind == 'events' and isinstance(result, EventsResult):
-                        current.events.save(job, signature, result)
-                    elif job.kind == 'filter' and isinstance(result, FilterResult):
-                        current.filters.save(job, signature, result)
-                    elif job.kind == 'theses' and isinstance(result, Theses):
-                        current.save_theses(job, signature, result)
+                    save(job, signature, result)
         except asyncio.CancelledError:
             raise
         except Exception as error:

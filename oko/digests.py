@@ -4,11 +4,11 @@ import json
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .processing import Point, InputSource, ProcessingRequest, Theses
+from .processing import ProcessingError, Point, InputSource, ProcessingRequest, Theses
 
 if TYPE_CHECKING:
     from .store import Job, Store
@@ -31,6 +31,26 @@ class Progress(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     parts: int = Field(ge=0)
     points: list[Point]
+    complete: bool = False
+    reduce_cursor: int = 0
+    reduced: list[Point] = Field(default_factory=list)
+    rounds: int = 0
+
+
+def review_groups(points: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    groups: list[list[dict[str, Any]]] = []
+    size = 0
+    refs: set[str] = set()
+    for point in points:
+        point_size = len(json.dumps(point, ensure_ascii=False))
+        point_refs = {r['id'] for r in point['sources']}
+        if not groups or size + point_size > 50000 or len(refs | point_refs) > 100:
+            groups.append([])
+            size, refs = 0, set()
+        groups[-1].append(point)
+        size += point_size
+        refs |= point_refs
+    return groups
 
 
 class Digests:
@@ -53,7 +73,7 @@ class Digests:
             raise ValueError('Выберите папку или фид')
         values = self.store.subscriptions.effective(scope, owner)['effective']
         start = body.start if body.start is not None else now - values['digest_days']['value'] * 86400 if body.period else None
-        end = body.end
+        end = body.end if body.end is not None else now if body.period else None
         feeds = {f['id']: f for f in self.store.subscriptions.feeds()}
         members = []
         for row in self.store.db.execute('SELECT id,feed_id,published FROM items WHERE viewed=0 ORDER BY published,id').fetchall():
@@ -126,7 +146,7 @@ class Digests:
         settings = [self.store.subscriptions.effective('feed', m['feed_id']) for m in materials]
         config = self.store.processor_config()
         signature = hashlib.sha256(json.dumps([row['members'], values, settings, [m['filter'] for m in materials], config.model_dump() if config else None], sort_keys=True).encode()).hexdigest()
-        return dict(materials=materials, signature=signature, values=values, public_ai=all(feeds[m['feed_id']]['public_ai'] for m in materials), folder_id=feeds[materials[0]['feed_id']]['folder_id'], scope=row['scope'], owner=row['owner'], importance=max((feeds[m['feed_id']]['importance'] for m in materials), key=lambda v: {'normal': 0, 'elevated': 1, 'high': 2}[v]))
+        return dict(materials=materials, signature=signature, values=values, public_ai=all(feeds[m['feed_id']]['public_ai'] for m in materials), folder_id=row['owner'] if row['scope'] == 'folder' else feeds[materials[0]['feed_id']]['folder_id'], scope=row['scope'], owner=row['owner'], importance=max((feeds[m['feed_id']]['importance'] for m in materials), key=lambda v: {'normal': 0, 'elevated': 1, 'high': 2}[v]))
 
     def signature(self, identity: str) -> str | None:
         candidate = self.candidate(identity)
@@ -181,9 +201,23 @@ class Digests:
             if not chunks or len(chunks[-1]) >= 10 or sum(len(s.text)+len(s.title) for s in chunks[-1])+len(source.text)+len(source.title) > 60000:
                 chunks.append([])
             chunks[-1].append(source)
-        part = (self.read(job.item, candidate['signature']) or dict(parts=0))['parts']
+        data = self.read(job.item, candidate['signature']) or Progress(parts=0, points=[]).model_dump()
+        part = data['parts']
+        operation: Literal['digest', 'digest_reduce', 'digest_final'] = 'digest'
+        prompt = candidate['values']['prompt_digest']['value']
         chunk = chunks[part] if part < len(chunks) else []
-        request = ProcessingRequest(operation='digest', sources=tuple(chunk), settings_version=self.store.settings_version(), prompt=candidate['values']['prompt_digest']['value'], processor=candidate['values']['processor']['value'], generation=job.generation)
+        if not data['complete'] and part >= len(chunks) and len(chunks) > 1:
+            groups = review_groups(data['points'])
+            if data['rounds'] >= 8:
+                raise ProcessingError('Не удалось сжать промежуточные результаты; измените промпт или период')
+            selected = groups[data['reduce_cursor']] if len(groups) > 1 else groups[0]
+            refs = {r['id'] for point in selected for r in point['sources']}
+            chunk = [InputSource(id=m['id'], version=m['version'], url=m['url'], title=m['title'], text='', published=m['published']) for m in candidate['materials'] if m['id'] in refs]
+            chunk[0] = chunk[0].model_copy(update={'text': json.dumps(selected, ensure_ascii=False)})
+            operation = 'digest_reduce' if len(groups) > 1 else 'digest_final'
+            if operation == 'digest_reduce':
+                prompt = 'Сожми промежуточные темы максимум в десять тезисов с точными ссылками; сохрани противоречия и атрибуцию.'
+        request = ProcessingRequest(operation=operation, sources=tuple(chunk), settings_version=self.store.settings_version(), prompt=prompt, processor=candidate['values']['processor']['value'], generation=job.generation)
         return request, candidate['signature'], candidate['public_ai']
 
     def save(self, job: 'Job', signature: str, result: Theses | None) -> None:
@@ -192,14 +226,31 @@ class Digests:
         prepared = self.request(job)
         if not prepared:
             return
-        data = self.read(job.item, signature) or dict(parts=0, points=[])
+        data = self.read(job.item, signature) or Progress(parts=0, points=[]).model_dump()
         if result:
             result.validate_sources(prepared[0])
-            data['points'].extend(p.model_dump() for p in result.points)
-            data['parts'] += 1
-        # Partial results remain inaccessible; all parts use the same atomic writer.
-        self.store.save_derivative(job, signature, data, '\n'.join('- '+p['text'] for p in data['points']), finish=result is None)
-        if result is not None:
+            points = [p.model_dump() for p in result.points]
+            if prepared[0].operation == 'digest_final':
+                data['points'] = points
+                data['complete'] = True
+            elif prepared[0].operation == 'digest_reduce':
+                data['reduced'].extend(points)
+                data['reduce_cursor'] += 1
+                # Reconstructing the next request detects completion of this round.
+                groups = review_groups(data['points'])
+                if data['reduce_cursor'] == len(groups):
+                    data['points'] = data['reduced']
+                    data['reduced'] = []
+                    data['reduce_cursor'] = 0
+                    data['rounds'] += 1
+            else:
+                data['points'].extend(points)
+                data['parts'] += 1
+        else:
+            data['complete'] = True
+        # Partial results remain inaccessible; all stages use the atomic writer.
+        self.store.save_derivative(job, signature, data, '\n'.join('- '+p['text'] for p in data['points']), finish=data['complete'])
+        if not data['complete']:
             with self.store.db:
                 self.store.db.execute("UPDATE jobs SET status='pending',next=0 WHERE id=? AND generation=?", (job.id, job.generation))
         else:

@@ -78,8 +78,8 @@ def test_hundred_sources_are_chunked_without_losing_frozen_members(tmp_path):
         identity = client.post('/api/digests/folder/demo', json={}).json()['id']
         material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + identity).json()).get('digest') else None)
         assert len(material['sources']) == 100
-        assert len(calls) == 10
-        assert len({s['id'] for call in calls for s in call['sources']}) == 100
+        assert len(calls) == 11
+        assert len({s['id'] for call in calls[:-1] for s in call['sources']}) == 100
         client.post('/api/materials/' + identity + '/viewed')
         assert client.get('/api/cards').json() == []
         assert not list((tmp_path / 'digests').glob('*'))
@@ -213,8 +213,8 @@ def test_partial_results_resume_after_stop_without_repeating_completed_part(tmp_
         client.post('/api/tabs/reader/heartbeat')
         material = wait_for(client, lambda: m if (m := client.get('/api/materials/'+identity).json()).get('digest') else None)
         assert len(material['sources']) == 3
-        assert len(calls) == 6  # three 60k originals; six bounded parts, first reused
-        assert [len(c['sources'][0]['text']) for c in calls] == [40000, 20000]*3
+        assert len(calls) == 7  # three 60k originals; six bounded parts, first reused
+        assert [len(c['sources'][0]['text']) for c in calls[:-1]] == [40000, 20000]*3
         client.post('/api/materials/'+identity+'/viewed')
         assert not list((tmp_path / 'digests').glob('*.md'))
 
@@ -315,3 +315,92 @@ def test_process_death_after_partial_move_and_view_commit_recovers(tmp_path):
         server.shutdown()
         server.server_close()
         worker.join(2)
+
+
+def test_whole_large_digest_obeys_global_prompt_after_partial_processing(tmp_path):
+    from oko.sources import Material
+    class Big(EventSource):
+        async def fetch(self, publication):
+            return Material('Тема', 'Текст '*10000)
+    calls = []
+    native = model_transport([])
+    def reply(request):
+        if request.url.path != '/v1/chat/completions':
+            return native.handler(request)
+        task = json.loads(json.loads(request.content)['messages'][1]['content'])
+        calls.append(task)
+        s = task['sources'][0]
+        result = dict(points=[dict(text=text, sources=[dict(id=s['id'], url=s['url'])]) for text in ['Тема первая', 'Тема вторая']])
+        return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(result)}}]})
+    with TestClient(create_app(tmp_path, source=Big(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+        configure(client)
+        client.patch('/api/settings/oko/global', json={'prompt_digest':'Ровно два тезиса.', 'originals':False})
+        identity = client.post('/api/digests/folder/demo',json={}).json()['id']
+        material = wait_for(client, lambda: m if (m:=client.get('/api/materials/'+identity).json()).get('digest') else None)
+        assert len(material['digest']['points']) == 2
+        assert calls[-1]['operation'] == 'digest_final'
+        assert len(material['sources']) == 3
+
+
+def test_folder_digest_stays_in_selected_folder_when_member_feed_moves(tmp_path):
+    from tests.test_rss import rss
+    def reply(request):
+        if request.url.path.endswith('/feed'):
+            return httpx.Response(200,text=rss('https://'+request.url.host+'/article'))
+        return httpx.Response(200,text='<article>Открылась библиотека</article>')
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), ai_transport=digest_transport([])), headers=HEADERS) as client:
+        plan = client.post('/api/import',json={'opml':'<opml><body><outline text="Новости"><outline text="a" xmlUrl="https://a.test/feed"/><outline text="b" xmlUrl="https://b.test/feed"/></outline><outline text="Другая"/></body></opml>'}).json()
+        folder = next(f['id'] for f in plan['folders'] if f['title']=='Новости')
+        other = next(f['id'] for f in plan['folders'] if f['title']=='Другая')
+        client.patch('/api/settings/oko/global',json={'events':False,'processor':'llamacpp'})
+        client.put('/api/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        client.post('/api/tabs/reader/heartbeat')
+        wait_for(client,lambda: len(c:=client.get('/api/cards').json())==2 and all(x['complete'] and not x.get('loading') for x in c))
+        identity = client.post('/api/digests/folder/'+folder,json={}).json()['id']
+        wait_for(client,lambda: client.get('/api/materials/'+identity).json().get('digest'))
+        client.patch('/api/feeds/'+plan['feeds'][0]['id'],json={'folder_id':other})
+        material = wait_for(client,lambda: m if (m:=client.get('/api/materials/'+identity).json()).get('digest') else None)
+        assert material['folder_id'] == folder
+        assert len(client.get('/api/cards?folder='+folder).json()) == 1
+        assert client.get('/api/cards?folder='+other).json() == []
+        assert len(material['sources']) == 2
+
+
+def test_original_presentation_mode_inherits_independently_of_theses(tmp_path):
+    with TestClient(create_app(tmp_path,source=EventSource(),token='test',ai_transport=digest_transport([])),headers=HEADERS) as client:
+        configure(client)
+        assert all(c['originals'] for c in client.get('/api/cards').json())
+        client.patch('/api/settings/oko/global',json={'originals':False, 'theses':True})
+        material = wait_for(client,lambda: m if (m:=client.get('/api/materials/'+client.get('/api/cards').json()[0]['id']).json()).get('theses') else None)
+        assert material['originals'] is False and material['text']
+        client.patch('/api/settings/feed/demo',json={'originals':True})
+        assert client.get('/api/materials/'+material['id']).json()['originals'] is True
+        assert client.get('/api/settings/feed/demo').json()['effective']['theses']['value'] is True
+
+
+def test_large_intermediate_review_is_reduced_with_bounded_attributed_requests(tmp_path):
+    from oko.sources import Material
+    class Big(EventSource):
+        async def fetch(self, publication):
+            return Material('Тема', 'Текст '*10000)
+    calls = []
+    native = model_transport([])
+    def reply(request):
+        if request.url.path != '/v1/chat/completions':
+            return native.handler(request)
+        task = json.loads(json.loads(request.content)['messages'][1]['content'])
+        calls.append(task)
+        source = task['sources'][0]
+        texts = ['Подробность '+('а'*3800)]*30 if task['operation']=='digest' else ['Общая тема']
+        result = dict(points=[dict(text=text,sources=[dict(id=source['id'],url=source['url'])]) for text in texts])
+        return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(result)}}]})
+    with TestClient(create_app(tmp_path,source=Big(),token='test',ai_transport=httpx.MockTransport(reply)),headers=HEADERS) as client:
+        configure(client)
+        identity = client.post('/api/digests/folder/demo',json={}).json()['id']
+        material = wait_for(client,lambda: m if (m:=client.get('/api/materials/'+identity).json()).get('digest') else None)
+        assert any(c['operation']=='digest_reduce' for c in calls)
+        assert calls[-1]['operation']=='digest_final'
+        assert all(sum(len(s['text'])+len(s['title']) for s in c['sources'])<60000 for c in calls)
+        assert len(material['digest']['points'])==1 and len(material['sources'])==3
+        client.post('/api/materials/'+identity+'/viewed')
+        assert not list((tmp_path / 'digests').glob('*'))

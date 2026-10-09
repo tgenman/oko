@@ -92,7 +92,7 @@ async function open(id) {
       for (const ref of point.sources) { const link = element('a', ' Источник'); link.href = ref.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; li.append(link); }
       return li;
     }));
-    byId('original-panel').open = !material.theses && (!filter || filter.status !== 'done' || filter.restored || !filter.removed.length && !filter.hidden);
+    byId('original-panel').open = material.originals !== false && (!filter || filter.status !== 'done' || filter.restored || !filter.removed.length && !filter.hidden);
     byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? (material.captions ? 'Получение субтитров и превью' : 'Текст сохранён · загрузка вложений') : material.captions ? (material.reason || 'Субтитры и превью сохранены') : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
     byId('retry').hidden = !material.complete || material.full !== false || material.loading;
     byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
@@ -153,7 +153,7 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch) return;
     ids = new Set(cards.map(card => card.id));
     if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.originals !== selected.originals || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
     byId('compress').disabled = !folderId;
     byId('digest-now').disabled = !folderId;
     byId('count').textContent = cards.filter(card => !card.filter?.hidden).length;
@@ -220,7 +220,7 @@ heartbeat().then(refresh);
 
 const fields = {
   events: ['Объединять события (Око или папка)', 'boolean'], event_hours: ['Окно события, часов (Око или папка)', 'number'],
-  originals: ['Оригиналы', 'boolean'], theses: ['Тезисы публикаций', 'boolean'],
+  originals: ['Оригиналы при открытии публикации', 'boolean'], theses: ['Тезисы публикаций', 'boolean'],
   digests: ['Обзоры за период', 'boolean'], prompt_theses: ['Промпт тезисов', 'text'],
   prompt_digest: ['Промпт обзора', 'text'], prompt_filters: ['Правила фильтрации (промпт; пустое поле выключает фильтрацию)', 'text'],
   schedule: ['Расписание обзора (off или ЧЧ:ММ, местное время)', 'string'],
