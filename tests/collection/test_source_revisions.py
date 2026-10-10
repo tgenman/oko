@@ -304,3 +304,45 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
         time.sleep(.1)
         assert len(calls) == count
         assert client.get('/api/materials/' + item).json()['ai']['error']
+
+
+def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_media(tmp_path):
+    from tests.support.telegram import Telegram, connect, settled
+    from oko.collection.contracts import SourceError
+    class Editable(Telegram):
+        fail = False
+        text = 'Неизменный пост'
+        async def messages(self, account, peer, ids):
+            return [dict(id=11, date=time.time()-60, text=self.text, group=None,
+                         media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
+        async def download(self, account, peer, id):
+            if self.fail:
+                raise SourceError('Ограничение частоты', 60)
+            return b'saved-image'
+    source = Editable()
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
+        client.patch('/api/settings/oko/global', json={'events': False})
+        client.post('/api/tabs/test/heartbeat')
+        connect(client)
+        original = settled(client)[0]
+        item = original['id']
+        source.fail = True
+        client.post('/api/collect')
+        wait_for(client, lambda: client.get('/api/status').json()['errors'] or client.get('/api/materials/' + item).json()['changed'])
+        retained = client.get('/api/materials/' + item).json()
+        assert retained['version'] == original['version']
+        assert retained['changed'] is False and retained['previous'] == []
+        assert retained['full'] is True
+        assert client.get(retained['attachments'][0]['url']).content == b'saved-image'
+        assert client.get('/api/status').json()['errors'] == ['Ограничение частоты']
+        source.fail = False
+        client.post('/api/materials/' + item + '/retry')
+        wait_for(client, lambda: not client.get('/api/materials/' + item).json()['loading'])
+        assert client.get('/api/materials/' + item).json()['version'] == original['version']
+        source.text = 'Настоящая правка текста при недоступном вложении'
+        source.fail = True
+        client.post('/api/collect')
+        edited = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == source.text else None)
+        assert edited['changed'] is True and edited['full'] is False
+        assert len(edited['previous']) == 1
+        assert client.get(edited['previous'][0]['url']).json()['text'] == 'Неизменный пост'

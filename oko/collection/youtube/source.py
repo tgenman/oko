@@ -83,8 +83,11 @@ class YouTubeSource(RSSSource):
                 transcript = await self.captions_client.fetch(publication.id)
                 text, state, reason = ((transcript, 'available', '') if transcript else ('', 'unavailable', 'Субтитры недоступны'))
             except SourceError as error:
+                if publication.teaser and publication.teaser.captions == 'available':
+                    raise
                 state, reason = 'error', error.label
         images: list[Image] = []
+        preview_complete = True
         try:
             raw, _, mime = await self.download(f'https://i.ytimg.com/vi/{publication.id}/hqdefault.jpg', 2_000_000)
             if mime == 'image/jpeg' and raw.startswith(b'\xff\xd8\xff'):
@@ -94,5 +97,8 @@ class YouTubeSource(RSSSource):
             else:
                 raise SourceError('Превью недоступно')
         except SourceError:
+            preview_complete = False
+            if publication.teaser:
+                images.extend(publication.teaser.images)
             reason = (reason + '; ' if reason else '') + 'Превью недоступно'
-        return Material(title, text, state == 'available' and bool(images), reason, tuple(images), captions=state)
+        return Material(title, text, state == 'available' and bool(images) and preview_complete, reason, tuple(images), captions=state)

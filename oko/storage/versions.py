@@ -7,7 +7,7 @@ import re
 import shutil
 from typing import TYPE_CHECKING, Any
 
-from oko.collection.contracts import Material
+from oko.collection.contracts import Material, SourceError
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -51,7 +51,19 @@ class Versions:
         self.store.db.execute('INSERT INTO content_versions VALUES (?,?,?,?) ON CONFLICT(item,number) DO UPDATE SET fingerprint=excluded.fingerprint,visible=MAX(visible,excluded.visible)', (item, number, fingerprint, int(visible)))
         self.store.db.execute('INSERT INTO content_current VALUES (?,?) ON CONFLICT(item) DO UPDATE SET number=excluded.number', (item, number))
 
-    def prepare(self, item: str, material: Material) -> tuple[int, str]:
+    @staticmethod
+    def payload_fingerprint(directory: Path) -> str:
+        raw, text = (directory / 'original.md').read_text().split('\n\n', 1)
+        header = json.loads(raw)
+        for key in ('full', 'reason', 'captions'):
+            header.pop(key, None)
+        digest = hashlib.sha256((json.dumps(header, sort_keys=True) + '\n\n' + text).encode())
+        for path in sorted(directory.iterdir()):
+            if path.name.startswith(('image-', 'media-')):
+                digest.update(path.name.encode() + b'\0' + hashlib.sha256(path.read_bytes()).digest())
+        return digest.hexdigest()
+
+    def prepare(self, item: str, material: Material) -> tuple[int, str, bool]:
         stage = self.store.root / 'staging' / item
         if stage.exists():
             shutil.rmtree(stage)
@@ -72,7 +84,12 @@ class Versions:
         number = self.number(item)
         if number and self.path(item).is_file() and self.fingerprint(self.path(item).parent) == fingerprint:
             shutil.rmtree(stage)
-            return number, fingerprint
+            return number, fingerprint, False
+        progress_only = bool(number and self.path(item).is_file() and self.payload_fingerprint(stage) == self.payload_fingerprint(self.path(item).parent))
+        accepted_full = bool(progress_only and json.loads(self.path(item).read_text().split('\n\n', 1)[0]).get('full'))
+        if accepted_full and not material.full:
+            shutil.rmtree(stage)
+            raise SourceError(material.reason or 'Повторная загрузка материала не завершена')
         # Include orphan directories from an interrupted write; never overwrite
         # the published version or promote that orphan as a completed result.
         parent = self.store.root / 'content' / item
@@ -82,7 +99,7 @@ class Versions:
         os.replace(stage, destination)
         for directory in (destination, parent, parent.parent, self.store.root / 'staging'):
             self._fsync(directory)
-        return number, fingerprint
+        return number, fingerprint, progress_only
 
     @staticmethod
     def _write(path: Path, data: bytes) -> None:
@@ -99,9 +116,12 @@ class Versions:
         finally:
             os.close(fd)
 
-    def publish(self, item: str, prepared: tuple[int, str], visible: bool) -> None:
+    def publish(self, item: str, prepared: tuple[int, str, bool], visible: bool) -> None:
         # Called inside Store's discovery/save transaction.
-        self._register(item, *prepared, visible)
+        number, fingerprint, progress_only = prepared
+        if progress_only:
+            self.store.db.execute('UPDATE content_versions SET visible=0 WHERE item=? AND number=?', (item, self.number(item)))
+        self._register(item, number, fingerprint, visible)
         self.store.db.execute('DELETE FROM source_deleted WHERE item=?', (item,))
 
     def version(self, item: str) -> str:

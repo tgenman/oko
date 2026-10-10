@@ -212,14 +212,16 @@ class RSSSource:
         unique_urls = list(dict.fromkeys(urls))
         if len(unique_urls) > 30:
             full, reason = False, 'Не все изображения сохранены (лимит 30)'
-        for url in unique_urls[:30]:
+        for position, url in enumerate(unique_urls[:30]):
             try:
                 raw, _, mime = await self.download(urljoin(base, url), 10_000_000)
                 signatures = {'image/png': b'\x89PNG\r\n\x1a\n', 'image/jpeg': b'\xff\xd8\xff', 'image/gif': b'GIF8', 'image/webp': b'RIFF'}
                 if mime not in signatures or not raw.startswith(signatures[mime]):
                     raise SourceError('Неподдерживаемое изображение')
                 suffix = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp'}[mime]
-                images.append(Image(f'image-{len(images)}.{suffix}', raw))
+                images.append(Image(f'image-{position}.{suffix}', raw))
             except SourceError:
                 full, reason = False, 'Не все изображения сохранены'
+                if publication.teaser:
+                    images.extend(image for image in publication.teaser.images if image.name.startswith(f'image-{position}.'))
         return Material(title, text, full, reason, tuple(images))
