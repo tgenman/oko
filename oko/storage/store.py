@@ -74,7 +74,7 @@ class Store:
                 self.db.execute('INSERT INTO items_scoped SELECT id,source_id,url,published,viewed,complete,feed_id,members FROM items')
                 self.db.execute('DROP TABLE items')
                 self.db.execute('ALTER TABLE items_scoped RENAME TO items')
-        self.subscriptions = Subscriptions(self.db)
+        self.subscriptions = Subscriptions(self.db, self.fault)
         self.filters = Filters(self)
         self.events = Events(self)
         self.digests = Digests(self)

@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit, parse_qs
 import xml.etree.ElementTree as ET
@@ -126,7 +127,7 @@ def preview(opml: str) -> dict[str, Any]:
 
 
 class Subscriptions:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: sqlite3.Connection, fault: Callable[[str], None] = lambda _: None) -> None:
         self.db = db
         db.executescript('''
         CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, title TEXT UNIQUE, position INTEGER);
@@ -139,20 +140,22 @@ class Subscriptions:
           PRIMARY KEY(scope,owner,field));
         ''')
 
-        columns = {row['name'] for row in db.execute('PRAGMA table_info(feeds)')}
-        for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT')]:
-            if column not in columns:
-                db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
-        if 'telegram_username' not in columns:
-            # Infer only while upgrading legacy storage. A new connection's
-            # explicit absence of a public username must remain authoritative.
-            for row in db.execute("SELECT * FROM feeds WHERE kind='telegram' AND telegram_peer IS NOT NULL").fetchall():
-                candidates = ([row['identity'].removeprefix('telegram:')]
-                              if row['identity'].startswith('telegram:') else []) + json.loads(row['original_urls'])
-                username = next((name.lstrip('@') for name in candidates
-                                 if re.fullmatch(r'@?[a-zA-Z][a-zA-Z0-9_]{3,31}', name)), None)
-                db.execute('UPDATE feeds SET telegram_username=? WHERE id=?', (username, row['id']))
-        db.commit()
+        with db:
+            db.execute('BEGIN IMMEDIATE')
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(feeds)')}
+            for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT')]:
+                if column not in columns:
+                    db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
+            if 'telegram_username' not in columns:
+                # Infer only while upgrading legacy storage. A new connection's
+                # explicit absence of a public username must remain authoritative.
+                for row in db.execute("SELECT * FROM feeds WHERE kind='telegram' AND telegram_peer IS NOT NULL").fetchall():
+                    candidates = ([row['identity'].removeprefix('telegram:')]
+                                  if row['identity'].startswith('telegram:') else []) + json.loads(row['original_urls'])
+                    username = next((name.lstrip('@') for name in candidates
+                                     if re.fullmatch(r'@?[a-zA-Z][a-zA-Z0-9_]{3,31}', name)), None)
+                    db.execute('UPDATE feeds SET telegram_username=? WHERE id=?', (username, row['id']))
+                fault('before_telegram_username_commit')
 
     def connect_telegram(self, body: ConnectTelegram, info: dict[str, Any]) -> dict[str, Any]:
         identity = f"telegram-peer:{body.account}:{info['peer']}"

@@ -426,6 +426,11 @@ def test_public_peer_is_resolved_again_after_restart_without_session_entity_cach
     import sqlite3
     with sqlite3.connect(tmp_path / 'state.sqlite') as database:
         database.execute('ALTER TABLE feeds DROP COLUMN telegram_username')
+    def interrupt_migration(point):
+        if point == 'before_telegram_username_commit':
+            raise OSError('simulated migration interruption')
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=ColdSession(), fault=interrupt_migration), headers=HEADERS) as client:
+        assert 'Хранилище' in client.get('/api/status').json()['error']
     restarted = ColdSession()
     restarted.text = 'После перезапуска'
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=restarted), headers=HEADERS) as client:
