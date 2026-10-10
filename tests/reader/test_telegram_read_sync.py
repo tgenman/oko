@@ -296,3 +296,34 @@ def test_complete_early_post_is_auto_confirmed_before_loading_later_post(tmp_pat
             assert network.acks == [11, 29]
     finally:
         network.release.set()
+
+
+def test_disabling_auto_read_requires_view_for_saved_unconfirmed_post_after_restart(tmp_path):
+    from oko.collection.contracts import SourceError
+    class Partial(ReadTelegram):
+        async def messages(self, account, peer, ids):
+            rows = await super().messages(account, peer, ids)
+            return [dict(m, media=dict(kind='image', mime='image/jpeg', extension='jpg')) if m['id'] == 11 else m for m in rows]
+        async def download(self, account, peer, id):
+            raise SourceError('Обрыв изображения')
+    network = Partial()
+    kwargs = dict(token='test', telegram_client=network)
+    with TestClient(create_app(tmp_path, **kwargs), headers=H) as client:
+        client.post('/api/tabs/test/heartbeat')
+        feed = connect(client)
+        client.patch('/api/feeds/' + feed['id'], json={'auto_read': True})
+        cards = settled(client, 2)
+        later = next(c for c in cards if c['members'] == [29])['id']
+        earlier = next(c for c in cards if c['members'] == [11])['id']
+        wait_for(client, lambda s: any(r.get('pending') == 1 and r.get('waiting') for r in s['telegram_reads']))
+        assert network.acks == []
+        assert client.patch('/api/feeds/' + feed['id'], json={'auto_read': False}).status_code == 200
+    with TestClient(create_app(tmp_path, **kwargs), headers=H) as client:
+        client.post('/api/tabs/test/heartbeat')
+        client.post('/api/materials/' + earlier + '/viewed')
+        wait_for(client, lambda s: any(r.get('confirmed') >= 11 for r in s['telegram_reads']))
+        assert network.acks == [11]
+        assert client.get('/api/materials/' + later).status_code == 200
+        client.post('/api/materials/' + later + '/viewed')
+        wait_for(client, lambda s: any(r.get('confirmed') == 29 for r in s['telegram_reads']))
+        assert network.acks == [11, 29]

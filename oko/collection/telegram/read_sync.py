@@ -54,9 +54,9 @@ class ReadSync:
             return None
         return dict(account=config['telegram_account'], peer=config['telegram_peer'],
                     username=config.get('telegram_username'), since=state['since'],
-                    initial=state['initial'], read_history=config['read_history'],
+                    initial=state['initial'], read_history=config['read_history'], auto_read=config['auto_read'],
                     eligible=[r[0] for r in self.store.db.execute(
-                        'SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1 AND missing=0 ORDER BY member', (feed,))])
+                        "SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1 AND missing=0 AND (?=1 OR reason='viewed') ORDER BY member", (feed, config['auto_read']))])
 
     def signature(self, request: dict[str, Any]) -> str:
         return json.dumps({k: v for k, v in request.items() if k != 'initial'}, sort_keys=True)
@@ -128,6 +128,10 @@ class ReadSync:
                 self.store.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=? AND generation=? AND status='running'", (now + (.1 if plan.waiting == 'Продолжение проверки истории Telegram' else 30), plan.waiting, job.id, job.generation))
             else:
                 self.store.finish(job)
+
+    def suspend(self, job: 'Job') -> None:
+        with self.store.db:
+            self.store.finish(job)
 
     def failed(self, feed: str, label: str) -> None:
         with self.store.db:

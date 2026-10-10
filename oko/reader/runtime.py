@@ -534,14 +534,12 @@ class Runtime:
         if not isinstance(source, TelegramSource):
             async with self._actions:
                 if self._store is current and current.valid(job):
-                    with current.db:
-                        current.finish(job)
+                    current.read_sync.suspend(job)
             return
         async with self._actions:
             request = current.read_sync.request(job.item)
             if not request:
-                current.finish(job)
-                current.db.commit()
+                current.read_sync.suspend(job)
                 return
             signature = current.read_sync.signature(request)
         await source.resolve()
