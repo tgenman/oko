@@ -115,15 +115,25 @@ class LocalTelegram:
 
 
 class TelegramSource:
-    def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int) -> None:
+    def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None) -> None:
+        self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days
         self.more = False
         self.gap: str | None = None
+
+    async def resolve(self) -> None:
+        # StringSession does not persist Telethon's entity/access-hash cache.
+        # Refill it in the current worker, but never change the feed's identity.
+        if self.username:
+            info = await self.client.info(self.account, '@' + self.username)
+            if info['peer'] != self.peer:
+                raise SourceError('Username Telegram теперь принадлежит другому источнику; переподключите фид')
 
     def url(self, id: int) -> str:
         return f'https://t.me/c/{-self.peer-1000000000000}/{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
 
     async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+        await self.resolve()
         state: dict[str, Any] = json.loads(cursor) if cursor else dict(after=0, since=time.time()-self.initial_days*86400)
         batch = await self.client.page(self.account, self.peer, state['after'], state['since'])
         self.more, self.gap = batch['more'], batch.get('gap')
@@ -147,6 +157,7 @@ class TelegramSource:
         return publications, json.dumps(state)
 
     async def fetch(self, publication: Publication) -> Material:
+        await self.resolve()
         rows = await self.client.messages(self.account, self.peer, list(publication.members) or [int(publication.id)])
         teaser = publication.teaser or Material('Публикация недоступна', '')
         if not rows:

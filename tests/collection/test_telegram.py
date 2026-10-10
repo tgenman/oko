@@ -395,3 +395,73 @@ def test_direct_client_prefers_existing_string_session_to_stale_file_setting(tmp
         assert response.status_code == 200, response.json()
         assert response.json()['telegram_account'] == 'default'
         assert not list(project.rglob('*.session'))
+
+
+def test_public_peer_is_resolved_again_after_restart_without_session_entity_cache(tmp_path: Path):
+    from oko.collection.contracts import SourceError
+    class ColdSession(Telegram):
+        resolved = False
+        text = 'До перезапуска'
+        async def info(self, account, peer):
+            if peer not in ('fixture', '@fixture'):
+                raise SourceError('Нет доступа к Telegram-источнику')
+            self.resolved = True
+            return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False, username='fixture')
+        async def page(self, account, peer, after, since):
+            if not self.resolved:
+                raise SourceError('Нет доступа к Telegram-источнику')
+            return await super().page(account, peer, after, since)
+        async def messages(self, account, peer, ids):
+            if not self.resolved:
+                raise SourceError('Нет доступа к Telegram-источнику')
+            return [dict(id=11, date=time.time()-60, text=self.text, group=None, media=None)]
+        async def close(self):
+            self.resolved = False
+    original = ColdSession()
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=original), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        connect(client)
+        item = settled(client)[0]['id']
+    # Simulate the user's existing database from before username persistence.
+    import sqlite3
+    with sqlite3.connect(tmp_path / 'state.sqlite') as database:
+        database.execute('ALTER TABLE feeds DROP COLUMN telegram_username')
+    restarted = ColdSession()
+    restarted.text = 'После перезапуска'
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=restarted), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        assert client.post('/api/materials/' + item + '/retry').status_code == 200
+        for _ in range(100):
+            material = client.get('/api/materials/' + item).json()
+            if material.get('text') == 'После перезапуска' and not material.get('loading'):
+                break
+            time.sleep(.02)
+        assert material['text'] == 'После перезапуска'
+
+
+def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path):
+    class Reassigned(Telegram):
+        changed = False
+        async def info(self, account, peer):
+            return dict(peer=-1009876543210 if self.changed else -1001234567890,
+                        title='Канал', kind='channel', forum=False, username='fixture')
+        async def messages(self, account, peer, ids):
+            assert not self.changed, 'Must reject the reassigned username before fetching'
+            return await super().messages(account, peer, ids)
+    original = Reassigned()
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=original), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        connect(client)
+        item = settled(client)[0]['id']
+    changed = Reassigned()
+    changed.changed = True
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=changed), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        client.post('/api/materials/' + item + '/retry')
+        for _ in range(100):
+            errors = client.get('/api/status').json()['errors']
+            if any('другому источнику' in e for e in errors):
+                break
+            time.sleep(.02)
+        assert any('другому источнику' in e for e in errors)
+        assert client.get('/api/materials/' + item).json()['text'] == 'Текст канала'

@@ -137,7 +137,7 @@ class Runtime:
                 continue
             if feed['transport'] == 'telegram' and self._telegram_client and feed.get('telegram_peer'):
                 if not isinstance(self._sources.get(feed['id']), TelegramSource):
-                    self._sources[feed['id']] = TelegramSource(self._telegram_client, feed['telegram_account'], feed['telegram_peer'], feed['initial_days'])
+                    self._sources[feed['id']] = TelegramSource(self._telegram_client, feed['telegram_account'], feed['telegram_peer'], feed['initial_days'], feed.get('telegram_username'))
                     self._store.enqueue_discovery(feed['id'])
                 telegram_source = self._sources[feed['id']]
                 if isinstance(telegram_source, TelegramSource):

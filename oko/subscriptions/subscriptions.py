@@ -140,7 +140,7 @@ class Subscriptions:
         ''')
 
         columns = {row['name'] for row in db.execute('PRAGMA table_info(feeds)')}
-        for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT')]:
+        for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT')]:
             if column not in columns:
                 db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
         db.commit()
@@ -168,7 +168,7 @@ class Subscriptions:
             if not old:
                 self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls)
                                 VALUES (?,?,?,'telegram',?,?)''', (id, identity, info['title'], folder, json.dumps([str(body.peer)])))
-            self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,auto_read=? WHERE id=?", (info['peer'], body.account, body.auto_read, id))
+            self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,telegram_username=?,auto_read=? WHERE id=?", (info['peer'], body.account, info.get('username'), body.auto_read, id))
         return next(f for f in self.feeds() if f['id'] == id)
 
     def ensure_demo(self) -> None:
@@ -188,6 +188,13 @@ class Subscriptions:
         for row in self.db.execute('SELECT * FROM feeds ORDER BY rowid'):
             feed = dict(row)
             feed['original_urls'] = json.loads(feed['original_urls'])
+            if feed['kind'] == 'telegram' and not feed.get('telegram_username'):
+                # Older connected feeds retain a public name in their identity
+                # (RSSHub import) or original connection reference.
+                candidates = ([feed['identity'].removeprefix('telegram:')]
+                              if feed['identity'].startswith('telegram:') else []) + feed['original_urls']
+                feed['telegram_username'] = next((name.lstrip('@') for name in candidates
+                                                  if re.fullmatch(r'@?[a-zA-Z][a-zA-Z0-9_]{3,31}', name)), None)
             for field in ('public_ai', 'read_history', 'auto_read'):
                 feed[field] = None if feed[field] is None else bool(feed[field])
             result.append(feed)
