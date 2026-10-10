@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from oko.collection.contracts import SourceError
+from oko.collection.contracts import SourceError, SourceDeleted
 from oko.collection.contracts import Attachment, Material, Publication
 
 
@@ -137,6 +137,7 @@ class LocalTelegram:
 
 
 class TelegramSource:
+    changes = 'Telegram: при сборе перечитываются известные непросмотренные сообщения и вложения. Отсутствующие сообщения сохраняются локально; исчезновение может означать удаление или потерю доступа.'
     def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None) -> None:
         self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days
@@ -183,11 +184,15 @@ class TelegramSource:
         rows = await self.client.messages(self.account, self.peer, list(publication.members) or [int(publication.id)])
         teaser = publication.teaser or Material('Публикация недоступна', '')
         if not rows:
+            if publication.teaser and publication.teaser.full:
+                raise SourceDeleted()
             return Material(teaser.title, teaser.text, False, 'Публикация недоступна в Telegram', attachments=teaser.attachments)
-        text = '\n\n'.join(msg['text'] for msg in rows if msg['text']) or teaser.text
+        text = '\n\n'.join(msg['text'] for msg in rows if msg['text'])
         attachments = []
         reasons = []
         if set(publication.members) - {msg['id'] for msg in rows}:
+            if teaser.full:
+                raise SourceDeleted()
             reasons.append('Часть альбома недоступна в Telegram')
         for msg in rows:
             media = msg['media']
@@ -204,7 +209,8 @@ class TelegramSource:
             except SourceError as error:
                 reasons.append(error.label)
         names = {a.name for a in attachments}
-        attachments.extend(a for a in teaser.attachments if a.name not in names)
+        failed_names = {f"media-{m['id']}.{m['media']['extension']}" for m in rows if m['media'] and m['media']['kind'] != 'unsupported'}
+        attachments.extend(a for a in teaser.attachments if a.name not in names and (a.name in failed_names or int(a.name.split('-')[1].split('.')[0]) not in {m['id'] for m in rows}))
         if any(msg['group'] and time.time()-msg['date'] < 5 for msg in rows):
             reasons.append('Альбом ещё публикуется; повторите загрузку')
         return Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, not reasons,

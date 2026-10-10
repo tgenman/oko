@@ -2,19 +2,19 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
-import re
 from pathlib import Path
 import shutil
 import sqlite3
 from collections.abc import Callable
 from typing import Any
 
+from oko.storage.versions import Versions
 from oko.reader.composition import FolderContents, ReadingComposition
 from oko.collection.telegram.read_sync import ReadSync
 from oko.reviews.events import Events
 from oko.reviews.digests import Digests
 from oko.reviews.filtering import Filters
-from oko.collection.contracts import Attachment, Material, Publication
+from oko.collection.contracts import Attachment, Image, Material, Publication
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.processing.contracts import InputSource, ProcessingRequest, Theses
 from oko.processing.llamacpp import ProcessorConfig
@@ -86,6 +86,8 @@ class Store:
         with self.db:
             self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
             self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
+        self.versions = Versions(self)
+        self.versions.recover()
         self.recover_files()
 
     def recover_files(self) -> None:
@@ -108,7 +110,7 @@ class Store:
                     self.db.execute("UPDATE jobs SET status='pending' WHERE kind='fetch' AND item=?", (row['id'],))
 
     def path(self, item: str) -> Path:
-        return self.root / 'content' / item / '1' / 'original.md'
+        return self.versions.path(item)
 
     def enqueue_discovery(self, feed: str = 'demo') -> None:
         with self.db:
@@ -133,7 +135,7 @@ class Store:
                 inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members) VALUES (?,?,?,?,?,?)',
                                 (item, source_id, p.url, p.published, feed, json.dumps(p.members)))
                 if inserted.rowcount and p.teaser:
-                    self.write_material(item, p.teaser)
+                    self.versions.publish(item, self.versions.prepare(item, p.teaser), False)
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and not row['viewed']:
@@ -141,12 +143,21 @@ class Store:
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
                         self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (row['id'],))
-                    self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('fetch',?)", (row['id'],))
+                    self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done'", (row['id'],))
             if namespace == 'telegram':
+                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]')", (feed,))
                 self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
+
+    def source_removed(self, job: Job) -> None:
+        if not self.valid(job) or self.publication(job.item) is None:
+            return
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
+            self.finish(job)
+        self.sync_theses()
 
     def retry_material(self, item: str) -> bool:
         if self.publication(item) is None:
@@ -200,57 +211,22 @@ class Store:
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         fallback = self.material(item) if row else None
-        teaser = Material(fallback['title'], fallback['text'], False, attachments=tuple(Attachment(Path(a['url']).name, (self.path(item).parent / Path(a['url']).name).read_bytes(), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
+        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', [])), attachments=tuple(Attachment(Path(a['url']).name, (self.path(item).parent / Path(a['url']).name).read_bytes(), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
         return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members']))) if row else None
 
     def save(self, job: Job, material: Material) -> None:
         item = job.item
         if not self.valid(job) or self.publication(item) is None:
             return
-        self.write_material(item, material)
+        prepared = self.versions.prepare(item, material)
         self.fault('after_file_move')
         with self.db:
+            self.versions.publish(item, prepared, True)
             self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
             if material.members:
                 self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
             self.finish(job)
         self.sync_theses()
-
-    def write_material(self, item: str, material: Material) -> None:
-        stage = self.root / 'staging' / item
-        if stage.exists():
-            shutil.rmtree(stage)
-        stage.mkdir()
-        # Header is content too, and deliberately lives outside SQLite.
-        with (stage / 'original.md').open('w', encoding='utf-8') as f:
-            f.write(json.dumps({'title': material.title, 'full': material.full, 'reason': material.reason, 'members': list(material.members), 'captions': material.captions, 'attachments': [dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments]}, ensure_ascii=False) + '\n\n' + material.text)
-            f.flush()
-            os.fsync(f.fileno())
-        for image in material.images:
-            if Path(image.name).name != image.name or not image.name.startswith('image-'):
-                raise ValueError('image name')
-            with (stage / image.name).open('wb') as output:
-                output.write(image.data)
-                output.flush()
-                os.fsync(output.fileno())
-        for attachment in material.attachments:
-            if not re.fullmatch(r'media-[0-9]+\.[a-z0-9]+', attachment.name):
-                raise ValueError('attachment name')
-            with (stage / attachment.name).open('wb') as output:
-                output.write(attachment.data)
-                output.flush()
-                os.fsync(output.fileno())
-        destination = self.path(item).parent
-        destination.parent.mkdir(exist_ok=True)
-        if destination.exists():
-            shutil.rmtree(destination)
-        os.replace(stage, destination)
-        for directory in (destination, destination.parent, destination.parent.parent, self.root / 'staging'):
-            fd = os.open(directory, os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
@@ -268,6 +244,7 @@ class Store:
                 self.read_sync.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
                 self.filters.forget(member)
+                self.versions.forget(member)
                 self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (member,))
                 self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))
                 self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (member,))
@@ -314,7 +291,7 @@ class Store:
             if filtered['status'] == 'done' and not filtered['restored']:
                 for fragment in filtered['removed']:
                     display_text = display_text.replace(fragment, '')
-            return dict(originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 
@@ -348,7 +325,7 @@ class Store:
         self.sync_theses()
 
     def content_version(self, item: str) -> str:
-        return hashlib.sha256(self.path(item).read_bytes()).hexdigest()
+        return self.versions.version(item)
 
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
         if not want_captions:

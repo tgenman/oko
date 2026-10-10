@@ -292,6 +292,15 @@ class Digests:
 
     def sync(self) -> None:
         for row in self.store.db.execute('SELECT * FROM digest_sets').fetchall():
+            members = json.loads(row['members'])
+            materials = [self.store.material(member) for member, _ in members]
+            if all(materials):
+                if any(not m['complete'] or m.get('loading') for m in materials if m):
+                    continue  # Preserve the frozen identities during a recheck.
+                current = [[m['id'], m['version']] for m in materials if m]
+                if current != members:
+                    with self.store.db:
+                        self.store.db.execute('UPDATE digest_sets SET members=? WHERE id=?', (json.dumps(current), row['id']))
             candidate = self.candidate(row['id'])
             if not candidate:
                 self.invalidate(row['id'])

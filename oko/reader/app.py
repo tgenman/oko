@@ -226,6 +226,33 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise HTTPException(404, 'Вложение недоступно')
         return Response(path.read_bytes(), media_type=media['mime'], headers={'Content-Disposition': 'inline'})
 
+    @app.get('/api/materials/{item}/versions/{number}')
+    async def previous_version(item: str, number: int) -> dict[str, Any]:
+        result = store().versions.read(item, number)
+        if result is None:
+            raise HTTPException(404, 'Версия недоступна')
+        return result
+
+    @app.get('/api/materials/{item}/versions/{number}/{kind}/{name}')
+    async def previous_media(item: str, number: int, kind: str, name: str) -> Response:
+        current = store()
+        material = current.versions.read(item, number)
+        if kind not in ('images', 'media') or material is None or Path(name).name != name:
+            raise HTTPException(404, 'Вложение недоступно')
+        images = material['images']
+        attachments = material['attachments']
+        match = next((a for a in attachments if a['url'].endswith('/'+name)), None)
+        if kind == 'images' and any(url.endswith('/'+name) for url in images):
+            mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'}[Path(name).suffix]
+        elif kind == 'media' and match:
+            mime = match['mime']
+        else:
+            raise HTTPException(404, 'Вложение недоступно')
+        path = current.versions.path(item, number).parent / name
+        if not path.is_file():
+            raise HTTPException(404, 'Вложение недоступно')
+        return Response(path.read_bytes(), media_type=mime)
+
     @app.get('/api/materials/{item}')
     async def material(item: str) -> dict[str, Any]:
         result = store().reading.material(item)

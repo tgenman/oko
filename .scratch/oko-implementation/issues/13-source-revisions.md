@@ -4,9 +4,9 @@
 
 **Blocked by:** [03: Чтение RSS-статей](03-rss-reading.md), [04: Чтение Telegram с медиа](04-telegram-reading.md), [08: Обновления и тезисы YouTube](08-youtube-updates.md), [11: Обзоры и сжатие истории](11-digests-compression.md)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
-**Label:** ready-for-agent
+**Label:** claimed
 
 **Основание:** [Спецификация первой версии](../../oko-product/spec.md), [Глоссарий](../../../GLOSSARY.md), [Макет A и его ограничения](../../oko-product/prototype/README.md).
 

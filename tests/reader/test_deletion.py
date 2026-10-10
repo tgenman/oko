@@ -19,6 +19,7 @@ def test_viewed_during_fetch_never_publishes_late_result(tmp_path: Path):
             time.sleep(.02)
         assert len(cards) == 3
         item = cards[0]['id']
+        viewed_source = cards[0]['url'].rsplit('/', 1)[1]
         client.post(f'/api/materials/{item}/viewed')
         time.sleep(.05)
         assert client.get(f'/api/materials/{item}').status_code == 404
@@ -40,6 +41,7 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
                 break
             time.sleep(.02)
         item = cards[0]['id']
+        viewed_source = cards[0]['url'].rsplit('/', 1)[1]
         client.post(f'/api/materials/{item}/viewed')
         assert client.get(f'/api/materials/{item}').status_code == 404
         assert client.get('/api/status').json()['errors'] == ['Ошибка удаления']
@@ -78,13 +80,15 @@ def test_repeated_discovery_does_not_download_viewed_identity(tmp_path: Path):
                 break
             time.sleep(.02)
         item = cards[0]['id']
+        viewed_source = cards[0]['url'].rsplit('/', 1)[1]
         client.post(f'/api/materials/{item}/viewed')
     source.downloaded.clear()
     with TestClient(create_app(tmp_path, source=source, token='test-token'), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'events': False})
         client.post('/api/tabs/a/heartbeat')
         time.sleep(.2)
-        assert source.downloaded == []
+        assert viewed_source not in source.downloaded
+        assert set(source.downloaded) <= {'1', '2', '3'} - {viewed_source}
         assert len(client.get('/api/cards').json()) == 2
         assert client.get(f'/api/materials/{item}').status_code == 404
 
@@ -109,6 +113,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
                 break
             time.sleep(.02)
         item = cards[0]['id']
+        viewed_source = cards[0]['url'].rsplit('/', 1)[1]
         client.post(f'/api/materials/{item}/viewed')
     source = CountingSource()
     with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault), headers=HEADERS) as client:

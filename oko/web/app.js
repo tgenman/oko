@@ -26,6 +26,7 @@ async function api(path, method = 'GET', body = undefined) {
 function clear() {
   clearImages();
   generation++;
+  byId('versions').replaceChildren();
   byId('event-panel').hidden = true;
   byId('event-body').replaceChildren();
   byId('event-sources').replaceChildren();
@@ -81,7 +82,7 @@ async function open(id) {
     byId('event-sources').replaceChildren();
     byId('original-panel').hidden = !!(material.event || material.digest);
     byId('copy').hidden = !!(material.event || material.digest);
-    if (material.event || material.digest) renderEvent(material);
+    if (material.event || material.digest) renderEvent(material, stamp);
     selected = {...material, folder_id: material.folder_id || cardFolders.get(id)};
     byId('title').textContent = material.title;
     byId('text').textContent = material.text;
@@ -101,8 +102,10 @@ async function open(id) {
       return li;
     }));
     byId('original-panel').open = material.originals !== false && (!filter || filter.status !== 'done' || filter.restored || !filter.removed.length && !filter.hidden);
+    renderVersions(material, byId('versions'), id, stamp);
     byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? (material.captions ? 'Получение субтитров и превью' : 'Текст сохранён · загрузка вложений') : material.captions ? (material.reason || 'Субтитры и превью сохранены') : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
     byId('retry').hidden = !material.complete || material.full !== false || material.loading;
+    byId('completeness').textContent += (material.changed ? ' · Изменено' : '') + (material.source_deleted ? ' · Недоступно в источнике; локальная копия сохранена' : '');
     byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
     byId('message').textContent = '';
     byId('material').hidden = false;
@@ -116,6 +119,29 @@ async function open(id) {
     }
   } catch (error) { clear(); byId('progress').textContent = error.message; }
 }
+function renderVersions(material, container, id, stamp) {
+  container.replaceChildren();
+  for (const previous of material.previous || []) {
+    const details = element('details');
+    details.append(element('summary', 'Предыдущая версия'));
+    const body = element('div'); details.append(body);
+    let loaded = false;
+    details.ontoggle = async () => {
+      if (!details.open || loaded) return;
+      loaded = true;
+      try {
+        const version = await api(previous.url.slice('/api/'.length));
+        if (stamp !== generation || stopped || !ids.has(id) || !details.isConnected) return;
+        body.append(element('h3', version.title), element('p', version.text));
+        await appendMedia(version, body, stamp, id);
+      } catch (error) {
+        if (stamp === generation && !stopped && details.isConnected) { body.textContent = error.message; loaded = false; }
+      }
+    };
+    container.append(details);
+  }
+}
+
 async function appendMedia(material, container, stamp, id) {
     for (const path of material.images || []) {
       const response = await fetch(path, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}});
@@ -154,7 +180,14 @@ async function refresh() {
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
     const progressMessages = [...new Set([...state.errors, ...readMessages])];
     byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (progressMessages.length ? ' · ' + progressMessages.join(', ') : '');
-    byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => { const p = document.createElement('p'); p.textContent = source.title + ': ' + (source.error || source.gap); return p; }));
+    const changesOpen = !!byId('source-status').querySelector('details[open]');
+    byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => element('p', source.title + ': ' + [source.error, source.gap].filter(Boolean).join(' · '))));
+    const changes = (state.sources || []).filter(source => source.changes);
+    if (changes.length) {
+      const details = element('details'); details.open = changesOpen; details.append(element('summary', 'Возможности проверки изменений'));
+      for (const source of changes) details.append(element('p', source.title + ': ' + source.changes));
+      byId('source-status').append(details);
+    }
     if (state.error) { clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
     if (byId('show-hidden').checked) params.set('show_hidden', 'true');
@@ -164,7 +197,7 @@ async function refresh() {
     ids = new Set(cards.map(card => card.id));
     cardFolders = new Map(cards.map(card => [card.id, card.folder_id]));
     if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.originals !== selected.originals || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.originals !== selected.originals || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || card.source_deleted !== selected.source_deleted || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
     byId('compress').disabled = !folderId;
     byId('folder-viewed').disabled = !folderId;
     byId('digest-now').disabled = !folderId;
@@ -172,7 +205,7 @@ async function refresh() {
     byId('cards').replaceChildren(...cards.map(card => {
       const button = document.createElement('button');
       button.classList.toggle('active', selected?.id === card.id);
-      button.textContent = (card.digest ? 'Обзор · ' : card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title;
+      button.textContent = (card.digest ? 'Обзор · ' : card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title + (card.changed ? ' · Изменено' : '');
       const date = document.createElement('small');
       date.textContent = new Date(card.published * 1000).toLocaleString('ru');
       button.append(date);
@@ -459,7 +492,7 @@ byId('filter-retry').onclick = async () => {
   catch (error) { byId('message').textContent = error.message; }
 };
 
-function renderEvent(material) {
+function renderEvent(material, stamp) {
   const body = byId('event-body');
   for (const [field, title] of [['points', 'Сводка'], ['updates', 'Обновление'], ['conflicts', 'Противоречия источников']]) {
     const points = (material.event || material.digest)[field] || [];
@@ -489,7 +522,8 @@ function renderEvent(material) {
     const text = element('p', source.text); text.className = 'source-text';
     details.append(element('summary', 'Оригинал · ' + new Date(source.published * 1000).toLocaleString('ru')), text);
     const media = element('div'); media.className = 'source-media'; media.id = 'source-media-' + source.id; details.append(media);
-    section.append(link, copy, details); byId('event-sources').append(section);
+    const versions = element('div'); renderVersions(source, versions, material.id, stamp);
+    section.append(link, copy, source.changed ? element('p', 'Изменено') : element('span'), details, versions); byId('event-sources').append(section);
   }
 }
 

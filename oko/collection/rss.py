@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 import httpx
-from oko.collection.contracts import Material, Publication, Image, SourceError
+from oko.collection.contracts import Material, Publication, Image, SourceError, SourceDeleted
 
 
 def normalized(url: str) -> str:
@@ -129,6 +129,7 @@ def entries(raw: bytes, base: str) -> list[Entry]:
 
 
 class RSSSource:
+    changes = 'RSS: повторно проверяются статьи в доступном окне фида; 404/410 сохраняют локальную копию. Исчезновение из окна не означает удаление.'
     def __init__(self, url: str, initial_days: int, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.url, self.initial_days, self.transport = normalized(url), initial_days, transport
         self.gap: str | None = None
@@ -146,6 +147,8 @@ class RSSSource:
                         except ValueError:
                             delay = 60.
                         raise SourceError('Ограничение частоты', delay)
+                    if response.status_code in (404, 410):
+                        raise SourceDeleted()
                     if response.status_code >= 400:
                         raise SourceError('Источник недоступен')
                     data = bytearray()
@@ -198,7 +201,13 @@ class RSSSource:
             article.feed(raw.decode('utf-8', errors='replace'))
             if article.article and article.text:
                 text, urls, full, reason = article.text, article.images, True, ''
+        except SourceDeleted:
+            if publication.teaser and publication.teaser.full:
+                raise
+            reason = 'Публикация недоступна; доступен анонс'
         except SourceError as error:
+            if publication.teaser and publication.teaser.full:
+                raise
             reason = error.label + '; доступен анонс'
         unique_urls = list(dict.fromkeys(urls))
         if len(unique_urls) > 30:

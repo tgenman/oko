@@ -14,7 +14,7 @@ from typing import Any, Literal, TypeVar
 import httpx
 
 from oko.collection.rss import RSSSource
-from oko.collection.contracts import SourceError
+from oko.collection.contracts import SourceError, SourceDeleted
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError, ProcessingRequest, EventsResult, FilterResult, Theses
@@ -588,7 +588,7 @@ class Runtime:
                         current.discovered(items, next_cursor, job, feed, namespace)
                         if getattr(source, 'more', False):
                             current.enqueue_discovery(feed)
-                        current.feed_status(feed, error=None, gap=getattr(source, 'gap', None))
+                        current.feed_status(feed, error=None, gap=getattr(source, 'gap', None), changes=getattr(source, 'changes', None))
             elif publication:
                 if isinstance(source, (RSSSource, TelegramSource)) and bool(publication.members) != isinstance(source, TelegramSource):
                     raise SourceError('Материал получен другим способом; верните исходный транспорт для загрузки')
@@ -597,12 +597,15 @@ class Runtime:
                     if self._store is current and self._live() and current.valid(job):
                         current.save(job, material)
                         current.read_sync.sync()
-                        current.feed_status(feed, error=None, gap=getattr(source, 'gap', None))
+                        current.feed_status(feed, error=None, gap=getattr(source, 'gap', None), changes=getattr(source, 'changes', None))
         except asyncio.CancelledError:
             raise
         except Exception as error:
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
+                    if isinstance(error, SourceDeleted) and job.kind == 'fetch':
+                        current.source_removed(job)
+                        return
                     label = error.label if isinstance(error, SourceError) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
                     current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1)
                     if job.kind == 'read':

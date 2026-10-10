@@ -45,3 +45,8 @@ class Source(Protocol):
 class SourceError(Exception):
     def __init__(self, label: str, delay: float = 60) -> None:
         self.label, self.delay = label, delay
+
+
+class SourceDeleted(SourceError):
+    def __init__(self) -> None:
+        super().__init__('Публикация удалена или недоступна в источнике')

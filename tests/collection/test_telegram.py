@@ -256,8 +256,12 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
         assert partial.read_bytes() == b'partial-download'
         card = client.get('/api/cards').json()[0]
         assert card['members'] == [11, 12] and card['title'] == 'Album'
+        downloading = bridge.process
         client.post('/api/materials/' + card['id'] + '/viewed')
-        assert not (root / 'staging' / '_telegram').exists()
+        assert downloading is not None and downloading.returncode is not None
+        # A read acknowledgement may start a new worker, but the interrupted
+        # download and its bytes must already be gone when viewed returns.
+        assert not partial.exists()
         assert not (root / 'content' / card['id']).exists()
         assert client.get('/api/cards').json() == []
 

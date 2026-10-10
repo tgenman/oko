@@ -121,7 +121,7 @@ def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
         card = settled(client)[0]
         # External loss of a stored file must not turn a preparation failure into
         # an unhandled task exception which closes the whole reader.
-        (tmp_path / 'content' / card['id'] / '1' / 'media-11.jpg').unlink()
+        next((tmp_path / 'content' / card['id']).glob('*/media-11.jpg')).unlink()
         source.rows = source.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=None)]
         client.post('/api/collect')
         for _ in range(100):

@@ -51,6 +51,7 @@ class LocalCaptions:
 
 
 class YouTubeSource(RSSSource):
+    changes = 'YouTube: повторно проверяются название, доступные субтитры и превью видео в окне Atom. Удаление видео и правки вне этого окна не определяются.'
     def __init__(self, url: str, initial_days: int, captions: CaptionsClient,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
         super().__init__(url, initial_days, transport)
@@ -73,7 +74,9 @@ class YouTubeSource(RSSSource):
     async def fetch(self, publication: Publication) -> Material:
         if not re.fullmatch(r'[A-Za-z0-9_-]{11}', publication.id):
             raise SourceError('Неверный ID YouTube')
-        title = publication.teaser.title if publication.teaser else 'YouTube'
+        batch = await self.read_entries()
+        entry = next((entry for entry in batch if entry.publication.id == publication.id), None)
+        title = entry.title if entry else publication.teaser.title if publication.teaser else 'YouTube'
         text, state, reason = '', 'not_requested', 'Субтитры не запрошены: включите тезисы или высокую важность'
         if self.want_captions:
             try:
