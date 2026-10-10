@@ -151,7 +151,9 @@ async function refresh() {
     const state = await api('status');
     if (stopped || epoch !== contentEpoch) return;
     if (state.stopped) { stopUi('Око остановлено'); return; }
-    byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (state.errors.length ? ' · ' + state.errors.join(', ') : '');
+    const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
+    const progressMessages = [...new Set([...state.errors, ...readMessages])];
+    byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (progressMessages.length ? ' · ' + progressMessages.join(', ') : '');
     byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => { const p = document.createElement('p'); p.textContent = source.title + ': ' + (source.error || source.gap); return p; }));
     if (state.error) { clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
@@ -326,7 +328,7 @@ function renderFeed(feed) {
   if (feed.kind === 'telegram') {
     auto = selectControl([['', 'Выберите режим'], ['true', 'Автопрочитывать после полного сохранения'], ['false', 'Отмечать только после «Просмотрено»']], feed.auto_read === null ? '' : feed.auto_read);
     history = element('input'); history.type = 'checkbox'; history.checked = feed.read_history;
-    container.append(element('p', 'Отметки прочитанного в Telegram пока не отправляются. Режим сохраняется для следующего этапа.'), labelled('Автопрочитывание в Telegram', auto), labelled('Отметить историю до начала импорта прочитанной', history), element('p', 'Без разрешения очистки старая непрочитанная история может задержать отметки Telegram. Сохранение настроек не отправляет отметки.'));
+    container.append(element('p', 'Око подтверждает только безопасную границу истории. Просмотр позднего материала может ожидать более ранний.'), labelled('Автопрочитывание в Telegram', auto), labelled('Отметить историю до начала импорта прочитанной', history), element('p', 'Без разрешения очистки старая непрочитанная история может задержать отметки Telegram. Разрешение применяется при работающем Око только к истории до зафиксированного начала импорта.'));
   }
   if (feed.kind === 'telegram' || feed.kind === 'unresolved' || feed.kind === 'youtube') {
     transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'youtube' ? [['youtube', 'YouTube: обновления и субтитры']] : [...(feed.kind === 'telegram' ? [['telegram', 'Telegram с локальными медиа']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']])], feed.transport || '');

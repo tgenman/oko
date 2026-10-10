@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from oko.reader.composition import FolderContents, ReadingComposition
+from oko.collection.telegram.read_sync import ReadSync
 from oko.reviews.events import Events
 from oko.reviews.digests import Digests
 from oko.reviews.filtering import Filters
@@ -79,6 +80,7 @@ class Store:
         self.events = Events(self)
         self.digests = Digests(self)
         self.reading = ReadingComposition(self)
+        self.read_sync = ReadSync(self)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
@@ -140,6 +142,8 @@ class Store:
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
                         self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (row['id'],))
                     self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('fetch',?)", (row['id'],))
+            if namespace == 'telegram':
+                self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
@@ -163,7 +167,7 @@ class Store:
 
     def ready_sources(self, feeds: list[str]) -> int:
         return sum(1 for feed in feeds if not self.db.execute(
-            "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
+            "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False) -> Job | None:
@@ -175,8 +179,8 @@ class Store:
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
-            query += f" AND (kind='delete' OR (kind='discover' AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
-        query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 ELSE 3 END,id LIMIT 1"
+            query += f" AND (kind='delete' OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
+        query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *('' if f == 'demo' else f for f in available), *available)
         row = self.db.execute(query, params).fetchone()
         if not row:
@@ -260,11 +264,14 @@ class Store:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
                 return False
             for member in members:
+                row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
+                self.read_sync.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
                 self.filters.forget(member)
                 self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (member,))
                 self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))
                 self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (member,))
+        self.read_sync.sync()
         self.digests.sync()
         self.events.sync()
         self.fault('after_viewed_commit')

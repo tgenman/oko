@@ -144,6 +144,25 @@ async def main() -> None:
                             if msg and msg.grouped_id:
                                 expanded.update({m.id: m for m in await album(cl, entity, msg)})
                         value = [record(m) for m in sorted(expanded.values(), key=lambda m: m.id)]
+                    elif op == 'read_state':
+                        from telethon import functions
+                        dialog = await cl(functions.messages.GetPeerDialogsRequest(
+                            peers=[types.InputDialogPeer(peer=await cl.get_input_entity(entity))]))
+                        if not dialog.dialogs:
+                            raise ValueError('read state')
+                        before = await cl.get_messages(entity, limit=1,
+                            offset_date=datetime.fromtimestamp(body['since'], timezone.utc))
+                        value = dict(read_max=dialog.dialogs[0].read_inbox_max_id,
+                                     initial=before[0].id if before else 0)
+                    elif op == 'read_window':
+                        batch = await cl.get_messages(entity, limit=100, reverse=True,
+                            offset_id=body['after'], max_id=body['until']+1)
+                        value = dict(ids=[m.id for m in batch], more=len(batch) == 100)
+                    elif op == 'acknowledge':
+                        max_id = body['max_id']
+                        if not isinstance(max_id, int) or max_id <= 0:
+                            raise ValueError('read boundary')
+                        value = bool(await cl.send_read_acknowledge(entity, max_id=max_id))
                     elif op == 'download':
                         msg = await cl.get_messages(entity, ids=body['id'])
                         if not msg or not msg.media:

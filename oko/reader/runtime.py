@@ -182,6 +182,8 @@ class Runtime:
             stage = self._ai_stage
         elif any(j['kind'] in ('theses', 'filter', 'events', 'digest') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
             stage = 'Ожидание обработчика' if state['errors'] else 'Подготовка тезисов'
+        elif pending and self._sources and all(j['kind'] == 'read' for j in state['jobs'] if j['status'] in ('pending', 'running')):
+            stage = 'Ожидание синхронизации Telegram'
         elif pending and not self._sources:
             stage = 'Источник не подключён'
         elif pending and state['errors']:
@@ -190,7 +192,7 @@ class Runtime:
             stage = 'Сбор'
         else:
             stage = 'Завершено с ошибками' if state['errors'] else 'Готово'
-        return dict(**state, sources=source_states, error=self._error, stopped=self.stopped,
+        return dict(**state, telegram_reads=self._store.read_sync.statuses() if self._store and not self.stopped else [], sources=source_states, error=self._error, stopped=self.stopped,
                     live_tabs=len(self._tabs), stage=stage,
                     ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
                     total_sources=len(self._sources))
@@ -528,6 +530,39 @@ class Runtime:
             if current.valid(job):
                 current.retry(job, self._clock(), 'Ошибка удаления')
 
+    async def _execute_read(self, job: Job, current: Store, source: Source) -> None:
+        if not isinstance(source, TelegramSource):
+            async with self._actions:
+                if self._store is current and current.valid(job):
+                    with current.db:
+                        current.finish(job)
+            return
+        async with self._actions:
+            request = current.read_sync.request(job.item)
+            if not request:
+                current.finish(job)
+                current.db.commit()
+                return
+            signature = current.read_sync.signature(request)
+        await source.resolve()
+        state = await source.client.read_state(source.account, source.peer, request['since'])
+        plan = current.read_sync.plan(request, state)
+        confirmed = plan.confirmed
+        if plan.until > confirmed:
+            window = await source.client.read_window(source.account, source.peer, confirmed, plan.until)
+            plan = current.read_sync.plan(request, state, window)
+        async with self._actions:
+            latest = current.read_sync.request(job.item) if self._store is current else None
+            if not self._live() or not current.valid(job) or not latest or current.read_sync.signature(latest) != signature:
+                return
+        if plan.candidate > confirmed:
+            await source.client.acknowledge(source.account, source.peer, plan.candidate)
+            self._fault('after_telegram_acknowledge')
+            confirmed = plan.candidate
+        async with self._actions:
+            if self._store is current and self._live() and current.valid(job):
+                current.read_sync.completed(job, plan, confirmed, self._clock())
+
     async def _execute(self, job: Job) -> None:
         current: Store | None = None
         feed = ''
@@ -539,14 +574,16 @@ class Runtime:
                 if job.kind == 'delete':
                     self._delete(job, current)
                     return
-                feed = (job.item or 'demo') if job.kind == 'discover' else current.item_feed(job.item)
+                feed = (job.item or 'demo') if job.kind in ('discover', 'read') else current.item_feed(job.item)
                 source = self._sources.get(feed)
                 publication = current.publication(job.item) if job.kind == 'fetch' else None
                 namespace = 'telegram' if isinstance(source, TelegramSource) else ''
                 cursor = current.cursor(feed, namespace) if job.kind == 'discover' else None
             if not source:
                 return
-            if job.kind == 'discover':
+            if job.kind == 'read':
+                await self._execute_read(job, current, source)
+            elif job.kind == 'discover':
                 items, next_cursor = await source.discover(cursor)
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
@@ -561,15 +598,18 @@ class Runtime:
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
                         current.save(job, material)
+                        current.read_sync.sync()
                         current.feed_status(feed, error=None, gap=getattr(source, 'gap', None))
         except asyncio.CancelledError:
             raise
         except Exception as error:
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
-                    label = error.label if isinstance(error, SourceError) else 'Ошибка сбора'
+                    label = error.label if isinstance(error, SourceError) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
                     current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1)
-                    if isinstance(error, SourceError):
+                    if job.kind == 'read':
+                        current.read_sync.failed(feed, label)
+                    elif isinstance(error, SourceError):
                         current.feed_status(feed, error=label, gap=None)
 
     async def run(self) -> None:
@@ -601,6 +641,7 @@ class Runtime:
                     elif self._store:
                         self._idle_since = None
                         if now - self._ai_sync >= .5:
+                            self._store.read_sync.sync()
                             self._store.sync_theses()
                             self._store.digests.schedule(wall)
                             self._ai_sync = now

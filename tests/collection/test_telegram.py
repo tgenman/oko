@@ -1,5 +1,6 @@
 from tests.support.telegram import Telegram, connect, settled
 from pathlib import Path
+import pytest
 import time
 from fastapi.testclient import TestClient
 from oko.reader.app import create_app
@@ -155,7 +156,7 @@ def test_late_video_after_viewed_cannot_publish_or_leave_files(tmp_path: Path):
         assert not (tmp_path / 'staging' / item).exists()
 
 
-def test_imported_telegram_feed_connects_without_duplicate_and_read_settings_are_inert(tmp_path: Path):
+def test_imported_telegram_feed_connects_without_duplicate_and_preserves_read_settings(tmp_path: Path):
     class Imported(Telegram):
         async def info(self, account, peer):
             return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False, username='fixture')
@@ -499,3 +500,45 @@ def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_us
                 break
             time.sleep(.02)
         assert material['text'] == 'Теперь приватный'
+
+
+@pytest.mark.parametrize('advance', [True, False])
+def test_owned_worker_verifies_readback_when_ack_returns_false(tmp_path: Path, monkeypatch, advance):
+    from oko.collection.telegram.source import LocalTelegram
+    project = fake_sdk_project(tmp_path, monkeypatch)
+    sdk = project / 'telethon' / '__init__.py'
+    code = sdk.read_text().replace('self.session = session', 'self.session = session; self.read_max = 0')
+    code = code.replace('types = SimpleNamespace(Channel=Channel, Chat=Chat)', 'types = SimpleNamespace(Channel=Channel, Chat=Chat, InputDialogPeer=lambda peer: peer)')
+    code += '''
+    async def get_input_entity(self, entity): return entity
+    async def __call__(self, request):
+        return SimpleNamespace(dialogs=[SimpleNamespace(read_inbox_max_id=self.read_max)])
+    async def send_read_acknowledge(self, entity, *, max_id):
+        assert max_id == 12 and max_id > 0
+        if os.environ.get('SDK_FIXTURE_ACK_NO_ADVANCE') != 'yes':
+            self.read_max = max_id
+        return False
+'''
+    code = code.replace("        if isinstance(params.get('ids'), int):", "        if 'max_id' in params:\n            return [msg(i) for i in (11, 12) if params.get('offset_id', 0) < i < params['max_id']]\n        if isinstance(params.get('ids'), int):")
+    code = code.replace("        await asyncio.sleep(100)", "        return file")
+    sdk.write_text(code)
+    (project / 'telethon' / 'functions.py').write_text('from types import SimpleNamespace\nmessages=SimpleNamespace(GetPeerDialogsRequest=lambda peers: peers)\n')
+    if not advance:
+        monkeypatch.setenv('SDK_FIXTURE_ACK_NO_ADVANCE', 'yes')
+    root = tmp_path / 'data'
+    with TestClient(create_app(root, token='test-token', telegram_client=LocalTelegram(project / '.env', root)), headers=HEADERS) as client:
+        client.post('/api/tabs/test/heartbeat')
+        connect(client)
+        card = settled(client)[0]
+        assert card['members'] == [11, 12]
+        assert client.post('/api/materials/' + card['id'] + '/viewed').status_code == 200
+        for _ in range(200):
+            status = client.get('/api/status').json()
+            if any(r['confirmed'] == 12 if advance else bool(r['error']) for r in status['telegram_reads']):
+                break
+            time.sleep(.02)
+        assert status['telegram_reads'][0]['confirmed'] == (12 if advance else 0)
+        if not advance:
+            assert 'не подтвердил' in status['telegram_reads'][0]['error']
+            assert status['telegram_reads'][0]['pending'] == 2
+        assert client.get('/api/materials/' + card['id']).status_code == 404

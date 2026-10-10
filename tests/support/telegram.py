@@ -18,6 +18,16 @@ class Telegram:
     async def download(self, account, peer, id):
         return b'media'
 
+    async def read_state(self, account, peer, since):
+        return dict(read_max=0, initial=0)
+
+    async def read_window(self, account, peer, after, until):
+        page = await self.page(account, peer, 0, 0)
+        return dict(ids=[m['id'] for m in page['messages'] if after < m['id'] <= until], more=False)
+
+    async def acknowledge(self, account, peer, max_id):
+        pass
+
     async def close(self):
         pass
 

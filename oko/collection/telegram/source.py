@@ -21,6 +21,9 @@ class TelegramClient(Protocol):
     async def page(self, account: str, peer: int, after: int, since: float) -> dict[str, Any]: ...
     async def messages(self, account: str, peer: int, ids: list[int]) -> list[dict[str, Any]]: ...
     async def download(self, account: str, peer: int, id: int) -> bytes: ...
+    async def read_state(self, account: str, peer: int, since: float) -> dict[str, Any]: ...
+    async def read_window(self, account: str, peer: int, after: int, until: int) -> dict[str, Any]: ...
+    async def acknowledge(self, account: str, peer: int, max_id: int) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -103,6 +106,25 @@ class LocalTelegram:
     async def download(self, account: str, peer: int, id: int) -> bytes:
         value: bytes = await self.request('download', account=account, peer=peer, id=id)
         return value
+
+    async def read_state(self, account: str, peer: int, since: float) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('read_state', account=account, peer=peer, since=since)
+        return value
+
+    async def read_window(self, account: str, peer: int, after: int, until: int) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('read_window', account=account, peer=peer, after=after, until=until)
+        return value
+
+    async def acknowledge(self, account: str, peer: int, max_id: int) -> None:
+        if max_id <= 0:
+            raise SourceError('Неверная граница прочитанного Telegram')
+        result = await self.request('acknowledge', account=account, peer=peer, max_id=max_id)
+        if result is not True:
+            # A repeated already-read boundary can return False. Verify the
+            # server's actual frontier before treating it as failure.
+            state = await self.read_state(account, peer, time.time())
+            if state['read_max'] < max_id:
+                raise SourceError('Telegram не подтвердил отметку прочитанного')
 
     async def close(self) -> None:
         self.generation += 1
