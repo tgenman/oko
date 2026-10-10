@@ -346,3 +346,35 @@ def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_med
         assert edited['changed'] is True and edited['full'] is False
         assert len(edited['previous']) == 1
         assert client.get(edited['previous'][0]['url']).json()['text'] == 'Неизменный пост'
+
+
+def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_path):
+    from tests.support.youtube import feed_xml, subscribe, PNG as PREVIEW
+    class Captions:
+        calls = 0
+        async def fetch(self, video):
+            self.calls += 1
+            return 'Уже сохранённые субтитры'
+    captions = Captions()
+    def reply(request):
+        if request.url.path == '/feeds/videos.xml':
+            return httpx.Response(200, text=feed_xml())
+        return httpx.Response(200, content=PREVIEW, headers={'Content-Type': 'image/png'})
+    with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=captions), headers=HEADERS) as client:
+        client.patch('/api/settings/oko/global', json={'events': False})
+        feed = subscribe(client)
+        client.patch('/api/settings/feed/' + feed, json={'theses': True})
+        client.post('/api/tabs/test/heartbeat')
+        original = wait_cards(client)[0]
+        item = original['id']
+        assert client.get('/api/materials/' + item).json()['captions'] == 'available'
+        count = captions.calls
+        client.patch('/api/settings/feed/' + feed, json={'theses': False})
+        client.post('/api/collect')
+        wait_for(client, lambda: not client.get('/api/materials/' + item).json().get('loading') and client.get('/api/status').json()['ready_sources'] == 1)
+        retained = client.get('/api/materials/' + item).json()
+        assert retained['text'] == 'Уже сохранённые субтитры'
+        assert retained['captions'] == 'available'
+        assert retained['version'] == original['version']
+        assert retained['changed'] is False and retained['previous'] == []
+        assert captions.calls == count

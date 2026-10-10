@@ -171,7 +171,7 @@ class Runtime:
         pending = any(j['status'] in ('pending', 'running') for j in state['jobs'])
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
-        source_states = [dict(**s, title=names.get(s['feed_id'], s['feed_id'])) for s in source_states if s['feed_id'] in self._sources]
+        source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=getattr(self._sources[s['feed_id']], 'changes', None)) for s in source_states if s['feed_id'] in self._sources]
         if self.stopped:
             stage = 'Остановлено'
         elif self._error:

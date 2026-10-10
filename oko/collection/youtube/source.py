@@ -78,6 +78,8 @@ class YouTubeSource(RSSSource):
         entry = next((entry for entry in batch if entry.publication.id == publication.id), None)
         title = entry.title if entry else publication.teaser.title if publication.teaser else 'YouTube'
         text, state, reason = '', 'not_requested', 'Субтитры не запрошены: включите тезисы или высокую важность'
+        if not self.want_captions and publication.teaser and publication.teaser.captions == 'available':
+            text, state, reason = publication.teaser.text, 'available', ''
         if self.want_captions:
             try:
                 transcript = await self.captions_client.fetch(publication.id)
