@@ -465,3 +465,32 @@ def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path
             time.sleep(.02)
         assert any('другому источнику' in e for e in errors)
         assert client.get('/api/materials/' + item).json()['text'] == 'Текст канала'
+
+
+
+def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_username(tmp_path: Path):
+    class FormerPublic(Telegram):
+        private = False
+        async def info(self, account, peer):
+            if self.private and not isinstance(peer, int):
+                from oko.collection.contracts import SourceError
+                raise SourceError('Нет доступа к Telegram-источнику')
+            return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False,
+                        username=None if self.private else 'fixture')
+        async def messages(self, account, peer, ids):
+            return [dict(id=11, date=time.time()-60, text='Теперь приватный' if self.private else 'Публичный', group=None, media=None)]
+    tg = FormerPublic()
+    with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
+        client.post('/api/import', json={'opml': '<opml><body><outline text="Новости"><outline xmlUrl="https://rsshub.test/telegram/channel/fixture"/></outline></body></opml>'})
+        client.post('/api/tabs/test/heartbeat')
+        feed = connect(client)
+        item = settled(client)[0]['id']
+        tg.private = True
+        assert connect(client, '-1001234567890')['id'] == feed['id']
+        client.post('/api/materials/' + item + '/retry')
+        for _ in range(100):
+            material = client.get('/api/materials/' + item).json()
+            if material.get('text') == 'Теперь приватный' and not material.get('loading'):
+                break
+            time.sleep(.02)
+        assert material['text'] == 'Теперь приватный'

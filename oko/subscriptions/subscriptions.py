@@ -143,6 +143,15 @@ class Subscriptions:
         for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT')]:
             if column not in columns:
                 db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
+        if 'telegram_username' not in columns:
+            # Infer only while upgrading legacy storage. A new connection's
+            # explicit absence of a public username must remain authoritative.
+            for row in db.execute("SELECT * FROM feeds WHERE kind='telegram' AND telegram_peer IS NOT NULL").fetchall():
+                candidates = ([row['identity'].removeprefix('telegram:')]
+                              if row['identity'].startswith('telegram:') else []) + json.loads(row['original_urls'])
+                username = next((name.lstrip('@') for name in candidates
+                                 if re.fullmatch(r'@?[a-zA-Z][a-zA-Z0-9_]{3,31}', name)), None)
+                db.execute('UPDATE feeds SET telegram_username=? WHERE id=?', (username, row['id']))
         db.commit()
 
     def connect_telegram(self, body: ConnectTelegram, info: dict[str, Any]) -> dict[str, Any]:
@@ -188,13 +197,6 @@ class Subscriptions:
         for row in self.db.execute('SELECT * FROM feeds ORDER BY rowid'):
             feed = dict(row)
             feed['original_urls'] = json.loads(feed['original_urls'])
-            if feed['kind'] == 'telegram' and not feed.get('telegram_username'):
-                # Older connected feeds retain a public name in their identity
-                # (RSSHub import) or original connection reference.
-                candidates = ([feed['identity'].removeprefix('telegram:')]
-                              if feed['identity'].startswith('telegram:') else []) + feed['original_urls']
-                feed['telegram_username'] = next((name.lstrip('@') for name in candidates
-                                                  if re.fullmatch(r'@?[a-zA-Z][a-zA-Z0-9_]{3,31}', name)), None)
             for field in ('public_ai', 'read_history', 'auto_read'):
                 feed[field] = None if feed[field] is None else bool(feed[field])
             result.append(feed)
