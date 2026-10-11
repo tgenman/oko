@@ -366,7 +366,6 @@ class Digests:
             for view in self.views():
                 if view['id'] != job.item and members & {m['id'] for m in view['sources']}:
                     self.invalidate(view['id'])
-            self.store.events.sync()
 
     def views(self) -> list[dict[str, Any]]:
         views = []

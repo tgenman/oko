@@ -14,9 +14,9 @@ from oko.collection.telegram.read_sync import ReadSync
 from oko.reviews.events import Events
 from oko.reviews.digests import Digests
 from oko.reviews.filtering import Filters
+from oko.reviews.coordination import ProcessingCoordination
 from oko.collection.contracts import Attachment, Image, Material, Publication
 from oko.subscriptions.subscriptions import Subscriptions
-from oko.processing.contracts import InputSource, ProcessingRequest, Theses
 from oko.processing.llamacpp import ProcessorConfig
 
 
@@ -79,6 +79,7 @@ class Store:
         self.filters = Filters(self)
         self.events = Events(self)
         self.digests = Digests(self)
+        self.processing = ProcessingCoordination(self)
         self.reading = ReadingComposition(self)
         self.read_sync = ReadSync(self)
         for name in ('content', 'staging'):
@@ -157,7 +158,7 @@ class Store:
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
             self.finish(job)
-        self.sync_theses()
+        self.processing.sync()
 
     def retry_material(self, item: str) -> bool:
         if self.publication(item) is None:
@@ -226,7 +227,7 @@ class Store:
             if material.members:
                 self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
             self.finish(job)
-        self.sync_theses()
+        self.processing.sync()
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
@@ -249,8 +250,7 @@ class Store:
                 self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))
                 self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (member,))
         self.read_sync.sync()
-        self.digests.sync()
-        self.events.sync()
+        self.processing.sync()
         self.fault('after_viewed_commit')
         return True
 
@@ -291,7 +291,7 @@ class Store:
             if filtered['status'] == 'done' and not filtered['restored']:
                 for fragment in filtered['removed']:
                     display_text = display_text.replace(fragment, '')
-            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.theses(item), ai=self.thesis_status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             return None
 
@@ -322,7 +322,7 @@ class Store:
     def settings_changed(self) -> None:
         with self.db:
             self.db.execute("INSERT INTO state VALUES ('settings-version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(self.settings_version() + 1),))
-        self.sync_theses()
+        self.processing.sync()
 
     def content_version(self, item: str) -> str:
         return self.versions.version(item)
@@ -334,95 +334,6 @@ class Store:
             material = self.material(row['id'])
             if material and material.get('captions') == 'not_requested' and not material.get('loading'):
                 self.retry_material(row['id'])
-
-    def thesis_signature(self, item: str) -> str | None:
-        row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
-        if not row or not self.path(item).is_file():
-            return None
-        filtered = self.filters.read(item)
-        if filtered['status'] not in ('off', 'done') or filtered['hidden']:
-            return None
-        settings = self.subscriptions.effective('feed', row['feed_id'])
-        values = {k: v['value'] for k, v in settings['effective'].items()}
-        if settings['feed']['kind'] == 'youtube':
-            header = json.loads(self.path(item).read_text().split('\n\n', 1)[0])
-            if not self.subscriptions.youtube_theses(row['feed_id']) or header.get('captions') != 'available':
-                return None
-        elif not values['theses']:
-            return None
-        config = self.processor_config()
-        payload = [self.content_version(item), filtered, row['members'], self.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
-        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-
-    def sync_theses(self) -> None:
-        self.filters.sync()
-        self.digests.sync()
-        self.events.sync()
-        for row in self.db.execute('SELECT id FROM items WHERE viewed=0').fetchall():
-            item = row['id']
-            signature = self.thesis_signature(item)
-            old = self.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
-            if old and old[0] == signature:
-                state = self.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
-                if state and (state[0] != 'done' or self.theses(item) is not None):
-                    continue
-            path = self.path(item).parent / 'theses.md'
-            path.unlink(missing_ok=True)
-            with self.db:
-                self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='theses' AND item=?", (item,))
-                if signature:
-                    self.db.execute('INSERT INTO thesis_inputs VALUES (?,?) ON CONFLICT(item) DO UPDATE SET signature=excluded.signature', (item, signature))
-                    self.db.execute("INSERT INTO jobs(kind,item) VALUES ('theses',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0,error=NULL", (item,))
-                else:
-                    self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
-
-    def processing_policy(self, item: str) -> tuple[str, bool] | None:
-        row = self.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
-        if not row:
-            return None
-        settings = self.subscriptions.effective('feed', row['feed_id'])
-        return settings['effective']['processor']['value'], settings['feed']['public_ai']
-
-    def processing_request(self, job: Job) -> tuple[ProcessingRequest, str, bool] | None:
-        signature = self.thesis_signature(job.item)
-        row = self.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (job.item,)).fetchone()
-        material = self.material(job.item)
-        if not signature or not row or row[0] != signature or not material:
-            return None
-        settings = self.subscriptions.effective('feed', material['feed_id'])
-        values = settings['effective']
-        request = ProcessingRequest(sources=(InputSource(id=job.item, version=self.content_version(job.item), url=material['url'], title=material['title'], text=material['display_text']),), settings_version=self.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
-        return request, signature, settings['feed']['public_ai']
-
-    def retry_theses(self, item: str) -> bool:
-        if not self.material(item) or not self.thesis_signature(item):
-            return False
-        with self.db:
-            self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
-        return True
-
-    def thesis_status(self, item: str) -> dict[str, Any] | None:
-        if not self.thesis_signature(item):
-            return None
-        row = self.db.execute("SELECT status,error FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
-        return dict(row) if row else dict(status='pending', error=None)
-
-    def theses(self, item: str) -> dict[str, Any] | None:
-        row = self.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
-        if not row or row[0] != 'done':
-            return None
-        try:
-            header = json.loads((self.path(item).parent / 'theses.md').read_text().split('\n\n', 1)[0])
-            if header['signature'] != self.thesis_signature(item):
-                return None
-            return Theses.model_validate(header['result']).model_dump()
-        except (OSError, ValueError, KeyError):
-            return None
-
-    def save_theses(self, job: Job, signature: str, theses: Theses) -> None:
-        if not self.valid(job) or signature != self.thesis_signature(job.item):
-            return
-        self.save_derivative(job, signature, theses.model_dump(), '\n'.join('- ' + p.text for p in theses.points))
 
     def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True) -> None:
         """Commit a validated AI result; callers own admission and input signature."""

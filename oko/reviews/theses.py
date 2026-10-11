@@ -1,0 +1,96 @@
+"""Publication theses: current inputs, durable results and their reader state."""
+import hashlib
+import json
+from typing import TYPE_CHECKING, Any
+
+from oko.processing.contracts import InputSource, ProcessingRequest, Theses
+
+if TYPE_CHECKING:
+    from oko.storage.store import Job, Store
+
+
+class PublicationTheses:
+    def __init__(self, store: 'Store') -> None:
+        self.store = store
+
+    def signature(self, item: str) -> str | None:
+        row = self.store.db.execute('SELECT * FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
+        if not row or not self.store.path(item).is_file():
+            return None
+        filtered = self.store.filters.read(item)
+        if filtered['status'] not in ('off', 'done') or filtered['hidden']:
+            return None
+        settings = self.store.subscriptions.effective('feed', row['feed_id'])
+        values = {k: v['value'] for k, v in settings['effective'].items()}
+        if settings['feed']['kind'] == 'youtube':
+            header = json.loads(self.store.path(item).read_text().split('\n\n', 1)[0])
+            if not self.store.subscriptions.youtube_theses(row['feed_id']) or header.get('captions') != 'available':
+                return None
+        elif not values['theses']:
+            return None
+        config = self.store.processor_config()
+        payload = [self.store.content_version(item), filtered, row['members'], self.store.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    def sync(self) -> None:
+        for row in self.store.db.execute('SELECT id FROM items WHERE viewed=0').fetchall():
+            item = row['id']
+            signature = self.signature(item)
+            old = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
+            state = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+            if signature is None and old is None and (not state or state[0] == 'cancelled') and not (self.store.path(item).parent / 'theses.md').exists():
+                continue
+            if old and old[0] == signature:
+                if state and (state[0] != 'done' or self.read(item) is not None):
+                    continue
+            path = self.store.path(item).parent / 'theses.md'
+            path.unlink(missing_ok=True)
+            with self.store.db:
+                self.store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='theses' AND item=?", (item,))
+                if signature:
+                    self.store.db.execute('INSERT INTO thesis_inputs VALUES (?,?) ON CONFLICT(item) DO UPDATE SET signature=excluded.signature', (item, signature))
+                    self.store.db.execute("INSERT INTO jobs(kind,item) VALUES ('theses',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0,error=NULL", (item,))
+                else:
+                    self.store.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
+
+    def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
+        signature = self.signature(job.item)
+        row = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (job.item,)).fetchone()
+        material = self.store.material(job.item)
+        if not signature or not row or row[0] != signature or not material:
+            return None
+        settings = self.store.subscriptions.effective('feed', material['feed_id'])
+        values = settings['effective']
+        request = ProcessingRequest(sources=(InputSource(id=job.item, version=self.store.content_version(job.item), url=material['url'], title=material['title'], text=material['display_text']),), settings_version=self.store.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        return request, signature, settings['feed']['public_ai']
+
+    def retry(self, item: str) -> bool:
+        if not self.store.material(item) or not self.signature(item):
+            return False
+        with self.store.db:
+            self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
+        return True
+
+    def status(self, item: str) -> dict[str, Any] | None:
+        if not self.signature(item):
+            return None
+        row = self.store.db.execute("SELECT status,error FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+        return dict(row) if row else dict(status='pending', error=None)
+
+    def read(self, item: str) -> dict[str, Any] | None:
+        row = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+        if not row or row[0] != 'done':
+            return None
+        try:
+            header = json.loads((self.store.path(item).parent / 'theses.md').read_text().split('\n\n', 1)[0])
+            if header['signature'] != self.signature(item):
+                return None
+            return Theses.model_validate(header['result']).model_dump()
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def save(self, job: 'Job', signature: str, theses: Theses) -> None:
+        if not self.store.valid(job) or signature != self.signature(job.item):
+            return
+        self.store.save_derivative(job, signature, theses.model_dump(), '\n'.join('- ' + p.text for p in theses.points))
+

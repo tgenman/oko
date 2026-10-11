@@ -17,9 +17,10 @@ from oko.collection.rss import RSSSource
 from oko.collection.contracts import SourceError, SourceDeleted
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
-from oko.processing.contracts import ProcessingError, ProcessingRequest, EventsResult, FilterResult, Theses
+from oko.processing.contracts import ProcessingError
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
 from oko.reviews.digests import DigestRequest
+from oko.reviews.coordination import PreparedWork
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
@@ -396,44 +397,21 @@ class Runtime:
 
     async def retry_theses(self, item: str) -> None:
         async with self._actions:
-            if not self.require_store().retry_theses(item):
+            if not self.require_store().processing.retry_theses(item):
                 raise ActionError('missing', 'Тезисы для материала не включены')
 
     async def _execute_ai(self, job: Job) -> None:
         current: Store | None = None
+        work: PreparedWork | None = None
         try:
             async with self._actions:
                 current = self._store
                 if not current or not current.valid(job) or not self._live():
                     return
-                policy = None if job.kind in ('events', 'digest') else current.processing_policy(job.item)
-                if policy and policy[0] == 'codex':
-                    if not policy[1]:
-                        raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
-
-                operations: dict[str, tuple[
-                    Callable[[Job], tuple[ProcessingRequest, str, bool] | None],
-                    Callable[[str], str | None], str,
-                    Callable[[Job, str, Theses | FilterResult | EventsResult], None]]] = {
-                    'digest': (current.digests.request, current.digests.signature, 'Подготовка обзора',
-                               lambda j, s, r: current.digests.save(j, s, Theses.model_validate(r.model_dump()))),
-                    'events': (current.events.request, current.events.signature, 'Объединение событий',
-                               lambda j, s, r: current.events.save(j, s, EventsResult.model_validate(r.model_dump()))),
-                    'filter': (current.filters.request, current.filters.signature, 'Фильтрация',
-                               lambda j, s, r: current.filters.save(j, s, FilterResult.model_validate(r.model_dump()))),
-                    'theses': (current.processing_request, current.thesis_signature, 'Подготовка тезисов',
-                               lambda j, s, r: current.save_theses(j, s, Theses.model_validate(r.model_dump()))),
-                }
-                prepare, input_signature, stage, save = operations[job.kind]
-                prepared = prepare(job)
-                if prepared and prepared[0].processor == 'codex' and not prepared[2]:
-                    raise ProcessingError('Запрещена публичная AI-обработка набора; разрешение требуется от всех фидов')
+                work = current.processing.prepare(job)
                 config = current.processor_config()
-                if not prepared:
-                    raise ProcessingError('Исходник недоступен для обработки')
-                request, signature, public_ai = prepared
-                if job.kind == 'digest' and not request.sources:
-                    current.digests.save(job, signature, None)
+                request = work.request
+                if work.finish_without_model():
                     return
                 adapter: Codex | LlamaCpp
                 if request.processor == 'codex':
@@ -445,16 +423,16 @@ class Runtime:
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:
-                if self._store is not current or not self._live() or not current.valid(job) or signature != input_signature(job.item):
+                if self._store is not current or not self._live() or not work.current():
                     return
-                if not checked['local'] and not public_ai:
+                if not checked['local'] and not work.public_ai:
                     raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
-            self._ai_stage = stage
+            self._ai_stage = work.stage
             result = (await adapter.generate(request, self._root / 'staging' / job.item)
                       if isinstance(adapter, Codex) else await adapter.generate(request))
             async with self._actions:
                 if self._store is current and self._live():
-                    save(job, signature, result)
+                    work.accept(result)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -462,8 +440,8 @@ class Runtime:
                 if current and self._store is current and not self.stopped and current.valid(job):
                     current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка AI-обработки', 30)
         finally:
-            if current and job.kind == 'digest':
-                current.digests.release(job)
+            if work:
+                work.close()
 
     def _telegram_ready(self) -> tuple[Store, TelegramClient]:
         current = self.require_store()
@@ -643,7 +621,7 @@ class Runtime:
                         self._idle_since = None
                         if now - self._ai_sync >= .5:
                             self._store.read_sync.sync()
-                            self._store.sync_theses()
+                            self._store.processing.sync()
                             self._store.digests.schedule(wall)
                             self._ai_sync = now
                         if self._ai and self._ai.done():

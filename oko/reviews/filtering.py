@@ -35,6 +35,8 @@ class Filters:
             signature = self.signature(item)
             old = store.db.execute('SELECT signature FROM filter_inputs WHERE item=?', (item,)).fetchone()
             state = store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=?", (item,)).fetchone()
+            if signature is None and old is None and (not state or state[0] == 'cancelled') and not (store.path(item).parent / 'filter.md').exists():
+                continue
             if old and old[0] == signature and state and (state[0] != 'done' or self.read(item).get('status') == 'done'):
                 continue
             (store.path(item).parent / 'filter.md').unlink(missing_ok=True)
@@ -81,7 +83,6 @@ class Filters:
         if not store.valid(job) or signature != self.signature(job.item):
             return
         store.save_derivative(job, signature, result.model_dump(), result.reason)
-        store.sync_theses()
 
     def restore(self, item: str) -> bool:
         store = self.store
@@ -89,7 +90,7 @@ class Filters:
             return False
         with store.db:
             store.db.execute('INSERT INTO filter_restores VALUES (?,?) ON CONFLICT(item) DO UPDATE SET version=excluded.version', (item, store.content_version(item)))
-        store.sync_theses()
+        store.processing.sync()
         return True
 
     def retry(self, item: str) -> bool:
@@ -97,7 +98,7 @@ class Filters:
             return False
         with self.store.db:
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='filter' AND item=?", (item,))
-        self.store.sync_theses()
+        self.store.processing.sync()
         return True
 
     def forget(self, item: str) -> None:
