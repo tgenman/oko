@@ -28,3 +28,27 @@ test('RSS connection selects count or inclusive date and displays saved history 
     await expect(r.page.locator('#feed-options')).toContainText('Загружено 7 публикаций с 01.10.2025');
   } finally { await r.close(); }
 });
+
+
+test('finite history warning and unknown date are visible in settings and material', async () => {
+  const r = await reader();
+  try {
+    const card = {id: 'unknown', feed_id: 'rss', title: 'Без даты', text: 'Текст', published: 0, published_known: false, url: 'https://source.test/post', complete: true, importance: 'normal'};
+    await r.start([card]);
+    await r.page.evaluate(card => {
+      const t = readerTransport;
+      const feed = {id: 'rss', title: 'История', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal', initial_days: 1,
+        initial_history: {mode: 'count', count: 100, count_text: '100', loaded: 15, state: 'done', frozen: true, available: 15, paused: false, warnings: ['Порядок RSS неоднозначен: точность выбора последних N не подтверждена']}};
+      t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
+      t.replies.set('/api/settings/feed/rss', {body: {...t.replies.get('/api/settings/oko/global').body, feed}});
+      t.replies.set('/api/materials/unknown', {body: {...card, originals: 'inline', images: [], attachments: []}});
+    }, card);
+    await expect(r.page.locator('#cards')).toContainText('Дата неизвестна');
+    await r.page.locator('#cards button').first().click();
+    await expect(r.page.locator('#date')).toHaveText('Дата неизвестна');
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('#settings-owner').selectOption('feed/rss');
+    await expect(r.page.locator('#feed-options')).toContainText('Запрошено 100, доступно 15');
+    await expect(r.page.locator('#feed-options')).toContainText('точность выбора последних N не подтверждена');
+  } finally { await r.close(); }
+});

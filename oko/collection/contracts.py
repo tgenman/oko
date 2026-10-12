@@ -9,6 +9,7 @@ class Publication:
     published: float
     teaser: 'Material | None' = None
     members: tuple[int, ...] = ()
+    published_known: bool = True
 
 
 @dataclass(frozen=True)

@@ -57,6 +57,13 @@ class History:
         CREATE TABLE IF NOT EXISTS history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));
         ''')
 
+    def warnings(self, feed: str, warnings: list[str]) -> None:
+        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        if row:
+            selection = json.loads(row['selection'])
+            selection['warnings'] = warnings
+            self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
+
     def configure(self, feed: str, selection: InitialHistory) -> None:
         self.db.execute('INSERT INTO initial_history(feed,selection) VALUES (?,?)', (feed, json.dumps(selection.selection())))
 

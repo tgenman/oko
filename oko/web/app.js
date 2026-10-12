@@ -115,7 +115,7 @@ async function refresh() {
       button.classList.toggle('active', opened.selection?.id === card.id);
       button.textContent = (card.digest ? 'Обзор · ' : card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title + (card.changed ? ' · Изменено' : '');
       const date = document.createElement('small');
-      date.textContent = new Date(card.published * 1000).toLocaleString('ru');
+      date.textContent = card.published_known === false ? 'Дата неизвестна' : new Date(card.published * 1000).toLocaleString('ru');
       button.append(date);
       button.onclick = () => opened.open(card);
       return button;
