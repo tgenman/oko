@@ -15,6 +15,6 @@
 
 **Проверки:** HTTP API читателя: пауза, новые поступления, перезапуск и продолжение для RSS/YouTube и Telegram. Браузерный сценарий состояния кнопок и прогресса.
 
-**Контекст:** Спецификация «Выбор начальной истории при подключении источника» в локальном трекере initial-history. Пауза начальной истории отличается от выключения всего фида. Реализация требует отдельного разрешения пользователя.
+**Контекст:** Спецификация «Выбор начальной истории при подключении источника» в локальном трекере initial-history. Пауза начальной истории отличается от выключения всего фида. Реализация разрешена вызовом implement-spec и завершена.
 
 **Verification:** 23 focused HTTP/adapter tests (5 new pause cases covering RSS count/date, YouTube and Telegram); browser pause/resume/completion controls; mypy: 36 modules clean; diff check clean. Pause persists independently of feed transport, excludes archived fetch jobs, invalidates in-flight generations and preserves the selected boundary. A paused Telegram source establishes its live cursor without enrolling archive publications.

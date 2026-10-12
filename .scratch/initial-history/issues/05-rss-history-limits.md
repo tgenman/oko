@@ -16,6 +16,6 @@
 
 **Проверки:** HTTP API читателя с ограниченным RSS/YouTube-окном, отсутствующими датами и изменением окна после первого сбора. Узкие проверки разбора даты и порядка при необходимости. Браузерный сценарий предупреждений и фактического объёма.
 
-**Контекст:** Спецификация «Выбор начальной истории при подключении источника» в локальном трекере initial-history. Объём доступного окна отличается от полноты архива источника. Реализация требует отдельного разрешения пользователя.
+**Контекст:** Спецификация «Выбор начальной истории при подключении источника» в локальном трекере initial-history. Объём доступного окна отличается от полноты архива источника. Реализация разрешена вызовом implement-spec и завершена.
 
 **Evidence:** HTTP API initial-history scenarios: 13 passed; collection adapters: 57 passed; browser initial-history scenarios: 2 passed; mypy: 36 modules clean. Date and order warnings persist with the frozen history cursor; unknown dates are explicit in saved materials and visible in cards/opened originals. Finite RSS history reports 100 requested / 15 available, without archive requests. Existing restart scenario proves retained pending publications after RSS window rotation.
