@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qs
 import xml.etree.ElementTree as ET
 
 from oko.collection.telegram.source import ConnectTelegram
+from oko.subscriptions.history import History, InitialHistory
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +26,7 @@ class FeedURL(BaseModel):
 
 
 class AddFeed(FeedURL):
+    initial_history: InitialHistory = Field(default_factory=InitialHistory)
     verification: str = Field(min_length=1, max_length=100)
     title: str = Field(min_length=1, max_length=200)
     folder: str = Field(default='Без папки', min_length=1, max_length=200)
@@ -140,6 +142,7 @@ def preview(opml: str) -> dict[str, Any]:
 class Subscriptions:
     def __init__(self, db: sqlite3.Connection, fault: Callable[[str], None] = lambda _: None) -> None:
         self.db = db
+        self.history = History(db)
         db.executescript('''
         CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, title TEXT UNIQUE, position INTEGER);
         CREATE TABLE IF NOT EXISTS feeds (
@@ -211,6 +214,7 @@ class Subscriptions:
         for row in self.db.execute('SELECT * FROM feeds ORDER BY rowid'):
             feed = dict(row)
             feed['original_urls'] = json.loads(feed['original_urls'])
+            feed['initial_history'] = self.history.status(feed['id'])
             for field in ('public_ai', 'read_history', 'auto_read'):
                 feed[field] = None if feed[field] is None else bool(feed[field])
             result.append(feed)
@@ -267,6 +271,7 @@ class Subscriptions:
             self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport)
                             VALUES (?,?,?,?,?,?,?,?)''',
                             (key(identity), identity, title, kind, folder, json.dumps([body.url]), connection, kind))
+            self.history.configure(key(identity), body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
 
     def existing_feed(self, url: str) -> dict[str, Any] | None:

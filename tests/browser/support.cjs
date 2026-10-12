@@ -9,7 +9,7 @@ async function reader() {
   const server = http.createServer(async (request, response) => {
     try {
       const name = request.url === '/' ? 'index.html' : request.url.slice(1);
-      if (!['index.html', 'app.js', 'debug.js', 'feed-connection.js', 'opened-material.js', 'telegram-connection.js', 'style.css'].includes(name)) {
+      if (!['index.html', 'app.js', 'debug.js', 'feed-connection.js', 'initial-history.js', 'opened-material.js', 'telegram-connection.js', 'style.css'].includes(name)) {
         response.writeHead(404).end(); return;
       }
       const data = await fs.readFile(path.join(__dirname, '../../oko/web', name));
