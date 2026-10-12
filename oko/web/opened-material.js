@@ -69,7 +69,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
       byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? (material.captions ? 'Получение субтитров и превью' : 'Текст сохранён · загрузка вложений') : material.captions ? (material.reason || 'Субтитры и превью сохранены') : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
       byId('retry').hidden = !material.complete || material.full !== false || material.loading;
       byId('completeness').textContent += (material.changed ? ' · Изменено' : '') + (material.source_deleted ? ' · Недоступно в источнике; локальная копия сохранена' : '');
-      byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
+      byId('date').textContent = material.published_known === false ? 'Дата неизвестна' : new Date(material.published * 1000).toLocaleString('ru');
       byId('message').textContent = '';
       byId('material').hidden = false;
       byId('empty').hidden = true;
@@ -162,7 +162,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
       };
       const details = element('details');
       const text = element('p', source.text); text.className = 'source-text';
-      details.append(element('summary', 'Оригинал · ' + new Date(source.published * 1000).toLocaleString('ru')), text);
+      details.append(element('summary', 'Оригинал · ' + (source.published_known === false ? 'Дата неизвестна' : new Date(source.published * 1000).toLocaleString('ru'))), text);
       const media = element('div'); media.className = 'source-media'; media.id = 'source-media-' + source.id; details.append(media);
       const versions = element('div'); renderVersions(source, versions, current);
       section.append(link, copy, source.changed ? element('p', 'Изменено') : element('span'), details, versions); byId('event-sources').append(section);

@@ -136,19 +136,20 @@ def entries(raw: bytes, base: str) -> list[Entry]:
             record_caught('rss.entries')
             continue
         date = value('pubDate') or value('published') or value('updated') or value('date')
+        known = True
         try:
             dt = parsedate_to_datetime(date) if ',' in date else datetime.fromisoformat(date.replace('Z', '+00:00'))
             stamp = dt.replace(tzinfo=dt.tzinfo or timezone.utc).timestamp()
         except (ValueError, TypeError, OverflowError):
             # Unknown date cannot justify excluding an otherwise new publication.
-            stamp = time.time()
+            stamp, known = 0., False
         identity = value('guid') or value('id') or url
-        result.append(Entry(Publication(identity, url, stamp), value('title') or 'Без заголовка',
+        result.append(Entry(Publication(identity, url, stamp, published_known=known), value('title') or 'Без заголовка',
                             markup('description') or markup('summary') or markup('encoded') or markup('content')))
     counts: dict[str, int] = {}
     for entry in result:
         counts[entry.publication.id] = counts.get(entry.publication.id, 0) + 1
-    return [Entry(Publication(e.publication.url if counts[e.publication.id] > 1 else e.publication.id, e.publication.url, e.publication.published), e.title, e.excerpt) for e in result]
+    return [Entry(Publication(e.publication.url if counts[e.publication.id] > 1 else e.publication.id, e.publication.url, e.publication.published, published_known=e.publication.published_known), e.title, e.excerpt) for e in result]
 
 
 class RSSSource:
@@ -199,18 +200,29 @@ class RSSSource:
                 next_cursor = previous
             else:
                 selection = self.initial_history
-                ordered = list({e.publication.id: e for e in sorted(batch, key=lambda e: e.publication.published, reverse=True)}.values())
-                chosen = ordered[:selection['count']] if selection['mode'] == 'count' else [e for e in batch if e.publication.published >= selection['since']]
+                unique = list({e.publication.id: e for e in batch}.values())
+                known_dates = [e.publication.published for e in unique if e.publication.published_known]
+                descending = all(a >= b for a, b in zip(known_dates, known_dates[1:]))
+                has_unknown = any(not e.publication.published_known for e in unique)
+                # When a date is absent only the producer's order can place it.
+                ordered = unique if has_unknown else sorted(unique, key=lambda e: e.publication.published, reverse=True)
+                chosen = ordered[:selection['count']] if selection['mode'] == 'count' else [e for e in unique if not e.publication.published_known or e.publication.published >= selection['since']]
+                warnings = []
+                if selection['mode'] == 'date':
+                    warnings.append('RSS отдаёт ограниченное окно: полнота истории за период не подтверждена')
+                elif has_unknown and (len(known_dates) < 2 or not descending):
+                    warnings.append('Порядок RSS неоднозначен: точность выбора последних N не подтверждена')
                 selected = {e.publication.id for e in chosen}
-                next_cursor = {'history_ids': list(selected), 'excluded': [e.publication.id for e in batch if e.publication.id not in selected], 'since': time.time()}
-            return [Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается')) for e in chosen], json.dumps(next_cursor)
+                next_cursor = {'history_ids': list(selected), 'excluded': [e.publication.id for e in batch if e.publication.id not in selected], 'since': time.time(), 'warnings': warnings}
+            self.gap = ' · '.join(next_cursor.get('warnings', [])) or None
+            return [Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in chosen], json.dumps(next_cursor)
         cutoff = previous['since'] if previous else time.time() - self.initial_days * 86400
         self.gap = None
         if not batch or min(e.publication.published for e in batch) > cutoff:
             self.gap = 'RSS отдаёт ограниченное окно: полнота истории за период не подтверждена'
         # Keep the original import boundary. RSS order/dates are not a cursor:
         # replaying the finite window also captures delayed and out-of-order items.
-        return [Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается')) for e in batch if e.publication.published >= cutoff], json.dumps({'since': cutoff})
+        return [Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in batch if not e.publication.published_known or e.publication.published >= cutoff], json.dumps({'since': cutoff})
 
     @staticmethod
     def excerpt(html: str) -> str:
