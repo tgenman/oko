@@ -118,6 +118,11 @@ class Store:
     def path(self, item: str) -> Path:
         return self.versions.path(item)
 
+    def pause_history(self, feed: str, paused: bool) -> dict[str, Any]:
+        self.subscriptions.check_owner('feed', feed)
+        with self.db:
+            return self.subscriptions.history.pause(feed, paused)
+
     def enqueue_discovery(self, feed: str = 'demo', next_at: float = 0) -> None:
         with self.db:
             self.db.execute("INSERT INTO jobs(kind,item,next) VALUES ('discover',?,?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=excluded.next,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed, next_at))
@@ -149,7 +154,7 @@ class Store:
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and p.id in history_ids:
                     history_items.append(row['id'])
-                if row and not row['viewed'] and not self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone():
+                if row and not row['viewed'] and not self.db.execute("SELECT 1 FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE d.item=? AND h.outcome='unavailable'", (row['id'],)).fetchone():
                     members = sorted(set(json.loads(row['members'])) | set(p.members))
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
@@ -161,8 +166,10 @@ class Store:
                     self.subscriptions.history.warnings(feed, selection['warnings'])
             if 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed, history_items, selection['scan_complete'])
+            if selection:
+                self.subscriptions.history.discovery_state(feed, selection)
             if namespace == 'telegram':
-                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT item FROM source_deleted))", (feed,))
+                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT d.item FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE h.outcome='unavailable'))", (feed,))
                 self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
@@ -210,7 +217,7 @@ class Store:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             query += f" AND (kind='delete' OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
-        query += " AND NOT (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed WHERE h.paused=1))"
+        query += " AND NOT (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed WHERE h.paused=1 OR (h.scan_complete=0 AND json_extract(h.selection,'$.mode')='count')))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *('' if f == 'demo' else f for f in available), *available)
         row = self.db.execute(query, params).fetchone()
