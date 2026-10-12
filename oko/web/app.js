@@ -1,20 +1,16 @@
+import {createOpenedMaterial} from './opened-material.js';
+
 'use strict';
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
 const tab = crypto.randomUUID();
 const byId = id => document.getElementById(id);
 const bus = new BroadcastChannel('oko-reader');
-let selected = null;
-let generation = 0;
 let contentEpoch = 0;
 let stopped = false;
-let ids = new Set();
-let cardFolders = new Map();
 let folderId = null;
 let refreshTimer = null;
-let imageUrls = [];
-function clearImages() { byId('material').querySelectorAll('video,audio').forEach(media => { media.pause(); media.removeAttribute('src'); media.load(); }); imageUrls.forEach(url => URL.revokeObjectURL(url)); imageUrls = []; byId('images').replaceChildren(); }
-async function api(path, method = 'GET', body = undefined) {
-  const response = await fetch('/api/' + path, {method, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
+async function api(path, method = 'GET', body = undefined, signal = undefined) {
+  const response = await fetch('/api/' + path, {method, signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
   const result = await response.json();
   if (!response.ok) {
     const error = new Error(typeof result.detail === 'string' ? result.detail : response.status === 422 ? 'Проверьте значения настроек' : 'Связь с Око потеряна');
@@ -23,26 +19,16 @@ async function api(path, method = 'GET', body = undefined) {
   }
   return result;
 }
-function clear() {
-  clearImages();
-  generation++;
-  byId('versions').replaceChildren();
-  byId('event-panel').hidden = true;
-  byId('event-body').replaceChildren();
-  byId('event-sources').replaceChildren();
-  byId('filter-panel').hidden = true;
-  ['filtered-text', 'filter-status'].forEach(id => { byId(id).textContent = ''; });
-  byId('theses').replaceChildren();
-  byId('theses-panel').hidden = true;
-  selected = null;
-  byId('material').hidden = true;
-  byId('empty').hidden = false;
-  ['title', 'text', 'date', 'message', 'ai-status'].forEach(id => { byId(id).textContent = ''; });
-}
+const opened = createOpenedMaterial({
+  api,
+  fetchMedia: (path, signal) => fetch(path, {signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}}),
+  onViewed: id => { contentEpoch++; opened.viewed(id); bus.postMessage(id); refresh(); },
+  onChanged: changed => { if (changed) contentEpoch++; refresh(); },
+});
 function stopUi(message) {
   stopped = true;
   contentEpoch++;
-  clear();
+  opened.clear();
   byId('cards').replaceChildren();
   byId('folders').replaceChildren();
   byId('count').textContent = '0';
@@ -61,114 +47,13 @@ bus.onmessage = event => {
   if (event.data === 'stop') stopUi('Око остановлено');
   else if (event.data?.kind === 'folder-viewed') {
     contentEpoch++;
-    if (selected?.folder_id === event.data.folder) clear();
-    for (const [id, folder] of cardFolders) { if (folder === event.data.folder) ids.delete(id); }
+    opened.folderCompleted(event.data.folder);
     refresh();
   } else {
     contentEpoch++;
-    generation++;
-    ids.delete(event.data);
-    if (selected && event.data === selected.id) clear();
+    opened.viewed(event.data);
   }
 };
-async function open(id) {
-  const stamp = ++generation;
-  try {
-    const material = await api('materials/' + id);
-    if (stamp !== generation || !ids.has(id) || stopped) return;
-    clearImages();
-    byId('event-panel').hidden = !(material.event || material.digest);
-    byId('event-body').replaceChildren();
-    byId('event-sources').replaceChildren();
-    byId('original-panel').hidden = !!(material.event || material.digest);
-    byId('copy').hidden = !!(material.event || material.digest);
-    if (material.event || material.digest) renderEvent(material, stamp);
-    selected = {...material, folder_id: material.folder_id || cardFolders.get(id)};
-    byId('title').textContent = material.title;
-    byId('text').textContent = material.text;
-    const filter = material.filter;
-    byId('filter-panel').hidden = !filter || filter.status === 'off';
-    byId('filter-status').textContent = !filter || filter.status === 'off' ? '' : filter.status === 'done' ? (filter.restored ? 'Возвращено пользователем · ' : filter.hidden ? 'Скрыто · ' : filter.removed.length ? 'Рекламные вставки убраны · ' : 'Фильтрация завершена') + (filter.reason || '') : filter.error || 'Ожидание фильтрации';
-    byId('filter-restore').hidden = !filter || filter.status !== 'done' || filter.restored || !(filter.hidden || filter.removed.length);
-    byId('filter-retry').hidden = !filter?.error;
-    byId('filtered-text').textContent = filter?.status === 'done' && !filter.hidden && !filter.restored && filter.removed.length ? material.display_text : '';
-
-    byId('theses-panel').hidden = !material.ai && !material.theses;
-    byId('ai-status').textContent = material.theses ? 'Тезисы готовы' : material.ai?.error || (material.ai?.status === 'running' ? 'Подготовка тезисов' : 'Ожидание обработчика');
-    byId('theses-retry').hidden = !material.ai?.error;
-    byId('theses').replaceChildren(...(material.theses?.points || []).map(point => {
-      const li = element('li', point.text);
-      for (const ref of point.sources) { const link = element('a', ' Источник'); link.href = ref.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; li.append(link); }
-      return li;
-    }));
-    byId('original-panel').open = material.originals !== false && (!filter || filter.status !== 'done' || filter.restored || !filter.removed.length && !filter.hidden);
-    renderVersions(material, byId('versions'), id, stamp);
-    byId('completeness').textContent = !material.complete ? 'Загрузка материала' : material.loading ? (material.captions ? 'Получение субтитров и превью' : 'Текст сохранён · загрузка вложений') : material.captions ? (material.reason || 'Субтитры и превью сохранены') : material.full === false ? 'Неполный материал · ' + material.reason : 'Полностью сохранено';
-    byId('retry').hidden = !material.complete || material.full !== false || material.loading;
-    byId('completeness').textContent += (material.changed ? ' · Изменено' : '') + (material.source_deleted ? ' · Недоступно в источнике; локальная копия сохранена' : '');
-    byId('date').textContent = new Date(material.published * 1000).toLocaleString('ru');
-    byId('message').textContent = '';
-    byId('material').hidden = false;
-    byId('empty').hidden = true;
-    await appendMedia(material, byId('images'), stamp, id);
-    if (material.event || material.digest) {
-      for (const source of material.sources) {
-        if (stamp !== generation || stopped) return;
-        await appendMedia(source, byId('source-media-' + source.id), stamp, id);
-      }
-    }
-  } catch (error) { clear(); byId('progress').textContent = error.message; }
-}
-function renderVersions(material, container, id, stamp) {
-  container.replaceChildren();
-  for (const previous of material.previous || []) {
-    const details = element('details');
-    details.append(element('summary', 'Предыдущая версия'));
-    const body = element('div'); details.append(body);
-    let loaded = false;
-    details.ontoggle = async () => {
-      if (!details.open || loaded) return;
-      loaded = true;
-      try {
-        const version = await api(previous.url.slice('/api/'.length));
-        if (stamp !== generation || stopped || !ids.has(id) || !details.isConnected) return;
-        body.append(element('h3', version.title), element('p', version.text));
-        await appendMedia(version, body, stamp, id);
-      } catch (error) {
-        if (stamp === generation && !stopped && details.isConnected) { body.textContent = error.message; loaded = false; }
-      }
-    };
-    container.append(details);
-  }
-}
-
-async function appendMedia(material, container, stamp, id) {
-    for (const path of material.images || []) {
-      const response = await fetch(path, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}});
-      if (!response.ok) continue;
-      const blob = await response.blob();
-      if (stamp !== generation || stopped || !ids.has(id)) return;
-      const url = URL.createObjectURL(blob); imageUrls.push(url);
-      const img = document.createElement('img'); img.src = url; img.alt = 'Изображение материала'; container.append(img);
-    }
-    for (const attachment of material.attachments || []) {
-      const response = await fetch(attachment.url, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}});
-      if (!response.ok) continue;
-      const blob = await response.blob();
-      if (stamp !== generation || stopped || !ids.has(id)) return;
-      const url = URL.createObjectURL(blob); imageUrls.push(url);
-      let node;
-      if (attachment.kind === 'image') { node = element('img'); node.alt = 'Изображение публикации'; }
-      else if (attachment.kind === 'video' || attachment.kind === 'circle' || attachment.kind === 'audio') {
-        node = element(attachment.kind === 'audio' ? 'audio' : 'video'); node.controls = true; node.preload = 'metadata';
-        node.setAttribute('aria-label', attachment.kind === 'circle' ? 'Кружочек Telegram' : attachment.kind === 'audio' ? 'Аудио публикации' : 'Видео публикации');
-        if (attachment.kind === 'circle') node.classList.add('circle');
-      } else { node = element('a', 'Скачать вложение'); node.href = url; node.download = attachment.url.split('/').pop(); }
-      if (node.tagName !== 'A') node.src = url;
-      container.append(node);
-    }
-}
-
 async function refresh() {
   clearTimeout(refreshTimer);
   if (stopped) return;
@@ -188,28 +73,25 @@ async function refresh() {
       for (const source of changes) details.append(element('p', source.title + ': ' + source.changes));
       byId('source-status').append(details);
     }
-    if (state.error) { clear(); return; }
+    if (state.error) { opened.clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
     if (byId('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);
     const cards = await api('cards?' + params);
     if (stopped || epoch !== contentEpoch) return;
-    ids = new Set(cards.map(card => card.id));
-    cardFolders = new Map(cards.map(card => [card.id, card.folder_id]));
-    if (selected && !ids.has(selected.id)) clear();
-    if (selected && cards.some(card => card.id === selected.id && (JSON.stringify(card.digest) !== JSON.stringify(selected.digest) || JSON.stringify(card.event) !== JSON.stringify(selected.event) || JSON.stringify(card.filter) !== JSON.stringify(selected.filter) || JSON.stringify(card.theses) !== JSON.stringify(selected.theses) || JSON.stringify(card.ai) !== JSON.stringify(selected.ai) || card.originals !== selected.originals || card.version !== selected.version || card.complete !== selected.complete || card.loading !== selected.loading || card.full !== selected.full || card.reason !== selected.reason || card.source_deleted !== selected.source_deleted || JSON.stringify(card.members) !== JSON.stringify(selected.members) || JSON.stringify(card.attachments) !== JSON.stringify(selected.attachments)))) await open(selected.id);
+    opened.reconcile(cards);
     byId('compress').disabled = !folderId;
     byId('folder-viewed').disabled = !folderId;
     byId('digest-now').disabled = !folderId;
     byId('count').textContent = cards.filter(card => !card.filter?.hidden).length;
     byId('cards').replaceChildren(...cards.map(card => {
       const button = document.createElement('button');
-      button.classList.toggle('active', selected?.id === card.id);
+      button.classList.toggle('active', opened.selection?.id === card.id);
       button.textContent = (card.digest ? 'Обзор · ' : card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title + (card.changed ? ' · Изменено' : '');
       const date = document.createElement('small');
       date.textContent = new Date(card.published * 1000).toLocaleString('ru');
       button.append(date);
-      button.onclick = () => open(card.id);
+      button.onclick = () => opened.open(card);
       return button;
     }));
     const folders = await api('folders');
@@ -218,32 +100,13 @@ async function refresh() {
       const button = document.createElement('button');
       button.textContent = `${folder.title} · ${folder.count}`;
       button.classList.toggle('active', folder.id === folderId);
-      button.onclick = () => { folderId = folder.id; contentEpoch++; clear(); refresh(); };
+      button.onclick = () => { folderId = folder.id; contentEpoch++; opened.clear(); refresh(); };
       return button;
     }));
-  } catch (error) { clear(); byId('progress').textContent = error.message; }
+  } catch (error) { if (!stopped && epoch === contentEpoch) { opened.clear(); byId('progress').textContent = error.message; } }
   finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
 byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { byId('progress').textContent = error.message; } };
-byId('retry').onclick = async () => { if (!selected) return; try { await api('materials/' + selected.id + '/retry', 'POST'); byId('retry').hidden = true; refresh(); } catch (error) { byId('message').textContent = error.message; } };
-byId('copy').onclick = async () => {
-  if (!selected) return;
-  try {
-    await navigator.clipboard.writeText(selected.url);
-    byId('message').textContent = 'Ссылка скопирована';
-  } catch { byId('message').textContent = 'Браузер не разрешил копирование'; }
-};
-byId('viewed').onclick = async () => {
-  if (!selected) return;
-  const id = selected.id;
-  try {
-    await api('materials/' + id + '/viewed', 'POST');
-    contentEpoch++;
-    ids.delete(id);
-    bus.postMessage(id);
-    clear();
-  } catch (error) { byId('message').textContent = error.message; }
-};
 byId('stop').onclick = async () => {
   try { await api('stop', 'POST'); bus.postMessage('stop'); stopUi('Око остановлено'); }
   catch (error) { byId('progress').textContent = error.message; }
@@ -251,15 +114,15 @@ byId('stop').onclick = async () => {
 async function heartbeat() {
   if (stopped) return;
   try { await api('tabs/' + tab + '/heartbeat', 'POST'); }
-  catch (error) { clear(); byId('progress').textContent = error.message; }
+  catch (error) { if (!stopped) { opened.clear(); byId('progress').textContent = error.message; } }
   if (!stopped) setTimeout(heartbeat, 2000);
 }
 window.addEventListener('pagehide', () => {
   fetch('/api/tabs/' + tab + '/close', {method:'POST', keepalive:true, headers:{'Authorization':'Bearer '+token}}).catch(() => {});
-  clear();
+  opened.clear();
 });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
-byId('all-folders').onclick = () => { folderId = null; contentEpoch++; clear(); refresh(); };
+byId('all-folders').onclick = () => { folderId = null; contentEpoch++; opened.clear(); refresh(); };
 byId('sort').onchange = () => { contentEpoch++; refresh(); };
 heartbeat().then(refresh);
 
@@ -458,12 +321,6 @@ byId('llamacpp-check').onclick = async () => {
   try { byId('llamacpp-status').textContent = 'Проверка…'; const result = await api('processors/llamacpp/check', 'POST'); if (stopped) return; byId('llamacpp-status').textContent = result.mode + ' · ' + result.model; byId('llamacpp-models').replaceChildren(...result.models.map(name => { const option = element('option'); option.value = name; return option; })); }
   catch (error) { byId('llamacpp-status').textContent = error.message; }
 };
-byId('theses-retry').onclick = async () => {
-  if (!selected) return;
-  try { await api('materials/' + selected.id + '/theses/retry', 'POST'); refresh(); }
-  catch (error) { byId('message').textContent = error.message; }
-};
-
 byId('codex-check').onclick = async () => {
   const button = byId('codex-check');
   button.disabled = true;
@@ -480,53 +337,7 @@ byId('codex-check').onclick = async () => {
   }
 };
 
-byId('show-hidden').onchange = () => { contentEpoch++; clear(); refresh(); };
-byId('filter-restore').onclick = async () => {
-  if (!selected) return;
-  try { await api('materials/' + selected.id + '/filter/restore', 'POST'); contentEpoch++; refresh(); }
-  catch (error) { byId('message').textContent = error.message; }
-};
-byId('filter-retry').onclick = async () => {
-  if (!selected) return;
-  try { await api('materials/' + selected.id + '/filter/retry', 'POST'); refresh(); }
-  catch (error) { byId('message').textContent = error.message; }
-};
-
-function renderEvent(material, stamp) {
-  const body = byId('event-body');
-  for (const [field, title] of [['points', 'Сводка'], ['updates', 'Обновление'], ['conflicts', 'Противоречия источников']]) {
-    const points = (material.event || material.digest)[field] || [];
-    if (!points.length) continue;
-    body.append(element('h2', title));
-    const list = element('ul');
-    for (const point of points) {
-      const li = element('li', point.text);
-      for (const ref of point.sources) {
-        const source = material.sources.find(s => s.id === ref.id);
-        const link = element('a', ' · ' + (source?.title || 'Источник'));
-        link.href = ref.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; li.append(link);
-      }
-      list.append(li);
-    }
-    body.append(list);
-  }
-  for (const source of material.sources) {
-    const section = element('section');
-    const link = element('a', source.title); link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    const copy = element('button', 'Скопировать ссылку');
-    copy.onclick = async () => {
-      try { await navigator.clipboard.writeText(source.url); byId('message').textContent = 'Ссылка скопирована'; }
-      catch { byId('message').textContent = 'Браузер не разрешил копирование'; }
-    };
-    const details = element('details');
-    const text = element('p', source.text); text.className = 'source-text';
-    details.append(element('summary', 'Оригинал · ' + new Date(source.published * 1000).toLocaleString('ru')), text);
-    const media = element('div'); media.className = 'source-media'; media.id = 'source-media-' + source.id; details.append(media);
-    const versions = element('div'); renderVersions(source, versions, material.id, stamp);
-    section.append(link, copy, source.changed ? element('p', 'Изменено') : element('span'), details, versions); byId('event-sources').append(section);
-  }
-}
-
+byId('show-hidden').onchange = () => { contentEpoch++; opened.clear(); refresh(); };
 let digestPeriod = false;
 function openDigest(period) {
   if (!folderId || stopped) return;
@@ -585,7 +396,7 @@ byId('completion-confirm').onclick = async () => {
   try {
     await api('folders/' + confirmedFolder + '/completion', 'POST', {token: completionToken});
     contentEpoch++;
-    clear();
+    opened.folderCompleted(confirmedFolder);
     byId('cards').replaceChildren();
     bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
     byId('completion-dialog').close();
@@ -593,7 +404,7 @@ byId('completion-confirm').onclick = async () => {
   } catch (error) {
     if (!error.detail?.preview) {
       contentEpoch++;
-      if (selected?.folder_id === confirmedFolder) clear();
+      opened.folderCompleted(confirmedFolder);
       bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
     }
     refresh();

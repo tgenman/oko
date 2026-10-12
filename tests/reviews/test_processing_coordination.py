@@ -104,7 +104,15 @@ def test_restore_hidden_original_rebuilds_review_and_theses_with_same_members(tm
         client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'events': True, 'prompt_filters': 'Убери рекламу.'})
         client.post('/api/tabs/reader/heartbeat')
         hidden = wait_for(client, lambda: next((c for c in client.get('/api/cards?show_hidden=true').json() if c.get('filter', {}).get('hidden')), None))
-        identity = client.post('/api/digests/folder/demo', json={}).json()['id']
+        # A filtered first publication does not mean the entire source has loaded.
+        def all_loaded():
+            cards = client.get('/api/cards?show_hidden=true').json()
+            originals = {source['id'] for card in cards for source in card.get('sources', [card])}
+            return len(originals) == 3 and all(card['complete'] and not card.get('loading') for card in cards)
+        wait_for(client, all_loaded)
+        created = client.post('/api/digests/folder/demo', json={})
+        assert created.status_code == 200, created.json()
+        identity = created.json()['id']
         before = wait_for(client, lambda: m if (m := client.get('/api/materials/' + identity).json()).get('digest') else None)
         count = len(calls)
         assert client.post('/api/materials/' + hidden['id'] + '/filter/restore').status_code == 200

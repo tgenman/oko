@@ -289,6 +289,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def js() -> FileResponse:
         return FileResponse(web / 'app.js', media_type='text/javascript')
 
+    @app.get('/opened-material.js')
+    async def opened_material_js() -> FileResponse:
+        return FileResponse(web / 'opened-material.js', media_type='text/javascript')
+
     @app.get('/style.css')
     async def css() -> FileResponse:
         return FileResponse(web / 'style.css', media_type='text/css')
