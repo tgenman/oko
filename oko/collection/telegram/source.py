@@ -228,7 +228,17 @@ class TelegramSource:
         state.pop('history_ids', None)
         state.pop('history_enroll', None)
         if config.get('paused') and not state['upper'] and not state['scan_complete']:
-            self.more = False
+            # Establish the snapshot boundary without enrolling archive materials.
+            # Live requests then start above it even if history was paused before
+            # its first successful request. Resume rereads this same archive page.
+            batch = await self.client.history_page(self.account, self.peer, 0, 0, state['since'], **self.scope)
+            state['upper'] = state['after'] = batch['upper']
+            state['lane'] = 'live'
+            if not state['upper']:
+                state['scan_complete'] = True
+                state['history_enroll'] = []
+            self.more = bool(state['upper'])
+            self.gap = batch.get('gap')
             return [], json.dumps(state)
         # First successful descending page fixes the snapshot. Alternate bounded
         # live requests with archive requests so new messages never wait for it.

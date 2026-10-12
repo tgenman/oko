@@ -80,6 +80,16 @@ class History:
         self.db.executemany('INSERT OR IGNORE INTO history_members(feed,item) VALUES (?,?)', ((feed, item) for item in items))
         self.db.execute('UPDATE initial_history SET frozen=1,scan_complete=? WHERE feed=?', (complete, feed))
 
+    def pause(self, feed: str, paused: bool) -> dict[str, Any]:
+        status = self.status(feed)
+        if status is None:
+            raise ValueError('Начальная история не настроена')
+        if status['state'] != 'done':
+            self.db.execute('UPDATE initial_history SET paused=? WHERE feed=?', (paused, feed))
+        result = self.status(feed)
+        assert result is not None
+        return result
+
     def saved(self, item: str, full: bool) -> None:
         self.db.execute("UPDATE history_members SET outcome=? WHERE item=?", ('loaded' if full else 'incomplete', item))
 
@@ -97,4 +107,6 @@ class History:
         result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen']))
         result['scan_complete'] = bool(row['scan_complete'])
         result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or not row['scan_complete'] else 'done'
+        if row['paused'] and result['state'] != 'done':
+            result['state'] = 'paused'
         return result
