@@ -49,7 +49,10 @@ SQLite хранит идентичности, состояние, позиции
 uv run python -m pytest
 uv run mypy oko
 node --check oko/web/app.js
+node --check oko/web/opened-material.js
 ```
+
+Браузерные сценарии открытого материала запускаются отдельно: `node --test tests/browser/test_opened_material.cjs`. Нужны Playwright и Chrome/Chromium; пути зависимостей, выбор браузера и устройство тестового транспорта описаны в [инструкции](tests/browser/README.md).
 
 Основная граница — API с настоящими временными SQLite/файлами, управляемым временем и синтетическими источниками. Процессные тесты открывают loopback и аварийно завершают дочерний процесс в точках транзакции и записи. Тестовые fault hooks передаются только Python-кодом, через HTTP не доступны.
 
