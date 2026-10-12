@@ -58,7 +58,16 @@ def test_hundred_sources_are_chunked_without_losing_frozen_members(tmp_path):
             time.sleep(.02)
         assert len(cards) == 100 and all(x['complete'] for x in cards)
         identity = client.post('/api/digests/folder/demo', json={}).json()['id']
-        material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + identity).json()).get('digest') else None)
+        # Eleven processing requests need a live reader throughout the wait.
+        # The shared three-second helper is too short under full-suite load.
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            client.post('/api/tabs/reader/heartbeat')
+            material = client.get('/api/materials/' + identity).json()
+            if material.get('digest'):
+                break
+            time.sleep(.02)
+        assert material.get('digest'), client.get('/api/status').json()
         assert len(material['sources']) == 100
         assert len(calls) == 11
         assert len({s['id'] for call in calls[:-1] for s in call['sources']}) == 100

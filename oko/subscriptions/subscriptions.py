@@ -143,7 +143,7 @@ class Subscriptions:
         with db:
             db.execute('BEGIN IMMEDIATE')
             columns = {row['name'] for row in db.execute('PRAGMA table_info(feeds)')}
-            for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT')]:
+            for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT'), ('telegram_topic', 'INTEGER')]:
                 if column not in columns:
                     db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
             if 'telegram_username' not in columns:
@@ -158,9 +158,9 @@ class Subscriptions:
                 fault('before_telegram_username_commit')
 
     def connect_telegram(self, body: ConnectTelegram, info: dict[str, Any]) -> dict[str, Any]:
-        identity = f"telegram-peer:{body.account}:{info['peer']}"
+        identity = f"telegram-peer:{body.account}:{info['peer']}" + (f":topic:{body.topic_id}" if body.topic_id else "")
         username_identity = 'telegram:' + str(info.get('username') or '').lower()
-        old = next((f for f in self.feeds() if f['identity'] == identity or (f.get('telegram_peer') == info['peer'] and f.get('telegram_account') == body.account) or (f['identity'] == username_identity and not f.get('telegram_peer'))), None)
+        old = next((f for f in self.feeds() if f['identity'] == identity or (f.get('telegram_peer') == info['peer'] and f.get('telegram_account') == body.account and f.get('telegram_topic') == body.topic_id) or (body.topic_id is None and f['identity'] == username_identity and not f.get('telegram_peer'))), None)
         if body.feed_id:
             self.check_owner('feed', body.feed_id)
             selected = next(f for f in self.feeds() if f['id'] == body.feed_id)
@@ -168,7 +168,7 @@ class Subscriptions:
                 raise ValueError('Выберите Telegram-фид')
             if old and old['id'] != selected['id']:
                 raise ValueError('Источник уже подключён в другом фиде')
-            if selected.get('telegram_peer') and (selected['telegram_peer'] != info['peer'] or selected['telegram_account'] != body.account):
+            if selected.get('telegram_peer') and (selected['telegram_peer'] != info['peer'] or selected['telegram_account'] != body.account or selected.get('telegram_topic') != body.topic_id):
                 raise ValueError('Для другого источника создайте новый фид')
             old = selected
         elif old and next(f for f in self.folders() if f['id'] == old['folder_id'])['title'] != body.folder:
@@ -180,7 +180,7 @@ class Subscriptions:
             if not old:
                 self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls)
                                 VALUES (?,?,?,'telegram',?,?)''', (id, identity, info['title'], folder, json.dumps([str(body.peer)])))
-            self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,telegram_username=?,auto_read=? WHERE id=?", (info['peer'], body.account, info.get('username'), body.auto_read, id))
+            self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,telegram_username=?,telegram_topic=?,auto_read=? WHERE id=?", (info['peer'], body.account, info.get('username'), body.topic_id, body.auto_read, id))
         return next(f for f in self.feeds() if f['id'] == id)
 
     def ensure_demo(self) -> None:

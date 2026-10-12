@@ -53,7 +53,7 @@ class ReadSync:
         if not config or not state or config['transport'] != 'telegram' or config['auto_read'] is None:
             return None
         return dict(account=config['telegram_account'], peer=config['telegram_peer'],
-                    username=config.get('telegram_username'), since=state['since'],
+                    username=config.get('telegram_username'), topic_id=config.get('telegram_topic'), since=state['since'],
                     initial=state['initial'], read_history=config['read_history'], auto_read=config['auto_read'],
                     eligible=[r[0] for r in self.store.db.execute(
                         "SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1 AND missing=0 AND (?=1 OR reason='viewed') ORDER BY member", (feed, config['auto_read']))])

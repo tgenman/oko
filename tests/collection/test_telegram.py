@@ -114,7 +114,7 @@ def test_private_group_access_forum_and_account_errors_are_explicit(tmp_path: Pa
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=Peers()), headers=HEADERS) as client:
         client.post('/api/tabs/test/heartbeat')
         assert client.post('/api/telegram/connect', json=dict(account='fixture', peer='@denied', folder='Личное', auto_read=False)).json()['detail'] == 'Нет доступа к Telegram-источнику'
-        assert 'Forum' in client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Личное', auto_read=False)).json()['detail']
+        assert 'Выберите тему' in client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Личное', auto_read=False)).json()['detail']
         assert client.get('/api/subscriptions').json()['feeds'] == []
         feed = connect(client, '-12345', 'Личное')
         assert feed['telegram_peer'] == -12345

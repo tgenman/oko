@@ -18,7 +18,7 @@ from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.codex import CodexClient
 from oko.reviews.digests import DigestRequest
 from oko.storage.store import Store
-from oko.collection.telegram.source import TelegramClient, ConnectTelegram
+from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
 from oko.subscriptions.subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
 from oko.collection.youtube.source import CaptionsClient
@@ -131,6 +131,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/api/telegram/accounts')
     async def telegram_accounts() -> list[str]:
         return await runtime.telegram_accounts()
+
+    @app.post('/api/telegram/topics')
+    async def telegram_topics(body: TelegramPeer) -> list[dict[str, Any]]:
+        return await runtime.telegram_topics(body)
 
     @app.post('/api/telegram/connect')
     async def telegram_connect(body: ConnectTelegram) -> dict[str, Any]:
@@ -292,6 +296,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/opened-material.js')
     async def opened_material_js() -> FileResponse:
         return FileResponse(web / 'opened-material.js', media_type='text/javascript')
+
+    @app.get('/telegram-connection.js')
+    def telegram_connection_js() -> FileResponse:
+        return FileResponse(web / 'telegram-connection.js', media_type='text/javascript')
 
     @app.get('/style.css')
     async def css() -> FileResponse:

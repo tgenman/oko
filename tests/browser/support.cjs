@@ -9,7 +9,7 @@ async function reader() {
   const server = http.createServer(async (request, response) => {
     try {
       const name = request.url === '/' ? 'index.html' : request.url.slice(1);
-      if (!['index.html', 'app.js', 'opened-material.js', 'style.css'].includes(name)) {
+      if (!['index.html', 'app.js', 'opened-material.js', 'telegram-connection.js', 'style.css'].includes(name)) {
         response.writeHead(404).end(); return;
       }
       const data = await fs.readFile(path.join(__dirname, '../../oko/web', name));
@@ -30,7 +30,7 @@ async function reader() {
       const held = new Map();
       const pending = new Map();
       window.readerTransport = {
-        replies, held, pending, cards: [],
+        replies, held, pending, cards: [], requests: [],
         release(url, body, status = 200) {
           const resolve = pending.get(url); pending.delete(url); held.delete(url);
           resolve(new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}}));
@@ -38,6 +38,7 @@ async function reader() {
       };
       window.fetch = async (url, options) => {
         const key = String(url);
+        window.readerTransport.requests.push({url: key, method: options?.method || 'GET', body: options?.body ? JSON.parse(options.body) : null});
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
         if (replies.has(key)) {
           const reply = replies.get(key);
@@ -69,6 +70,8 @@ async function reader() {
         const t = window.readerTransport;
         t.replies.set('/api/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
         t.replies.set('/api/folders', {body: [{id: 'f', title: 'Тема', count: materials.length}]});
+        const defaults = {events: true, event_hours: 24, originals: true, theses: false, digests: false, prompt_theses: 'Тезисы', prompt_digest: 'Темы', prompt_filters: '', schedule: 'off', digest_days: 1, processor: 'codex'};
+        t.replies.set('/api/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
         t.cards = materials.map(({text, ...card}) => card);
         for (const material of materials) t.replies.set('/api/materials/' + material.id, {body: material});
       }, materials);

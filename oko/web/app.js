@@ -1,3 +1,4 @@
+import {createTelegramConnection} from './telegram-connection.js';
 import {createOpenedMaterial} from './opened-material.js';
 
 'use strict';
@@ -25,7 +26,11 @@ const opened = createOpenedMaterial({
   onViewed: id => { contentEpoch++; opened.viewed(id); bus.postMessage(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
+const telegram = createTelegramConnection({api, onConnected: async feed => {
+  await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
+}});
 function stopUi(message) {
+  telegram.stop();
   stopped = true;
   contentEpoch++;
   opened.clear();
@@ -244,16 +249,9 @@ function renderFeed(feed) {
   };
   container.append(save);
   if (feed.kind === 'telegram') {
-    const peer = element('input'); peer.value = feed.telegram_peer || feed.identity.replace(/^telegram:/, '@');
-    const account = element('input'); account.value = feed.telegram_account || '';
-    const connect = element('button', 'Подключить Telegram-фид');
-    connect.onclick = async () => {
-      try {
-        await api('telegram/connect', 'POST', {account: account.value, peer: peer.value, folder: subscriptions.folders.find(f => f.id === feed.folder_id).title, feed_id: feed.id, auto_read: auto.value === 'true'});
-        await loadSubscriptions('feed/' + feed.id); byId('settings-message').textContent = 'Подключён; отметки прочитанного пока не отправляются';
-      } catch (error) { byId('settings-message').textContent = error.message; }
-    };
-    container.append(labelled('Аккаунт существующего клиента', account), labelled('Username или ID Telegram', peer), connect);
+    const connect = element('button', 'Настроить подключение Telegram-фида');
+    connect.onclick = () => telegram.configure(feed, subscriptions.folders.find(f => f.id === feed.folder_id).title);
+    container.append(connect);
   }
 }
 function showConflicts(conflicts) {
@@ -266,6 +264,7 @@ function showConflicts(conflicts) {
 }
 byId('settings-open').onclick = async () => {
   byId('settings-dialog').showModal();
+  telegram.loadAccounts();
   byId('settings-message').textContent = '';
   try { await loadSubscriptions(); const config = await api('processors/llamacpp'); if (config) { byId('llamacpp-endpoint').value = config.endpoint; byId('llamacpp-model').value = config.model; byId('llamacpp-local').checked = config.local_execution; } } catch (error) { byId('settings-message').textContent = error.message; }
 };
@@ -296,18 +295,6 @@ byId('import-confirm').onclick = async () => {
     if (error.detail?.conflicts) { byId('import-plan').replaceChildren(element('p', 'Выберите одну папку для каждого конфликта и повторите импорт.')); showConflicts(error.detail.conflicts); }
     else byId('settings-message').textContent = error.message;
   }
-};
-
-byId('telegram-accounts').onclick = async () => {
-  try { byId('settings-message').textContent = 'Доступные аккаунты: ' + (await api('telegram/accounts')).join(', '); }
-  catch (error) { byId('settings-message').textContent = error.message; }
-};
-byId('telegram-add').onclick = async () => {
-  try {
-    const feed = await api('telegram/connect', 'POST', {account: byId('telegram-account').value, peer: byId('telegram-peer').value, folder: byId('telegram-folder').value, auto_read: byId('telegram-auto').checked});
-    await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
-    byId('settings-message').textContent = 'Источник подключён; отметки прочитанного пока не отправляются';
-  } catch (error) { byId('settings-message').textContent = error.message; }
 };
 
 for (const id of ['llamacpp-endpoint', 'llamacpp-model']) {

@@ -9,3 +9,5 @@ header #settings-open{margin-left:auto}header #stop{margin-left:0}#all-folders{w
 .source-text{white-space:pre-wrap;line-height:1.75}.source-media img,.source-media video,.source-media audio{display:block;max-width:100%;margin:16px 0}.source-media video{max-height:600px}.source-media .circle{width:320px;height:320px;object-fit:cover;border-radius:50%}#event-sources section{padding:16px 0;border-right:0}#event-sources details{margin-top:12px}
 
 .folder-actions{flex-wrap:wrap}.folder-actions button{flex:1 1 120px}
+
+#telegram-topic-label[hidden]{display:none}

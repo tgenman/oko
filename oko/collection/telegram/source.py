@@ -17,20 +17,25 @@ from oko.collection.contracts import Attachment, Material, Publication
 
 class TelegramClient(Protocol):
     async def accounts(self) -> list[str]: ...
-    async def info(self, account: str, peer: str | int) -> dict[str, Any]: ...
-    async def page(self, account: str, peer: int, after: int, since: float) -> dict[str, Any]: ...
-    async def messages(self, account: str, peer: int, ids: list[int]) -> list[dict[str, Any]]: ...
-    async def download(self, account: str, peer: int, id: int) -> bytes: ...
-    async def read_state(self, account: str, peer: int, since: float) -> dict[str, Any]: ...
-    async def read_window(self, account: str, peer: int, after: int, until: int) -> dict[str, Any]: ...
-    async def acknowledge(self, account: str, peer: int, max_id: int) -> None: ...
+    async def topics(self, account: str, peer: str | int) -> list[dict[str, Any]]: ...
+    async def info(self, account: str, peer: str | int, topic_id: int | None = None) -> dict[str, Any]: ...
+    async def page(self, account: str, peer: int, after: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
+    async def messages(self, account: str, peer: int, ids: list[int], topic_id: int | None = None) -> list[dict[str, Any]]: ...
+    async def download(self, account: str, peer: int, id: int, topic_id: int | None = None) -> bytes: ...
+    async def read_state(self, account: str, peer: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
+    async def read_window(self, account: str, peer: int, after: int, until: int, topic_id: int | None = None) -> dict[str, Any]: ...
+    async def acknowledge(self, account: str, peer: int, max_id: int, topic_id: int | None = None) -> None: ...
     async def close(self) -> None: ...
 
 
-class ConnectTelegram(BaseModel):
+class TelegramPeer(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     account: str = Field(min_length=1, max_length=80, pattern=r'^[a-zA-Z0-9_-]+$')
     peer: str = Field(min_length=1, max_length=100, pattern=r'^(@?[a-zA-Z][a-zA-Z0-9_]{3,31}|-[0-9]+)$')
+
+
+class ConnectTelegram(TelegramPeer):
+    topic_id: int | None = Field(default=None, ge=1, le=2147483647)
     folder: str = Field(min_length=1, max_length=200)
     feed_id: str | None = None
     auto_read: bool
@@ -91,38 +96,42 @@ class LocalTelegram:
         value: list[str] = await self.request('accounts')
         return value
 
-    async def info(self, account: str, peer: str | int) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('info', account=account, peer=peer)
+    async def topics(self, account: str, peer: str | int) -> list[dict[str, Any]]:
+        value: list[dict[str, Any]] = await self.request('topics', account=account, peer=peer)
         return value
 
-    async def page(self, account: str, peer: int, after: int, since: float) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('page', account=account, peer=peer, after=after, since=since)
+    async def info(self, account: str, peer: str | int, topic_id: int | None = None) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('info', account=account, peer=peer, topic_id=topic_id)
         return value
 
-    async def messages(self, account: str, peer: int, ids: list[int]) -> list[dict[str, Any]]:
-        value: list[dict[str, Any]] = await self.request('messages', account=account, peer=peer, ids=ids)
+    async def page(self, account: str, peer: int, after: int, since: float, topic_id: int | None = None) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('page', account=account, peer=peer, after=after, since=since, topic_id=topic_id)
         return value
 
-    async def download(self, account: str, peer: int, id: int) -> bytes:
-        value: bytes = await self.request('download', account=account, peer=peer, id=id)
+    async def messages(self, account: str, peer: int, ids: list[int], topic_id: int | None = None) -> list[dict[str, Any]]:
+        value: list[dict[str, Any]] = await self.request('messages', account=account, peer=peer, ids=ids, topic_id=topic_id)
         return value
 
-    async def read_state(self, account: str, peer: int, since: float) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('read_state', account=account, peer=peer, since=since)
+    async def download(self, account: str, peer: int, id: int, topic_id: int | None = None) -> bytes:
+        value: bytes = await self.request('download', account=account, peer=peer, id=id, topic_id=topic_id)
         return value
 
-    async def read_window(self, account: str, peer: int, after: int, until: int) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('read_window', account=account, peer=peer, after=after, until=until)
+    async def read_state(self, account: str, peer: int, since: float, topic_id: int | None = None) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('read_state', account=account, peer=peer, since=since, topic_id=topic_id)
         return value
 
-    async def acknowledge(self, account: str, peer: int, max_id: int) -> None:
+    async def read_window(self, account: str, peer: int, after: int, until: int, topic_id: int | None = None) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('read_window', account=account, peer=peer, after=after, until=until, topic_id=topic_id)
+        return value
+
+    async def acknowledge(self, account: str, peer: int, max_id: int, topic_id: int | None = None) -> None:
         if max_id <= 0:
             raise SourceError('Неверная граница прочитанного Telegram')
-        result = await self.request('acknowledge', account=account, peer=peer, max_id=max_id)
+        result = await self.request('acknowledge', account=account, peer=peer, max_id=max_id, topic_id=topic_id)
         if result is not True:
             # A repeated already-read boundary can return False. Verify the
             # server's actual frontier before treating it as failure.
-            state = await self.read_state(account, peer, time.time())
+            state = await self.read_state(account, peer, time.time(), topic_id=topic_id)
             if state['read_max'] < max_id:
                 raise SourceError('Telegram не подтвердил отметку прочитанного')
 
@@ -138,27 +147,33 @@ class LocalTelegram:
 
 class TelegramSource:
     changes = 'Telegram: при сборе перечитываются известные непросмотренные сообщения и вложения. Отсутствующие сообщения сохраняются локально; исчезновение может означать удаление или потерю доступа.'
-    def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None) -> None:
+    def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None, topic_id: int | None = None) -> None:
+        self.topic_id = topic_id
         self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days
         self.more = False
         self.gap: str | None = None
 
+    @property
+    def scope(self) -> dict[str, int]:
+        return {'topic_id': self.topic_id} if self.topic_id is not None else {}
+
     async def resolve(self) -> None:
         # StringSession does not persist Telethon's entity/access-hash cache.
         # Refill it in the current worker, but never change the feed's identity.
         if self.username:
-            info = await self.client.info(self.account, '@' + self.username)
+            info = await self.client.info(self.account, '@' + self.username, **self.scope)
             if info['peer'] != self.peer:
                 raise SourceError('Username Telegram теперь принадлежит другому источнику; переподключите фид')
 
     def url(self, id: int) -> str:
-        return f'https://t.me/c/{-self.peer-1000000000000}/{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
+        topic = f'{self.topic_id}/' if self.topic_id else ''
+        return f'https://t.me/c/{-self.peer-1000000000000}/{topic}{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
 
     async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
         await self.resolve()
         state: dict[str, Any] = json.loads(cursor) if cursor else dict(after=0, since=time.time()-self.initial_days*86400)
-        batch = await self.client.page(self.account, self.peer, state['after'], state['since'])
+        batch = await self.client.page(self.account, self.peer, state['after'], state['since'], **self.scope)
         self.more, self.gap = batch['more'], batch.get('gap')
         groups: dict[str, list[dict[str, Any]]] = {}
         for msg in batch['messages']:
@@ -174,14 +189,14 @@ class TelegramSource:
             publications.append(Publication('album:' + str(messages[0]['group']) if messages[0]['group'] else str(id), self.url(id), messages[0]['date'],
                                            Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, False),
                                            tuple(m['id'] for m in messages)))
-        state['after'] = max([state['after']] + [m for p in publications for m in p.members])
+        state['after'] = max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members])
         if self.more and state['after'] == (json.loads(cursor)['after'] if cursor else 0):
             raise SourceError('Telegram не продвинул позицию сбора')
         return publications, json.dumps(state)
 
     async def fetch(self, publication: Publication) -> Material:
         await self.resolve()
-        rows = await self.client.messages(self.account, self.peer, list(publication.members) or [int(publication.id)])
+        rows = await self.client.messages(self.account, self.peer, list(publication.members) or [int(publication.id)], **self.scope)
         teaser = publication.teaser or Material('Публикация недоступна', '')
         if not rows:
             if publication.teaser and publication.teaser.full:
@@ -202,7 +217,7 @@ class TelegramSource:
                 reasons.append('Тип вложения пока не поддерживается')
                 continue
             try:
-                data = await self.client.download(self.account, self.peer, msg['id'])
+                data = await self.client.download(self.account, self.peer, msg['id'], **self.scope)
                 if not data:
                     raise SourceError('Пустое вложение Telegram')
                 attachments.append(Attachment(f"media-{msg['id']}.{media['extension']}", data, media['kind'], media['mime']))

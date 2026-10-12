@@ -23,7 +23,7 @@ from oko.reviews.digests import DigestRequest
 from oko.reviews.coordination import PreparedWork
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
-from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
+from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram, TelegramPeer
 from oko.subscriptions.subscriptions import ImportRequest, Overrides, FeedPatch
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions
 
@@ -138,7 +138,7 @@ class Runtime:
                 continue
             if feed['transport'] == 'telegram' and self._telegram_client and feed.get('telegram_peer'):
                 if not isinstance(self._sources.get(feed['id']), TelegramSource):
-                    self._sources[feed['id']] = TelegramSource(self._telegram_client, feed['telegram_account'], feed['telegram_peer'], feed['initial_days'], feed.get('telegram_username'))
+                    self._sources[feed['id']] = TelegramSource(self._telegram_client, feed['telegram_account'], feed['telegram_peer'], feed['initial_days'], feed.get('telegram_username'), feed.get('telegram_topic'))
                     self._store.enqueue_discovery(feed['id'])
                 telegram_source = self._sources[feed['id']]
                 if isinstance(telegram_source, TelegramSource):
@@ -483,15 +483,22 @@ class Runtime:
         result, _, _ = await self._call_telegram(lambda client: client.accounts())
         return result
 
+    async def telegram_topics(self, body: TelegramPeer) -> list[dict[str, Any]]:
+        result, _, _ = await self._call_telegram(
+            lambda client: client.topics(body.account, int(body.peer) if body.peer.startswith('-') else body.peer))
+        return result
+
     async def connect_telegram(self, body: ConnectTelegram) -> dict[str, Any]:
         info, current, epoch = await self._call_telegram(
-            lambda client: client.info(body.account, int(body.peer) if body.peer.startswith('-') else body.peer))
+            lambda client: client.info(body.account, int(body.peer) if body.peer.startswith('-') else body.peer, **({'topic_id': body.topic_id} if body.topic_id is not None else {})))
         async with self._actions:
             self._check_request(current, epoch)
-            if info.get('forum'):
-                raise ActionError('conflict', 'Forum topics пока не поддерживаются')
+            if info.get('forum') and body.topic_id is None:
+                raise ActionError('invalid', 'Выберите тему форумной группы: загрузите список тем')
+            if body.topic_id is not None and (not info.get('forum') or info.get('topic_id') != body.topic_id):
+                raise ActionError('invalid', 'Тема недоступна в этой группе')
             if info['kind'] not in ('channel', 'group'):
-                raise ActionError('invalid', 'Поддерживаются каналы и обычные группы')
+                raise ActionError('invalid', 'Поддерживаются каналы и группы')
             try:
                 result = current.subscriptions.connect_telegram(body, info)
             except (LookupError, ValueError) as error:
@@ -521,18 +528,18 @@ class Runtime:
                 return
             signature = current.read_sync.signature(request)
         await source.resolve()
-        state = await source.client.read_state(source.account, source.peer, request['since'])
+        state = await source.client.read_state(source.account, source.peer, request['since'], **source.scope)
         plan = current.read_sync.plan(request, state)
         confirmed = plan.confirmed
         if plan.until > confirmed:
-            window = await source.client.read_window(source.account, source.peer, confirmed, plan.until)
+            window = await source.client.read_window(source.account, source.peer, confirmed, plan.until, **source.scope)
             plan = current.read_sync.plan(request, state, window)
         async with self._actions:
             latest = current.read_sync.request(job.item) if self._store is current else None
             if not self._live() or not current.valid(job) or not latest or current.read_sync.signature(latest) != signature:
                 return
         if plan.candidate > confirmed:
-            await source.client.acknowledge(source.account, source.peer, plan.candidate)
+            await source.client.acknowledge(source.account, source.peer, plan.candidate, **source.scope)
             self._fault('after_telegram_acknowledge')
             confirmed = plan.candidate
         async with self._actions:
