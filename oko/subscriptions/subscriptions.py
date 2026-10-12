@@ -185,8 +185,8 @@ class Subscriptions:
             if selected.get('telegram_peer') and (selected['telegram_peer'] != info['peer'] or selected['telegram_account'] != body.account or selected.get('telegram_topic') != body.topic_id):
                 raise ValueError('Для другого источника создайте новый фид')
             old = selected
-        elif old and next(f for f in self.folders() if f['id'] == old['folder_id'])['title'] != body.folder:
-            raise ValueError('Источник уже в другой папке; переместите существующий фид')
+        elif old:
+            return old
         id = old['id'] if old else key(identity)
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (key('folder:' + body.folder), body.folder, len(self.folders())))

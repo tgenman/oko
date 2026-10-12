@@ -241,15 +241,17 @@ function renderFeed(feed) {
   container.append(element('h2', 'Подключение фида'));
   if (feed.initial_history) {
     const progress = element('p', historyProgress(feed.initial_history)); progress.id = 'history-progress'; progress.dataset.feed = feed.id; progress.setAttribute('role', 'status'); container.append(progress);
+  } else if (feed.kind !== 'demo') {
+    container.append(element('p', Number.isInteger(feed.initial_days) ? `Сохранённый первоначальный период: ${feed.initial_days} дней` : 'Первоначальный период не сохранён'),
+      element('p', 'Количество и прогресс начальной загрузки не сохранены. Существующая граница и курсор сохраняются; повторная загрузка истории не запускается.'));
   }
   const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.transport === 'youtube' ? 'YouTube подключён: сбор при открытой вкладке' : feed.kind === 'youtube' ? 'YouTube отключён' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
   container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
   if (feed.kind === 'youtube') container.append(element('p', (feed.transport === 'youtube' ? 'YouTube: обновления собираются при открытой вкладке. ' : 'YouTube подключается автоматически при добавлении URL фида. ') + 'Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));
   const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
   const importance = selectControl(Object.entries(importanceNames), feed.importance);
-  const days = element('input'); days.type = 'number'; days.min = '1'; days.max = '3650'; days.value = feed.initial_days;
   const publicAi = element('input'); publicAi.type = 'checkbox'; publicAi.checked = feed.public_ai;
-  container.append(labelled('Папка', folder), labelled('Важность фида', importance), labelled('Первоначальный период, дней', days), labelled('Разрешить обработку публичным AI', publicAi));
+  container.append(labelled('Папка', folder), labelled('Важность фида', importance), labelled('Разрешить обработку публичным AI', publicAi));
   let auto, history, transport, youtubeEnabled;
   if (feed.kind === 'telegram') {
     auto = selectControl([['', 'Выберите режим'], ['true', 'Автопрочитывать после полного сохранения'], ['false', 'Отмечать только после «Просмотрено»']], feed.auto_read === null ? '' : feed.auto_read);
@@ -266,7 +268,7 @@ function renderFeed(feed) {
   }
   const save = element('button', 'Сохранить фид');
   save.onclick = async () => {
-    const patch = {folder_id: folder.value, importance: importance.value, initial_days: Number(days.value), public_ai: publicAi.checked};
+    const patch = {folder_id: folder.value, importance: importance.value, public_ai: publicAi.checked};
     if (auto) { patch.auto_read = auto.value === '' ? null : auto.value === 'true'; patch.read_history = history.checked; }
     if (transport) patch.transport = transport.value || null;
     if (youtubeEnabled) patch.transport = youtubeEnabled.checked ? 'youtube' : null;
