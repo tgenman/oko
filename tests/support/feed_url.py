@@ -22,5 +22,3 @@ def verify(client, url='https://example.org/feed.xml'):
 def add(client, checked, **values):
     return client.post('/api/feeds', json={'url': checked['url'], 'verification': checked['verification'],
                                         'title': checked['title'], 'folder': 'Учёба', **values})
-
-

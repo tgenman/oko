@@ -15,4 +15,3 @@ class Archive(Telegram):
         return dict(messages=[m for m in self.rows if m['id']>after],more=False,next_after=max([after]+[m['id'] for m in self.rows]))
     async def messages(self,account,peer,ids,**scope):
         return [m for m in self.rows if m['id'] in ids]
-
