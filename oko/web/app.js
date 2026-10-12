@@ -85,7 +85,7 @@ async function refresh() {
     const historyNode = byId('history-progress');
     if (historyNode) {
       const progress = (state.initial_histories || []).find(h => h.feed_id === historyNode.dataset.feed);
-      if (progress) historyNode.textContent = historyProgress(progress);
+      if (progress) renderHistoryState(progress);
     }
     if (state.stopped) { stopUi('Око остановлено'); return; }
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
@@ -236,11 +236,32 @@ async function loadSettings() {
     }
   } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
 }
+function renderHistoryState(history) {
+  const progress = byId('history-progress');
+  if (progress) progress.textContent = historyProgress(history);
+  const toggle = byId('history-toggle');
+  if (toggle) {
+    toggle.hidden = history.state === 'done';
+    toggle.textContent = history.paused ? 'Продолжить историю' : 'Приостановить историю';
+    toggle.dataset.paused = String(history.paused);
+  }
+}
 function renderFeed(feed) {
   const container = byId('feed-options');
   container.append(element('h2', 'Подключение фида'));
   if (feed.initial_history) {
-    const progress = element('p', historyProgress(feed.initial_history)); progress.id = 'history-progress'; progress.dataset.feed = feed.id; progress.setAttribute('role', 'status'); container.append(progress);
+    const progress = element('p', historyProgress(feed.initial_history)); progress.id = 'history-progress'; progress.dataset.feed = feed.id; progress.setAttribute('role', 'status');
+    const toggle = element('button'); toggle.id = 'history-toggle';
+    toggle.onclick = async () => {
+      toggle.disabled = true;
+      try {
+        const history = await api('feeds/' + feed.id + '/history', 'PATCH', {paused: toggle.dataset.paused !== 'true'});
+        renderHistoryState(history);
+      } catch (error) {reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message;}
+      finally {toggle.disabled = false;}
+    };
+    container.append(progress, toggle);
+    renderHistoryState(feed.initial_history);
   } else if (feed.kind !== 'demo') {
     container.append(element('p', Number.isInteger(feed.initial_days) ? `Сохранённый первоначальный период: ${feed.initial_days} дней` : 'Первоначальный период не сохранён'),
       element('p', 'Количество и прогресс начальной загрузки не сохранены. Существующая граница и курсор сохраняются; повторная загрузка истории не запускается.'));

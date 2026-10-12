@@ -28,6 +28,10 @@ from oko.collection.youtube.source import CaptionsClient
 from oko.diagnostics import Journal, BrowserError, active_journal, diagnostic_source, capture_scope, record_caught
 
 
+class HistoryPause(BaseModel):
+    paused: bool = Field(strict=True)
+
+
 class CompletionRequest(BaseModel):
     token: str = Field(min_length=1, max_length=100)
 
@@ -256,6 +260,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.patch('/api/settings/{scope}/{owner}')
     async def settings_patch(scope: str, owner: str, body: Overrides) -> dict[str, Any]:
         return await runtime.update_settings(scope, owner, body)
+
+    @app.patch('/api/feeds/{identity}/history')
+    async def history_pause(identity: str, body: HistoryPause) -> dict[str, Any]:
+        return await runtime.pause_history(identity, body.paused)
 
     @app.patch('/api/feeds/{identity}')
     async def feed_patch(identity: str, body: FeedPatch) -> dict[str, Any]:
