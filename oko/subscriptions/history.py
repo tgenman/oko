@@ -56,6 +56,8 @@ class History:
         CREATE TABLE IF NOT EXISTS initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));
         ''')
+        if 'scan_complete' not in {r['name'] for r in db.execute('PRAGMA table_info(initial_history)')}:
+            db.execute('ALTER TABLE initial_history ADD COLUMN scan_complete INTEGER DEFAULT 1')
 
     def warnings(self, feed: str, warnings: list[str]) -> None:
         row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
@@ -74,6 +76,10 @@ class History:
         self.db.executemany('INSERT OR IGNORE INTO history_members(feed,item) VALUES (?,?)', ((feed, item) for item in items))
         self.db.execute('UPDATE initial_history SET frozen=1 WHERE feed=?', (feed,))
 
+    def enroll(self, feed: str, items: list[str], complete: bool) -> None:
+        self.db.executemany('INSERT OR IGNORE INTO history_members(feed,item) VALUES (?,?)', ((feed, item) for item in items))
+        self.db.execute('UPDATE initial_history SET frozen=1,scan_complete=? WHERE feed=?', (complete, feed))
+
     def saved(self, item: str, full: bool) -> None:
         self.db.execute("UPDATE history_members SET outcome=? WHERE item=?", ('loaded' if full else 'incomplete', item))
 
@@ -89,5 +95,6 @@ class History:
         counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome,count(*) n FROM history_members WHERE feed=? GROUP BY outcome', (feed,))}
         loaded = counts.get('loaded', 0) + counts.get('incomplete', 0)
         result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen']))
-        result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) else 'done'
+        result['scan_complete'] = bool(row['scan_complete'])
+        result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or not row['scan_complete'] else 'done'
         return result

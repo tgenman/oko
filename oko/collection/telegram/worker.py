@@ -127,6 +127,26 @@ async def main() -> None:
                         topic = await topic_info(cl, entity, topic_id) if topic_id is not None else None
                         value = dict(peer=utils.get_peer_id(entity), title=entity.title + (' · ' + topic.title if topic else ''),
                                      kind='channel' if getattr(entity, 'broadcast', False) else 'group', forum=bool(getattr(entity, 'forum', False)), topic_id=topic_id, username=getattr(entity, 'username', None))
+                    elif op == 'history_page':
+                        if topic_id is not None:
+                            await topic_info(cl, entity, topic_id)
+                        upper, before = body['upper'], body['before']
+                        first = not upper
+                        archive_params: dict[str, Any] = dict(limit=100)
+                        if before:
+                            archive_params['offset_id'] = before
+                        elif upper:
+                            archive_params['offset_id'] = upper + 1
+                        raw, batch = await history(cl, entity, topic_id, **archive_params)
+                        upper = upper or max([0] + [m.id for m in raw])
+                        expanded = {m.id: m for m in batch}
+                        for msg in (batch[0:1] + batch[-1:]) if batch else []:
+                            if msg.grouped_id:
+                                expanded.update({m.id: m for m in await album(cl, entity, msg, topic_id)})
+                        if first:
+                            upper = max([upper] + list(expanded))
+                        value = dict(messages=[record(m) for m in expanded.values()], upper=upper,
+                                     next_before=min([m.id for m in raw], default=before), more=len(raw) == 100)
                     elif op == 'page':
                         if topic_id is not None:
                             await topic_info(cl, entity, topic_id)

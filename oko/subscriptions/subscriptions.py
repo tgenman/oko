@@ -192,6 +192,8 @@ class Subscriptions:
             self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (key('folder:' + body.folder), body.folder, len(self.folders())))
             folder = self.db.execute('SELECT id FROM folders WHERE title=?', (body.folder,)).fetchone()[0]
             if not old:
+                if body.initial_history is not None:
+                    self.history.configure(id, body.initial_history)
                 self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls)
                                 VALUES (?,?,?,'telegram',?,?)''', (id, identity, info['title'], folder, json.dumps([str(body.peer)])))
             self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,telegram_username=?,telegram_topic=?,auto_read=? WHERE id=?", (info['peer'], body.account, info.get('username'), body.topic_id, body.auto_read, id))

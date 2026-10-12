@@ -1,5 +1,6 @@
 """Telegram source and cancellable worker for Oko-owned Telethon client."""
 from oko.diagnostics import record_caught
+from oko.subscriptions.history import InitialHistory
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
@@ -21,6 +22,7 @@ class TelegramClient(Protocol):
     async def topics(self, account: str, peer: str | int) -> list[dict[str, Any]]: ...
     async def info(self, account: str, peer: str | int, topic_id: int | None = None) -> dict[str, Any]: ...
     async def page(self, account: str, peer: int, after: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
+    async def history_page(self, account: str, peer: int, upper: int, before: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
     async def messages(self, account: str, peer: int, ids: list[int], topic_id: int | None = None) -> list[dict[str, Any]]: ...
     async def download(self, account: str, peer: int, id: int, topic_id: int | None = None) -> bytes: ...
     async def read_state(self, account: str, peer: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
@@ -40,6 +42,7 @@ class ConnectTelegram(TelegramPeer):
     folder: str = Field(min_length=1, max_length=200)
     feed_id: str | None = None
     auto_read: bool
+    initial_history: InitialHistory | None = None
 
 
 class LocalTelegram:
@@ -110,6 +113,10 @@ class LocalTelegram:
         value: dict[str, Any] = await self.request('page', account=account, peer=peer, after=after, since=since, topic_id=topic_id)
         return value
 
+    async def history_page(self, account: str, peer: int, upper: int, before: int, since: float, topic_id: int | None = None) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('history_page', account=account, peer=peer, upper=upper, before=before, since=since, topic_id=topic_id)
+        return value
+
     async def messages(self, account: str, peer: int, ids: list[int], topic_id: int | None = None) -> list[dict[str, Any]]:
         value: list[dict[str, Any]] = await self.request('messages', account=account, peer=peer, ids=ids, topic_id=topic_id)
         return value
@@ -153,6 +160,7 @@ class TelegramSource:
         self.topic_id = topic_id
         self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days
+        self.initial_history: dict[str, Any] | None = None
         self.more = False
         self.gap: str | None = None
 
@@ -174,6 +182,8 @@ class TelegramSource:
 
     async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
         await self.resolve()
+        if self.initial_history:
+            return await self.discover_history(cursor)
         state: dict[str, Any] = json.loads(cursor) if cursor else dict(after=0, since=time.time()-self.initial_days*86400)
         batch = await self.client.page(self.account, self.peer, state['after'], state['since'], **self.scope)
         self.more, self.gap = batch['more'], batch.get('gap')
@@ -194,6 +204,66 @@ class TelegramSource:
         state['after'] = max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members])
         if self.more and state['after'] == (json.loads(cursor)['after'] if cursor else 0):
             raise SourceError('Telegram не продвинул позицию сбора')
+        return publications, json.dumps(state)
+
+    def publications(self, rows: list[dict[str, Any]]) -> list[Publication]:
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for msg in rows:
+            identity = 'album:' + str(msg['group']) if msg['group'] else str(msg['id'])
+            groups.setdefault(identity, []).append(msg)
+        result = []
+        for identity, members in groups.items():
+            members.sort(key=lambda m: m['id'])
+            text = '\n\n'.join(m['text'] for m in members if m['text'])
+            result.append(Publication(identity, self.url(members[0]['id']), members[0]['date'],
+                          Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, False),
+                          tuple(m['id'] for m in members)))
+        return sorted(result, key=lambda p: max(p.members), reverse=True)
+
+    async def discover_history(self, cursor: str | None) -> tuple[list[Publication], str]:
+        assert self.initial_history
+        config = self.initial_history
+        state: dict[str, Any] = json.loads(cursor) if cursor else dict(after=0, since=config['since'] or 0, upper=0,
+                                                       before=0, enrolled=0, scan_complete=False, lane='history', oldest=None)
+        state.pop('history_ids', None)
+        state.pop('history_enroll', None)
+        if config.get('paused') and not state['upper'] and not state['scan_complete']:
+            self.more = False
+            return [], json.dumps(state)
+        # First successful descending page fixes the snapshot. Alternate bounded
+        # live requests with archive requests so new messages never wait for it.
+        history_lane = not state['scan_complete'] and not config.get('paused') and (state['lane'] == 'history' or not state['upper'])
+        if history_lane:
+            batch = await self.client.history_page(self.account, self.peer, state['upper'], state['before'], state['since'], **self.scope)
+            if not state['upper']:
+                state['upper'] = batch['upper']
+                state['after'] = batch['upper']
+            rows = self.publications(batch['messages'])
+            rows = [p for p in rows if not state['before'] or max(p.members) < state['before']]
+            chosen = [p for p in rows if config['mode'] == 'count' or p.published >= state['since']]
+            if config['mode'] == 'count':
+                chosen = chosen[:max(0, config['count'] - state['enrolled'])]
+            state['enrolled'] += len(chosen)
+            if chosen:
+                state['oldest'] = min([min(p.members) for p in chosen] + ([state['oldest']] if state['oldest'] else []))
+            previous = state['before']
+            state['before'] = batch['next_before']
+            state['scan_complete'] = not batch['more'] or (config['mode'] == 'count' and state['enrolled'] >= config['count']) or (config['mode'] == 'date' and any(p.published < state['since'] for p in rows))
+            if not state['scan_complete'] and (state['before'] == previous or not state['before']):
+                raise SourceError('Telegram не продвинул позицию истории')
+            # Keep the raw cursor: expanded album members can straddle other
+            # publications. The maximum-member filter suppresses the same album
+            # on the next page without skipping intervening publications.
+            state['history_enroll'] = [p.id for p in chosen]
+            state['lane'] = 'live'
+            publications = chosen
+        else:
+            batch = await self.client.page(self.account, self.peer, state['after'], state['since'], **self.scope)
+            publications = [p for p in self.publications(batch['messages']) if max(p.members) > state['after']]
+            state['after'] = max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members])
+            state['lane'] = 'live' if batch['more'] else 'history'
+        self.more = bool(batch.get('more')) or (not state['scan_complete'] and not config.get('paused'))
+        self.gap = batch.get('gap')
         return publications, json.dumps(state)
 
     async def fetch(self, publication: Publication) -> Material:

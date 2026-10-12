@@ -1,3 +1,4 @@
+import {bindInitialHistory} from './initial-history.js';
 import {reportError} from './debug.js';
 export function createTelegramConnection({api, onConnected}) {
   const byId = id => document.getElementById(id);
@@ -5,6 +6,8 @@ export function createTelegramConnection({api, onConnected}) {
   const folder = byId('telegram-folder'), topic = byId('telegram-topic');
   const add = byId('telegram-add'), accounts = byId('telegram-accounts');
   const topics = byId('telegram-topics'), message = byId('telegram-message');
+  const initialHistory = bindInitialHistory('telegram');
+  const historyFields = byId('telegram-history');
   const inputs = [account, peer, folder, topic, byId('telegram-auto')];
   let busy = false, loadingAccounts = false, loadingTopics = false, stopped = false;
   let generation = 0;
@@ -15,6 +18,8 @@ export function createTelegramConnection({api, onConnected}) {
     accounts.disabled = stopped || busy || loadingAccounts;
     topics.disabled = stopped || busy || loadingAccounts || loadingTopics || !account.value || !validPeer();
     for (const input of inputs) input.disabled = stopped || busy || (input === account && loadingAccounts) || (input === topic && !topic.options.length) || (input === folder && feedId !== null);
+    historyFields.disabled = stopped || busy;
+    historyFields.hidden = feedId !== null;
     add.textContent = busy ? 'Подключение…' : 'Подключить источник';
   }
   function option(value, title) {
@@ -67,9 +72,11 @@ export function createTelegramConnection({api, onConnected}) {
   };
   add.onclick = async () => {
     if (add.disabled) return;
+    const history = feedId ? null : initialHistory();
+    if (!feedId && !history) return;
     busy = true; update(); message.textContent = 'Подключение…';
     try {
-      const feed = await api('telegram/connect', 'POST', {account: account.value, peer: peer.value.trim(), folder: folder.value.trim(), auto_read: byId('telegram-auto').checked, topic_id: topic.value ? Number(topic.value) : null, ...(feedId ? {feed_id: feedId} : {})});
+      const feed = await api('telegram/connect', 'POST', {account: account.value, peer: peer.value.trim(), folder: folder.value.trim(), auto_read: byId('telegram-auto').checked, topic_id: topic.value ? Number(topic.value) : null, ...(feedId ? {feed_id: feedId} : {initial_history: history})});
       if (stopped) return;
       peer.value = ''; feedId = null; byId('telegram-new').hidden = true; resetTopics();
       message.textContent = 'Источник подключён. Сбор начался; отметки прочитанного синхронизируются по настройкам фида.';
