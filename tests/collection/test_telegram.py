@@ -546,3 +546,19 @@ def test_owned_worker_verifies_readback_when_ack_returns_false(tmp_path: Path, m
             assert 'не подтвердил' in status['telegram_reads'][0]['error']
             assert status['telegram_reads'][0]['pending'] == 2
         assert client.get('/api/materials/' + card['id']).status_code == 404
+
+def test_worker_descending_snapshot_expands_boundary_album(tmp_path: Path, monkeypatch):
+    import asyncio
+    from oko.collection.telegram.source import LocalTelegram
+    project = fake_sdk_project(tmp_path, monkeypatch)
+    async def check():
+        bridge = LocalTelegram(project / '.env', tmp_path / 'data')
+        try:
+            page = await bridge.history_page('fixture', -1001234567890, 0, 0, 0)
+            assert [m['id'] for m in page['messages']] == [11,12]
+            assert page['upper'] == 12
+            assert page['next_before'] == 11
+            assert not page['more']
+        finally:
+            await bridge.close()
+    asyncio.run(check())

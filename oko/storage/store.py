@@ -114,9 +114,9 @@ class Store:
     def path(self, item: str) -> Path:
         return self.versions.path(item)
 
-    def enqueue_discovery(self, feed: str = 'demo') -> None:
+    def enqueue_discovery(self, feed: str = 'demo', next_at: float = 0) -> None:
         with self.db:
-            self.db.execute("INSERT INTO jobs(kind,item) VALUES ('discover',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed,))
+            self.db.execute("INSERT INTO jobs(kind,item,next) VALUES ('discover',?,?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=excluded.next,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed, next_at))
 
     def cursor_key(self, feed: str, namespace: str) -> str:
         return 'cursor:' + namespace + ':' + feed if namespace else 'cursor' if feed == 'demo' else 'cursor:' + feed
@@ -129,7 +129,7 @@ class Store:
         with self.db:
             history_items = []
             selection = json.loads(cursor) if self.subscriptions.history.status(feed) else {}
-            history_ids = set(selection.get('history_ids', []))
+            history_ids = set(selection.get('history_ids', selection.get('history_enroll', [])))
             for p in publications:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
                 source_id = p.id if feed == 'demo' else feed + ':' + p.id
@@ -153,6 +153,8 @@ class Store:
                     self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done'", (row['id'],))
             if 'history_ids' in selection:
                 self.subscriptions.history.freeze(feed, history_items)
+            if 'history_enroll' in selection:
+                self.subscriptions.history.enroll(feed, history_items, selection['scan_complete'])
             if namespace == 'telegram':
                 self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]')", (feed,))
                 self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)

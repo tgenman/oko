@@ -152,6 +152,7 @@ class Runtime:
                 telegram_source = self._sources[feed['id']]
                 if isinstance(telegram_source, TelegramSource):
                     telegram_source.initial_days = feed['initial_days']
+                    telegram_source.initial_history = feed['initial_history']
                 continue
             if feed['transport'] != 'rss' or not self._rss_enabled:
                 continue
@@ -660,7 +661,10 @@ class Runtime:
                     if self._store is current and self._live() and current.valid(job):
                         current.discovered(items, next_cursor, job, feed, namespace)
                         if getattr(source, 'more', False):
-                            current.enqueue_discovery(feed)
+                            # Yield a scheduling turn to saved page materials;
+                            # bounded archive discovery must not monopolize fetch.
+                            delay = .1 if isinstance(source, TelegramSource) and source.initial_history else 0
+                            current.enqueue_discovery(feed, self._clock() + delay if delay else 0)
                         current.feed_status(feed, error=None, gap=getattr(source, 'gap', None), changes=getattr(source, 'changes', None))
             elif publication:
                 if isinstance(source, (RSSSource, TelegramSource)) and bool(publication.members) != isinstance(source, TelegramSource):

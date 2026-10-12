@@ -38,6 +38,9 @@ class ReadSync:
         db = self.store.db
         db.execute('INSERT OR IGNORE INTO telegram_read_state(feed,since) VALUES (?,?)',
                    (feed, json.loads(cursor)['since']))
+        selection = json.loads(cursor)
+        if 'scan_complete' in selection and selection['scan_complete'] and selection.get('oldest'):
+            db.execute('UPDATE telegram_read_state SET initial=? WHERE feed=? AND initial IS NULL', (selection['oldest'] - 1, feed))
         db.execute('UPDATE telegram_read_state SET signature=NULL WHERE feed=?', (feed,))
         db.executemany('INSERT INTO telegram_read_members(feed,member) VALUES (?,?) ON CONFLICT(feed,member) DO UPDATE SET missing=0',
                        [(feed, member) for member in members])
@@ -49,6 +52,9 @@ class ReadSync:
 
     def request(self, feed: str) -> dict[str, Any] | None:
         config = next((f for f in self.store.subscriptions.feeds() if f['id'] == feed), None)
+        history = config.get('initial_history') if config else None
+        if history and history['mode'] == 'count' and (not history['frozen'] or not history.get('scan_complete', True)):
+            return None
         state = self.store.db.execute('SELECT * FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
         if not config or not state or config['transport'] != 'telegram' or config['auto_read'] is None:
             return None
