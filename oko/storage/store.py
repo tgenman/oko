@@ -76,6 +76,9 @@ class Store:
                 self.db.execute('INSERT INTO items_scoped SELECT id,source_id,url,published,viewed,complete,feed_id,members FROM items')
                 self.db.execute('DROP TABLE items')
                 self.db.execute('ALTER TABLE items_scoped RENAME TO items')
+        if 'published_known' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
+            self.db.execute('ALTER TABLE items ADD COLUMN published_known INTEGER DEFAULT 1')
+            self.db.commit()
         self.subscriptions = Subscriptions(self.db, self.fault)
         self.filters = Filters(self)
         self.events = Events(self)
@@ -137,8 +140,8 @@ class Store:
                 if existing and existing['url'] != p.url and not (p.members and p.id.startswith('album:')):
                     source_id = feed + ':' + p.url
                     item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
-                inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members) VALUES (?,?,?,?,?,?)',
-                                (item, source_id, p.url, p.published, feed, json.dumps(p.members)))
+                inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members,published_known) VALUES (?,?,?,?,?,?,?)',
+                                (item, source_id, p.url, p.published, feed, json.dumps(p.members), p.published_known))
                 if inserted.rowcount and p.teaser:
                     self.versions.publish(item, self.versions.prepare(item, p.teaser), False)
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
@@ -153,6 +156,8 @@ class Store:
                     self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done'", (row['id'],))
             if 'history_ids' in selection:
                 self.subscriptions.history.freeze(feed, history_items)
+                if 'warnings' in selection:
+                    self.subscriptions.history.warnings(feed, selection['warnings'])
             if namespace == 'telegram':
                 self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]')", (feed,))
                 self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
@@ -221,7 +226,7 @@ class Store:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         fallback = self.material(item) if row else None
         teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', [])), captions=fallback.get('captions'), attachments=tuple(Attachment(Path(a['url']).name, (self.path(item).parent / Path(a['url']).name).read_bytes(), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
-        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members']))) if row else None
+        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members'])), bool(row['published_known'])) if row else None
 
     def save(self, job: Job, material: Material) -> None:
         item = job.item
@@ -293,7 +298,7 @@ class Store:
         if not row:
             return None
         if not row['complete']:
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title='Материал загружается', text='', complete=False)
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title='Материал загружается', text='', complete=False)
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
             filtered = self.filters.read(item)
@@ -301,7 +306,7 @@ class Store:
             if filtered['status'] == 'done' and not filtered['restored']:
                 for fragment in filtered['removed']:
                     display_text = display_text.replace(fragment, '')
-            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             record_caught('store.material')
             return None

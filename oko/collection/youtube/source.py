@@ -70,7 +70,7 @@ class YouTubeSource(RSSSource):
             match = re.fullmatch(r'yt:video:([A-Za-z0-9_-]{11})', entry.publication.id)
             if match:
                 video = match[1]
-                result.append(Entry(Publication(video, f'https://www.youtube.com/watch?v={video}', entry.publication.published), entry.title, ''))
+                result.append(Entry(Publication(video, f'https://www.youtube.com/watch?v={video}', entry.publication.published, published_known=entry.publication.published_known), entry.title, ''))
         return result
 
     async def fetch(self, publication: Publication) -> Material:
