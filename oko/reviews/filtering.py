@@ -1,4 +1,5 @@
 """Durable filtered views; originals and media remain owned by Store."""
+from oko.diagnostics import record_caught
 import hashlib
 import json
 from typing import Any, TYPE_CHECKING
@@ -63,6 +64,7 @@ class Filters:
                     result = FilterResult.model_validate(data['result']).model_dump()
                     return dict(result, hidden=False if restored else result['hidden'], restored=restored, status='done', error=None)
             except (OSError, ValueError, KeyError):
+                record_caught('filtering.read')
                 pass
         return dict(status='pending' if not row or row['status'] == 'done' else row['status'], error=row['error'] if row else None, hidden=False, restored=restored, reason='', removed=[])
 

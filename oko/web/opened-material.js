@@ -1,3 +1,4 @@
+import {reportError} from './debug.js';
 // Owns the complete lifetime of the selected card, including its sources.
 export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
   const byId = id => document.getElementById(id);
@@ -79,7 +80,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
           await appendMedia(source, byId('source-media-' + source.id), current);
         }
       }
-    } catch (error) { if (active(current)) clear(error.message); }
+    } catch (error) { reportError(error, 'opened-material.js'); if (active(current)) clear(error.message); }
   }
   function renderVersions(material, container, current) {
     container.replaceChildren();
@@ -96,7 +97,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
           if (!active(current) || !details.isConnected) return;
           body.append(element('h3', version.title), element('p', version.text));
           await appendMedia(version, body, current);
-        } catch (error) {
+        } catch (error) { reportError(error, 'opened-material.js');
           if (active(current) && details.isConnected) { body.textContent = error.message; loaded = false; }
         }
       };
@@ -157,7 +158,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
       const copy = element('button', 'Скопировать ссылку');
       copy.onclick = async () => {
         try { await navigator.clipboard.writeText(source.url); if (active(current)) byId('message').textContent = 'Ссылка скопирована'; }
-        catch { if (active(current)) byId('message').textContent = 'Браузер не разрешил копирование'; }
+        catch (error) { reportError(error, 'opened-material.js'); if (active(current)) byId('message').textContent = 'Браузер не разрешил копирование'; }
       };
       const details = element('details');
       const text = element('p', source.text); text.className = 'source-text';
@@ -175,7 +176,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
     try {
       await api('materials/' + current.id + path, 'POST');
       if (active(current)) onChanged(changed);
-    } catch (error) { if (active(current)) byId('message').textContent = error.message; }
+    } catch (error) { reportError(error, 'opened-material.js'); if (active(current)) byId('message').textContent = error.message; }
   }
   byId('retry').onclick = () => action('/retry');
   byId('theses-retry').onclick = () => action('/theses/retry');
@@ -187,7 +188,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
     try {
       await navigator.clipboard.writeText(current.material.url);
       if (active(current)) byId('message').textContent = 'Ссылка скопирована';
-    } catch { if (active(current)) byId('message').textContent = 'Браузер не разрешил копирование'; }
+    } catch (error) { reportError(error, 'opened-material.js'); if (active(current)) byId('message').textContent = 'Браузер не разрешил копирование'; }
   };
   byId('viewed').onclick = async () => {
     const current = session;
@@ -196,7 +197,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
       await api('materials/' + current.id + '/viewed', 'POST');
       if (active(current)) clear();
       onViewed(current.id);
-    } catch (error) { if (active(current)) byId('message').textContent = error.message; }
+    } catch (error) { reportError(error, 'opened-material.js'); if (active(current)) byId('message').textContent = error.message; }
   };
   return {
     get selection() { return session && {id: session.id, folder_id: session.folder_id}; },

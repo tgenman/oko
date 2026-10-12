@@ -12,6 +12,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import ProcessorConfig
@@ -19,9 +22,10 @@ from oko.processing.codex import CodexClient
 from oko.reviews.digests import DigestRequest
 from oko.storage.store import Store
 from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
-from oko.subscriptions.subscriptions import Subscriptions, ImportRequest, Overrides, FeedPatch, preview
+from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
 from oko.collection.youtube.source import CaptionsClient
+from oko.diagnostics import Journal, BrowserError, active_journal, diagnostic_source, capture_scope, record_caught
 
 
 class CompletionRequest(BaseModel):
@@ -38,22 +42,75 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                youtube_captions: CaptionsClient | None = None) -> FastAPI:
     token = token or secrets.token_urlsafe(32)
     runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions)
+    journal = Journal(root, token)
+    runtime.diagnostics = journal
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        loop = asyncio.get_running_loop()
+        previous_handler = loop.get_exception_handler()
+
+        def background_error(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+            error = context.get('exception')
+            if isinstance(error, BaseException):
+                journal.capture(error, 'Фоновая задача asyncio')
+            else:
+                journal.add('asyncio', str(context.get('message', 'Ошибка фоновой задачи')), '')
+            if previous_handler:
+                previous_handler(loop, context)
+            else:
+                loop.default_exception_handler(context)
+
+        loop.set_exception_handler(background_error)
         task = asyncio.create_task(runtime.run())
+
+        def runtime_finished(finished: asyncio.Task[None]) -> None:
+            if not finished.cancelled():
+                error = finished.exception()
+                if error and not getattr(error, '_oko_diagnostic_group', None):
+                    journal.capture(error, 'Главный цикл Око')
+
+        task.add_done_callback(runtime_finished)
         # Initialise storage before accepting the first API call.
         await asyncio.sleep(0)
-        yield
-        await runtime.stop()
-        await task
+        try:
+            yield
+        finally:
+            try:
+                await runtime.stop()
+                await task
+            except Exception:
+                record_caught('Остановка главного цикла')
+                error = task.exception() if task.done() and not task.cancelled() else None
+                if error and not getattr(error, '_oko_diagnostic_group', None):
+                    journal.capture(error, 'Главный цикл Око')
+                raise
+            finally:
+                loop.set_exception_handler(previous_handler)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.runtime = runtime
 
     @app.exception_handler(ActionError)
     async def action_error(request: Request, error: ActionError) -> JSONResponse:
-        return JSONResponse({'detail': error.detail}, status_code={'conflict': 409, 'invalid': 400, 'missing': 404, 'unavailable': 503}[error.kind])
+        group = journal.capture(error, request.method + ' ' + request.url.path)
+        return JSONResponse({'detail': error.detail}, headers={'X-Oko-Error': group} if group else {'X-Oko-Expected': '1'} if error.diagnostic_skip else {}, status_code={'conflict': 409, 'invalid': 400, 'missing': 404, 'unavailable': 503}[error.kind])
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, error: StarletteHTTPException) -> Response:
+        group = journal.capture(error, request.method + ' ' + request.url.path)
+        response = await http_exception_handler(request, error)
+        if group:
+            response.headers['X-Oko-Error'] = group
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, error: RequestValidationError) -> Response:
+        group = journal.capture(error, request.method + ' ' + request.url.path)
+        response = await request_validation_exception_handler(request, error)
+        if group:
+            response.headers['X-Oko-Error'] = group
+        return response
 
     @app.middleware('http')
     async def boundary(request: Request, call_next: Any) -> Response:
@@ -67,7 +124,19 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             supplied = request.headers.get('authorization', '')
             if not secrets.compare_digest(supplied, f'Bearer {token}'):
                 return JSONResponse({'detail': 'Требуется локальная сессия'}, status_code=403)
-        response: Response = await call_next(request)
+        context = active_journal.set(journal)
+        source_context = diagnostic_source.set(request.method + ' ' + request.url.path)
+        scope_context = capture_scope.set(secrets.token_hex(16))
+        try:
+            response: Response = await call_next(request)
+        except Exception as error:
+            group = journal.capture(error, request.method + ' ' + request.url.path)
+            response = JSONResponse({'detail': 'Ошибка Око; подробности в диагностике'}, status_code=500,
+                                    headers={'X-Oko-Error': group} if group else {})
+        finally:
+            capture_scope.reset(scope_context)
+            diagnostic_source.reset(source_context)
+            active_journal.reset(context)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -77,9 +146,22 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     def store() -> Store:
         return runtime.require_store()
 
+    @app.get('/api/debug')
+    async def debug_entries() -> dict[str, Any]:
+        return dict(groups=journal.entries(), persistence_error=journal.persistence_error)
+
+    @app.post('/api/debug')
+    async def debug_browser(body: BrowserError) -> dict[str, Any]:
+        group = journal.add(body.source, body.message, body.traceback, error_type=body.error_type,
+                            location=body.location, event_id=body.event_id,
+                            timestamp=body.occurred_at.isoformat() if body.occurred_at else None,
+                            count=body.count, first=body.first_at.isoformat() if body.first_at else None,
+                            stream_id=body.stream_id, sequence=body.sequence)
+        return dict(ok=not bool(journal.persistence_error), group=group, entry=next((entry for entry in journal.entries() if entry['id'] == group), None), persistence_error=journal.persistence_error)
+
     @app.get('/api/status')
     async def status() -> dict[str, Any]:
-        return runtime.status()
+        return dict(runtime.status(), debug_count=len(journal.records), debug_persistence_error=journal.persistence_error)
 
     @app.post('/api/tabs/{tab}/heartbeat')
     async def heartbeat(tab: str) -> dict[str, bool]:
@@ -151,6 +233,14 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             return preview(body.opml)
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
+
+    @app.post('/api/feeds')
+    async def add_feed(body: AddFeed) -> dict[str, Any]:
+        return await runtime.add_feed(body)
+
+    @app.post('/api/feeds/verify')
+    async def verify_feed(body: FeedURL) -> dict[str, Any]:
+        return await runtime.verify_feed(body)
 
     @app.post('/api/import')
     async def import_subscriptions(body: ImportRequest) -> dict[str, Any]:
@@ -292,6 +382,14 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/app.js')
     async def js() -> FileResponse:
         return FileResponse(web / 'app.js', media_type='text/javascript')
+
+    @app.get('/debug.js')
+    async def debug_js() -> FileResponse:
+        return FileResponse(web / 'debug.js', media_type='text/javascript')
+
+    @app.get('/feed-connection.js')
+    async def feed_connection_js() -> FileResponse:
+        return FileResponse(web / 'feed-connection.js', media_type='text/javascript')
 
     @app.get('/opened-material.js')
     async def opened_material_js() -> FileResponse:

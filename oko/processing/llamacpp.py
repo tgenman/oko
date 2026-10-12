@@ -1,3 +1,4 @@
+from oko.diagnostics import record_caught
 import ipaddress
 import json
 from typing import Any
@@ -23,6 +24,7 @@ class ProcessorConfig(BaseModel):
         try:
             parsed.port
         except ValueError:
+            record_caught('llamacpp.endpoint_valid')
             raise ValueError('Неверный порт') from None
         return value.rstrip('/')
 
@@ -60,8 +62,10 @@ class LlamaCpp:
                 raise ProcessingError('llama.cpp вернул ошибку')
             return value
         except (httpx.HTTPError, OSError):
+            record_caught('llamacpp._json')
             raise ProcessingError('llama.cpp недоступен; ожидание подключения') from None
         except (ValueError, TypeError):
+            record_caught('llamacpp._json')
             raise ProcessingError('Некорректный ответ llama.cpp') from None
 
     def _client(self) -> httpx.AsyncClient:
@@ -117,4 +121,5 @@ class LlamaCpp:
             theses.validate_sources(request)
             return theses
         except (KeyError, TypeError, ValueError):
+            record_caught('llamacpp.generate')
             raise ProcessingError('Результат не соответствует схеме обработки') from None

@@ -19,6 +19,17 @@ class ImportRequest(BaseModel):
     choices: dict[str, str] = Field(default_factory=dict)
 
 
+class FeedURL(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True, str_strip_whitespace=True)
+    url: str = Field(min_length=1, max_length=4000)
+
+
+class AddFeed(FeedURL):
+    verification: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=200)
+    folder: str = Field(default='Без папки', min_length=1, max_length=200)
+
+
 class Overrides(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     events: bool | None = None
@@ -241,6 +252,26 @@ class Subscriptions:
                                 (key(identity), identity, feed['title'], feed['kind'], folder,
                                  json.dumps(urls), feed['connection'], feed['kind'] if feed['kind'] in ('rss', 'youtube') else None))
         return dict(folders=self.folders(), feeds=self.feeds())
+
+    def add_feed(self, body: AddFeed) -> dict[str, Any]:
+        identity, kind, connection = identify(body.url)
+        if kind not in ('rss', 'youtube'):
+            raise ValueError('Для Telegram используйте подключение Telegram-источника')
+        old = self.existing_feed(body.url)
+        if old:
+            return old
+        title = body.title or urlsplit(body.url).hostname or 'RSS'
+        with self.db:
+            folder = key('folder:' + body.folder)
+            self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (folder, body.folder, len(self.folders())))
+            self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport)
+                            VALUES (?,?,?,?,?,?,?,?)''',
+                            (key(identity), identity, title, kind, folder, json.dumps([body.url]), connection, kind))
+        return next(feed for feed in self.feeds() if feed['identity'] == identity)
+
+    def existing_feed(self, url: str) -> dict[str, Any] | None:
+        identity, _, _ = identify(url)
+        return next((feed for feed in self.feeds() if feed['identity'] == identity), None)
 
     def check_owner(self, scope: str, owner: str) -> None:
         if scope == 'oko' and owner == 'global':

@@ -9,7 +9,7 @@ async function reader() {
   const server = http.createServer(async (request, response) => {
     try {
       const name = request.url === '/' ? 'index.html' : request.url.slice(1);
-      if (!['index.html', 'app.js', 'opened-material.js', 'telegram-connection.js', 'style.css'].includes(name)) {
+      if (!['index.html', 'app.js', 'debug.js', 'feed-connection.js', 'opened-material.js', 'telegram-connection.js', 'style.css'].includes(name)) {
         response.writeHead(404).end(); return;
       }
       const data = await fs.readFile(path.join(__dirname, '../../oko/web', name));
@@ -30,7 +30,7 @@ async function reader() {
       const held = new Map();
       const pending = new Map();
       window.readerTransport = {
-        replies, held, pending, cards: [], requests: [],
+        replies, held, pending, cards: [], requests: [], debugGroups: [],
         release(url, body, status = 200) {
           const resolve = pending.get(url); pending.delete(url); held.delete(url);
           resolve(new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}}));
@@ -40,10 +40,23 @@ async function reader() {
         const key = String(url);
         window.readerTransport.requests.push({url: key, method: options?.method || 'GET', body: options?.body ? JSON.parse(options.body) : null});
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
-        if (replies.has(key)) {
-          const reply = replies.get(key);
+        const replyKey = (options?.method || 'GET') + ' ' + key;
+        if (replies.has(replyKey) || replies.has(key)) {
+          const reply = replies.get(replyKey) || replies.get(key);
           if (reply.base64) return new Response(Uint8Array.from(atob(reply.base64), c => c.charCodeAt(0)), {headers: {'Content-Type': reply.mime}});
           return new Response(JSON.stringify(reply.body), {status: reply.status || 200, headers: {'Content-Type': 'application/json'}});
+        }
+        if (key === '/api/debug') {
+          const t = window.readerTransport;
+          if (options?.method === 'POST') {
+            const body = JSON.parse(options.body);
+            const old = t.debugGroups.find(g => g.source === body.source && g.location === body.location && g.message === body.message);
+            const entry = {...body, id: old?.id || body.event_id, count: (old?.count || 0) + body.count,
+              first_time: old?.first_time || body.first_at, last_time: body.occurred_at, streams: {...(old?.streams || {}), [body.stream_id]: body.sequence}};
+            t.debugGroups = t.debugGroups.filter(g => g.id !== entry.id); t.debugGroups.unshift(entry);
+            return new Response(JSON.stringify({ok: true, entry}));
+          }
+          return new Response(JSON.stringify({groups: t.debugGroups, persistence_error: ''}));
         }
         if (key.startsWith('/api/cards?')) {
           const folder = new URL(key, location.origin).searchParams.get('folder');

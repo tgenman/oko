@@ -1,4 +1,5 @@
 """Telegram source and cancellable worker for Oko-owned Telethon client."""
+from oko.diagnostics import record_caught
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
@@ -75,7 +76,7 @@ class LocalTelegram:
                     raise SourceError('Telegram-клиент недоступен')
                 result = json.loads(line)
                 if 'error' in result:
-                    raise SourceError(result['error'], result.get('delay', 60))
+                    raise SourceError.from_worker(result['error'], result, result.get('delay', 60))
                 if operation == 'download':
                     path = self.spool / 'media.bin'
                     try:
@@ -89,6 +90,7 @@ class LocalTelegram:
                 await self.close()
                 raise
             except Exception:
+                record_caught('source.request')
                 await self.close()
                 raise SourceError('Telegram-клиент недоступен') from None
 
@@ -222,6 +224,7 @@ class TelegramSource:
                     raise SourceError('Пустое вложение Telegram')
                 attachments.append(Attachment(f"media-{msg['id']}.{media['extension']}", data, media['kind'], media['mime']))
             except SourceError as error:
+                record_caught('source.fetch')
                 reasons.append(error.label)
         names = {a.name for a in attachments}
         failed_names = {f"media-{m['id']}.{m['media']['extension']}" for m in rows if m['media'] and m['media']['kind'] != 'unsupported'}

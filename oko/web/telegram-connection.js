@@ -1,3 +1,4 @@
+import {reportError} from './debug.js';
 export function createTelegramConnection({api, onConnected}) {
   const byId = id => document.getElementById(id);
   const account = byId('telegram-account'), peer = byId('telegram-peer');
@@ -41,7 +42,7 @@ export function createTelegramConnection({api, onConnected}) {
       if (names.includes(previous)) account.value = previous;
       else if (names.length === 1) account.value = names[0];
       message.textContent = names.length ? '' : 'В клиенте Telegram нет настроенных аккаунтов.';
-    } catch (error) {
+    } catch (error) { reportError(error, 'telegram-connection.js');
       if (!stopped) { account.replaceChildren(option('', 'Аккаунты недоступны')); message.textContent = error.message; }
     } finally { loadingAccounts = false; update(); }
   }
@@ -61,7 +62,7 @@ export function createTelegramConnection({api, onConnected}) {
       topic.replaceChildren(...(result.length ? [option('', 'Выберите тему'), ...result.map(item => option(String(item.id), item.title))] : []));
       byId('telegram-topic-label').hidden = !result.length;
       message.textContent = result.length ? 'Выберите тему форумной группы.' : 'Это канал или обычная группа — тему выбирать не нужно.';
-    } catch (error) { if (!stopped && stamp === generation) message.textContent = error.message; }
+    } catch (error) { reportError(error, 'telegram-connection.js'); if (!stopped && stamp === generation) message.textContent = error.message; }
     finally { if (stamp === generation) {loadingTopics = false; update();} }
   };
   add.onclick = async () => {
@@ -73,7 +74,7 @@ export function createTelegramConnection({api, onConnected}) {
       peer.value = ''; feedId = null; byId('telegram-new').hidden = true; resetTopics();
       message.textContent = 'Источник подключён. Сбор начался; отметки прочитанного синхронизируются по настройкам фида.';
       await onConnected(feed);
-    } catch (error) { if (!stopped) message.textContent = error.message; }
+    } catch (error) { reportError(error, 'telegram-connection.js'); if (!stopped) message.textContent = error.message; }
     finally {busy = false; update();}
   };
   byId('telegram-new').onclick = () => {

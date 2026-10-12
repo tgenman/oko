@@ -1,8 +1,11 @@
+import {createFeedConnection} from './feed-connection.js';
+import {createDebugPanel, reportError} from './debug.js';
 import {createTelegramConnection} from './telegram-connection.js';
 import {createOpenedMaterial} from './opened-material.js';
 
 'use strict';
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
+const debug = createDebugPanel({token});
 const tab = crypto.randomUUID();
 const byId = id => document.getElementById(id);
 const bus = new BroadcastChannel('oko-reader');
@@ -11,15 +14,20 @@ let stopped = false;
 let folderId = null;
 let refreshTimer = null;
 async function api(path, method = 'GET', body = undefined, signal = undefined) {
-  const response = await fetch('/api/' + path, {method, signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
-  const result = await response.json();
-  if (!response.ok) {
-    const error = new Error(typeof result.detail === 'string' ? result.detail : response.status === 422 ? 'Проверьте значения настроек' : 'Связь с Око потеряна');
-    error.detail = result.detail;
-    throw error;
-  }
-  return result;
+  try {
+    const response = await fetch('/api/' + path, {method, signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
+    const result = await response.json();
+    if (!response.ok) {
+      const error = new Error(typeof result.detail === 'string' ? result.detail : response.status === 422 ? 'Проверьте значения настроек' : 'Связь с Око потеряна');
+      error.detail = result.detail;
+    error.diagnosticId = response.headers.get('X-Oko-Error');
+    if (response.headers.get('X-Oko-Expected')) error.name = 'AbortError';
+      throw error;
+    }
+    return result;
+  } catch (error) { reportError(error, method + ' /api/' + path, true); throw error; }
 }
+
 const opened = createOpenedMaterial({
   api,
   fetchMedia: (path, signal) => fetch(path, {signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}}),
@@ -29,7 +37,11 @@ const opened = createOpenedMaterial({
 const telegram = createTelegramConnection({api, onConnected: async feed => {
   await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
 }});
+const feedConnection = createFeedConnection({api, onSelected: async feed => {
+  await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
+}});
 function stopUi(message) {
+  feedConnection.stop();
   telegram.stop();
   stopped = true;
   contentEpoch++;
@@ -47,6 +59,8 @@ function stopUi(message) {
   byId('digest-dialog').close();
   byId('settings-dialog').close();
   byId('settings-open').disabled = true;
+  byId('rss-add').disabled = true;
+  void debug.refresh();
 }
 bus.onmessage = event => {
   if (event.data === 'stop') stopUi('Око остановлено');
@@ -66,6 +80,7 @@ async function refresh() {
   try {
     const state = await api('status');
     if (stopped || epoch !== contentEpoch) return;
+    debug.updateStatus(state.debug_count, state.debug_persistence_error);
     if (state.stopped) { stopUi('Око остановлено'); return; }
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
     const progressMessages = [...new Set([...state.errors, ...readMessages])];
@@ -108,22 +123,22 @@ async function refresh() {
       button.onclick = () => { folderId = folder.id; contentEpoch++; opened.clear(); refresh(); };
       return button;
     }));
-  } catch (error) { if (!stopped && epoch === contentEpoch) { opened.clear(); byId('progress').textContent = error.message; } }
+  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch) { opened.clear(); byId('progress').textContent = error.message; } }
   finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
-byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { byId('progress').textContent = error.message; } };
+byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); byId('progress').textContent = error.message; } };
 byId('stop').onclick = async () => {
   try { await api('stop', 'POST'); bus.postMessage('stop'); stopUi('Око остановлено'); }
-  catch (error) { byId('progress').textContent = error.message; }
+  catch (error) { reportError(error, 'Интерфейс Око'); byId('progress').textContent = error.message; }
 };
 async function heartbeat() {
   if (stopped) return;
   try { await api('tabs/' + tab + '/heartbeat', 'POST'); }
-  catch (error) { if (!stopped) { opened.clear(); byId('progress').textContent = error.message; } }
+  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { opened.clear(); byId('progress').textContent = error.message; } }
   if (!stopped) setTimeout(heartbeat, 2000);
 }
 window.addEventListener('pagehide', () => {
-  fetch('/api/tabs/' + tab + '/close', {method:'POST', keepalive:true, headers:{'Authorization':'Bearer '+token}}).catch(() => {});
+  fetch('/api/tabs/' + tab + '/close', {method:'POST', keepalive:true, headers:{'Authorization':'Bearer '+token}}).catch(error => reportError(error, 'Закрытие вкладки'));
   opened.clear();
 });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
@@ -161,6 +176,7 @@ function describeOwner(scope, owner) {
 }
 async function loadSubscriptions(preferred = scopePath()) {
   subscriptions = await api('subscriptions');
+  byId('rss-folders').replaceChildren(...subscriptions.folders.map(folder => { const option = element('option'); option.value = folder.title; return option; }));
   const owner = byId('settings-owner');
   owner.replaceChildren();
   const options = [['oko/global', 'Око'], ...subscriptions.folders.map(f => ['folder/' + f.id, 'Папка: ' + f.title]), ...subscriptions.feeds.map(f => ['feed/' + f.id, 'Фид: ' + f.title])];
@@ -183,7 +199,7 @@ async function loadSettings() {
       const update = element('button', 'Обновить обзор сейчас');
       update.onclick = async () => {
         try { await api('digests/' + path, 'POST', {period: true}); byId('settings-message').textContent = 'Обзор поставлен в обработку'; refresh(); }
-        catch (error) { byId('settings-message').textContent = error.message; }
+        catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
       };
       container.append(update);
     }
@@ -206,33 +222,37 @@ async function loadSettings() {
           await api('settings/' + path, 'PATCH', {[field]: value});
           if (path === scopePath()) await loadSettings();
           byId('settings-message').textContent = 'Настройка сохранена';
-        } catch (error) { byId('settings-message').textContent = error.message; }
+        } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
       }
       save.onclick = () => update(type === 'boolean' ? input.value === 'true' : type === 'number' ? Number(input.value) : input.value);
       reset.onclick = () => update(null);
       row.append(labelled(title, input), info, save, reset); container.append(row);
     }
-  } catch (error) { byId('settings-message').textContent = error.message; }
+  } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
 }
 function renderFeed(feed) {
   const container = byId('feed-options');
   container.append(element('h2', 'Подключение фида'));
-  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.transport === 'youtube' ? 'YouTube подключён: сбор при открытой вкладке' : feed.kind === 'youtube' ? 'YouTube отключён: выберите способ сбора' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
+  const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.transport === 'youtube' ? 'YouTube подключён: сбор при открытой вкладке' : feed.kind === 'youtube' ? 'YouTube отключён' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
   container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
-  if (feed.kind === 'youtube') container.append(element('p', (feed.transport === 'youtube' ? 'YouTube: обновления собираются при открытой вкладке. ' : 'Для сбора выберите способ подключения YouTube. ') + 'Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));
+  if (feed.kind === 'youtube') container.append(element('p', (feed.transport === 'youtube' ? 'YouTube: обновления собираются при открытой вкладке. ' : 'YouTube подключается автоматически при добавлении URL фида. ') + 'Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));
   const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
   const importance = selectControl(Object.entries(importanceNames), feed.importance);
   const days = element('input'); days.type = 'number'; days.min = '1'; days.max = '3650'; days.value = feed.initial_days;
   const publicAi = element('input'); publicAi.type = 'checkbox'; publicAi.checked = feed.public_ai;
   container.append(labelled('Папка', folder), labelled('Важность фида', importance), labelled('Первоначальный период, дней', days), labelled('Разрешить обработку публичным AI', publicAi));
-  let auto, history, transport;
+  let auto, history, transport, youtubeEnabled;
   if (feed.kind === 'telegram') {
     auto = selectControl([['', 'Выберите режим'], ['true', 'Автопрочитывать после полного сохранения'], ['false', 'Отмечать только после «Просмотрено»']], feed.auto_read === null ? '' : feed.auto_read);
     history = element('input'); history.type = 'checkbox'; history.checked = feed.read_history;
     container.append(element('p', 'Око подтверждает только безопасную границу истории. Просмотр позднего материала может ожидать более ранний.'), labelled('Автопрочитывание в Telegram', auto), labelled('Отметить историю до начала импорта прочитанной', history), element('p', 'Без разрешения очистки старая непрочитанная история может задержать отметки Telegram. Разрешение применяется при работающем Око только к истории до зафиксированного начала импорта.'));
   }
-  if (feed.kind === 'telegram' || feed.kind === 'unresolved' || feed.kind === 'youtube') {
-    transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'youtube' ? [['youtube', 'YouTube: обновления и субтитры']] : [...(feed.kind === 'telegram' ? [['telegram', 'Telegram с локальными медиа']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']])], feed.transport || '');
+  if (feed.kind === 'youtube') {
+    youtubeEnabled = element('input'); youtubeEnabled.type = 'checkbox'; youtubeEnabled.checked = feed.transport === 'youtube';
+    container.append(labelled('Собирать обновления YouTube', youtubeEnabled));
+  }
+  if (feed.kind === 'telegram' || feed.kind === 'unresolved') {
+    transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'telegram' ? [['telegram', 'Telegram с локальными медиа']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']], feed.transport || '');
     container.append(labelled('Способ сбора', transport));
   }
   const save = element('button', 'Сохранить фид');
@@ -240,12 +260,13 @@ function renderFeed(feed) {
     const patch = {folder_id: folder.value, importance: importance.value, initial_days: Number(days.value), public_ai: publicAi.checked};
     if (auto) { patch.auto_read = auto.value === '' ? null : auto.value === 'true'; patch.read_history = history.checked; }
     if (transport) patch.transport = transport.value || null;
+    if (youtubeEnabled) patch.transport = youtubeEnabled.checked ? 'youtube' : null;
     try {
       await api('feeds/' + feed.id, 'PATCH', patch);
       await loadSubscriptions('feed/' + feed.id);
       contentEpoch++; refresh();
       byId('settings-message').textContent = 'Фид сохранён';
-    } catch (error) { byId('settings-message').textContent = error.message; }
+    } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
   };
   container.append(save);
   if (feed.kind === 'telegram') {
@@ -266,7 +287,7 @@ byId('settings-open').onclick = async () => {
   byId('settings-dialog').showModal();
   telegram.loadAccounts();
   byId('settings-message').textContent = '';
-  try { await loadSubscriptions(); const config = await api('processors/llamacpp'); if (config) { byId('llamacpp-endpoint').value = config.endpoint; byId('llamacpp-model').value = config.model; byId('llamacpp-local').checked = config.local_execution; } } catch (error) { byId('settings-message').textContent = error.message; }
+  try { await loadSubscriptions(); const config = await api('processors/llamacpp'); if (config) { byId('llamacpp-endpoint').value = config.endpoint; byId('llamacpp-model').value = config.model; byId('llamacpp-local').checked = config.local_execution; } } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
 };
 byId('settings-close').onclick = () => byId('settings-dialog').close();
 byId('settings-owner').onchange = loadSettings;
@@ -281,17 +302,17 @@ byId('opml-file').onchange = async () => {
     byId('import-plan').replaceChildren(element('p', `Папок: ${plan.folders.length}; источников: ${plan.feeds.length}. Повторяющиеся адреса объединены. Новые фиды: сутки истории, публичный AI и очистка истории выключены.`));
     showConflicts(plan.feeds.filter(f => f.folders.length > 1));
     byId('import-confirm').hidden = false;
-  } catch (error) { importText = null; byId('settings-message').textContent = error.message; }
+  } catch (error) { reportError(error, 'Интерфейс Око'); importText = null; byId('settings-message').textContent = error.message; }
 };
 byId('import-confirm').onclick = async () => {
   if (!importText) return;
   try {
     await api('import', 'POST', {opml: importText, choices: importChoices});
     importText = null; importChoices = {}; byId('opml-file').value = ''; byId('import-confirm').hidden = true;
-    byId('import-plan').replaceChildren(element('p', 'Подписки импортированы. Выберите фид для настройки подключения.'));
+    byId('import-plan').replaceChildren(element('p', 'Подписки импортированы. RSS и YouTube подключены автоматически; для Telegram настройте подключение.'));
     await loadSubscriptions(); contentEpoch++; refresh();
     byId('settings-message').textContent = 'Импорт завершён';
-  } catch (error) {
+  } catch (error) { reportError(error, 'Интерфейс Око');
     if (error.detail?.conflicts) { byId('import-plan').replaceChildren(element('p', 'Выберите одну папку для каждого конфликта и повторите импорт.')); showConflicts(error.detail.conflicts); }
     else byId('settings-message').textContent = error.message;
   }
@@ -302,11 +323,11 @@ for (const id of ['llamacpp-endpoint', 'llamacpp-model']) {
 }
 byId('llamacpp-save').onclick = async () => {
   try { await api('processors/llamacpp', 'PUT', {endpoint: byId('llamacpp-endpoint').value, model: byId('llamacpp-model').value, local_execution: byId('llamacpp-local').checked}); byId('llamacpp-status').textContent = 'Подключение сохранено. Выберите llama.cpp и включите тезисы для Око, папки или фида.'; }
-  catch (error) { byId('llamacpp-status').textContent = error.message; }
+  catch (error) { reportError(error, 'Интерфейс Око'); byId('llamacpp-status').textContent = error.message; }
 };
 byId('llamacpp-check').onclick = async () => {
   try { byId('llamacpp-status').textContent = 'Проверка…'; const result = await api('processors/llamacpp/check', 'POST'); if (stopped) return; byId('llamacpp-status').textContent = result.mode + ' · ' + result.model; byId('llamacpp-models').replaceChildren(...result.models.map(name => { const option = element('option'); option.value = name; return option; })); }
-  catch (error) { byId('llamacpp-status').textContent = error.message; }
+  catch (error) { reportError(error, 'Интерфейс Око'); byId('llamacpp-status').textContent = error.message; }
 };
 byId('codex-check').onclick = async () => {
   const button = byId('codex-check');
@@ -317,7 +338,7 @@ byId('codex-check').onclick = async () => {
     if (stopped) return;
     const auth = {chatgpt: 'вход через ChatGPT', api_key: 'вход через API key', missing: 'вход отсутствует', unknown: 'способ входа не распознан', unchecked: 'вход не проверен'};
     byId('codex-status').textContent = (result.version ? 'CLI ' + result.version + ' · ' : '') + auth[result.auth] + (result.limits_checked ? '. Лимиты проверены. ' : '. Лимиты не проверены. ') + (result.available ? 'Изолированный запуск доступен.' : result.reason);
-  } catch (error) {
+  } catch (error) { reportError(error, 'Интерфейс Око');
     if (!stopped) byId('codex-status').textContent = error.message;
   } finally {
     button.disabled = stopped;
@@ -347,7 +368,7 @@ byId('digest-run').onclick = async () => {
     }
     await api('digests/folder/' + folderId, 'POST', body);
     byId('digest-dialog').close(); refresh();
-  } catch (error) { byId('digest-message').textContent = error.message; }
+  } catch (error) { reportError(error, 'Интерфейс Око'); byId('digest-message').textContent = error.message; }
   finally { button.disabled = stopped; }
 };
 
@@ -371,7 +392,7 @@ byId('folder-viewed').onclick = async () => {
   try {
     const preview = await api('folders/' + completionFolder + '/completion/preview', 'POST');
     if (stamp === completionGeneration && !stopped && byId('completion-dialog').open) renderCompletion(preview);
-  } catch (error) { if (stamp === completionGeneration) byId('completion-message').textContent = error.message; }
+  } catch (error) { reportError(error, 'Интерфейс Око'); if (stamp === completionGeneration) byId('completion-message').textContent = error.message; }
 };
 byId('completion-dialog').addEventListener('close', () => { completionGeneration++; completionToken = null; });
 byId('completion-close').onclick = () => byId('completion-dialog').close();
@@ -388,7 +409,7 @@ byId('completion-confirm').onclick = async () => {
     bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
     byId('completion-dialog').close();
     refresh();
-  } catch (error) {
+  } catch (error) { reportError(error, 'Интерфейс Око');
     if (!error.detail?.preview) {
       contentEpoch++;
       opened.folderCompleted(confirmedFolder);

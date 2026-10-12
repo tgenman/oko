@@ -1,4 +1,5 @@
 """Frozen source sets and resumable, bounded period reviews."""
+from oko.diagnostics import record_caught
 import hashlib
 import json
 import uuid
@@ -274,7 +275,10 @@ class Digests:
                 progress = Progress.model_validate(data['result'])
                 progress.validate_state(chunks)
                 return progress
+        except FileNotFoundError:
+            return None
         except (OSError, ValueError, KeyError, TypeError, ProcessingError):
+            record_caught('digests._read')
             pass
         return None
 

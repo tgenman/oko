@@ -43,8 +43,18 @@ class Source(Protocol):
 
 
 class SourceError(Exception):
-    def __init__(self, label: str, delay: float = 60) -> None:
+    def __init__(self, label: str, delay: float = 60, *, remote_traceback: str = '') -> None:
         self.label, self.delay = label, delay
+        self.remote_traceback = remote_traceback
+        self.remote_type = self.remote_message = self.remote_location = ''
+
+    @classmethod
+    def from_worker(cls, label: str, details: dict[str, str], delay: float = 60) -> 'SourceError':
+        error = cls(label, delay, remote_traceback=details.get('traceback', ''))
+        error.remote_type = details.get('error_type', '')
+        error.remote_message = details.get('message', '')
+        error.remote_location = details.get('location', '')
+        return error
 
 
 class SourceDeleted(SourceError):

@@ -1,4 +1,5 @@
 """Publication theses: current inputs, durable results and their reader state."""
+from oko.diagnostics import record_caught
 import hashlib
 import json
 from typing import TYPE_CHECKING, Any
@@ -87,6 +88,7 @@ class PublicationTheses:
                 return None
             return Theses.model_validate(header['result']).model_dump()
         except (OSError, ValueError, KeyError):
+            record_caught('theses.read')
             return None
 
     def save(self, job: 'Job', signature: str, theses: Theses) -> None:

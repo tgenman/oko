@@ -1,5 +1,6 @@
 """Ephemeral Codex CLI connection, isolated by an audited macOS OS profile."""
 
+from oko.diagnostics import record_caught
 import asyncio
 from contextlib import closing
 import hashlib
@@ -85,6 +86,7 @@ async def diagnose() -> dict[str, Any]:
                 result['auth'] = 'unknown'
             return result
     except (OSError, ValueError, asyncio.TimeoutError):
+        record_caught('codex.diagnose')
         return dict(result, reason='Проверка Codex не завершена; проверьте CLI. ' + UNAVAILABLE)
 
 # External CLI boundary. Tests replace the service; the real connection always
@@ -112,6 +114,7 @@ def supported_binary() -> Path | None:
             digest = hashlib.file_digest(handle, 'sha256').hexdigest()
         return binary if digest == APPROVED_SHA256 else None
     except OSError:
+        record_caught('codex.supported_binary')
         return None
 
 
@@ -155,6 +158,7 @@ async def run_isolated(args: list[str], prompt: bytes, directory: Path) -> tuple
             process.stdin.write(prompt)
             await process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError):
+            record_caught('codex.run_isolated')
             pass
         finally:
             process.stdin.close()
@@ -171,6 +175,7 @@ async def run_isolated(args: list[str], prompt: bytes, directory: Path) -> tuple
         assert isinstance(code, int)
         return code, output
     except asyncio.TimeoutError:
+        record_caught('codex.run_isolated')
         raise ProcessingError('Codex не завершил задание за 120 секунд') from None
     finally:
         try:
@@ -250,6 +255,7 @@ async def quota_before_turn(binary: Path, work: Path, auth: Path) -> list[dict[s
                 raise ProcessingError('Лимиты Codex не определены; материалы не отправлены')
         return windows
     except (OSError, ValueError, TypeError, asyncio.TimeoutError):
+        record_caught('codex.quota_before_turn')
         raise ProcessingError('Не удалось проверить лимиты Codex; материалы не отправлены') from None
     finally:
         try:
@@ -282,8 +288,10 @@ class LocalCodex:
                     return dict(result, reason='Предварительная проверка лимитов требует входа ChatGPT')
                 windows = await quota_before_turn(binary, work, auth)
         except ProcessingError as error:
+            record_caught('codex.check')
             return dict(result, reason=error.label)
         except OSError:
+            record_caught('codex.check')
             return dict(result, reason='Внешний sandbox Codex недоступен. ' + UNAVAILABLE)
         return dict(result, available=True, local=False, reason='', limits_checked=True, quota_windows=windows)
 
@@ -321,11 +329,13 @@ class LocalCodex:
                     raise ProcessingError('Codex создал непредусмотренную копию; результат не принят')
                 return finished_result(code, output)
         except OSError:
+            record_caught('codex.complete')
             raise ProcessingError('Изолированный запуск Codex недоступен') from None
         finally:
             try:
                 directory.rmdir()
             except OSError:
+                record_caught('codex.complete')
                 pass
 
 
@@ -354,6 +364,7 @@ def finished_result(code: int, output: bytes) -> str:
             raise ProcessingError('Codex не завершил результат')
         return text
     except (ValueError, KeyError, TypeError):
+        record_caught('codex.finished_result')
         raise ProcessingError('Некорректный ответ Codex') from None
 
 
@@ -379,6 +390,7 @@ class Codex:
             theses.validate_sources(request)
             return theses
         except ValueError:
+            record_caught('codex.generate')
             raise ProcessingError('Результат не соответствует схеме обработки') from None
 
 

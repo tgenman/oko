@@ -13,7 +13,7 @@ from typing import Any, Literal, TypeVar
 
 import httpx
 
-from oko.collection.rss import RSSSource
+from oko.collection.rss import RSSSource, feed_title, normalized
 from oko.collection.contracts import SourceError, SourceDeleted
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
@@ -24,15 +24,17 @@ from oko.reviews.coordination import PreparedWork
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram, TelegramPeer
-from oko.subscriptions.subscriptions import ImportRequest, Overrides, FeedPatch
+from oko.subscriptions.subscriptions import AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, identify
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions
+from oko.diagnostics import Journal, active_journal, diagnostic_source, capture_scope, record_caught
 
 T = TypeVar('T')
 
 
 class ActionError(Exception):
-    def __init__(self, kind: Literal['conflict', 'invalid', 'missing', 'unavailable'], detail: str | dict[str, Any]) -> None:
+    def __init__(self, kind: Literal['conflict', 'invalid', 'missing', 'unavailable'], detail: str | dict[str, Any], *, expected: bool = False) -> None:
         self.kind, self.detail = kind, detail
+        self.diagnostic_skip = expected
         super().__init__(str(detail))
 
 
@@ -56,6 +58,7 @@ class Runtime:
         self._last_collection = clock()
         self._tabs: dict[str, float] = {}
         self._completions: dict[str, tuple[str, FolderContents | None]] = {}
+        self._feed_checks: dict[str, str] = {}
         self._stop_requested = asyncio.Event()
         self._closed = False
         self._actions = asyncio.Lock()
@@ -70,6 +73,7 @@ class Runtime:
         self._detached_ai: set[asyncio.Task[None]] = set()
         self._previous_tick = clock()
         self._previous_wall = time.time()
+        self.diagnostics: Journal | None = None
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
 
@@ -102,7 +106,9 @@ class Runtime:
                 done, _ = await asyncio.wait({task}, timeout=.25)
                 if task in done:
                     if not task.cancelled():
-                        task.exception()
+                        error = task.exception()
+                        if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
+                            self.diagnostics.capture(error, 'Завершение фоновой задачи')
                 else:
                     self._detached.add(task)
                     if task is ai_task:
@@ -112,7 +118,9 @@ class Runtime:
                         self._detached.discard(finished)
                         self._detached_ai.discard(finished)
                         if not finished.cancelled():
-                            finished.exception()
+                            error = finished.exception()
+                            if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
+                                self.diagnostics.capture(error, 'Завершение отсоединённой задачи')
 
                     task.add_done_callback(completed)
             if self._telegram_client:
@@ -238,8 +246,10 @@ class Runtime:
             try:
                 return current.digests.create(scope, owner, body, time.time())
             except LookupError as error:
+                record_caught('runtime.create_digest')
                 raise ActionError('missing', str(error)) from None
             except ValueError as error:
+                record_caught('runtime.create_digest')
                 raise ActionError('invalid', str(error)) from None
 
     async def viewed(self, item: str) -> None:
@@ -253,6 +263,7 @@ class Runtime:
         try:
             contents = current.folder_contents(folder)
         except LookupError as error:
+            record_caught('runtime._completion_preview')
             raise ActionError('missing', str(error)) from None
         token = secrets.token_urlsafe(32)
         # Confirmation handles contain only service IDs, never publication text.
@@ -277,6 +288,7 @@ class Runtime:
                 try:
                     latest = current.folder_contents(folder)
                 except LookupError as error:
+                    record_caught('runtime.complete_folder')
                     raise ActionError('missing', str(error)) from None
                 if latest != contents:
                     raise ActionError('conflict', dict(message='Состав папки изменился. Подтвердите новое количество.', preview=self._completion_preview(folder, current)))
@@ -300,8 +312,10 @@ class Runtime:
             try:
                 result = current.subscriptions.update_feed(identity, body)
             except LookupError as error:
+                record_caught('runtime.patch_feed')
                 raise ActionError('missing', str(error)) from None
             except ValueError as error:
+                record_caught('runtime.patch_feed')
                 raise ActionError('invalid', str(error)) from None
             current.settings_changed()
             await self._cancel()
@@ -314,10 +328,68 @@ class Runtime:
             try:
                 result = self.require_store().subscriptions.import_opml(body)
             except ValueError as error:
+                record_caught('runtime.import_subscriptions')
                 raise ActionError('invalid', str(error)) from None
             if 'conflicts' in result:
                 raise ActionError('conflict', result)
             return result
+
+    async def add_feed(self, body: AddFeed) -> dict[str, Any]:
+        async with self._actions:
+            try:
+                current = self.require_store()
+                if not self._live():
+                    raise ActionError('conflict', 'Откройте читатель для добавления фида', expected=True)
+                url = normalized(body.url)
+                if self._feed_checks.get(body.verification) != url:
+                    raise ValueError('Сначала проверьте текущий URL фида')
+                return current.subscriptions.add_feed(body.model_copy(update={'url': url}))
+            except ValueError as error:
+                record_caught('runtime.add_feed')
+                raise ActionError('invalid', str(error)) from error
+
+    async def verify_feed(self, body: FeedURL) -> dict[str, Any]:
+        async with self._actions:
+            current = self.require_store()
+            if not self._live():
+                raise ActionError('conflict', 'Откройте читатель для проверки фида')
+            epoch = self._epoch
+            try:
+                url = normalized(body.url)
+                _, kind, _ = identify(url)
+                if kind not in ('rss', 'youtube'):
+                    raise ValueError('Для Telegram используйте подключение Telegram-источника')
+                diagnostic_source.set('Проверка фида · ' + url)
+                existing = current.subscriptions.existing_feed(url)
+            except (ValueError, SourceError) as error:
+                raise ActionError('invalid', error.label if isinstance(error, SourceError) else str(error)) from error
+            async def check() -> str:
+                async with asyncio.timeout(25):
+                    raw, _, _ = await RSSSource(url, 1, self._rss_transport).download(url)
+                    return feed_title(raw)
+            task = asyncio.create_task(check()) if not existing else None
+            if task:
+                self._requests.add(task)
+        try:
+            title = existing['title'] if existing else await task if task else ''
+        except asyncio.CancelledError:
+            caller = asyncio.current_task()
+            if caller and caller.cancelling():
+                raise
+            raise ActionError('conflict', 'Проверка фида прервана; повторите действие', expected=True) from None
+        except (SourceError, TimeoutError, httpx.InvalidURL) as error:
+            raise ActionError('invalid', error.label if isinstance(error, SourceError) else 'Неверный URL фида' if isinstance(error, httpx.InvalidURL) else 'Проверка фида не завершилась за 25 секунд') from error
+        finally:
+            if task:
+                self._requests.discard(task)
+        async with self._actions:
+            self._check_request(current, epoch)
+            verification = secrets.token_urlsafe(24)
+            self._feed_checks[verification] = url
+            if len(self._feed_checks) > 100:
+                del self._feed_checks[next(iter(self._feed_checks))]
+            return dict(url=url, title=title, kind=kind, verification=verification,
+                        existing=current.subscriptions.existing_feed(url))
 
     async def update_settings(self, scope: str, owner: str, body: Overrides) -> dict[str, Any]:
         async with self._actions:
@@ -328,8 +400,10 @@ class Runtime:
                 await self._cancel()
                 return result
             except LookupError as error:
+                record_caught('runtime.update_settings')
                 raise ActionError('missing', str(error)) from None
             except ValueError as error:
+                record_caught('runtime.update_settings')
                 raise ActionError('invalid', str(error)) from None
 
     async def configure_processor(self, config: ProcessorConfig) -> None:
@@ -351,9 +425,10 @@ class Runtime:
         try:
             result = await task
         except ProcessingError as error:
+            record_caught('runtime.check_processor')
             raise ActionError('conflict', error.label) from None
         except asyncio.CancelledError:
-            raise ActionError('conflict', 'Проверка прервана') from None
+            raise ActionError('conflict', 'Проверка прервана', expected=True) from None
         finally:
             self._requests.discard(task)
         async with self._actions:
@@ -375,7 +450,7 @@ class Runtime:
         try:
             result = await task
         except asyncio.CancelledError:
-            raise ActionError('conflict', 'Проверка Codex прервана') from None
+            raise ActionError('conflict', 'Проверка Codex прервана', expected=True) from None
         finally:
             self._requests.discard(task)
         async with self._actions:
@@ -401,6 +476,7 @@ class Runtime:
                 raise ActionError('missing', 'Тезисы для материала не включены')
 
     async def _execute_ai(self, job: Job) -> None:
+        capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
         work: PreparedWork | None = None
         try:
@@ -408,7 +484,9 @@ class Runtime:
                 current = self._store
                 if not current or not current.valid(job) or not self._live():
                     return
+                diagnostic_source.set('Обработка · ' + job.kind + ' · ' + job.item)
                 work = current.processing.prepare(job)
+                diagnostic_source.set('Обработка · ' + job.kind + ' · ' + ','.join(sorted({current.item_feed(source.id) for source in work.request.sources})))
                 config = current.processor_config()
                 request = work.request
                 if work.finish_without_model():
@@ -436,6 +514,7 @@ class Runtime:
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            record_caught('runtime._execute_ai')
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
                     current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка AI-обработки', 30)
@@ -453,9 +532,9 @@ class Runtime:
 
     def _check_request(self, current: Store, epoch: int) -> None:
         if self.stopped or self._store is not current or not self._live():
-            raise ActionError('conflict', 'Око остановлено')
+            raise ActionError('conflict', 'Око остановлено', expected=True)
         if epoch != self._epoch:
-            raise ActionError('conflict', 'Проверка подключения прервана; повторите действие')
+            raise ActionError('conflict', 'Проверка подключения прервана; повторите действие', expected=True)
 
     async def _call_telegram(self, call: Callable[[TelegramClient], Awaitable[T]]) -> tuple[T, Store, int]:
         async with self._actions:
@@ -467,12 +546,13 @@ class Runtime:
             # Network work is deliberately outside the mutation seam.
             result = await task
         except SourceError as error:
+            record_caught('runtime._call_telegram')
             raise ActionError('conflict', error.label) from None
         except asyncio.CancelledError:
             caller = asyncio.current_task()
             if caller and caller.cancelling():
                 raise
-            raise ActionError('conflict', 'Око остановлено' if self.stopped else 'Подключение Telegram прервано; повторите действие') from None
+            raise ActionError('conflict', 'Око остановлено' if self.stopped else 'Подключение Telegram прервано; повторите действие', expected=True) from None
         finally:
             self._requests.discard(task)
         async with self._actions:
@@ -502,6 +582,7 @@ class Runtime:
             try:
                 result = current.subscriptions.connect_telegram(body, info)
             except (LookupError, ValueError) as error:
+                record_caught('runtime.connect_telegram')
                 raise ActionError('invalid', str(error)) from None
             await self._cancel()
             self._sources.pop(result['id'], None)
@@ -512,6 +593,7 @@ class Runtime:
         try:
             current.delete(job)
         except Exception:
+            record_caught('runtime._delete')
             if current.valid(job):
                 current.retry(job, self._clock(), 'Ошибка удаления')
 
@@ -547,6 +629,7 @@ class Runtime:
                 current.read_sync.completed(job, plan, confirmed, self._clock())
 
     async def _execute(self, job: Job) -> None:
+        capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
         feed = ''
         try:
@@ -555,9 +638,11 @@ class Runtime:
                 if not current or not current.valid(job) or not self._live():
                     return
                 if job.kind == 'delete':
+                    diagnostic_source.set('Удаление · ' + job.item)
                     self._delete(job, current)
                     return
                 feed = (job.item or 'demo') if job.kind in ('discover', 'read') else current.item_feed(job.item)
+                diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 source = self._sources.get(feed)
                 publication = current.publication(job.item) if job.kind == 'fetch' else None
                 namespace = 'telegram' if isinstance(source, TelegramSource) else ''
@@ -586,6 +671,7 @@ class Runtime:
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            record_caught('runtime._execute')
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
                     if isinstance(error, SourceDeleted) and job.kind == 'fetch':
@@ -599,6 +685,7 @@ class Runtime:
                         current.feed_status(feed, error=label, gap=None)
 
     async def run(self) -> None:
+        journal_context = active_journal.set(self.diagnostics)
         try:
             self._store = Store(self._root, self._fault)
             config = self._store.subscriptions
@@ -608,6 +695,7 @@ class Runtime:
                 config.check_owner('feed', self._source_feed)
                 self._store.enqueue_discovery(self._source_feed)
         except (sqlite3.DatabaseError, OSError):
+            record_caught('runtime.run')
             self._error = 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'
         self._idle_since = self._clock()
         try:
@@ -652,6 +740,9 @@ class Runtime:
                             if job:
                                 self._active = asyncio.create_task(self._execute(job))
                 await asyncio.sleep(.02)
+        except Exception:
+            record_caught('Главный цикл Око')
+            raise
         finally:
             self._stop_requested.set()
             async with self._actions:
@@ -661,3 +752,4 @@ class Runtime:
                     self._store = None
                 self._closed = True
             self._shutdown()
+            active_journal.reset(journal_context)

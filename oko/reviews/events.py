@@ -1,4 +1,5 @@
 """Folder/window event views. Only current input identities survive in SQLite."""
+from oko.diagnostics import record_caught
 import hashlib
 import json
 from pathlib import Path
@@ -110,6 +111,7 @@ class Events:
                 return None
             return EventsResult.model_validate(data['result'])
         except (OSError, ValueError, KeyError):
+            record_caught('events.read')
             return None
 
     def save(self, job: 'Job', signature: str, result: EventsResult) -> None:

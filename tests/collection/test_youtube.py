@@ -185,3 +185,44 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
         time.sleep(.05)
         assert not list((tmp_path / 'content').rglob('image-*'))
         assert not any('Late captions' in p.read_text() for p in (tmp_path / 'content').rglob('*.md'))
+
+
+def test_owned_caption_worker_preserves_original_exception_in_debug(tmp_path, monkeypatch):
+    import os
+    package = tmp_path / 'sdk' / 'youtube_transcript_api'
+    package.mkdir(parents=True)
+    (package / '_errors.py').write_text('class TranscriptsDisabled(Exception): pass\nclass NoTranscriptFound(Exception): pass\n')
+    (package / '__init__.py').write_text('''
+class YouTubeTranscriptApi:
+    def __init__(self, http_client): pass
+    def list(self, video):
+        raise RuntimeError('SDK failed password=private-caption-key')
+''')
+    monkeypatch.setenv('PYTHONPATH', str(package.parent) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    with TestClient(create_app(tmp_path / 'data', token='test', rss_enabled=True, rss_transport=transport([])), headers=HEADERS) as client:
+        feed = subscribe(client)
+        client.patch('/api/feeds/' + feed, json={'importance': 'high'})
+        client.post('/api/tabs/reader/heartbeat')
+        wait(client, lambda m: m.get('captions') == 'error')
+        groups = client.get('/api/debug').json()['groups']
+        matching = [g for g in groups if 'SDK failed' in g['message']]
+        assert len(matching) == 1 and matching[0]['count'] == 1
+        assert matching[0]['error_type'] == 'RuntimeError'
+        assert 'Worker traceback' in matching[0]['traceback']
+        assert 'private-caption-key' not in str(groups)
+
+
+def test_youtube_added_through_checked_url_uses_existing_collector(tmp_path):
+    captions = Captions()
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions), headers=HEADERS) as client:
+        client.post('/api/tabs/reader/heartbeat')
+        url = 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw'
+        checked = client.post('/api/feeds/verify', json={'url': url}).json()
+        added = client.post('/api/feeds', json={'url': url, 'verification': checked['verification'], 'title': '3Blue1Brown', 'folder': 'Учёба'})
+        assert added.status_code == 200, added.text
+        feed = added.json()
+        assert feed['kind'] == feed['transport'] == 'youtube'
+        client.patch('/api/feeds/' + feed['id'], json={'importance': 'high'})
+        material = wait(client, lambda m: m.get('captions') == 'available')
+        assert material['url'] == f'https://www.youtube.com/watch?v={VIDEO}'
+        assert captions.calls == [VIDEO]

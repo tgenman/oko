@@ -7,6 +7,7 @@ import asyncio
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 import json
+from oko.diagnostics import exception_details
 import logging
 import os
 from pathlib import Path
@@ -208,19 +209,19 @@ async def main() -> None:
                     else:
                         raise ValueError('operation')
                 response = dict(value=value)
-            except SessionLockError:
-                response = dict(error='Telegram-сессия занята другим клиентом')
+            except SessionLockError as error:
+                response = dict(error='Telegram-сессия занята другим клиентом', **exception_details(error))
             except FloodWaitError as error:
-                response = dict(error='Ограничение частоты Telegram', delay=max(1, error.seconds))
-            except PermissionError:
-                response = dict(error='Требуется авторизация существующего Telegram-клиента')
-            except OverflowError:
-                response = dict(error='Вложение Telegram превышает лимит 200 МБ')
+                response = dict(error='Ограничение частоты Telegram', delay=max(1, error.seconds), **exception_details(error))
+            except PermissionError as error:
+                response = dict(error='Требуется авторизация существующего Telegram-клиента', **exception_details(error))
+            except OverflowError as error:
+                response = dict(error='Вложение Telegram превышает лимит 200 МБ', **exception_details(error))
             except Exception as error:
                 label = 'Нет доступа к Telegram-источнику' if type(error).__name__ in (
                     'ChannelPrivateError', 'ChatAdminRequiredError', 'UsernameInvalidError',
                     'UsernameNotOccupiedError', 'PeerIdInvalidError', 'ValueError') else 'Telegram недоступен'
-                response = dict(error=label)
+                response = dict(error=label, **exception_details(error))
             output.write(json.dumps(response, ensure_ascii=False) + '\n')
             output.flush()
     finally:

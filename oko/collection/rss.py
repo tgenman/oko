@@ -1,4 +1,5 @@
 """Finite RSS/Atom windows; content stays outside the state database."""
+from oko.diagnostics import record_caught
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -72,12 +73,32 @@ class Entry:
     excerpt: str
 
 
+def feed_title(raw: bytes) -> str:
+    if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():
+        raise SourceError('Неподдерживаемый XML источника')
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as error:
+        raise SourceError('Неверный RSS/Atom') from error
+    def local(tag: str) -> str:
+        return tag.rsplit('}', 1)[-1]
+    kind = local(root.tag)
+    if kind not in ('rss', 'feed', 'RDF'):
+        raise SourceError('Нужен RSS/Atom-фид, а не веб-страница')
+    parent = root if kind == 'feed' else next((node for node in root if local(node.tag) == 'channel'), None)
+    if parent is None:
+        raise SourceError('Неверный RSS: отсутствует channel')
+    title = next((node for node in parent if local(node.tag) == 'title'), None)
+    return ''.join(title.itertext()).strip()[:200] if title is not None else ''
+
+
 def entries(raw: bytes, base: str) -> list[Entry]:
     if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():
         raise SourceError('Неподдерживаемый XML источника')
     try:
         root = ET.fromstring(raw)
     except ET.ParseError:
+        record_caught('rss.entries')
         raise SourceError('Неверный RSS/Atom') from None
     def local(tag: str) -> str:
         return tag.rsplit('}', 1)[-1]
@@ -111,6 +132,7 @@ def entries(raw: bytes, base: str) -> list[Entry]:
         try:
             url = normalized(urljoin(entry_base, link))
         except SourceError:
+            record_caught('rss.entries')
             continue
         date = value('pubDate') or value('published') or value('updated') or value('date')
         try:
@@ -158,6 +180,7 @@ class RSSSource:
                             raise SourceError('Превышен размер материала')
                     return bytes(data), str(response.url), response.headers.get('content-type', '').split(';')[0]
         except httpx.HTTPError:
+            record_caught('rss.download')
             raise SourceError('Источник недоступен') from None
 
     async def read_entries(self) -> list[Entry]:
@@ -185,6 +208,7 @@ class RSSSource:
         try:
             batch = await self.read_entries()
         except SourceError:
+            record_caught('rss.fetch')
             batch = []
         entry = next((e for e in batch if e.publication.url == publication.url), None)
         title, excerpt = (entry.title, entry.excerpt) if entry else (publication.teaser.title, publication.teaser.text) if publication.teaser else ('Статья', '')
@@ -206,6 +230,7 @@ class RSSSource:
                 raise
             reason = 'Публикация недоступна; доступен анонс'
         except SourceError as error:
+            record_caught('rss.fetch')
             if publication.teaser and publication.teaser.full:
                 raise
             reason = error.label + '; доступен анонс'
@@ -221,6 +246,7 @@ class RSSSource:
                 suffix = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp'}[mime]
                 images.append(Image(f'image-{position}.{suffix}', raw))
             except SourceError:
+                record_caught('rss.fetch')
                 full, reason = False, 'Не все изображения сохранены'
                 if publication.teaser:
                     images.extend(image for image in publication.teaser.images if image.name.startswith(f'image-{position}.'))

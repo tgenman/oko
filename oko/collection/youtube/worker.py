@@ -2,6 +2,7 @@
 import json
 import logging
 import sys
+from oko.diagnostics import exception_details
 from typing import Any
 
 
@@ -20,8 +21,8 @@ def main() -> None:
         result = dict(text=text)
     except (TranscriptsDisabled, NoTranscriptFound):
         result = dict(text=None)
-    except Exception:
-        result = dict(error=True)
+    except Exception as error:
+        result = dict(error=True, **exception_details(error))
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
 
 

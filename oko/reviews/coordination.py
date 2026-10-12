@@ -1,4 +1,5 @@
 """Current processing work and reconciliation of dependent reader results."""
+from oko.diagnostics import record_caught
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -98,6 +99,7 @@ class ProcessingCoordination:
                 raise ProcessingError('Запрещена публичная AI-обработка набора; разрешение требуется от всех фидов')
             return PreparedWork(self, operation, job, signature, request, public_ai)
         except BaseException:
+            record_caught('coordination.prepare')
             # Request preparation can allocate a digest plan before failing.
             if operation.release:
                 operation.release(job)

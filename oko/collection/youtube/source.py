@@ -1,4 +1,5 @@
 """YouTube Atom updates and captions only; never downloads video/audio."""
+from oko.diagnostics import record_caught
 import asyncio
 import json
 import re
@@ -35,12 +36,13 @@ class LocalCaptions:
             if process.returncode or not isinstance(result, dict):
                 raise ValueError('worker')
             if result.get('error'):
-                raise SourceError('Не удалось получить субтитры; повторите загрузку')
+                raise SourceError.from_worker('Не удалось получить субтитры; повторите загрузку', result)
             text = result['text']
             if text is not None and not isinstance(text, str):
                 raise ValueError('text')
             return text or None
         except (TimeoutError, ValueError, KeyError, OSError):
+            record_caught('source.fetch')
             raise SourceError('Не удалось получить субтитры; повторите загрузку') from None
         finally:
             if process.returncode is None:
@@ -85,6 +87,7 @@ class YouTubeSource(RSSSource):
                 transcript = await self.captions_client.fetch(publication.id)
                 text, state, reason = ((transcript, 'available', '') if transcript else ('', 'unavailable', 'Субтитры недоступны'))
             except SourceError as error:
+                record_caught('source.fetch')
                 if publication.teaser and publication.teaser.captions == 'available':
                     raise
                 state, reason = 'error', error.label
@@ -99,6 +102,7 @@ class YouTubeSource(RSSSource):
             else:
                 raise SourceError('Превью недоступно')
         except SourceError:
+            record_caught('source.fetch')
             preview_complete = False
             if publication.teaser:
                 images.extend(publication.teaser.images)
