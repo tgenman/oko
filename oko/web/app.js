@@ -1,3 +1,4 @@
+import {historyProgress} from './initial-history.js';
 import {createFeedConnection} from './feed-connection.js';
 import {createDebugPanel, reportError} from './debug.js';
 import {createTelegramConnection} from './telegram-connection.js';
@@ -81,6 +82,11 @@ async function refresh() {
     const state = await api('status');
     if (stopped || epoch !== contentEpoch) return;
     debug.updateStatus(state.debug_count, state.debug_persistence_error);
+    const historyNode = byId('history-progress');
+    if (historyNode) {
+      const progress = (state.initial_histories || []).find(h => h.feed_id === historyNode.dataset.feed);
+      if (progress) historyNode.textContent = historyProgress(progress);
+    }
     if (state.stopped) { stopUi('Око остановлено'); return; }
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
     const progressMessages = [...new Set([...state.errors, ...readMessages])];
@@ -233,6 +239,9 @@ async function loadSettings() {
 function renderFeed(feed) {
   const container = byId('feed-options');
   container.append(element('h2', 'Подключение фида'));
+  if (feed.initial_history) {
+    const progress = element('p', historyProgress(feed.initial_history)); progress.id = 'history-progress'; progress.dataset.feed = feed.id; progress.setAttribute('role', 'status'); container.append(progress);
+  }
   const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.transport === 'youtube' ? 'YouTube подключён: сбор при открытой вкладке' : feed.kind === 'youtube' ? 'YouTube отключён' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
   container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
   if (feed.kind === 'youtube') container.append(element('p', (feed.transport === 'youtube' ? 'YouTube: обновления собираются при открытой вкладке. ' : 'YouTube подключается автоматически при добавлении URL фида. ') + 'Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));

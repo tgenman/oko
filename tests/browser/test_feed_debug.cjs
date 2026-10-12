@@ -24,7 +24,7 @@ test('add URL uses one form and automatically shows YouTube connection', async (
     await expect(r.page.locator('#rss-message')).toContainText('YouTube');
     await expect(r.page.locator('#feed-options')).toContainText('YouTube подключён');
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/feeds' && r.method === 'POST'));
-    expect(request.body).toEqual({url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw', title: '3Blue1Brown', folder: 'Учёба', verification: 'checked'});
+    expect(request.body).toEqual({url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw', title: '3Blue1Brown', folder: 'Учёба', verification: 'checked', initial_history: {mode: 'count', count: 20, date: null, timezone: await r.page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)}});
   } finally { await r.close(); }
 });
 

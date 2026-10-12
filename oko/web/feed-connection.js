@@ -1,7 +1,9 @@
 import {reportError} from './debug.js';
+import {bindInitialHistory} from './initial-history.js';
 
 export function createFeedConnection({api, onSelected}) {
   const byId = id => document.getElementById(id);
+  const historySelection = bindInitialHistory('rss');
   const url = byId('rss-url'), check = byId('rss-check'), add = byId('rss-add');
   let generation = 0, checked = null, pending = false, saving = false, stopped = false, controller = null;
   function controls() {
@@ -46,11 +48,13 @@ export function createFeedConnection({api, onSelected}) {
   byId('rss-form').onsubmit = async event => {
     event.preventDefault();
     if (add.disabled || !checked) return;
+    const initialHistory = historySelection();
+    if (!initialHistory) return;
     const stamp = generation, preview = checked;
     pending = true; saving = true; controls(); byId('rss-message').textContent = 'Добавление…';
     try {
       const result = await api('feeds', 'POST', {url: preview.url, verification: preview.verification,
-        title: byId('rss-title').value.trim(), folder: byId('rss-folder').value.trim()});
+        title: byId('rss-title').value.trim(), folder: byId('rss-folder').value.trim(), initial_history: initialHistory});
       if (stamp !== generation || stopped) return;
       await onSelected(result);
       if (stamp !== generation || stopped) return;

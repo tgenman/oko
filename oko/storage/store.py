@@ -127,6 +127,9 @@ class Store:
 
     def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo', namespace: str = '') -> None:
         with self.db:
+            history_items = []
+            selection = json.loads(cursor) if self.subscriptions.history.status(feed) else {}
+            history_ids = set(selection.get('history_ids', []))
             for p in publications:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
                 source_id = p.id if feed == 'demo' else feed + ':' + p.id
@@ -140,12 +143,16 @@ class Store:
                     self.versions.publish(item, self.versions.prepare(item, p.teaser), False)
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
+                if row and p.id in history_ids:
+                    history_items.append(row['id'])
                 if row and not row['viewed']:
                     members = sorted(set(json.loads(row['members'])) | set(p.members))
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
                         self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (row['id'],))
                     self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done'", (row['id'],))
+            if 'history_ids' in selection:
+                self.subscriptions.history.freeze(feed, history_items)
             if namespace == 'telegram':
                 self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]')", (feed,))
                 self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
@@ -227,6 +234,7 @@ class Store:
             self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
             if material.members:
                 self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
+            self.subscriptions.history.saved(item, material.full)
             self.finish(job)
         self.processing.sync()
 
@@ -244,6 +252,7 @@ class Store:
             for member in members:
                 row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
                 self.read_sync.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
+                self.subscriptions.history.viewed(member)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
                 self.filters.forget(member)
                 self.versions.forget(member)

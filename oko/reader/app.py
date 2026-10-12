@@ -387,6 +387,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def debug_js() -> FileResponse:
         return FileResponse(web / 'debug.js', media_type='text/javascript')
 
+    @app.get('/initial-history.js')
+    async def initial_history_module() -> FileResponse:
+        return FileResponse(web / 'initial-history.js', media_type='text/javascript')
+
     @app.get('/feed-connection.js')
     async def feed_connection_js() -> FileResponse:
         return FileResponse(web / 'feed-connection.js', media_type='text/javascript')

@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from html import escape
 import json
 import time
+from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
@@ -155,6 +156,7 @@ class RSSSource:
     def __init__(self, url: str, initial_days: int, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.url, self.initial_days, self.transport = normalized(url), initial_days, transport
         self.gap: str | None = None
+        self.initial_history: dict[str, Any] | None = None
 
     async def download(self, url: str, limit: int = 4_000_000) -> tuple[bytes, str, str]:
         try:
@@ -190,6 +192,18 @@ class RSSSource:
     async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
         batch = await self.read_entries()
         previous = json.loads(cursor) if cursor else None
+        if self.initial_history:
+            if previous and 'history_ids' in previous:
+                excluded = set(previous['excluded'])
+                chosen = [e for e in batch if e.publication.id not in excluded]
+                next_cursor = previous
+            else:
+                selection = self.initial_history
+                ordered = list({e.publication.id: e for e in sorted(batch, key=lambda e: e.publication.published, reverse=True)}.values())
+                chosen = ordered[:selection['count']] if selection['mode'] == 'count' else [e for e in batch if e.publication.published >= selection['since']]
+                selected = {e.publication.id for e in chosen}
+                next_cursor = {'history_ids': list(selected), 'excluded': [e.publication.id for e in batch if e.publication.id not in selected], 'since': time.time()}
+            return [Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается')) for e in chosen], json.dumps(next_cursor)
         cutoff = previous['since'] if previous else time.time() - self.initial_days * 86400
         self.gap = None
         if not batch or min(e.publication.published for e in batch) > cutoff:

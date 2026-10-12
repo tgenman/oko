@@ -141,6 +141,7 @@ class Runtime:
                 youtube = self._sources[feed['id']]
                 if isinstance(youtube, YouTubeSource):
                     youtube.initial_days = feed['initial_days']
+                    youtube.initial_history = feed['initial_history']
                     youtube.want_captions = self._store.subscriptions.youtube_theses(feed['id'])
                     self._store.prepare_youtube(feed['id'], youtube.want_captions)
                 continue
@@ -160,6 +161,8 @@ class Runtime:
             source = self._sources[feed['id']]
             if isinstance(source, (RSSSource, TelegramSource)):
                 source.initial_days = feed['initial_days']
+                if isinstance(source, RSSSource):
+                    source.initial_history = feed['initial_history']
         active = {f['id'] for f in self._store.subscriptions.feeds() if (f['transport'] in ('rss', 'youtube') and self._rss_enabled) or (f['transport'] == 'telegram' and self._telegram_client and f.get('telegram_peer'))}
         self._sources = {key: source for key, source in self._sources.items() if key in active or key == self._source_feed and self._source}
 
@@ -201,7 +204,7 @@ class Runtime:
             stage = 'Сбор'
         else:
             stage = 'Завершено с ошибками' if state['errors'] else 'Готово'
-        return dict(**state, telegram_reads=self._store.read_sync.statuses() if self._store and not self.stopped else [], sources=source_states, error=self._error, stopped=self.stopped,
+        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], telegram_reads=self._store.read_sync.statuses() if self._store and not self.stopped else [], sources=source_states, error=self._error, stopped=self.stopped,
                     live_tabs=len(self._tabs), stage=stage,
                     ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
                     total_sources=len(self._sources))
