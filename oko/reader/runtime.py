@@ -314,9 +314,7 @@ class Runtime:
         async with self._actions:
             current = self.require_store()
             try:
-                current.subscriptions.check_owner('feed', identity)
-                with current.db:
-                    result = current.subscriptions.history.pause(identity, paused)
+                result = current.pause_history(identity, paused)
             except LookupError as error:
                 raise ActionError('missing', str(error)) from None
             except ValueError as error:

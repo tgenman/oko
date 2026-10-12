@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from oko.reader.app import create_app
-from tests.reader.test_feed_url import HEADERS, add, verify
+from tests.support.feed_url import HEADERS, add, verify
 
 
 def wait_history(client, feed, predicate):
@@ -54,7 +54,7 @@ def test_pause_keeps_snapshot_across_restart_but_fetches_new_posts(tmp_path, sel
 
 
 def test_telegram_paused_history_keeps_live_lane_and_resumes_album_snapshot(tmp_path):
-    from tests.reader.test_telegram_history import Archive
+    from tests.support.telegram_history import Archive
     class PausedArchive(Archive):
         blocked = True
         async def messages(self, account, peer, ids, **scope):
@@ -86,7 +86,7 @@ def test_telegram_paused_history_keeps_live_lane_and_resumes_album_snapshot(tmp_
 
 
 def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
-    from tests.reader.test_telegram_history import Archive
+    from tests.support.telegram_history import Archive
     from oko.collection.telegram.source import TelegramSource
     import json
     async def scenario():
@@ -106,7 +106,7 @@ def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
 
 
 def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp_path):
-    from tests.reader.test_feed_url import YOUTUBE
+    from tests.support.feed_url import YOUTUBE
     from tests.support.youtube import PNG
     blocked = True
     videos = ['abcdefghijk', 'lmnopqrstuv']

@@ -187,28 +187,19 @@ class TelegramSource:
         state: dict[str, Any] = json.loads(cursor) if cursor else dict(after=0, since=time.time()-self.initial_days*86400)
         batch = await self.client.page(self.account, self.peer, state['after'], state['since'], **self.scope)
         self.more, self.gap = batch['more'], batch.get('gap')
-        groups: dict[str, list[dict[str, Any]]] = {}
-        for msg in batch['messages']:
-            group = 'album:' + str(msg['group']) if msg['group'] else str(msg['id'])
-            groups.setdefault(group, []).append(msg)
-        publications = []
-        for messages in groups.values():
-            messages.sort(key=lambda m: m['id'])
-            if max(m['id'] for m in messages) <= state['after'] or max(m['date'] for m in messages) < state['since']:
-                continue
-            text = '\n\n'.join(m['text'] for m in messages if m['text'])
-            id = messages[0]['id']
-            publications.append(Publication('album:' + str(messages[0]['group']) if messages[0]['group'] else str(id), self.url(id), messages[0]['date'],
-                                           Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, False),
-                                           tuple(m['id'] for m in messages)))
+        dates = {m['id']: m['date'] for m in batch['messages']}
+        publications = [p for p in reversed(self.publications(batch['messages']))
+                        if max(p.members) > state['after'] and max(dates[m] for m in p.members) >= state['since']]
         state['after'] = max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members])
         if self.more and state['after'] == (json.loads(cursor)['after'] if cursor else 0):
             raise SourceError('Telegram не продвинул позицию сбора')
         return publications, json.dumps(state)
 
-    def publications(self, rows: list[dict[str, Any]]) -> list[Publication]:
+    def publications(self, rows: list[dict[str, Any]], posts_only: bool = False) -> list[Publication]:
         groups: dict[str, list[dict[str, Any]]] = {}
         for msg in rows:
+            if posts_only and msg.get('service'):
+                continue
             identity = 'album:' + str(msg['group']) if msg['group'] else str(msg['id'])
             groups.setdefault(identity, []).append(msg)
         result = []
@@ -227,6 +218,7 @@ class TelegramSource:
                                                        before=0, enrolled=0, scan_complete=False, lane='history', oldest=None)
         state.pop('history_ids', None)
         state.pop('history_enroll', None)
+        state.setdefault('warnings', ['Telegram не предоставляет атомарный снимок истории: набор выбирается по доступным страницам; удалённые во время выбора публикации могли не попасть в него.'])
         if config.get('paused') and not state['upper'] and not state['scan_complete']:
             # Establish the snapshot boundary without enrolling archive materials.
             # Live requests then start above it even if history was paused before
@@ -240,15 +232,27 @@ class TelegramSource:
             self.more = bool(state['upper'])
             self.gap = batch.get('gap')
             return [], json.dumps(state)
-        # First successful descending page fixes the snapshot. Alternate bounded
+        # Metadata pages build a durable manifest before count-mode content fetches.
+        # Telegram cannot provide an atomic server snapshot. Alternate bounded
         # live requests with archive requests so new messages never wait for it.
-        history_lane = not state['scan_complete'] and not config.get('paused') and (state['lane'] == 'history' or not state['upper'])
+        history_lane = not state['scan_complete'] and not config.get('paused') and (state['lane'] == 'history' or not state['upper']) and time.time() >= state.get('history_retry_at', 0)
         if history_lane:
-            batch = await self.client.history_page(self.account, self.peer, state['upper'], state['before'], state['since'], **self.scope)
+            try:
+                batch = await self.client.history_page(self.account, self.peer, state['upper'], state['before'], state['since'], **self.scope)
+            except SourceError as error:
+                if not state['upper']:
+                    raise
+                record_caught('Telegram: начальная история')
+                state.update(history_error=error.label, history_retry_at=time.time() + error.delay, lane='live')
+                state['history_enroll'] = []
+                self.more, self.gap = True, error.label
+                return [], json.dumps(state)
+            state.pop('history_error', None)
+            state.pop('history_retry_at', None)
             if not state['upper']:
                 state['upper'] = batch['upper']
                 state['after'] = batch['upper']
-            rows = self.publications(batch['messages'])
+            rows = self.publications(batch['messages'], posts_only=config['mode'] == 'count')
             rows = [p for p in rows if not state['before'] or max(p.members) < state['before']]
             chosen = [p for p in rows if config['mode'] == 'count' or p.published >= state['since']]
             if config['mode'] == 'count':

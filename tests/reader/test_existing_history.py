@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from oko.reader.app import create_app
 from tests.support.telegram import Telegram
-from tests.reader.test_feed_url import HEADERS, client_for, verify, add
+from tests.support.feed_url import HEADERS, client_for, verify, add
 
 
 def test_readding_telegram_opens_existing_without_changing_history_or_settings(tmp_path):
@@ -74,7 +74,10 @@ def test_legacy_cursor_does_not_replay_older_posts_on_restart(tmp_path):
         assert {c['url'] for c in cards} == {'https://legacy.test/recent'}
         feed = client.get('/api/subscriptions').json()['feeds'][0]
         assert feed['initial_history'] is None
+        frozen_since = client.get('/api/settings/feed/' + feed['id']).json()['feed']['legacy_since']
+        assert now - 86500 < frozen_since < now - 86300
         client.patch('/api/feeds/' + feed['id'], json={'initial_days': 7})
+        assert client.get('/api/settings/feed/' + feed['id']).json()['feed']['legacy_since'] == frozen_since
     with open_reader() as client:
         client.post('/api/tabs/reader/heartbeat')
         client.post('/api/collect')

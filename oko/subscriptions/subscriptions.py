@@ -185,18 +185,19 @@ class Subscriptions:
             if selected.get('telegram_peer') and (selected['telegram_peer'] != info['peer'] or selected['telegram_account'] != body.account or selected.get('telegram_topic') != body.topic_id):
                 raise ValueError('Для другого источника создайте новый фид')
             old = selected
-        elif old:
+        elif old and old.get('telegram_peer') and old['transport'] == 'telegram':
             return old
         id = old['id'] if old else key(identity)
         with self.db:
-            self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (key('folder:' + body.folder), body.folder, len(self.folders())))
-            folder = self.db.execute('SELECT id FROM folders WHERE title=?', (body.folder,)).fetchone()[0]
             if not old:
+                self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (key('folder:' + body.folder), body.folder, len(self.folders())))
+                folder = self.db.execute('SELECT id FROM folders WHERE title=?', (body.folder,)).fetchone()[0]
                 if body.initial_history is not None:
                     self.history.configure(id, body.initial_history)
                 self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls)
                                 VALUES (?,?,?,'telegram',?,?)''', (id, identity, info['title'], folder, json.dumps([str(body.peer)])))
-            self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,telegram_username=?,telegram_topic=?,auto_read=? WHERE id=?", (info['peer'], body.account, info.get('username'), body.topic_id, body.auto_read, id))
+            auto_read = old['auto_read'] if old and not body.feed_id and old['auto_read'] is not None else body.auto_read
+            self.db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_peer=?,telegram_account=?,telegram_username=?,telegram_topic=?,auto_read=? WHERE id=?", (info['peer'], body.account, info.get('username'), body.topic_id, auto_read, id))
         return next(f for f in self.feeds() if f['id'] == id)
 
     def ensure_demo(self) -> None:
@@ -217,6 +218,14 @@ class Subscriptions:
             feed = dict(row)
             feed['original_urls'] = json.loads(feed['original_urls'])
             feed['initial_history'] = self.history.status(feed['id'])
+            if feed['initial_history'] is None:
+                namespace = 'telegram:' if feed['transport'] == 'telegram' else ''
+                saved = self.db.execute('SELECT value FROM state WHERE key=?', ('cursor:' + namespace + feed['id'],)).fetchone()
+                try:
+                    cursor = json.loads(saved['value']) if saved else {}
+                except json.JSONDecodeError:
+                    cursor = {}  # Adapters may own opaque, non-JSON cursors.
+                feed['legacy_since'] = cursor.get('since') if isinstance(cursor, dict) else None
             for field in ('public_ai', 'read_history', 'auto_read'):
                 feed[field] = None if feed[field] is None else bool(feed[field])
             result.append(feed)

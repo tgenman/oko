@@ -263,7 +263,7 @@ function renderFeed(feed) {
     container.append(progress, toggle);
     renderHistoryState(feed.initial_history);
   } else if (feed.kind !== 'demo') {
-    container.append(element('p', Number.isInteger(feed.initial_days) ? `Сохранённый первоначальный период: ${feed.initial_days} дней` : 'Первоначальный период не сохранён'),
+    container.append(element('p', feed.legacy_since ? `Зафиксированное начало истории: ${new Date(feed.legacy_since * 1000).toLocaleString()}` : Number.isInteger(feed.initial_days) ? `Сохранённая настройка глубины: ${feed.initial_days} дней; фактическая граница не сохранена` : 'Фактическая граница истории не сохранена'),
       element('p', 'Количество и прогресс начальной загрузки не сохранены. Существующая граница и курсор сохраняются; повторная загрузка истории не запускается.'));
   }
   const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.transport === 'youtube' ? 'YouTube подключён: сбор при открытой вкладке' : feed.kind === 'youtube' ? 'YouTube отключён' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';

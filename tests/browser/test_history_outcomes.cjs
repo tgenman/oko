@@ -21,3 +21,23 @@ test('initial history shows partial, retry and unavailable outcomes with errors'
     await expect(r.page.locator('#feed-options')).toContainText('Источник недоступен');
   } finally {await r.close();}
 });
+
+test('count selection does not announce shortfall before metadata scan completes', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.page.evaluate(() => {
+      const t = readerTransport;
+      const feed = {id:'rss',title:'История',kind:'telegram',transport:'telegram',folder_id:'f',original_urls:['@source'],importance:'normal',
+        initial_history:{mode:'count',count:100,loaded:0,state:'selecting',frozen:false,scan_complete:false,available:10,paused:false,discovery_error:'Архив недоступен',discovery_retry_at:Date.now()/1000+600}};
+      t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
+      t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global').body,feed}});
+    });
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('#settings-owner').selectOption('feed/rss');
+    await expect(r.page.locator('#feed-options')).not.toContainText('доступно 10');
+    await expect(r.page.locator('#feed-options')).toContainText('Выбираются публикации начальной истории');
+    await expect(r.page.locator('#feed-options')).toContainText('Архив недоступен');
+    await expect(r.page.locator('#feed-options')).toContainText('повторная попытка');
+  } finally {await r.close();}
+});

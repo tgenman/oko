@@ -2,7 +2,7 @@ import time
 import httpx
 from fastapi.testclient import TestClient
 from oko.reader.app import create_app
-from tests.reader.test_feed_url import HEADERS, verify, add
+from tests.support.feed_url import HEADERS, verify, add
 
 
 def test_initial_history_retry_partial_and_terminal_outcomes_survive_restart(tmp_path):

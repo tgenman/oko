@@ -119,7 +119,9 @@ def test_private_group_access_forum_and_account_errors_are_explicit(tmp_path: Pa
         feed = connect(client, '-12345', 'Личное')
         assert feed['telegram_peer'] == -12345
         assert len(client.get('/api/subscriptions').json()['feeds']) == 1
-        assert client.post('/api/telegram/connect', json=dict(account='fixture', peer='-12345', folder='Другое', auto_read=False)).status_code == 400
+        duplicate = client.post('/api/telegram/connect', json=dict(account='fixture', peer='-12345', folder='Другое', auto_read=False))
+        assert duplicate.status_code == 200
+        assert duplicate.json()['folder_id'] == feed['folder_id']
         assert connect(client, '-12345', 'Личное')['id'] == feed['id']
         card = settled(client)[0]
         assert card['url'] == 'tg://openmessage?chat_id=12345&message_id=11'
@@ -496,7 +498,9 @@ def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_us
         feed = connect(client)
         item = settled(client)[0]['id']
         tg.private = True
-        assert connect(client, '-1001234567890')['id'] == feed['id']
+        response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='-1001234567890', folder='Новости', auto_read=False, feed_id=feed['id']))
+        assert response.status_code == 200
+        assert response.json()['id'] == feed['id']
         client.post('/api/materials/' + item + '/retry')
         for _ in range(100):
             material = client.get('/api/materials/' + item).json()
@@ -562,3 +566,24 @@ def test_worker_descending_snapshot_expands_boundary_album(tmp_path: Path, monke
         finally:
             await bridge.close()
     asyncio.run(check())
+
+
+def test_worker_service_actions_keep_read_ids_but_do_not_consume_post_count(tmp_path: Path, monkeypatch):
+    import asyncio
+    from oko.collection.telegram.source import LocalTelegram, TelegramSource
+    project = fake_sdk_project(tmp_path, monkeypatch)
+    sdk = project / 'telethon' / '__init__.py'
+    text = sdk.read_text().replace("return [msg(11)] if not params.get('offset_id') else []", "return [SimpleNamespace(id=20, date=datetime.now(timezone.utc), grouped_id=None, action=object()), msg(11)] if not params.get('offset_id') else []")
+    sdk.write_text(text)
+    async def scenario():
+        bridge = LocalTelegram(project / '.env', tmp_path / 'data')
+        try:
+            source = TelegramSource(bridge, 'fixture', -1001234567890, 1)
+            source.initial_history = dict(mode='count', count=1, since=None, paused=False)
+            publications, _ = await source.discover(None)
+            assert [p.members for p in publications] == [(11, 12)]
+            window = await bridge.read_window('fixture', -1001234567890, 0, 20)
+            assert 20 in window['ids']
+        finally:
+            await bridge.close()
+    asyncio.run(scenario())

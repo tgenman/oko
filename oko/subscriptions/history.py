@@ -72,6 +72,16 @@ class History:
             selection['warnings'] = warnings
             self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
 
+    def discovery_state(self, feed: str, cursor: dict[str, Any]) -> None:
+        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        if not row:
+            return
+        selection = json.loads(row['selection'])
+        selection['warnings'] = cursor.get('warnings', selection.get('warnings', []))
+        selection['discovery_error'] = cursor.get('history_error')
+        selection['discovery_retry_at'] = cursor.get('history_retry_at')
+        self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
+
     def configure(self, feed: str, selection: InitialHistory) -> None:
         self.db.execute('INSERT INTO initial_history(feed,selection) VALUES (?,?)', (feed, json.dumps(selection.selection())))
 
@@ -110,12 +120,14 @@ class History:
         result['count_text'] = str(result['count']) if result['count'] is not None else None
         counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome,count(*) n FROM history_members WHERE feed=? GROUP BY outcome', (feed,))}
         loaded = counts.get('loaded', 0) + counts.get('incomplete', 0)
-        result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen']))
+        result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen'] and row['scan_complete']))
         result['retrying'] = counts.get('retrying', 0)
         result['unavailable'] = counts.get('unavailable', 0)
         result['errors'] = [dict(item=r['item'], message=r['error']) for r in self.db.execute("SELECT h.item,j.error FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch' WHERE h.feed=? AND h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL", (feed,))]
         result['scan_complete'] = bool(row['scan_complete'])
         result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or counts.get('retrying', 0) or not row['scan_complete'] else 'done'
+        if row['frozen'] and not result['scan_complete'] and result['mode'] == 'count':
+            result['state'] = 'selecting'
         if row['paused'] and result['state'] != 'done':
             result['state'] = 'paused'
         return result

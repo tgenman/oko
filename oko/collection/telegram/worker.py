@@ -20,6 +20,8 @@ MAX_MEDIA = 200 * 1024 * 1024
 
 
 def record(msg: Any) -> dict[str, Any]:
+    if getattr(msg, 'action', None) is not None:
+        return dict(id=msg.id, date=msg.date.timestamp(), text='', group=None, media=None, service=True)
     media = None
     if msg.photo:
         media = dict(kind='image', mime='image/jpeg', extension='jpg')
@@ -36,7 +38,7 @@ def record(msg: Any) -> dict[str, Any]:
     elif msg.media and type(msg.media).__name__ != 'MessageMediaWebPage':
         media = dict(kind='unsupported', mime='application/octet-stream', extension='bin')
     return dict(id=msg.id, date=msg.date.timestamp(), text=msg.message or '',
-                group=msg.grouped_id, media=media)
+                group=msg.grouped_id, media=media, service=False)
 
 
 async def main() -> None:
