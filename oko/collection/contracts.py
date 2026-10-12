@@ -36,6 +36,7 @@ class Material:
     attachments: tuple[Attachment, ...] = ()
     members: tuple[int, ...] = ()
     captions: str | None = None
+    collection_error: 'SourceError | None' = None
 
 
 class Source(Protocol):

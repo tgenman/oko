@@ -27,5 +27,7 @@ export function historyProgress(history) {
   const progress = history.mode === 'count' ? `Загружено ${history.loaded} из ${history.count_text || history.count}` : `Загружено ${history.loaded} публикаций с ${history.date.split('-').reverse().join('.')}`;
   const state = history.state === 'pending' ? 'Ожидает первого обращения к источнику' : history.state === 'done' ? 'Начальная история завершена' : 'Начальная история загружается';
   const short = history.frozen && history.mode === 'count' && BigInt(history.count_text || history.count) > BigInt(history.available) ? ` · Запрошено ${history.count_text || history.count}, доступно ${history.available}` : '';
-  return progress + ' · ' + state + short + (history.warnings?.length ? ' · ' + history.warnings.join(' · ') : '');
+  const outcomes = (history.incomplete ? ` · ${history.incomplete} неполных` : '') + (history.retrying ? ` · ${history.retrying} ожидает повторной попытки` : '') + (history.unavailable ? ` · ${history.unavailable} окончательно недоступно` : '');
+  const errors = history.errors?.length ? ' · ' + [...new Set(history.errors.map(error => error.message))].join(' · ') : '';
+  return progress + ' · ' + state + outcomes + errors + short + (history.warnings?.length ? ' · ' + history.warnings.join(' · ') : '');
 }

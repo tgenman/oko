@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -16,7 +17,7 @@ from oko.reviews.events import Events
 from oko.reviews.digests import Digests
 from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
-from oko.collection.contracts import Attachment, Image, Material, Publication
+from oko.collection.contracts import SourceDeleted, Attachment, Image, Material, Publication
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.processing.llamacpp import ProcessorConfig
 
@@ -148,7 +149,7 @@ class Store:
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and p.id in history_ids:
                     history_items.append(row['id'])
-                if row and not row['viewed']:
+                if row and not row['viewed'] and not self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone():
                     members = sorted(set(json.loads(row['members'])) | set(p.members))
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
@@ -161,7 +162,7 @@ class Store:
             if 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed, history_items, selection['scan_complete'])
             if namespace == 'telegram':
-                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]')", (feed,))
+                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT item FROM source_deleted))", (feed,))
                 self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
@@ -172,7 +173,9 @@ class Store:
             return
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
+            self.subscriptions.history.failed(job.item, True)
             self.finish(job)
+            self.db.execute('UPDATE jobs SET error=? WHERE id=?', ('Публикация удалена или недоступна в источнике', job.id))
         self.processing.sync()
 
     def retry_material(self, item: str) -> bool:
@@ -230,7 +233,7 @@ class Store:
         teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', [])), captions=fallback.get('captions'), attachments=tuple(Attachment(Path(a['url']).name, (self.path(item).parent / Path(a['url']).name).read_bytes(), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
         return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members'])), bool(row['published_known'])) if row else None
 
-    def save(self, job: Job, material: Material) -> None:
+    def save(self, job: Job, material: Material, now: float | None = None) -> None:
         item = job.item
         if not self.valid(job) or self.publication(item) is None:
             return
@@ -241,9 +244,23 @@ class Store:
             self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
             if material.members:
                 self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
-            self.subscriptions.history.saved(item, material.full)
+            if not material.collection_error or not self.subscriptions.history.member(item):
+                self.subscriptions.history.saved(item, material.full)
             self.finish(job)
+            self.history_collection_error(job, material, time.monotonic() if now is None else now)
         self.processing.sync()
+
+    def history_collection_error(self, job: Job, material: Material, now: float) -> None:
+        error = material.collection_error
+        if not error or not self.subscriptions.history.member(job.item):
+            return
+        if isinstance(error, SourceDeleted):
+            self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
+            self.subscriptions.history.failed(job.item, True)
+            self.db.execute('UPDATE jobs SET error=? WHERE id=?', (error.label, job.id))
+        else:
+            self.subscriptions.history.failed(job.item)
+            self.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=?", (now + error.delay, error.label, job.id))
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
@@ -288,6 +305,8 @@ class Store:
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1) -> None:
         with self.db:
+            if job.kind == 'fetch':
+                self.subscriptions.history.failed(job.item)
             self.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=? AND generation=? AND status='running'",
                             (now + delay, error, job.id, job.generation))
 

@@ -273,10 +273,11 @@ class TelegramSource:
         if not rows:
             if publication.teaser and publication.teaser.full:
                 raise SourceDeleted()
-            return Material(teaser.title, teaser.text, False, 'Публикация недоступна в Telegram', attachments=teaser.attachments)
+            return Material(teaser.title, teaser.text, False, 'Публикация недоступна в Telegram', attachments=teaser.attachments, collection_error=SourceDeleted())
         text = '\n\n'.join(msg['text'] for msg in rows if msg['text'])
         attachments = []
         reasons = []
+        collection_error = None
         if set(publication.members) - {msg['id'] for msg in rows}:
             if teaser.full:
                 raise SourceDeleted()
@@ -296,10 +297,13 @@ class TelegramSource:
             except SourceError as error:
                 record_caught('source.fetch')
                 reasons.append(error.label)
+                if not isinstance(error, SourceDeleted):
+                    collection_error = error
         names = {a.name for a in attachments}
         failed_names = {f"media-{m['id']}.{m['media']['extension']}" for m in rows if m['media'] and m['media']['kind'] != 'unsupported'}
         attachments.extend(a for a in teaser.attachments if a.name not in names and (a.name in failed_names or int(a.name.split('-')[1].split('.')[0]) not in {m['id'] for m in rows}))
         if any(msg['group'] and time.time()-msg['date'] < 5 for msg in rows):
             reasons.append('Альбом ещё публикуется; повторите загрузку')
+            collection_error = SourceError('Альбом ещё публикуется', 5)
         return Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, not reasons,
-                        '; '.join(dict.fromkeys(reasons)), attachments=tuple(attachments), members=tuple(sorted({m['id'] for m in rows} | set(publication.members))))
+                        '; '.join(dict.fromkeys(reasons)), attachments=tuple(attachments), members=tuple(sorted({m['id'] for m in rows} | set(publication.members))), collection_error=collection_error)

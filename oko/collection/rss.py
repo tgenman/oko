@@ -243,6 +243,7 @@ class RSSSource:
         text = fallback.text
         images: list[Image] = []
         full, reason = False, 'Полный текст не извлечён; доступен анонс'
+        collection_error: SourceError | None = None
         urls = fallback.images
         base = publication.url
         try:
@@ -251,11 +252,13 @@ class RSSSource:
             article.feed(raw.decode('utf-8', errors='replace'))
             if article.article and article.text:
                 text, urls, full, reason = article.text, article.images, True, ''
-        except SourceDeleted:
+        except SourceDeleted as error:
+            collection_error = error
             if publication.teaser and publication.teaser.full:
                 raise
             reason = 'Публикация недоступна; доступен анонс'
         except SourceError as error:
+            collection_error = error
             record_caught('rss.fetch')
             if publication.teaser and publication.teaser.full:
                 raise
@@ -271,9 +274,11 @@ class RSSSource:
                     raise SourceError('Неподдерживаемое изображение')
                 suffix = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp'}[mime]
                 images.append(Image(f'image-{position}.{suffix}', raw))
-            except SourceError:
+            except SourceError as error:
                 record_caught('rss.fetch')
+                if not isinstance(error, SourceDeleted):
+                    collection_error = collection_error or error
                 full, reason = False, 'Не все изображения сохранены'
                 if publication.teaser:
                     images.extend(image for image in publication.teaser.images if image.name.startswith(f'image-{position}.'))
-        return Material(title, text, full, reason, tuple(images))
+        return Material(title, text, full, reason, tuple(images), collection_error=collection_error)

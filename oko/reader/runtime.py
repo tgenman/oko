@@ -672,7 +672,7 @@ class Runtime:
                 material = await source.fetch(publication)
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
-                        current.save(job, material)
+                        current.save(job, material, self._clock())
                         current.read_sync.sync()
                         current.feed_status(feed, error=None, gap=getattr(source, 'gap', None), changes=getattr(source, 'changes', None))
         except asyncio.CancelledError:

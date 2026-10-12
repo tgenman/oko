@@ -59,6 +59,12 @@ class History:
         if 'scan_complete' not in {r['name'] for r in db.execute('PRAGMA table_info(initial_history)')}:
             db.execute('ALTER TABLE initial_history ADD COLUMN scan_complete INTEGER DEFAULT 1')
 
+    def member(self, item: str) -> bool:
+        return self.db.execute('SELECT 1 FROM history_members WHERE item=?', (item,)).fetchone() is not None
+
+    def failed(self, item: str, unavailable: bool = False) -> None:
+        self.db.execute("UPDATE history_members SET outcome=? WHERE item=? AND outcome NOT IN ('loaded','incomplete','viewed','unavailable')", ('unavailable' if unavailable else 'retrying', item))
+
     def warnings(self, feed: str, warnings: list[str]) -> None:
         row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
         if row:
@@ -84,7 +90,7 @@ class History:
         self.db.execute("UPDATE history_members SET outcome=? WHERE item=?", ('loaded' if full else 'incomplete', item))
 
     def viewed(self, item: str) -> None:
-        self.db.execute("UPDATE history_members SET outcome='viewed' WHERE item=? AND outcome='pending'", (item,))
+        self.db.execute("UPDATE history_members SET outcome='viewed' WHERE item=? AND outcome IN ('pending','retrying')", (item,))
 
     def status(self, feed: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM initial_history WHERE feed=?', (feed,)).fetchone()
@@ -95,6 +101,9 @@ class History:
         counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome,count(*) n FROM history_members WHERE feed=? GROUP BY outcome', (feed,))}
         loaded = counts.get('loaded', 0) + counts.get('incomplete', 0)
         result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen']))
+        result['retrying'] = counts.get('retrying', 0)
+        result['unavailable'] = counts.get('unavailable', 0)
+        result['errors'] = [dict(item=r['item'], message=r['error']) for r in self.db.execute("SELECT h.item,j.error FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch' WHERE h.feed=? AND h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL", (feed,))]
         result['scan_complete'] = bool(row['scan_complete'])
-        result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or not row['scan_complete'] else 'done'
+        result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or counts.get('retrying', 0) or not row['scan_complete'] else 'done'
         return result
