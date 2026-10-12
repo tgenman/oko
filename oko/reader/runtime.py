@@ -310,6 +310,24 @@ class Runtime:
             self._delete(job, current)
             job = current.next_job(self._clock(), deleting_only=True)
 
+    async def pause_history(self, identity: str, paused: bool) -> dict[str, Any]:
+        async with self._actions:
+            current = self.require_store()
+            try:
+                current.subscriptions.check_owner('feed', identity)
+                with current.db:
+                    result = current.subscriptions.history.pause(identity, paused)
+            except LookupError as error:
+                raise ActionError('missing', str(error)) from None
+            except ValueError as error:
+                raise ActionError('invalid', str(error)) from None
+            # Invalidate in-flight generations before cancellation. An adapter
+            # ignoring cancellation cannot publish an old history result.
+            await self._cancel()
+            self._sync_sources()
+            current.enqueue_discovery(identity)
+            return result
+
     async def patch_feed(self, identity: str, body: FeedPatch) -> dict[str, Any]:
         async with self._actions:
             current = self.require_store()
