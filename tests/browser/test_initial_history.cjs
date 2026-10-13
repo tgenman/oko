@@ -8,7 +8,7 @@ test('RSS connection selects count or inclusive date and displays saved history 
     await r.page.evaluate(() => {
       const t = readerTransport;
       const feed = {id: 'rss', title: 'История', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal', initial_days: 1,
-        initial_history: {mode: 'date', date: '2025-10-01', timezone: 'UTC', since: 1759276800, loaded: 7, state: 'loading', frozen: true, available: 20, paused: false}};
+        initial_history: window.readerFixtures.history({mode: 'date', count:null, count_text:null, date: '2025-10-01', timezone: 'UTC', since: 1759276800, loaded: 7, state: 'loading', frozen: true, available: 20, paused: false})};
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/feeds', {body: feed});
       t.replies.set('/api/feeds/verify', {body: {url: feed.original_urls[0], title: feed.title, kind: 'rss', verification: 'checked', existing: null}});
@@ -59,7 +59,7 @@ test('finite history warning and unknown date are visible in settings and materi
     await r.page.evaluate(card => {
       const t = readerTransport;
       const feed = {id: 'rss', title: 'История', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal', initial_days: 1,
-        initial_history: {mode: 'count', count: 100, count_text: '100', loaded: 15, state: 'done', frozen: true, scan_complete: true, available: 15, paused: false, warnings: ['Порядок RSS неоднозначен: точность выбора последних N не подтверждена']}};
+        initial_history: window.readerFixtures.history({mode: 'count', count: 100, count_text: '100', loaded: 15, state: 'done', frozen: true, scan_complete: true, available: 15, paused: false, warnings: ['Порядок RSS неоднозначен: точность выбора последних N не подтверждена']})};
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/settings/feed/rss', {body: {...t.replies.get('/api/settings/oko/global').body, feed}});
       t.replies.set('/api/materials/unknown', {body: {...card, originals: true, images: [], attachments: []}});

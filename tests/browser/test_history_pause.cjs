@@ -7,7 +7,7 @@ test('history can pause and resume in feed settings without offering restart aft
     await r.start([]);
     await r.page.evaluate(() => {
       const t = readerTransport;
-      const history = {mode:'count',count:20,count_text:'20',loaded:7,available:20,state:'loading',frozen:true,paused:false};
+      const history = window.readerFixtures.history({mode:'count',count:20,count_text:'20',loaded:7,available:20,state:'loading',frozen:true,paused:false});
       const feed = {id:'rss',title:'История',kind:'rss',transport:'rss',folder_id:'f',original_urls:['https://source.test/feed'],importance:'normal',initial_days:1,initial_history:history};
       t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
       t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global').body,feed}});
@@ -20,7 +20,7 @@ test('history can pause and resume in feed settings without offering restart aft
     await expect(r.page.getByRole('button',{name:'Продолжить историю',exact:true})).toBeVisible();
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url==='/api/feeds/rss/history'));
     expect(request.body).toEqual({paused:true});
-    await r.page.evaluate(() => readerTransport.replies.set('/api/feeds/rss/history',{body:{mode:'count',count:20,count_text:'20',loaded:20,available:20,state:'done',frozen:true,paused:false}}));
+    await r.page.evaluate(() => readerTransport.replies.set('/api/feeds/rss/history',{body:window.readerFixtures.history({mode:'count',count:20,count_text:'20',loaded:20,available:20,state:'done',frozen:true,paused:false})}));
     await r.page.getByRole('button',{name:'Продолжить историю',exact:true}).click();
     await expect(r.page.locator('#history-progress')).toContainText('завершена');
     await expect(r.page.locator('#history-toggle')).toBeHidden();

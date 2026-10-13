@@ -104,7 +104,7 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
     await r.page.locator('#youtube-address').fill('http://second.test:8000');
     await r.page.locator('#youtube-password').fill('second-password');
     await r.page.locator('#settings-close').click();
-    await r.page.evaluate(() => readerTransport.release('/api/youtube', {mode:'proxy', address:'http://first.test:8000', has_password:true, has_username:false, paused:false}));
+    await r.page.evaluate(() => readerTransport.release('/api/youtube', {mode:'proxy', address:'http://first.test:8000', has_password:true, has_username:false, paused:false, next_at:0, strikes:0, reason:''}));
     await expect(r.page.locator('#settings-dialog')).not.toBeVisible();
     await r.page.locator('#settings-open').click();
     await expect(r.page.locator('#youtube-address')).toHaveValue('http://second.test:8000');

@@ -38,7 +38,7 @@ def test_frontend_rejects_traversal_symlinks_and_unknown_data_paths(tmp_path: Pa
     monkeypatch.setattr('oko.reader.static.FRONTEND_ROOT', frontend)
     with TestClient(create_app(tmp_path / 'data', token='secret')) as client:
         for path in ('/leak.txt', '/leak-directory/private.txt', '/%2e%2e/private.txt', '/%2Fetc/passwd',
-                     '/missing', '/api/unknown', '/api', '/loop', '/%00'):
+                     '/missing', '/api/unknown', '/api', '/loop', '/%00', '/%2e', '/%2e/', '/%2e%2f'):
             response = client.get(path, headers={'Authorization': 'Bearer secret'})
             assert response.status_code == 404, path
             assert 'private bytes' not in response.text

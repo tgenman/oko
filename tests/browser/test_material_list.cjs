@@ -57,7 +57,7 @@ test('date groups, saved sorting and displayed hidden card count use current row
   await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false})]);
   await expect(r.page.locator('.date-group')).toHaveText(['Сегодня','Вчера','Дата неизвестна']);
   await expect(r.page.locator('#count-label')).toHaveText('3 карточки');
-  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/cards').body[0],{...t.replies.get('/api/cards').body[0],id:'hidden',filter:{hidden:true}},...t.replies.get('/api/cards').body.slice(1)]});});
+  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/cards').body[0],{...t.replies.get('/api/cards').body[0],id:'hidden',filter:{status:'done',hidden:true,restored:false,reason:'Синтетический фильтр',removed:[]}},...t.replies.get('/api/cards').body.slice(1)]});});
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('#count-label')).toHaveText('4 карточки');
@@ -101,7 +101,7 @@ test('polling preserves row focus and anchored scroll, and returning restores ar
   await r.start(items);
   await r.page.evaluate(items => {const t=readerTransport;
    t.replies.set('/api/cards?sort=newest&feed=feed',{body:[{...items[0],id:'new',title:'Новый материал',published:2000}, ...items]});
-  }, items.filter((_,index)=>index%2===0).map(({text,...card})=>card));
+  }, items.filter((_,index)=>index%2===0).map(({text,...card})=>({feed_title:'feed',snippet:'',...card})));
   await r.page.locator('[data-card="item-20"]').focus();
   const before=await r.page.locator('[data-card="item-20"]').evaluate(n=>n.getBoundingClientRect().top);
   await r.page.evaluate(()=>readerTransport.replies.get('/api/cards').body.unshift({...readerTransport.replies.get('/api/cards').body[0],id:'new',title:'Новый материал',published:2000}));

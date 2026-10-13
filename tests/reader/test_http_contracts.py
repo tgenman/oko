@@ -47,3 +47,13 @@ def test_material_and_stopped_status_preserve_wire_fields(tmp_path):
         assert stopped['stopped']
         assert stopped['youtube'] is None
         assert 'review_restarts' not in stopped
+
+
+def test_work_status_rejects_history_without_progress_fields(tmp_path):
+    import pytest
+    from pydantic import ValidationError
+    from oko.reader.contracts import CONTRACTS
+    with TestClient(create_app(tmp_path, token='test'), headers=HEADERS) as client:
+        status = client.get('/api/status').json()
+        with pytest.raises(ValidationError):
+            CONTRACTS['status'].validate_python({**status, 'initial_histories': [{}]})

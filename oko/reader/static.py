@@ -30,7 +30,7 @@ def install_frontend(app: FastAPI) -> None:
     @router.get('/{asset:path}')
     async def frontend(asset: str = '') -> FileResponse:
         relative = Path(asset or 'index.html')
-        if relative.is_absolute() or any(part.startswith('.') for part in relative.parts) or relative.parts[0] == 'api':
+        if not relative.parts or relative.is_absolute() or any(part.startswith('.') for part in relative.parts) or relative.parts[0] == 'api':
             raise HTTPException(404, 'Файл недоступен')
         try:
             file = (root / relative).resolve()

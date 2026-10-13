@@ -4,9 +4,9 @@ Run ``python -m oko.reader.contracts`` to export draft-07 compatible schemas for
 browser checks, without starting Runtime or connecting external adapters.
 """
 import json
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import ConfigDict, TypeAdapter, with_config
+from pydantic import ConfigDict, TypeAdapter, with_config, Field
 from typing_extensions import NotRequired, TypedDict
 
 
@@ -31,8 +31,8 @@ class HistoryError(Wire):
     message: str
 
 
-class History(Wire, total=False):
-    run: str
+class History(Wire):
+    run: NotRequired[str]
     mode: Literal['count', 'date']
     count: int | None
     count_text: str | None
@@ -50,15 +50,17 @@ class History(Wire, total=False):
     errors: list[HistoryError]
     scan_complete: bool
     state: Literal['pending', 'loading', 'done', 'selecting', 'paused', 'waiting', 'cancelled']
-    warnings: list[str]
-    discovery_error: str | None
-    discovery_retry_at: float | None
-    waiting: bool
-    requests: int
-    cancelled: bool
-    resume: int
-    feed_id: str
+    warnings: NotRequired[list[str]]
+    discovery_error: NotRequired[str | None]
+    discovery_retry_at: NotRequired[float | None]
+    waiting: NotRequired[bool]
+    requests: NotRequired[int]
+    cancelled: NotRequired[bool]
+    resume: NotRequired[int]
 
+
+class InitialHistoryStatus(History):
+    feed_id: str
 
 class Feed(Wire):
     id: str
@@ -110,20 +112,33 @@ class Event(Summary):
     conflicts: list[Point]
 
 
-class Provenance(Wire, total=False):
-    model: str | None
-    processor: str
+class UnknownProvenance(Wire):
+    model: None
+
+
+class CodexProvenance(Wire):
+    processor: Literal['codex']
+    model: str
     reasoning_effort: str
     fast: bool
 
 
-class Filter(Wire, total=False):
+@with_config(ConfigDict(strict=True, extra='forbid', regex_engine='python-re'))
+class LocalProvenance(Wire):
+    processor: Annotated[str, Field(pattern=r'^(?!codex$).+')]
+    model: str | None
+
+
+Provenance = UnknownProvenance | CodexProvenance | LocalProvenance
+
+
+class Filter(Wire):
     status: Literal['off', 'pending', 'running', 'done', 'cancelled']
     hidden: bool
     restored: bool
     reason: str
     removed: list[str]
-    error: str | None
+    error: NotRequired[str | None]
 
 
 class AI(Wire):
@@ -150,7 +165,6 @@ class Content(Wire):
     published: float
     title: str
     complete: bool
-    published_known: NotRequired[bool]
     source_order: NotRequired[int | None]
     version: NotRequired[str]
     images: NotRequired[list[str]]
@@ -170,8 +184,6 @@ class Content(Wire):
     event: NotRequired[Event]
     digest: NotRequired[Summary]
     batch: NotRequired[str]
-    folder_id: NotRequired[str]
-    importance: NotRequired[Importance]
     members: NotRequired[list[int]]
 
 
@@ -181,14 +193,19 @@ class CardSource(Reference):
 
 
 class Card(Content):
-    feed_title: NotRequired[str]
-    importance: NotRequired[Importance]
-    snippet: NotRequired[str]
+    folder_id: str
+    published_known: bool
+    feed_title: str
+    importance: Importance
+    snippet: str
     sources: NotRequired[list[CardSource]]
 
 
 class Material(Content):
     text: str
+    published_known: NotRequired[bool]
+    folder_id: NotRequired[str]
+    importance: NotRequired[Importance]
     description: NotRequired[str]
     display_text: NotRequired[str]
     sources: NotRequired[list['Material']]
@@ -232,18 +249,15 @@ class ReviewRestart(Wire):
     error: str
 
 
-class YouTube(Wire, total=False):
-    strikes: int
-    reason: str
+class YouTube(Wire):
     mode: Literal['direct', 'proxy']
     address: str
     has_password: bool
     has_username: bool
     paused: bool
     next_at: float
-    requests: int
-    error: str | None
-    waiting: str | None
+    strikes: int
+    reason: str
 
 
 class Status(Wire):
@@ -255,7 +269,7 @@ class Status(Wire):
     jobs: NotRequired[list[Job]]
     deleting: NotRequired[bool]
     youtube: NotRequired[YouTube | None]
-    initial_histories: NotRequired[list[History]]
+    initial_histories: NotRequired[list[InitialHistoryStatus]]
     telegram_reads: NotRequired[list[TelegramRead]]
     error: NotRequired[str | None]
     stopped: NotRequired[bool]
