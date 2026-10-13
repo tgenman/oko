@@ -411,6 +411,30 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     def telegram_connection_js() -> FileResponse:
         return FileResponse(web / 'telegram-connection.js', media_type='text/javascript')
 
+    @app.get('/controls.js')
+    async def controls_js() -> FileResponse:
+        return FileResponse(web / 'controls.js', media_type='text/javascript')
+
+    @app.get('/ui-operations.js')
+    async def ui_operations_js() -> FileResponse:
+        return FileResponse(web / 'ui-operations.js', media_type='text/javascript')
+
+    @app.get('/menus.js')
+    async def menus_js() -> FileResponse:
+        return FileResponse(web / 'menus.js', media_type='text/javascript')
+
+    @app.get('/settings-editor.js')
+    async def settings_editor_js() -> FileResponse:
+        return FileResponse(web / 'settings-editor.js', media_type='text/javascript')
+
+    @app.get('/model-settings.js')
+    async def model_settings_js() -> FileResponse:
+        return FileResponse(web / 'model-settings.js', media_type='text/javascript')
+
+    @app.get('/opml-import.js')
+    async def opml_import_js() -> FileResponse:
+        return FileResponse(web / 'opml-import.js', media_type='text/javascript')
+
     @app.get('/style.css')
     async def css() -> FileResponse:
         return FileResponse(web / 'style.css', media_type='text/css')
