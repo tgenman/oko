@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check the exact staged Python/JavaScript bytes, including partial staging."""
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,8 @@ def main():
             print(f'CHECK staged {name}', flush=True)
             mode = 'commonjs' if name.endswith('.cjs') else 'module'
             if subprocess.run([node, '--check', '--input-type=' + mode], input=content).returncode:
+                failed = True
+            elif subprocess.run([node, str(Path(__file__).with_name('lint-js.cjs')), '--stdin', name], input=content).returncode:
                 failed = True
     return int(failed)
 

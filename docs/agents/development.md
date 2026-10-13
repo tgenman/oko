@@ -19,6 +19,8 @@
 ./scripts/check all
 ./scripts/check python types
 ./scripts/check http
+./scripts/check browser --files tests/browser/test_material_list.cjs tests/browser/test_reader_http.cjs
+./scripts/check python --files tests/development/test_check_runner.py
 ```
 
 Состав режимов задаёт [runner](../../scripts/check): UI проверяет выдачу модулей настоящим HTTP-сервером и браузерный интерфейс, полный режим добавляет серверные проверки. Отдельные наборы выбираются аргументами runner; после исправления повторяется затронутый набор. Команда сообщает результат и время каждого набора; отсутствие зависимости и прерывание не считаются успехом. Она не устанавливает зависимости и не запускает личные источники. Подготовка окружения, Git hooks, CI и переменные путей описаны в [инструкции проверок](../../tests/browser/README.md).

@@ -134,3 +134,65 @@ def test_failed_http_module_check_fails_ui(tmp_path):
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'FAIL http' in result.stdout
+
+
+def test_browser_file_selection_only_runs_requested_file(tmp_path):
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as f: f.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.cjs'], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = record.read_text()
+    assert 'test_material_list.cjs' in commands
+    assert 'test_opened_material.cjs' not in commands
+    assert 'PASS browser' in result.stdout
+
+
+def test_invalid_file_selection_fails_before_checks(tmp_path):
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/missing.cjs'], env=runtimes(tmp_path), capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'RUN browser' not in result.stdout
+
+
+def test_python_file_selection_supports_test_id_and_does_not_require_node(tmp_path):
+    env = runtimes(tmp_path)
+    env['OKO_NODE'] = str(tmp_path / 'missing-node')
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as f: f.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files', 'tests/reader/test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data'], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data' in record.read_text()
+    assert 'PASS python-tests' in result.stdout
+
+
+def test_selection_rejects_file_from_wrong_suite_and_outside_checkout(tmp_path):
+    env = runtimes(tmp_path)
+    for filename in ('tests/reader/test_web_assets.py', str(tmp_path / 'test_external.cjs')):
+        if filename.startswith(str(tmp_path)):
+            Path(filename).write_text('')
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', filename], env=env, capture_output=True, text=True)
+        assert result.returncode == 2
+        assert 'RUN browser' not in result.stdout
+
+
+def test_browser_gets_resolved_python_in_checkout_without_virtualenv(tmp_path):
+    import shutil
+    checkout = tmp_path / 'checkout'
+    (checkout / 'scripts').mkdir(parents=True)
+    (checkout / 'tests/browser').mkdir(parents=True)
+    shutil.copy(ROOT / 'scripts/check', checkout / 'scripts/check')
+    (checkout / 'tests/browser/test_reader_http.cjs').write_text('')
+    env = runtimes(tmp_path)
+    env.pop('OKO_PYTHON')
+    (tmp_path / 'python3').symlink_to(sys.executable)
+    record = tmp_path / 'python-choice'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('#!/usr/bin/env python3', '#!' + sys.executable).replace('sys.exit(0)', "from pathlib import Path\nif '--test' in sys.argv: Path(os.environ['RECORD']).write_text(os.environ.get('OKO_PYTHON', 'missing'))\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'browser'], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert record.read_text() == str(tmp_path / 'python3')

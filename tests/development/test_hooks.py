@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 def repo(tmp_path):
     for directory in ('scripts', '.githooks'):
         shutil.copytree(ROOT / directory, tmp_path / directory)
+    shutil.copy(ROOT / 'eslint.config.cjs', tmp_path / 'eslint.config.cjs')
+    if (ROOT / 'node_modules').exists():
+        (tmp_path / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
     env = {**os.environ, 'OKO_PYTHON': sys.executable}
     def run(*args):
         return subprocess.run(args, cwd=tmp_path, env=env, capture_output=True, text=True)
@@ -63,6 +66,21 @@ def test_precommit_rejects_staged_javascript_syntax(tmp_path):
     assert result.returncode != 0
     assert 'SyntaxError' in result.stderr
     assert run('git', 'add', 'example.js').returncode == 0
+    assert run('git', 'hook', 'run', 'pre-commit').returncode == 0
+
+
+@pytest.mark.skipif(shutil.which(os.environ.get('OKO_NODE', 'node')) is None,
+                    reason='JavaScript hook requires Node')
+def test_precommit_rejects_undefined_staged_name_and_allows_valid_partial_stage(tmp_path):
+    run = repo(tmp_path)
+    source = tmp_path / 'example.js'
+    source.write_text('export function render() { return source.description; }\n')
+    assert run('git', 'add', 'example.js').returncode == 0
+    source.write_text('export function render(source) { return source.description; }\n')
+    result = run('git', 'hook', 'run', 'pre-commit')
+    assert result.returncode != 0 and 'no-undef' in result.stdout + result.stderr
+    assert run('git', 'add', 'example.js').returncode == 0
+    source.write_text('export function render() { return source.description; }\n')
     assert run('git', 'hook', 'run', 'pre-commit').returncode == 0
 
 
