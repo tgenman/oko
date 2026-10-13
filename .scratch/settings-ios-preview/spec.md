@@ -1,7 +1,9 @@
 # Настройки Око в стиле iPhone
 
-Status: ready-for-agent
+Status: done
 Label: ready-for-agent
+
+Реализовано 2026-10-13 по implement-spec. Все пять дочерних тикетов завершены; [фактические проверки и ревью](../../docs/verification/settings-ios.md).
 
 ## Problem Statement
 

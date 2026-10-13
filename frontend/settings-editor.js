@@ -98,7 +98,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
   }
   function settingPage(name, heading) {
     const panel = element('div'); panel.dataset.settingsPage = name;
-    const title = element('h2', heading); title.className = 'settings-page-title'; title.id = 'settings-page-' + name.replaceAll('/','-'); panel.append(title);
+    const title = element('h2', heading); title.className = 'settings-page-title'; title.id = 'settings-page-' + name.replaceAll('/','-'); title.tabIndex = -1; panel.append(title);
     return panel;
   }
   function settingLink(title, value, page, color = '', symbol = '') {
