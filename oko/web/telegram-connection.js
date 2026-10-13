@@ -38,19 +38,16 @@ export function createTelegramConnection({api, onConnected, prefix = 'telegram',
     topic.replaceChildren(); byId('telegram-topic-label').hidden = true;
     update();
   }
-  function loadAccounts() {
-    if (accountsTask) return accountsTask;
-    accountsTask = fetchAccounts().finally(() => {accountsTask = null;});
-    return accountsTask;
-  }
-  async function fetchAccounts() {
+  async function loadAccounts() {
     if (stopped || busy) return;
     const screen = context();
     loadingAccounts = true; resetTopics();
     const previous = account.value;
     account.replaceChildren(option('', 'Загрузка аккаунтов…')); update();
     try {
-      const names = await api('telegram/accounts');
+      // Share the data request, but let each caller render into its own context.
+      if (!accountsTask) accountsTask = api('telegram/accounts').finally(() => {accountsTask = null;});
+      const names = await accountsTask;
       if (stopped || !screen.current) return;
       account.replaceChildren(option('', names.length ? 'Выберите аккаунт' : 'Нет доступных аккаунтов'), ...names.map(name => option(name, name)));
       if (names.includes(previous)) account.value = previous;

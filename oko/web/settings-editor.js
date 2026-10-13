@@ -6,7 +6,7 @@ import {createTelegramConnection} from './telegram-connection.js';
 
 export function createSettingsEditor({api, onChanged, onDetail}) {
   const byId = id => document.getElementById(id);
-  const reconnect = createTelegramConnection({api, prefix: 'reconnect', context: () => operations.capture(), onConnected: async (_feed, action) => {await loadSubscriptions(); await action.commit(loadSettings); onChanged();}});
+  const reconnect = createTelegramConnection({api, prefix: 'reconnect', context: () => operations.capture(), onConnected: async (_feed, action) => {onChanged(); await loadSubscriptions(); await action.commit(loadSettings);}});
   const fields = {
     events: ['Объединять события (Око или папка)', 'boolean'], event_hours: ['Окно события, часов (Око или папка)', 'number'],
     originals: ['Оригиналы при открытии публикации', 'boolean'], theses: ['Тезисы публикаций', 'boolean'],
@@ -196,10 +196,9 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
         const submitted = Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith('feed-')));
         await api('feeds/' + feed.id, 'PATCH', patch);
         for (const [key, value] of Object.entries(submitted)) if (values[key] === value) delete values[key];
-        const path = 'feed/' + feed.id;
+        onChanged();
         await loadSubscriptions();
         await action.commit(loadSettings);
-        onChanged();
         action.commit(() => editorMessage('Фид сохранён'));
       } catch (error) { reportError(error, 'Интерфейс Око'); action.commit(() => editorMessage(error.message)); }
     };
