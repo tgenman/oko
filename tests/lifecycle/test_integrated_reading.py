@@ -6,7 +6,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from oko.reader.app import create_app
-from tests.support.codex import CodexService
+from tests.support.codex import CodexService, configure_codex
 from tests.support.digests import digest_transport
 from tests.support.events import event_transport
 from tests.support.filters import transport as filter_transport
@@ -119,6 +119,7 @@ def test_local_mixed_digest_cannot_transfer_private_content_when_switched_to_cod
     local = digest_transport(calls)
     service = CodexService()
     with TestClient(create_app(tmp_path, token='test', telegram_client=MixedTelegram(), ai_transport=local, codex_client=service), headers=HEADERS) as client:
+        configure_codex(client)
         client.patch('/api/settings/oko/global', json={'events': False})
         client.post('/api/tabs/reader/heartbeat')
         public = connect(client, peer='@public')

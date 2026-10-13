@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.codex import CodexClient
+from oko.processing.execution import CodexSettings
 from oko.reviews.digests import DigestRequest
 from oko.storage.store import Store
 from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
@@ -195,6 +196,15 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def codex_state() -> dict[str, Any]:
         return runtime.codex_status()
 
+    @app.get('/api/processors/codex/models')
+    async def codex_models() -> dict[str, Any]:
+        return dict(models=await runtime.codex_models())
+
+    @app.put('/api/processors/codex')
+    async def codex_save(body: CodexSettings) -> dict[str, Any]:
+        await runtime.configure_codex(body)
+        return body.model_dump()
+
     @app.post('/api/processors/codex/check')
     async def codex_check() -> dict[str, Any]:
         return await runtime.check_codex()
@@ -212,6 +222,11 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.post('/api/processors/llamacpp/check')
     async def processor_check() -> dict[str, Any]:
         return await runtime.check_processor()
+
+    @app.post('/api/materials/{item}/regenerate')
+    async def regenerate(item: str) -> dict[str, bool]:
+        await runtime.regenerate(item)
+        return {'ok': True}
 
     @app.post('/api/materials/{item}/theses/retry')
     async def retry_theses(item: str) -> dict[str, bool]:
@@ -440,6 +455,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/settings-editor.js')
     async def settings_editor_js() -> FileResponse:
         return FileResponse(web / 'settings-editor.js', media_type='text/javascript')
+
+    @app.get('/codex-settings.js')
+    async def codex_settings_script() -> FileResponse:
+        return FileResponse(web / 'codex-settings.js', media_type='text/javascript')
 
     @app.get('/model-settings.js')
     async def model_settings_js() -> FileResponse:

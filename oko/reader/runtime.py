@@ -18,6 +18,7 @@ from oko.collection.contracts import SourceError, SourceDeleted, SourceSkipped
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
+from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
 from oko.reviews.digests import DigestRequest
 from oko.reviews.coordination import PreparedWork
@@ -457,7 +458,42 @@ class Runtime:
 
     def codex_status(self) -> dict[str, Any]:
         self.require_store()
-        return self._codex_status.copy()
+        config = self.require_store().codex_config()
+        return dict(self._codex_status, config=config.model_dump() if config else None)
+
+    async def codex_models(self) -> list[dict[str, Any]]:
+        async with self._actions:
+            current = self.require_store()
+            if not self._live():
+                raise ActionError('conflict', 'Откройте читатель для подключения')
+            epoch = self._epoch
+            task = asyncio.create_task(self._codex_client.catalog())
+            self._requests.add(task)
+        try:
+            result = await task
+        except ProcessingError as error:
+            raise ActionError('conflict', error.label) from None
+        except asyncio.CancelledError:
+            raise ActionError('conflict', 'Загрузка каталога прервана', expected=True) from None
+        finally:
+            self._requests.discard(task)
+        async with self._actions:
+            self._check_request(current, epoch)
+        return result
+
+    async def configure_codex(self, config: CodexSettings) -> None:
+        # Validate against fresh catalog outside the action lock. Saving cannot
+        # stop the in-flight generation or increase any freshness generation.
+        current = self.require_store()
+        models = await self.codex_models()
+        try:
+            config.validate_catalog(models)
+        except ProcessingError as error:
+            raise ActionError('invalid', error.label) from None
+        async with self._actions:
+            if self._store is not current or not self._live():
+                raise ActionError('conflict', 'Сохранение настроек прервано', expected=True)
+            current.configure_codex(config)
 
     async def check_codex(self) -> dict[str, Any]:
         async with self._actions:
@@ -494,6 +530,18 @@ class Runtime:
         async with self._actions:
             if not self.require_store().processing.retry_theses(item):
                 raise ActionError('missing', 'Тезисы для материала не включены')
+
+    async def regenerate(self, item: str) -> None:
+        async with self._actions:
+            current = self.require_store()
+            if item.startswith('digest-'):
+                accepted = current.digests.retry(item)
+            elif item.startswith('event-'):
+                accepted = current.events.retry(item)
+            else:
+                accepted = current.processing.retry_theses(item)
+            if not accepted:
+                raise ActionError('missing', 'Результат недоступен для пересоздания')
 
     async def _execute_ai(self, job: Job) -> None:
         capture_scope.set(secrets.token_hex(16))

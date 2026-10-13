@@ -50,6 +50,7 @@ function stopUi(message) {
   byId('folders').replaceChildren();
   byId('count').textContent = '0';
   byId('progress').textContent = message;
+  byId('review-restarts').replaceChildren();
   byId('stop').disabled = true;
   byId('collect').disabled = true;
   byId('compress').disabled = true;
@@ -87,6 +88,17 @@ async function refresh() {
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
     const progressMessages = [...new Set([...state.errors, ...readMessages])];
     byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (progressMessages.length ? ' · ' + progressMessages.join(', ') : '');
+    byId('review-restarts').replaceChildren(...(state.review_restarts || []).map(review => {
+      const row = element('p', review.error + ' ');
+      const button = element('button', 'Пересоздать обзор');
+      button.onclick = async () => {
+        button.disabled = true;
+        try {await api('materials/' + review.id + '/regenerate', 'POST'); refresh();}
+        catch(error) {if (!stopped) byId('progress').textContent = error.message;}
+        finally {button.disabled = stopped;}
+      };
+      row.append(button); return row;
+    }));
     menus.sources(state.sources || []);
     const navigation = await api('navigation');
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;

@@ -63,10 +63,10 @@ def test_window_is_configurable_and_restart_keeps_exact_event(tmp_path):
 
 
 def test_cross_feed_permissions_folder_boundary_importance_and_sort(tmp_path):
-    from tests.support.codex import CodexService
+    from tests.support.codex import CodexService, configure_codex
     from tests.support.rss import rss
     class EventCodex(CodexService):
-        async def complete(self, prompt, schema, directory):
+        async def complete(self, prompt, schema, directory, choice):
             self.inputs.append(prompt)
             task = json.loads(prompt.split('\n', 1)[1])
             sources = task['sources']
@@ -77,6 +77,7 @@ def test_cross_feed_permissions_folder_boundary_importance_and_sort(tmp_path):
             return httpx.Response(200, text=rss('https://' + request.url.host + '/article'))
         return httpx.Response(200, text='<article>Открылась библиотека</article>')
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), codex_client=service), headers=HEADERS) as client:
+        configure_codex(client)
         feeds = []
         for name, folder in [('a', 'Новости'), ('b', 'Новости'), ('c', 'Отдельно')]:
             feeds.append(client.post('/api/import', json={'opml': f'<opml><body><outline text="{folder}"><outline text="{name}" xmlUrl="https://{name}.test/feed"/></outline></body></opml>'}).json()['feeds'][-1])

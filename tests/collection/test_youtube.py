@@ -161,10 +161,11 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
 
 
 def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
-    from tests.support.codex import CodexService
+    from tests.support.codex import CodexService, configure_codex
     captions, codex = Captions(), CodexService()
     kwargs = dict(token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, codex_client=codex)
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
+        configure_codex(client)
         feed = subscribe(client)
         client.patch('/api/feeds/' + feed, json={'importance': 'high'})
         client.post('/api/tabs/reader/heartbeat')

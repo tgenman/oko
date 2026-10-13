@@ -11,6 +11,7 @@ import uvicorn
 
 from oko.reader.app import create_app
 from tests.support.events import event_transport
+from tests.support.codex import CodexService
 from tests.support.youtube import PNG
 
 
@@ -29,7 +30,7 @@ def response(request):
 if __name__ == '__main__':
     token = secrets.token_urlsafe(24)
     app = create_app(Path(sys.argv[1]), token=token, rss_enabled=True,
-                     rss_transport=httpx.MockTransport(response), ai_transport=event_transport([]),
+                     rss_transport=httpx.MockTransport(response), ai_transport=event_transport([]), codex_client=CodexService(),
                      lease=60, grace=60)
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))

@@ -17,6 +17,8 @@ from typing import Any, Protocol
 
 from oko.processing.contracts import ProcessingError, ProcessingRequest, Theses, EventsResult, FilterResult, result_type, processing_instruction
 
+from oko.processing.execution import CodexChoice
+
 UNAVAILABLE = (
     'Codex недоступен: изоляция файлов и инструментов и отсутствие копий '
     'в логах не подтверждены. Материалы не отправлены.'
@@ -100,8 +102,9 @@ FEATURES = ('shell_tool', 'unified_exec', 'plugins', 'apps', 'memories', 'hooks'
 
 
 class CodexClient(Protocol):
+    async def catalog(self) -> list[dict[str, Any]]: ...
     async def check(self) -> dict[str, Any]: ...
-    async def complete(self, prompt: str, schema: dict[str, Any], directory: Path) -> str: ...
+    async def complete(self, prompt: str, schema: dict[str, Any], directory: Path, choice: CodexChoice) -> str: ...
 
 
 def supported_binary() -> Path | None:
@@ -266,6 +269,10 @@ async def quota_before_turn(binary: Path, work: Path, auth: Path) -> list[dict[s
 
 
 class LocalCodex:
+    async def catalog(self) -> list[dict[str, Any]]:
+        from oko.processing.codex_catalog import catalog
+        return await catalog()
+
     async def check(self) -> dict[str, Any]:
         result = await diagnose()
         if result.get('auth') == 'missing':
@@ -295,7 +302,7 @@ class LocalCodex:
             return dict(result, reason='Внешний sandbox Codex недоступен. ' + UNAVAILABLE)
         return dict(result, available=True, local=False, reason='', limits_checked=True, quota_windows=windows)
 
-    async def complete(self, prompt: str, schema: dict[str, Any], directory: Path) -> str:
+    async def complete(self, prompt: str, schema: dict[str, Any], directory: Path, choice: CodexChoice) -> str:
         binary = await asyncio.to_thread(supported_binary)
         if not binary:
             raise ProcessingError(UNAVAILABLE)
@@ -308,7 +315,10 @@ class LocalCodex:
                 schema_file.write_text(json.dumps(schema), encoding='utf-8')
                 args = ['/usr/bin/sandbox-exec', '-p', sandbox_profile(binary, work, auth),
                         str(binary), 'exec', '--ephemeral', '--ignore-user-config',
-                        '--ignore-rules', '--skip-git-repo-check', '--json', '-C', str(work)]
+                        '--ignore-rules', '--skip-git-repo-check', '--json', '-C', str(work),
+                        '--model', choice.model, '-c', 'model_reasoning_effort=' + json.dumps(choice.reasoning_effort),
+                        '-c', 'service_tier=' + json.dumps('fast' if choice.fast else 'default'),
+                        '--enable' if choice.fast else '--disable', 'fast_mode']
                 for feature in FEATURES:
                     args.extend(['--disable', feature])
                 args.extend(['-c', 'mcp_servers={}', '-c', 'web_search="disabled"',
@@ -383,8 +393,10 @@ class Codex:
     async def generate(self, request: ProcessingRequest, directory: Path) -> Theses | FilterResult | EventsResult:
         if sum(len(s.text) + len(s.title) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
+        if request.codex_choice is None:
+            raise ProcessingError('Выберите и сохраните модель Codex для каждого действия')
         prompt = processing_instruction(request) + ' Не используй инструменты.\n' + request.model_dump_json()
-        result = await self.client.complete(prompt, result_type(request).model_json_schema(), directory)
+        result = await self.client.complete(prompt, result_type(request).model_json_schema(), directory, request.codex_choice)
         try:
             theses = result_type(request).model_validate_json(result)
             theses.validate_sources(request)

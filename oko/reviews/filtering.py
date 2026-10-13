@@ -98,6 +98,7 @@ class Filters:
     def retry(self, item: str) -> bool:
         if not self.signature(item):
             return False
+        self.store.forget_execution('filter', item)
         with self.store.db:
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='filter' AND item=?", (item,))
         self.store.processing.sync()

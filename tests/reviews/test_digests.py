@@ -183,11 +183,11 @@ def test_view_during_cancel_resistant_generation_cannot_restore_digest(tmp_path)
 def test_permission_change_during_generation_discards_late_public_result(tmp_path):
     import asyncio
     import threading
-    from tests.support.codex import CodexService
+    from tests.support.codex import CodexService, configure_codex
     class Held(CodexService):
         started = threading.Event()
         release = threading.Event()
-        async def complete(self, prompt, schema, directory):
+        async def complete(self, prompt, schema, directory, choice):
             self.inputs.append(prompt)
             self.started.set()
             while not self.release.is_set():
@@ -196,6 +196,7 @@ def test_permission_change_during_generation_discards_late_public_result(tmp_pat
             return json.dumps(dict(points=[dict(text='Обзор', sources=[dict(id=source['id'],url=source['url'])])]))
     service = Held()
     with TestClient(create_app(tmp_path, source=EventSource(), token='test', codex_client=service), headers=HEADERS) as client:
+        configure_codex(client)
         setup_reader(client)
         identity = client.post('/api/digests/folder/demo', json={}).json()['id']
         wait_for(client, lambda: any('всех фидов' in e for e in client.get('/api/status').json()['errors']))

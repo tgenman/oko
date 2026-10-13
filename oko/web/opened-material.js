@@ -24,6 +24,10 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
     ['filtered-text', 'filter-status'].forEach(id => { byId(id).textContent = ''; });
     byId('theses').replaceChildren();
     byId('theses-panel').hidden = true;
+    byId('processing-details').hidden = true;
+    byId('processing-details').open = false;
+    byId('processing-provenance').textContent = '';
+    byId('regenerate').hidden = true;
     session = null;
     byId('description-panel').hidden = true;
     byId('material').hidden = true;
@@ -47,6 +51,12 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
       byId('copy').hidden = !!(material.event || material.digest);
       if (material.event || material.digest) renderEvent(material, current);
       current.material = material;
+      const hasResult = !!(material.theses || material.event || material.digest);
+      byId('processing-details').hidden = !hasResult;
+      byId('regenerate').hidden = !hasResult;
+      const origin = material.provenance;
+      byId('processing-provenance').textContent = !origin?.model ? 'Модель неизвестна' :
+        [origin.processor, origin.model, origin.reasoning_effort, origin.fast === true ? 'Fast включён' : origin.fast === false ? 'Fast выключен' : ''].filter(Boolean).join(' · ');
       for (const source of material.sources || []) current.members.add(source.id);
       byId('title').textContent = material.title;
       byId('text').textContent = material.text;
@@ -185,6 +195,7 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
       if (active(current)) onChanged(changed);
     } catch (error) { reportError(error, 'opened-material.js'); if (active(current)) byId('message').textContent = error.message; }
   }
+  byId('regenerate').onclick = () => action('/regenerate');
   byId('retry').onclick = () => action('/retry');
   byId('theses-retry').onclick = () => action('/theses/retry');
   byId('filter-restore').onclick = () => action('/filter/restore', true);

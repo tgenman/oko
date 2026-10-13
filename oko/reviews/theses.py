@@ -68,6 +68,7 @@ class PublicationTheses:
     def retry(self, item: str) -> bool:
         if not self.store.material(item) or not self.signature(item):
             return False
+        self.store.forget_execution('theses', item)
         with self.store.db:
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
         return True
@@ -90,6 +91,17 @@ class PublicationTheses:
         except (OSError, ValueError, KeyError):
             record_caught('theses.read')
             return None
+
+    def provenance(self, item: str) -> dict[str, Any] | None:
+        if self.read(item) is None:
+            return None
+        signature = self.signature(item)
+        versions = self.store.db.execute('SELECT number FROM content_versions WHERE item=? ORDER BY number DESC', (item,)).fetchall()
+        for version in versions:
+            origin = self.store.derivative_provenance(self.store.versions.path(item, version['number']).parent / 'theses.md', signature)
+            if origin is not None:
+                return origin
+        return None
 
     def save(self, job: 'Job', signature: str, theses: Theses) -> None:
         if not self.store.valid(job) or signature != self.signature(job.item):

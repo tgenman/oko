@@ -20,6 +20,7 @@ from oko.reviews.coordination import ProcessingCoordination
 from oko.collection.contracts import SourceDeleted, Attachment, Image, Material, Publication
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.execution import CodexSettings, UNKNOWN_REVIEW
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,8 @@ class Store:
           status TEXT DEFAULT 'pending', attempt INTEGER DEFAULT 0,
           next REAL DEFAULT 0, generation INTEGER DEFAULT 0, error TEXT,
           UNIQUE(kind,item));
+        CREATE TABLE IF NOT EXISTS execution_settings (
+          job INTEGER PRIMARY KEY, generation INTEGER, signature TEXT, parameters TEXT);
         CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY, signature TEXT);
         ''')
@@ -90,6 +93,7 @@ class Store:
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
+            self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
             self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
             self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
         self.versions = Versions(self)
@@ -224,6 +228,7 @@ class Store:
         if not row:
             return None
         with self.db:
+            self.db.execute('UPDATE execution_settings SET generation=generation+1 WHERE job=? AND generation=?', (row['id'], row['generation']))
             self.db.execute("UPDATE jobs SET status='running',attempt=attempt+1,generation=generation+1 WHERE id=?", (row['id'],))
         current = self.db.execute('SELECT * FROM jobs WHERE id=?', (row['id'],)).fetchone()
         return Job(current['id'], current['kind'], current['item'], current['generation'])
@@ -309,6 +314,7 @@ class Store:
                 shutil.rmtree(path)
         self.fault('after_delete_files')
         with self.db:
+            self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1) -> None:
@@ -320,6 +326,7 @@ class Store:
 
     def interrupted(self) -> None:
         with self.db:
+            self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
             self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
 
     def material(self, item: str) -> dict[str, Any] | None:
@@ -335,7 +342,7 @@ class Store:
             if filtered['status'] == 'done' and not filtered['restored']:
                 for fragment in filtered['removed']:
                     display_text = display_text.replace(fragment, '')
-            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), description=json.loads(header).get('description', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), description=json.loads(header).get('description', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             record_caught('store.material')
             return None
@@ -348,8 +355,46 @@ class Store:
         jobs = [dict(r) for r in rows]
         errors = sorted({r['error'] for r in rows if r['error']})
         pending_deletes = any(r['kind'] == 'delete' and r['status'] != 'done' for r in rows)
-        return dict(jobs=jobs, errors=errors, deleting=pending_deletes)
+        return dict(jobs=jobs, errors=errors, deleting=pending_deletes, review_restarts=[dict(id=r['item'], error=r['error']) for r in self.db.execute("SELECT item,error FROM jobs WHERE kind='digest' AND status='pending' AND error=?", (UNKNOWN_REVIEW,))])
 
+
+    def saved_execution(self, job: Job, signature: str) -> dict[str, Any] | None:
+        row = self.db.execute('SELECT * FROM execution_settings WHERE job=? AND generation=? AND signature=?',
+                              (job.id, job.generation, signature)).fetchone()
+        return json.loads(row['parameters']) if row else None
+
+    def save_execution(self, job: Job, signature: str, origin: dict[str, Any]) -> None:
+        with self.db:
+            self.db.execute('INSERT INTO execution_settings VALUES (?,?,?,?) ON CONFLICT(job) DO UPDATE SET generation=excluded.generation,signature=excluded.signature,parameters=excluded.parameters',
+                            (job.id, job.generation, signature, json.dumps(origin)))
+
+    def forget_execution(self, kind: str, item: str) -> None:
+        with self.db:
+            self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE kind=? AND item=?)', (kind, item))
+
+    def execution_provenance(self, job: Job) -> dict[str, Any] | None:
+        row = self.db.execute('SELECT parameters FROM execution_settings WHERE job=? AND generation=?', (job.id, job.generation)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def derivative_provenance(self, path: Path, signature: str | None, group: str | None = None) -> dict[str, Any] | None:
+        if signature is None:
+            return None
+        try:
+            header = json.loads(path.read_text().split('\n\n', 1)[0])
+            if header['signature'] == signature:
+                return (header.get('event_origins', {}).get(group) if group else None) or header.get('provenance') or dict(model=None)
+        except (OSError, ValueError, KeyError):
+            record_caught('store.derivative_provenance')
+        return None
+
+    def codex_config(self) -> CodexSettings | None:
+        row = self.db.execute("SELECT value FROM state WHERE key='processor:codex'").fetchone()
+        return CodexSettings.model_validate_json(row[0]) if row else None
+
+    def configure_codex(self, config: CodexSettings) -> None:
+        # Future execution choice does not invalidate inputs or cancel work.
+        with self.db:
+            self.db.execute("INSERT INTO state VALUES ('processor:codex',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
 
     def processor_config(self) -> ProcessorConfig | None:
         row = self.db.execute("SELECT value FROM state WHERE key='processor:llamacpp'").fetchone()
@@ -380,7 +425,7 @@ class Store:
             if material and material.get('captions') == 'not_requested' and not material.get('loading'):
                 self.retry_material(row['id'])
 
-    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True) -> None:
+    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True, event_origins: dict[str, Any] | None = None) -> None:
         """Commit a validated AI result; callers own admission and input signature."""
         stage = None
         if job.kind in ('events', 'digest'):
@@ -394,8 +439,9 @@ class Store:
             pending = stage / filename
         else:
             raise ValueError('Unknown derivative')
+        provenance = self.execution_provenance(job)
         with pending.open('w', encoding='utf-8') as output:
-            output.write(json.dumps(dict(signature=signature, result=result), ensure_ascii=False) + '\n\n' + text)
+            output.write(json.dumps(dict(signature=signature, result=result, provenance=provenance, event_origins=event_origins or {}), ensure_ascii=False) + '\n\n' + text)
             output.flush()
             os.fsync(output.fileno())
         os.replace(pending, destination)

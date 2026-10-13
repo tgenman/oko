@@ -2,6 +2,7 @@
 import re
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
+from oko.processing.execution import CodexChoice
 
 
 class InputSource(BaseModel):
@@ -17,6 +18,7 @@ class InputSource(BaseModel):
 class ProcessingRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
     operation: Literal['theses', 'filter', 'events', 'digest', 'digest_reduce', 'digest_final'] = 'theses'
+    codex_choice: CodexChoice | None = None
     event_hours: int = Field(default=24, ge=1, le=87600)
     sources: tuple[InputSource, ...]
     settings_version: int

@@ -200,9 +200,9 @@ def test_process_death_after_filter_move_does_not_publish_orphan(tmp_path):
 
 
 def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):
-    from tests.support.codex import CodexService
+    from tests.support.codex import CodexService, configure_codex
     class FilterCodex(CodexService):
-        async def complete(self, prompt, schema, directory):
+        async def complete(self, prompt, schema, directory, choice):
             self.inputs.append(prompt)
             task = json.loads(prompt.split('\n', 1)[1])
             assert task['operation'] == 'filter'
@@ -210,6 +210,7 @@ def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):
             return json.dumps(dict(hidden=True, reason='Реклама', removed=[]))
     service = FilterCodex()
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', codex_client=service), headers=HEADERS) as client:
+        configure_codex(client)
         configure(client)
         client.patch('/api/settings/oko/global', json={'processor': 'codex'})
         item = client.get('/api/cards').json()[0]['id']

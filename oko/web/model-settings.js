@@ -1,10 +1,12 @@
 import {reportError} from './debug.js';
 import {createOperations} from './ui-operations.js';
+import {createCodexSettings} from './codex-settings.js';
 import {element} from './controls.js';
 
 export function createModelSettings({api}) {
   const byId = id => document.getElementById(id);
   const operations = createOperations();
+  const codex = createCodexSettings({api});
   let stopped = false, dirty = false, loaded = false;
   for (const id of ['llamacpp-endpoint', 'llamacpp-model']) {
     byId(id).oninput = () => {dirty = true; byId('llamacpp-local').checked = false;};
@@ -43,12 +45,14 @@ export function createModelSettings({api}) {
   };
   function deactivate() {
     operations.invalidate();
+    codex.deactivate();
     byId('codex-check').disabled = stopped;
     for (const id of ['codex-status', 'llamacpp-status']) byId(id).textContent = '';
   }
   return {
     async open() {
-      if (loaded) return;
+      const codexLoad = codex.open();
+      if (loaded) {await codexLoad; return;}
       const action = operations.begin('load', {abortable:true});
       try {
         const config = await api('processors/llamacpp', 'GET', undefined, action.signal);
@@ -57,6 +61,7 @@ export function createModelSettings({api}) {
           loaded = true;
         });
       } catch(error) {reportError(error, 'Подключения моделей'); action.commit(() => {byId('llamacpp-status').textContent = error.message;});}
+      await codexLoad;
     },
     deactivate,
     stop() {stopped = true; deactivate();},

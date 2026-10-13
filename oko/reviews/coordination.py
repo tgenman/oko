@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from oko.processing.contracts import EventsResult, FilterResult, ProcessingError, ProcessingRequest, Theses
 from oko.reviews.theses import PublicationTheses
+from oko.processing.execution import CodexChoice
 
 if TYPE_CHECKING:
     from oko.storage.store import Job, Store
@@ -97,6 +98,7 @@ class ProcessingCoordination:
             request, signature, public_ai = prepared
             if request.processor == 'codex' and not public_ai:
                 raise ProcessingError('Запрещена публичная AI-обработка набора; разрешение требуется от всех фидов')
+            request = self._execution_choice(job, signature, request)
             return PreparedWork(self, operation, job, signature, request, public_ai)
         except BaseException:
             record_caught('coordination.prepare')
@@ -104,6 +106,23 @@ class ProcessingCoordination:
             if operation.release:
                 operation.release(job)
             raise
+
+    def _execution_choice(self, job: 'Job', signature: str, request: ProcessingRequest) -> ProcessingRequest:
+        origin = self.store.saved_execution(job, signature)
+        if origin is None:
+            if request.processor == 'codex':
+                config = self.store.codex_config()
+                if config is None:
+                    return request  # Adapter checks auth/quota before missing choice.
+                if job.kind == 'digest':
+                    self.store.digests.require_known_execution(job.item, signature)
+                origin = dict(processor='codex', **config.choice(request.operation).model_dump())
+            else:
+                local = self.store.processor_config()
+                origin = dict(processor=request.processor, model=local.model if local else None)
+            self.store.save_execution(job, signature, origin)
+        choice = CodexChoice.model_validate({k: origin[k] for k in ('model', 'reasoning_effort', 'fast')}) if origin['processor'] == 'codex' else None
+        return request.model_copy(update={'codex_choice': choice})
 
     def retry_theses(self, item: str) -> bool:
         return self.theses.retry(item)

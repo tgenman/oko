@@ -1,0 +1,31 @@
+const {test} = require('node:test');
+const {expect} = require('playwright/test');
+const {productionReader} = require('./http-reader.cjs');
+
+test('production HTTP saves choices, reads provenance and recreates material from the browser', {timeout:30000}, async t=>{
+  const {page,api,origin,token}=await productionReader(t);
+  const errors=[]; page.on('pageerror',error=>errors.push(error.message));
+  await api('settings/oko/global','PATCH',{events:false,theses:false,prompt_filters:''});
+  const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Статьи" xmlUrl="https://a.test/feed"/></outline></body></opml>'});
+  const feed=plan.feeds[0];
+  await page.goto(origin+'/#token='+token);
+  await page.locator('#settings-open').click();
+  await page.locator('#settings-dialog summary').filter({hasText:'Codex'}).click();
+  await expect(page.locator('#codex-theses-model')).toHaveValue('synthetic');
+  await page.locator('#codex-save').click();
+  await expect(page.locator('#codex-choice-status')).toContainText('сохранены');
+  expect((await api('processors/codex')).config.theses).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
+  await page.locator('#settings-close').click();
+  await api('feeds/'+feed.id,'PATCH',{public_ai:true});
+  await api('settings/oko/global','PATCH',{theses:true});
+  await expect.poll(async()=>(await api('cards')).some(c=>c.theses),{timeout:10000}).toBe(true);
+  await page.locator('#cards button').click();
+  await page.locator('#processing-details summary').click();
+  await expect(page.locator('#processing-provenance')).toContainText('synthetic');
+  await expect(page.locator('#processing-provenance')).toContainText('Fast выключен');
+  const completed=page.waitForResponse(response=>response.url().endsWith('/regenerate')&&response.request().method()==='POST');
+  await page.locator('#regenerate').click();
+  expect((await completed).status()).toBe(200);
+  await expect(page.locator('#ai-status')).toHaveText('Тезисы готовы');
+  expect(errors).toEqual([]);
+});

@@ -10,6 +10,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from oko.processing.execution import UNKNOWN_REVIEW
 from oko.processing.contracts import ProcessingError, Point, InputSource, ProcessingRequest, Theses
 
 if TYPE_CHECKING:
@@ -289,10 +290,17 @@ class Digests:
         self._plans.pop((job.id, job.generation), None)
 
     def _restart(self, identity: str) -> None:
+        self.store.forget_execution('digest', identity)
         self._forget(identity)
         self.path(identity).unlink(missing_ok=True)
         with self.store.db:
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,generation=generation+1,error=NULL WHERE kind='digest' AND item=?", (identity,))
+
+    def retry(self, identity: str) -> bool:
+        if self.candidate(identity) is None:
+            return False
+        self._restart(identity)
+        return True
 
     def sync(self) -> None:
         for row in self.store.db.execute('SELECT * FROM digest_sets').fetchall():
@@ -319,6 +327,11 @@ class Digests:
         for path in (self.store.root / 'digests').glob('*.md'):
             if not self.store.db.execute('SELECT 1 FROM digest_sets WHERE id=?', (path.stem,)).fetchone():
                 self.invalidate(path.stem)
+
+    def require_known_execution(self, identity: str, signature: str) -> None:
+        progress = self.read(identity, signature)
+        if progress and progress.parts:
+            raise ProcessingError(UNKNOWN_REVIEW)
 
     def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
         candidate = self.candidate(job.item)
@@ -381,7 +394,7 @@ class Digests:
             if data is None or not data.complete:
                 continue
             sources = candidate['materials']
-            views.append(dict(id=row['id'], digest=dict(points=[p.model_dump() for p in data.points]), sources=sources, folder_id=candidate['folder_id'], feed_id=sources[0]['feed_id'], importance=candidate['importance'], title='Обзор за период', published=max(m['published'] for m in sources), url=sources[0]['url'], complete=True, text='', version=candidate['signature']))
+            views.append(dict(id=row['id'], provenance=self.store.derivative_provenance(self.path(row['id']), candidate['signature']), digest=dict(points=[p.model_dump() for p in data.points]), sources=sources, folder_id=candidate['folder_id'], feed_id=sources[0]['feed_id'], importance=candidate['importance'], title='Обзор за период', published=max(m['published'] for m in sources), url=sources[0]['url'], complete=True, text='', version=candidate['signature']))
         return views
 
     def material(self, identity: str) -> dict[str, Any] | None:

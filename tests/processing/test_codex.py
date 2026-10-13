@@ -1,4 +1,4 @@
-from tests.support.codex import CodexService
+from tests.support.codex import CodexService, configure_codex
 from pathlib import Path
 from fastapi.testclient import TestClient
 from oko.reader.app import create_app
@@ -115,6 +115,7 @@ def test_probe_output_limit_does_not_expose_diagnostics(tmp_path, monkeypatch):
 def test_allowed_codex_theses_use_contract_and_are_deleted(tmp_path):
     service = CodexService()
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', codex_client=service), headers=HEADERS) as client:
+        configure_codex(client)
         item = setup_reader(client)
         client.patch('/api/settings/oko/global', json={'processor': 'codex', 'theses': True, 'prompt_theses': 'Один тезис'})
         denied = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
@@ -133,9 +134,10 @@ def test_allowed_codex_theses_use_contract_and_are_deleted(tmp_path):
 
 def test_codex_refuses_unknown_source_and_keeps_original(tmp_path):
     class BadSource(CodexService):
-        async def complete(self, prompt, schema, directory):
+        async def complete(self, prompt, schema, directory, choice):
             return '{"points":[{"text":"Чужой тезис","sources":[{"id":"alien","url":"https://alien.example"}]}]}'
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', codex_client=BadSource()), headers=HEADERS) as client:
+        configure_codex(client)
         item = setup_reader(client)
         client.patch('/api/feeds/demo', json={'public_ai': True})
         client.patch('/api/settings/oko/global', json={'processor': 'codex', 'theses': True})
@@ -151,7 +153,7 @@ def test_late_codex_result_after_permission_change_is_not_published(tmp_path):
     import threading
     entered, release = threading.Event(), threading.Event()
     class Held(CodexService):
-        async def complete(self, prompt, schema, directory):
+        async def complete(self, prompt, schema, directory, choice):
             entered.set()
             try:
                 while not release.is_set():
@@ -159,9 +161,10 @@ def test_late_codex_result_after_permission_change_is_not_published(tmp_path):
             except asyncio.CancelledError:
                 while not release.is_set():
                     await asyncio.sleep(.01)
-            return await super().complete(prompt, schema, directory)
+            return await super().complete(prompt, schema, directory, choice)
     service=Held()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
+        configure_codex(client)
         item=setup_reader(client)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
@@ -178,6 +181,7 @@ def test_late_codex_result_after_permission_change_is_not_published(tmp_path):
 def test_completed_codex_theses_survive_restart_without_another_call(tmp_path):
     service=CodexService()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
+        configure_codex(client)
         item=setup_reader(client)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
@@ -194,7 +198,7 @@ def test_codex_cancellation_on_view_keeps_late_result_deleted(tmp_path):
     import threading
     entered, release = threading.Event(), threading.Event()
     class Held(CodexService):
-        async def complete(self, prompt, schema, directory):
+        async def complete(self, prompt, schema, directory, choice):
             entered.set()
             try:
                 while not release.is_set():
@@ -202,9 +206,10 @@ def test_codex_cancellation_on_view_keeps_late_result_deleted(tmp_path):
             except asyncio.CancelledError:
                 while not release.is_set():
                     await asyncio.sleep(.01)
-            return await super().complete(prompt, schema, directory)
+            return await super().complete(prompt, schema, directory, choice)
     service=Held()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
+        configure_codex(client)
         item=setup_reader(client)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})

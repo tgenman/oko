@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from oko.storage.store import Job, Store
 
 
+def group_identity(members: list[str]) -> str:
+    return 'event-' + hashlib.sha256(json.dumps(sorted(members)).encode()).hexdigest()[:32]
+
+
 class Events:
     def __init__(self, store: 'Store') -> None:
         self.store = store
@@ -88,9 +92,23 @@ class Events:
     def invalidate(self, batch: str) -> None:
         with self.store.db:
             self.store.db.execute('DELETE FROM event_inputs WHERE item=?', (batch,))
+            self.store.db.execute('DELETE FROM state WHERE key=?', ('event-retry:' + batch,))
             self.store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='events' AND item=?", (batch,))
             if self.path(batch).exists() or (self.store.root / 'staging' / batch).exists():
                 self.store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status NOT IN ('pending','running')", (batch,))
+
+    def retry(self, identity: str) -> bool:
+        material = self.material(identity)
+        if material is None:
+            return False
+        batch = material['batch']
+        members = material['event']['members']
+        self.store.forget_execution('events', batch)
+        with self.store.db:
+            self.store.db.execute('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                  ('event-retry:' + batch, json.dumps(members)))
+            self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='events' AND item=?", (batch,))
+        return True
 
     def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
         candidate = self.candidates().get(job.item)
@@ -98,13 +116,19 @@ class Events:
             return None
         if len(candidate['materials']) > 100:
             raise ProcessingError('Набор событий превышает 100 публикаций; уменьшите окно или разделите папку')
+        selected = self.store.db.execute('SELECT value FROM state WHERE key=?', ('event-retry:' + job.item,)).fetchone()
+        if selected:
+            members = set(json.loads(selected[0]))
+            candidate = dict(candidate, materials=[m for m in candidate['materials'] if m['id'] in members])
         request = ProcessingRequest(operation='events', event_hours=candidate['event_hours'], sources=tuple(InputSource(id=m['id'], version=m['version'], url=m['url'], title=m['title'], text=m['display_text'], published=m['published']) for m in candidate['materials']), settings_version=self.store.settings_version(), prompt='Времена публикаций: ' + json.dumps({m['id']: m['published'] for m in candidate['materials']}), processor=candidate['processor'], generation=job.generation)
         return request, candidate['signature'], candidate['public_ai']
 
     def read(self, batch: str, candidate: dict[str, Any]) -> EventsResult | None:
         row = self.store.db.execute("SELECT status FROM jobs WHERE kind='events' AND item=?", (batch,)).fetchone()
-        if not row or row[0] != 'done':
+        if not row:
             return None
+        if row[0] != 'done' and not self.store.db.execute('SELECT 1 FROM state WHERE key=?', ('event-retry:' + batch,)).fetchone():
+            return None  # An explicit retry retains accepted groups until success.
         try:
             data = json.loads(self.path(batch).read_text().split('\n\n', 1)[0])
             if data['signature'] != candidate['signature']:
@@ -121,7 +145,26 @@ class Events:
         if not request:
             return
         result.validate_sources(request[0])
-        self.store.save_derivative(job, signature, result.model_dump(), '\n'.join(g.title for g in result.groups))
+        origin = self.store.execution_provenance(job) or dict(model=None)
+        origins = {group_identity(g.members): origin for g in result.groups}
+        selected = self.store.db.execute('SELECT value FROM state WHERE key=?', ('event-retry:' + job.item,)).fetchone()
+        if selected:
+            members = set(json.loads(selected[0]))
+            header = json.loads(self.path(job.item).read_text().split('\n\n', 1)[0])
+            if header['signature'] != signature:
+                return
+            previous = EventsResult.model_validate(header['result'])
+            for group in previous.groups:
+                if not members.intersection(group.members):
+                    identity = group_identity(group.members)
+                    origins[identity] = header.get('event_origins', {}).get(identity) or header.get('provenance') or dict(model=None)
+            result = EventsResult(groups=[g for g in previous.groups if not members.intersection(g.members)] + result.groups)
+            candidate = self.candidates()[job.item]
+            originals = tuple(InputSource(id=m['id'], version=m['version'], url=m['url'], title=m['title'], text=m['display_text'], published=m['published']) for m in candidate['materials'])
+            result.validate_sources(request[0].model_copy(update={'sources': originals}))
+        self.store.save_derivative(job, signature, result.model_dump(), '\n'.join(g.title for g in result.groups), event_origins=origins)
+        with self.store.db:
+            self.store.db.execute('DELETE FROM state WHERE key=?', ('event-retry:' + job.item,))
 
     def views(self) -> list[dict[str, Any]]:
         views = []
@@ -134,8 +177,8 @@ class Events:
                 if len(group.members) < 2:
                     continue
                 sources = [m for m in candidate['materials'] if m['id'] in group.members]
-                identity = 'event-' + hashlib.sha256(json.dumps(sorted(group.members)).encode()).hexdigest()[:32]
-                views.append(dict(id=identity, batch=batch, event=group.model_dump(), sources=sources, folder_id=candidate['folder_id'], feed_id=sources[0]['feed_id'], importance=max((feeds[m['feed_id']]['importance'] for m in sources), key=lambda value: {'normal': 0, 'elevated': 1, 'high': 2}[value]), title=group.title, published=max(m['published'] for m in sources), url=sources[0]['url'], complete=True, text='', version=candidate['signature']))
+                identity = group_identity(group.members)
+                views.append(dict(id=identity, batch=batch, provenance=self.store.derivative_provenance(self.path(batch), candidate['signature'], identity), event=group.model_dump(), sources=sources, folder_id=candidate['folder_id'], feed_id=sources[0]['feed_id'], importance=max((feeds[m['feed_id']]['importance'] for m in sources), key=lambda value: {'normal': 0, 'elevated': 1, 'high': 2}[value]), title=group.title, published=max(m['published'] for m in sources), url=sources[0]['url'], complete=True, text='', version=candidate['signature']))
         return views
 
     def material(self, identity: str) -> dict[str, Any] | None:

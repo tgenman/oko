@@ -222,14 +222,14 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
 
 
 def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(tmp_path):
-    from tests.support.youtube import feed_xml, subscribe, PNG as PREVIEW
+    from tests.support.youtube import feed_xml, subscribe, NoCaptions, PNG as PREVIEW
     title, present = ['О границах модели'], [True]
     def reply(request):
         if request.url.path == '/feeds/videos.xml':
             xml = feed_xml().replace('О границах модели', title[0]) if present[0] else '<feed xmlns="http://www.w3.org/2005/Atom"/>'
             return httpx.Response(200, text=xml)
         return httpx.Response(200, content=PREVIEW, headers={'Content-Type': 'image/png'})
-    with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=NoCaptions()), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'events': False})
         subscribe(client)
         client.post('/api/tabs/test/heartbeat')
