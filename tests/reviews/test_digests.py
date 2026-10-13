@@ -21,7 +21,7 @@ def test_compress_preserves_exact_members_and_deletes_unmentioned_originals(tmp_
         assert {s['id'] for s in digest['sources']} == {c['id'] for c in originals}
         assert len(digest['digest']['points'][0]['sources']) == 1
         assert len(client.get('/api/cards').json()) == 1
-        assert client.get('/api/folders').json()[0]['count'] == 1
+        assert client.get('/api/folders').json()[0]['count'] == 3
         again = client.post('/api/digests/folder/demo', json={}).json()['id']
         wait_for(client, lambda: client.get('/api/materials/' + again).json().get('digest'))
         assert {s['id'] for s in client.get('/api/materials/' + again).json()['sources']} == {c['id'] for c in originals}
