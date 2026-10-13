@@ -9,7 +9,7 @@ async function reader() {
   const server = http.createServer(async (request, response) => {
     try {
       const name = request.url === '/' ? 'index.html' : request.url.slice(1);
-      if (!['index.html', 'app.js', 'controls.js', 'ui-operations.js', 'menus.js', 'settings-editor.js', 'model-settings.js', 'opml-import.js', 'debug.js', 'feed-connection.js', 'initial-history.js', 'opened-material.js', 'telegram-connection.js', 'style.css'].includes(name)) {
+      if (!['index.html', 'app.js', 'reading-tree.js', 'controls.js', 'ui-operations.js', 'menus.js', 'settings-editor.js', 'model-settings.js', 'opml-import.js', 'debug.js', 'feed-connection.js', 'initial-history.js', 'opened-material.js', 'telegram-connection.js', 'style.css'].includes(name)) {
         response.writeHead(404).end(); return;
       }
       const data = await fs.readFile(path.join(__dirname, '../../oko/web', name));
@@ -47,6 +47,11 @@ async function reader() {
           if (reply.base64) return new Response(Uint8Array.from(atob(reply.base64), c => c.charCodeAt(0)), {headers: {'Content-Type': reply.mime}});
           return new Response(JSON.stringify(reply.body), {status: reply.status || 200, headers: {'Content-Type': 'application/json'}});
         }
+        if (key === '/api/navigation') {
+          const t = window.readerTransport, folders = t.replies.get('/api/folders')?.body || [];
+          const feeds = t.replies.get('/api/subscriptions')?.body?.feeds || [...new Map(t.cards.map(c => [c.feed_id, {id:c.feed_id, title:c.feed_id, folder_id:c.folder_id, kind:'rss'}])).values()];
+          return new Response(JSON.stringify({folders, feeds, count:t.cards.length}));
+        }
         if (key === '/api/debug') {
           const t = window.readerTransport;
           if (options?.method === 'DELETE') {
@@ -64,8 +69,9 @@ async function reader() {
           return new Response(JSON.stringify({groups: t.debugGroups, persistence_error: ''}));
         }
         if (key.startsWith('/api/cards?')) {
-          const folder = new URL(key, location.origin).searchParams.get('folder');
-          return new Response(JSON.stringify(window.readerTransport.cards.filter(card => !folder || card.folder_id === folder)));
+          const params = new URL(key, location.origin).searchParams;
+          const folder = params.get('folder'), feed = params.get('feed');
+          return new Response(JSON.stringify(window.readerTransport.cards.filter(card => (!folder || card.folder_id === folder) && (!feed || card.feed_id === feed || (card.sources || []).some(s => s.feed_id === feed)))));
         }
         if (key.endsWith('/viewed')) {
           const id = key.split('/')[3];
