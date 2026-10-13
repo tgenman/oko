@@ -1,9 +1,15 @@
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
+
+
+class Navigation(TypedDict):
+    folders: list[dict[str, Any]]
+    feeds: list[dict[str, Any]]
+    count: int
 
 
 @dataclass(frozen=True)
@@ -25,7 +31,7 @@ class ReadingComposition:
     def _views(self) -> list[dict[str, Any]]:
         return self._store.events.views() + self._store.digests.views()
 
-    def cards(self, show_hidden: bool = False) -> list[dict[str, Any]]:
+    def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
         feeds = {feed['id']: feed for feed in self._store.subscriptions.feeds()}
         views = self._views()
         covered = represented_originals(views)
@@ -42,11 +48,47 @@ class ReadingComposition:
         for view in views:
             card = dict(view)
             card.pop('text')
-            card['sources'] = [dict(id=source['id'], url=source['url']) for source in view['sources']]
+            card['sources'] = []
+            for source in view['sources']:
+                source_feed = feeds.get(source['feed_id'])
+                card['sources'].append(dict(id=source['id'], url=source['url'],
+                                            feed_id=source['feed_id'],
+                                            title=source_feed['title'] if source_feed else ''))
             cards.append(card)
         return [dict(card, folder_id=card.get('folder_id', feeds[card['feed_id']]['folder_id']),
                      importance=card.get('importance', feeds[card['feed_id']]['importance']))
-                for card in cards if card['feed_id'] in feeds]
+                for card in cards if card['feed_id'] in feeds
+                and (folder is None or card.get('folder_id', feeds[card['feed_id']]['folder_id']) == folder)
+                and (feed is None or (any(source['feed_id'] == feed for source in card['sources'])
+                                     if card.get('sources') else card['feed_id'] == feed))]
+
+    def navigation(self) -> Navigation:
+        """Count original publications, retaining frozen view folder ownership."""
+        folders = self._store.subscriptions.folders()
+        feeds = self._store.subscriptions.feeds()
+        by_feed = {feed['id']: feed for feed in feeds}
+        folder_members: dict[str, set[str]] = {folder['id']: set() for folder in folders}
+        feed_members: dict[str, set[str]] = {feed['id']: set() for feed in feeds}
+        represented: dict[str, set[str]] = {}
+        for view in self._views():
+            owner = by_feed.get(view['feed_id'])
+            if owner:
+                folder = view.get('folder_id', owner['folder_id'])
+                for identity in represented_originals([view]):
+                    represented.setdefault(identity, set()).add(folder)
+        visible = set()
+        for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0'):
+            if row['feed_id'] not in by_feed or self._store.filters.read(row['id'])['hidden']:
+                continue
+            identity = row['id']
+            visible.add(identity)
+            feed_members[row['feed_id']].add(identity)
+            for folder in represented.get(identity, {by_feed[row['feed_id']]['folder_id']}):
+                if folder in folder_members:
+                    folder_members[folder].add(identity)
+        return dict(folders=[dict(folder, count=len(folder_members[folder['id']])) for folder in folders],
+                    feeds=[dict(feed, count=len(feed_members[feed['id']])) for feed in feeds],
+                    count=len(visible))
 
     def folder_contents(self, folder: str) -> FolderContents:
         self._store.subscriptions.check_owner('folder', folder)
