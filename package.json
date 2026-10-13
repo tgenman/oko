@@ -1,0 +1,6 @@
+{
+  "name": "oko-browser-checks",
+  "private": true,
+  "engines": {"node": ">=20"},
+  "devDependencies": {"playwright": "1.62.1"}
+}

@@ -62,13 +62,11 @@ SQLite хранит идентичности, состояние, позиции
 ## Проверки
 
 ```sh
-uv run python -m pytest
-uv run mypy oko
-node --check oko/web/app.js
-node --check oko/web/opened-material.js
+./scripts/check ui
+./scripts/check all
 ```
 
-Браузерные сценарии открытого материала запускаются отдельно: `node --test tests/browser/test_*.cjs`. Нужны Playwright и Chrome/Chromium; пути зависимостей, выбор браузера и устройство тестового транспорта описаны в [инструкции](tests/browser/README.md).
+Настройка окружения и выбор runtime описаны в [инструкции проверок](tests/browser/README.md). Команда не устанавливает зависимости. Состав режимов и правила выбора проверки: [порядок разработки](docs/agents/development.md).
 
 Основная граница — API с настоящими временными SQLite/файлами, управляемым временем и синтетическими источниками. Процессные тесты открывают loopback и аварийно завершают дочерний процесс в точках транзакции и записи. Тестовые fault hooks передаются только Python-кодом, через HTTP не доступны.
 
@@ -132,6 +130,6 @@ uv run python -m oko --telegram-env /Users/dabondarev/repo_personal/telegram-mcp
 
 `oko/collection` содержит источники и их workers, `processing` — общий контракт AI и adapters Codex/llama.cpp, `reviews` — фильтрацию, события и обзоры. `reader` управляет чтением и работой Око, `storage` — SQLite/файлами, `subscriptions` — подписками и наследованием настроек. Запуск остаётся `python -m oko`.
 
-Тесты сгруппированы в `tests/reader`, `collection`, `processing`, `reviews` и `lifecycle`; общие синтетические adapters и процессные помощники находятся в `tests/support`. Полная проверка: `.venv/bin/pytest -q`; типизация: `.venv/bin/mypy`. Подробности: [структура пакетов](docs/architecture/package-layout.md).
+Тесты сгруппированы в `tests/reader`, `collection`, `processing`, `reviews` и `lifecycle`; общие синтетические adapters и процессные помощники находятся в `tests/support`. Полная проверка: `./scripts/check all`. Подробности: [структура пакетов](docs/architecture/package-layout.md).
 
 При повторном сборе Око проверяет правки в доступном окне RSS/YouTube и перечитывает известные непросмотренные Telegram-сообщения. Возможности и ограничения видны в UI. Новое содержимое сохраняется отдельной версией с исходными медиа; предыдущие версии доступны до просмотра. Исчезновение записи из RSS/Atom не считается удалением. Недоступный в источнике материал остаётся локально. Тезисы, события и обзоры обновляются по текущим версиям; состав созданного обзора сохраняет прежние ID. Проверки и границы приёмки: [версии источников](docs/verification/source-revisions.md).
