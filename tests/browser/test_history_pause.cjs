@@ -13,7 +13,7 @@ test('history can pause and resume in feed settings without offering restart aft
       t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global').body,feed}});
       t.replies.set('/api/feeds/rss/history',{body:{...history,paused:true,state:'paused'}});
     });
-    await r.page.locator('#settings-open').click();
+    await r.page.locator('#feeds-open').click();
     await r.page.locator('#settings-owner').selectOption('feed/rss');
     await r.page.getByRole('button',{name:'Приостановить историю',exact:true}).click();
     await expect(r.page.locator('#history-progress')).toContainText('приостановлена');

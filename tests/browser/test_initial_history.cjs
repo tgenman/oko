@@ -14,8 +14,7 @@ test('RSS connection selects count or inclusive date and displays saved history 
       t.replies.set('/api/feeds/verify', {body: {url: feed.original_urls[0], title: feed.title, kind: 'rss', verification: 'checked', existing: null}});
       t.replies.set('/api/settings/feed/rss', {body: {...t.replies.get('/api/settings/oko/global').body, feed}});
     });
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('#rss-connection summary').click();
+    await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/feed');
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-history-count')).toHaveValue('20');
@@ -37,8 +36,8 @@ test('Telegram connection sends default count and can switch to date with user t
       readerTransport.held.set('/api/telegram/connect', true);
     });
     await r.start([]);
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('#telegram-connection summary').click();
+    await r.page.locator('#add-open').click();
+    await r.page.getByRole('tab', {name: 'Telegram', exact: true}).click();
     await r.page.locator('#telegram-peer').fill('@channel');
     await expect(r.page.locator('#telegram-history-count')).toHaveValue('20');
     await r.page.locator('#telegram-history-mode').selectOption('date');
@@ -68,7 +67,7 @@ test('finite history warning and unknown date are visible in settings and materi
     await expect(r.page.locator('#cards')).toContainText('Дата неизвестна');
     await r.page.locator('#cards button').first().click();
     await expect(r.page.locator('#date')).toHaveText('Дата неизвестна');
-    await r.page.locator('#settings-open').click();
+    await r.page.locator('#feeds-open').click();
     await r.page.locator('#settings-owner').selectOption('feed/rss');
     await expect(r.page.locator('#feed-options')).toContainText('Запрошено 100, доступно 15');
     await expect(r.page.locator('#feed-options')).toContainText('точность выбора последних N не подтверждена');

@@ -35,15 +35,15 @@ const opened = createOpenedMaterial({
   onViewed: id => { contentEpoch++; opened.viewed(id); bus.postMessage(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
-const telegram = createTelegramConnection({api, onConnected: async feed => {
-  await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
-}});
+const telegram = createTelegramConnection({api, onConnected: selectedFeed});
+const reconnect = createTelegramConnection({api, prefix: 'reconnect', onConnected: feed => selectedFeed(feed, true)});
 const feedConnection = createFeedConnection({api, onSelected: async feed => {
-  await loadSubscriptions('feed/' + feed.id); contentEpoch++; refresh();
+  await selectedFeed(feed);
 }});
 function stopUi(message) {
   feedConnection.stop();
   telegram.stop();
+  reconnect.stop();
   stopped = true;
   contentEpoch++;
   opened.clear();
@@ -58,8 +58,7 @@ function stopUi(message) {
   byId('completion-dialog').close();
   byId('digest-now').disabled = true;
   byId('digest-dialog').close();
-  byId('settings-dialog').close();
-  byId('settings-open').disabled = true;
+  for (const name of ['add', 'feeds', 'settings']) {byId(name + '-dialog').close(); byId(name + '-open').disabled = true;}
   byId('rss-add').disabled = true;
   void debug.refresh();
 }
@@ -164,7 +163,78 @@ const importanceNames = {normal: 'Обычная', elevated: 'Повышенна
 let subscriptions = {folders: [], feeds: []};
 let importText = null;
 let importChoices = {};
-let settingsGeneration = 0;
+let settingsGeneration = 0, subscriptionsGeneration = 0;
+let menuGeneration = 0, currentMenu = null, selectedOwner = null, opener = null;
+let modelsLoaded = false, modelDraft = false;
+const drafts = new Map();
+function draft(path) { if (!drafts.has(path)) drafts.set(path, {}); return drafts.get(path); }
+function editorMessage(message, path = scopePath()) {
+  if (path !== scopePath()) return;
+  byId(currentMenu === 'add' ? 'add-message' : 'settings-message').textContent = message;
+}
+function showMenu(name, trigger) {
+  if (!currentMenu) opener = trigger || document.activeElement;
+  if (currentMenu !== name) {
+    const previous = currentMenu; currentMenu = name; settingsGeneration++; subscriptionsGeneration++;
+    if (previous === 'feeds') reconnect.deactivate();
+    if (previous) byId(previous + '-dialog').close();
+    byId(name + '-dialog').showModal();
+  }
+  const global = name === 'settings';
+  if (name !== 'add') {
+    byId(global ? 'global-settings' : 'object-settings').append(byId('settings-editor'));
+    byId('settings-editor').hidden = true;
+    byId('feed-options').hidden = global;
+  }
+}
+async function openMenu(name, trigger, preferred) {
+  showMenu(name, trigger);
+  const stamp = ++menuGeneration;
+  try {
+    await loadSubscriptions(preferred);
+    if (stamp !== menuGeneration || stopped || currentMenu !== name) return;
+    if (name === 'settings') {
+      await loadSettings();
+      if (!modelsLoaded) {
+        const config = await api('processors/llamacpp');
+        if (stamp !== menuGeneration || stopped || currentMenu !== name) return;
+        if (config && !modelDraft) {byId('llamacpp-endpoint').value = config.endpoint; byId('llamacpp-model').value = config.model; byId('llamacpp-local').checked = config.local_execution;}
+        modelsLoaded = true;
+      }
+    } else if (name === 'feeds' && selectedOwner) await loadSettings();
+  } catch (error) {reportError(error, 'Меню Око'); if (stamp === menuGeneration) editorMessage(error.message);}
+}
+async function selectedFeed(feed, reconnecting = false) {
+  if ((reconnecting && (currentMenu !== 'feeds' || selectedOwner !== 'feed/' + feed.id)) || (!reconnecting && currentMenu !== 'add')) {
+    await loadSubscriptions(); return;
+  }
+  reconnect.deactivate();
+  await openMenu('feeds', null, 'feed/' + feed.id);
+  contentEpoch++; refresh();
+}
+for (const name of ['add', 'feeds', 'settings']) {
+  byId(name + '-open').onclick = event => openMenu(name, event.currentTarget);
+  byId(name + '-close').onclick = () => byId(name + '-dialog').close();
+  byId(name + '-dialog').addEventListener('close', () => {
+    if (currentMenu !== name) return;
+    if (name === 'feeds') reconnect.deactivate();
+    currentMenu = null; menuGeneration++; settingsGeneration++; subscriptionsGeneration++;
+    if (opener?.isConnected) opener.focus({preventScroll: true});
+    opener = null;
+  });
+}
+byId('feeds-add').onclick = event => openMenu('add', event.currentTarget);
+byId('feeds-back').onclick = () => {byId('feeds-layout').classList.remove('show-detail');};
+for (const name of ['rss', 'telegram', 'opml']) {
+  byId('add-' + name + '-tab').onclick = () => {
+    for (const [other, target] of [['rss', 'rss-connection'], ['telegram', 'telegram-connection'], ['opml', 'opml-panel']]) {
+      byId(target).hidden = other !== name;
+      byId('add-' + other + '-tab').setAttribute('aria-selected', String(other === name));
+    }
+    if (name === 'telegram' && !byId('telegram-account').value) telegram.loadAccounts();
+  };
+}
+
 function element(tag, text = '') { const node = document.createElement(tag); node.textContent = text; return node; }
 function selectControl(options, value) {
   const select = document.createElement('select');
@@ -173,29 +243,60 @@ function selectControl(options, value) {
   return select;
 }
 function labelled(title, input) { const label = element('label', title); label.append(input); return label; }
-function scopePath() { return byId('settings-owner').value || 'oko/global'; }
+function scopePath() { return currentMenu === 'settings' ? 'oko/global' : selectedOwner; }
 function describeOwner(scope, owner) {
   if (scope === 'default') return 'Око · начальное значение';
   if (scope === 'oko') return 'Око';
   const list = scope === 'folder' ? subscriptions.folders : subscriptions.feeds;
   return (scope === 'folder' ? 'Папка: ' : 'Фид: ') + (list.find(item => item.id === owner)?.title || owner);
 }
-async function loadSubscriptions(preferred = scopePath()) {
-  subscriptions = await api('subscriptions');
-  byId('rss-folders').replaceChildren(...subscriptions.folders.map(folder => { const option = element('option'); option.value = folder.title; return option; }));
-  const owner = byId('settings-owner');
-  owner.replaceChildren();
-  const options = [['oko/global', 'Око'], ...subscriptions.folders.map(f => ['folder/' + f.id, 'Папка: ' + f.title]), ...subscriptions.feeds.map(f => ['feed/' + f.id, 'Фид: ' + f.title])];
-  for (const [id, title] of options) { const option = element('option', title); option.value = id; owner.append(option); }
-  owner.value = options.some(([id]) => id === preferred) ? preferred : 'oko/global';
+async function loadSubscriptions(preferred = selectedOwner) {
+  const stamp = ++subscriptionsGeneration;
+  const result = await api('subscriptions');
+  if (stopped || stamp !== subscriptionsGeneration) return;
+  subscriptions = result;
+  byId('rss-folders').replaceChildren(...subscriptions.folders.map(folder => {const option = element('option'); option.value = folder.title; return option;}));
+  const options = [...subscriptions.folders.map(f => ['folder/' + f.id, 'Папка: ' + f.title]), ...subscriptions.feeds.map(f => ['feed/' + f.id, 'Фид: ' + f.title])];
+  selectedOwner = options.some(([id]) => id === preferred) ? preferred : null;
+  const owner = byId('settings-owner'); owner.replaceChildren();
+  for (const [id, title] of [['', 'Выберите объект'], ...options]) {const option = element('option', title); option.value = id; owner.append(option);}
+  owner.value = selectedOwner || '';
+  const tree = byId('feed-tree'); tree.replaceChildren();
+  for (const folder of subscriptions.folders) {
+    const group = element('div'); group.className = 'feed-group';
+    const button = element('button', folder.title); button.dataset.owner = 'folder/' + folder.id;
+    button.onclick = () => selectOwner(button.dataset.owner); group.append(button);
+    for (const feed of subscriptions.feeds.filter(f => f.folder_id === folder.id)) {
+      const child = element('button', feed.title); child.className = 'feed-child'; child.dataset.owner = 'feed/' + feed.id;
+      child.onclick = () => selectOwner(child.dataset.owner); group.append(child);
+    }
+    tree.append(group);
+  }
+  if (!options.length) tree.append(element('p', 'Фидов пока нет. Добавьте источник.'));
+  byId('feed-detail').hidden = !selectedOwner;
+  if (currentMenu === 'feeds' && selectedOwner) byId('feeds-layout').classList.add('show-detail');
+}
+async function selectOwner(path) {
+  subscriptionsGeneration++; settingsGeneration++;
+  reconnect.deactivate();
+  selectedOwner = path || null; byId('settings-owner').value = path || '';
+  byId('feed-detail').hidden = !selectedOwner;
+  byId('settings-editor').hidden = true;
+  byId('reconnect-connection').hidden = true;
+  if (!selectedOwner) return;
+  byId('feeds-layout').classList.add('show-detail');
   await loadSettings();
 }
 async function loadSettings() {
   const stamp = ++settingsGeneration;
   const path = scopePath();
+  if (!path) return;
+  const values = draft(path);
   try {
     const result = await api('settings/' + path);
-    if (stamp !== settingsGeneration || stopped) return;
+    if (stamp !== settingsGeneration || stopped || path !== scopePath() || !currentMenu || currentMenu === 'add') return;
+    byId('settings-editor').hidden = false;
+    byId('owner-heading').textContent = describeOwner(...path.split('/'));
     byId('feed-options').replaceChildren();
     const feed = subscriptions.feeds.find(f => 'feed/' + f.id === path);
     if (feed) renderFeed(feed);
@@ -204,8 +305,8 @@ async function loadSettings() {
     if (path.startsWith('feed/') || path.startsWith('folder/')) {
       const update = element('button', 'Обновить обзор сейчас');
       update.onclick = async () => {
-        try { await api('digests/' + path, 'POST', {period: true}); byId('settings-message').textContent = 'Обзор поставлен в обработку'; refresh(); }
-        catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
+        try { await api('digests/' + path, 'POST', {period: true}); editorMessage('Обзор поставлен в обработку', path); refresh(); }
+        catch (error) { reportError(error, 'Интерфейс Око'); editorMessage(error.message, path); }
       };
       container.append(update);
     }
@@ -219,22 +320,26 @@ async function loadSettings() {
       else if (type === 'text') { input = element('textarea'); input.value = effective.value; input.rows = 3; }
       else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = field === 'event_hours' ? '87600' : '3650'; } }
       input.id = 'setting-' + field;
+      if (input.id in values) input.value = values[input.id];
+      input.oninput = input.onchange = () => {values[input.id] = input.value;};
       const info = element('small', 'Эффективное значение: ' + (type === 'boolean' ? (effective.value ? 'Включено' : 'Выключено') : String(effective.value)) + ' · ' + describeOwner(effective.scope, effective.owner));
       const save = element('button', 'Сохранить поле');
       const reset = element('button', 'Сбросить');
       reset.disabled = !(field in result.overrides);
       async function update(value) {
+        const submittedDraft = input.value;
         try {
           await api('settings/' + path, 'PATCH', {[field]: value});
+          if (values[input.id] === submittedDraft) delete values[input.id];
           if (path === scopePath()) await loadSettings();
-          byId('settings-message').textContent = 'Настройка сохранена';
-        } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
+          editorMessage('Настройка сохранена', path);
+        } catch (error) { reportError(error, 'Интерфейс Око'); editorMessage(error.message, path); }
       }
       save.onclick = () => update(type === 'boolean' ? input.value === 'true' : type === 'number' ? Number(input.value) : input.value);
       reset.onclick = () => update(null);
       row.append(labelled(title, input), info, save, reset); container.append(row);
     }
-  } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
+  } catch (error) { reportError(error, 'Интерфейс Око'); editorMessage(error.message, path); }
 }
 function renderHistoryState(history) {
   const progress = byId('history-progress');
@@ -247,6 +352,12 @@ function renderHistoryState(history) {
   }
 }
 function renderFeed(feed) {
+  const values = draft('feed/' + feed.id);
+  const remember = (input, name) => {
+    input.id = 'feed-' + name;
+    if (input.id in values) {if (input.type === 'checkbox') input.checked = values[input.id]; else input.value = values[input.id];}
+    input.oninput = input.onchange = () => {values[input.id] = input.type === 'checkbox' ? input.checked : input.value;};
+  };
   const container = byId('feed-options');
   container.append(element('h2', 'Подключение фида'));
   if (feed.initial_history) {
@@ -256,8 +367,8 @@ function renderFeed(feed) {
       toggle.disabled = true;
       try {
         const history = await api('feeds/' + feed.id + '/history', 'PATCH', {paused: toggle.dataset.paused !== 'true'});
-        renderHistoryState(history);
-      } catch (error) {reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message;}
+        if (byId('history-progress')?.dataset.feed === feed.id) renderHistoryState(history);
+      } catch (error) {reportError(error, 'Интерфейс Око'); editorMessage(error.message);}
       finally {toggle.disabled = false;}
     };
     container.append(progress, toggle);
@@ -272,19 +383,23 @@ function renderFeed(feed) {
   const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
   const importance = selectControl(Object.entries(importanceNames), feed.importance);
   const publicAi = element('input'); publicAi.type = 'checkbox'; publicAi.checked = feed.public_ai;
+  remember(folder, 'folder'); remember(importance, 'importance'); remember(publicAi, 'public-ai');
   container.append(labelled('Папка', folder), labelled('Важность фида', importance), labelled('Разрешить обработку публичным AI', publicAi));
   let auto, history, transport, youtubeEnabled;
   if (feed.kind === 'telegram') {
     auto = selectControl([['', 'Выберите режим'], ['true', 'Автопрочитывать после полного сохранения'], ['false', 'Отмечать только после «Просмотрено»']], feed.auto_read === null ? '' : feed.auto_read);
     history = element('input'); history.type = 'checkbox'; history.checked = feed.read_history;
+    remember(auto, 'auto'); remember(history, 'read-history');
     container.append(element('p', 'Око подтверждает только безопасную границу истории. Просмотр позднего материала может ожидать более ранний.'), labelled('Автопрочитывание в Telegram', auto), labelled('Отметить историю до начала импорта прочитанной', history), element('p', 'Без разрешения очистки старая непрочитанная история может задержать отметки Telegram. Разрешение применяется при работающем Око только к истории до зафиксированного начала импорта.'));
   }
   if (feed.kind === 'youtube') {
     youtubeEnabled = element('input'); youtubeEnabled.type = 'checkbox'; youtubeEnabled.checked = feed.transport === 'youtube';
+    remember(youtubeEnabled, 'youtube');
     container.append(labelled('Собирать обновления YouTube', youtubeEnabled));
   }
   if (feed.kind === 'telegram' || feed.kind === 'unresolved') {
     transport = selectControl([['', 'Подключение не выбрано'], ...(feed.kind === 'telegram' ? [['telegram', 'Telegram с локальными медиа']] : []), ['rss', 'Ограниченный RSS (без Telegram-медиа и отметок чтения)']], feed.transport || '');
+    remember(transport, 'transport');
     container.append(labelled('Способ сбора', transport));
   }
   const save = element('button', 'Сохранить фид');
@@ -294,16 +409,20 @@ function renderFeed(feed) {
     if (transport) patch.transport = transport.value || null;
     if (youtubeEnabled) patch.transport = youtubeEnabled.checked ? 'youtube' : null;
     try {
+      const submitted = Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith('feed-')));
       await api('feeds/' + feed.id, 'PATCH', patch);
-      await loadSubscriptions('feed/' + feed.id);
+      for (const [key, value] of Object.entries(submitted)) if (values[key] === value) delete values[key];
+      const path = 'feed/' + feed.id;
+      await loadSubscriptions();
+      if (path === scopePath()) await loadSettings();
       contentEpoch++; refresh();
-      byId('settings-message').textContent = 'Фид сохранён';
-    } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
+      editorMessage('Фид сохранён', path);
+    } catch (error) { reportError(error, 'Интерфейс Око'); editorMessage(error.message, 'feed/' + feed.id); }
   };
   container.append(save);
   if (feed.kind === 'telegram') {
     const connect = element('button', 'Настроить подключение Telegram-фида');
-    connect.onclick = () => telegram.configure(feed, subscriptions.folders.find(f => f.id === feed.folder_id).title);
+    connect.onclick = () => reconnect.configure(feed, subscriptions.folders.find(f => f.id === feed.folder_id).title);
     container.append(connect);
   }
 }
@@ -315,14 +434,7 @@ function showConflicts(conflicts) {
     container.append(labelled(conflict.identity + ' встречается в нескольких папках', select));
   }
 }
-byId('settings-open').onclick = async () => {
-  byId('settings-dialog').showModal();
-  telegram.loadAccounts();
-  byId('settings-message').textContent = '';
-  try { await loadSubscriptions(); const config = await api('processors/llamacpp'); if (config) { byId('llamacpp-endpoint').value = config.endpoint; byId('llamacpp-model').value = config.model; byId('llamacpp-local').checked = config.local_execution; } } catch (error) { reportError(error, 'Интерфейс Око'); byId('settings-message').textContent = error.message; }
-};
-byId('settings-close').onclick = () => byId('settings-dialog').close();
-byId('settings-owner').onchange = loadSettings;
+byId('settings-owner').onchange = () => selectOwner(byId('settings-owner').value);
 byId('opml-file').onchange = async () => {
   const file = byId('opml-file').files[0];
   importText = null; importChoices = {}; byId('import-confirm').hidden = true;
@@ -334,7 +446,7 @@ byId('opml-file').onchange = async () => {
     byId('import-plan').replaceChildren(element('p', `Папок: ${plan.folders.length}; источников: ${plan.feeds.length}. Повторяющиеся адреса объединены. Новые фиды: сутки истории, публичный AI и очистка истории выключены.`));
     showConflicts(plan.feeds.filter(f => f.folders.length > 1));
     byId('import-confirm').hidden = false;
-  } catch (error) { reportError(error, 'Интерфейс Око'); importText = null; byId('settings-message').textContent = error.message; }
+  } catch (error) { reportError(error, 'Интерфейс Око'); importText = null; editorMessage(error.message); }
 };
 byId('import-confirm').onclick = async () => {
   if (!importText) return;
@@ -342,17 +454,19 @@ byId('import-confirm').onclick = async () => {
     await api('import', 'POST', {opml: importText, choices: importChoices});
     importText = null; importChoices = {}; byId('opml-file').value = ''; byId('import-confirm').hidden = true;
     byId('import-plan').replaceChildren(element('p', 'Подписки импортированы. RSS и YouTube подключены автоматически; для Telegram настройте подключение.'));
-    await loadSubscriptions(); contentEpoch++; refresh();
-    byId('settings-message').textContent = 'Импорт завершён';
+    selectedOwner = null; byId('feeds-layout').classList.remove('show-detail');
+    await openMenu('feeds', null, null); contentEpoch++; refresh();
+    editorMessage('Импорт завершён');
   } catch (error) { reportError(error, 'Интерфейс Око');
     if (error.detail?.conflicts) { byId('import-plan').replaceChildren(element('p', 'Выберите одну папку для каждого конфликта и повторите импорт.')); showConflicts(error.detail.conflicts); }
-    else byId('settings-message').textContent = error.message;
+    else editorMessage(error.message);
   }
 };
 
 for (const id of ['llamacpp-endpoint', 'llamacpp-model']) {
-  byId(id).oninput = () => { byId('llamacpp-local').checked = false; };
+  byId(id).oninput = () => { modelDraft = true; byId('llamacpp-local').checked = false; };
 }
+byId('llamacpp-local').onchange = () => {modelDraft = true;};
 byId('llamacpp-save').onclick = async () => {
   try { await api('processors/llamacpp', 'PUT', {endpoint: byId('llamacpp-endpoint').value, model: byId('llamacpp-model').value, local_execution: byId('llamacpp-local').checked}); byId('llamacpp-status').textContent = 'Подключение сохранено. Выберите llama.cpp и включите тезисы для Око, папки или фида.'; }
   catch (error) { reportError(error, 'Интерфейс Око'); byId('llamacpp-status').textContent = error.message; }

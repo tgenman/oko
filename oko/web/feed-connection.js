@@ -58,8 +58,8 @@ export function createFeedConnection({api, onSelected}) {
       if (stamp !== generation || stopped) return;
       await onSelected(result);
       if (stamp !== generation || stopped) return;
-      byId('rss-message').textContent = result.title + ' · ' + (result.kind === 'youtube' ? 'YouTube подключён автоматически' : 'RSS подключён');
-      checked = null;
+      saving = false; byId('rss-form').reset(); reset();
+      byId('rss-history-mode').dispatchEvent(new Event('change'));
     } catch (error) {
       reportError(error, 'Добавление фида');
       if (stamp === generation && !stopped) byId('rss-message').textContent = error.message;

@@ -13,17 +13,22 @@ test('add URL uses one form and automatically shows YouTube connection', async (
       t.replies.set('/api/feeds/verify', {body: {url: feed.original_urls[0], title: '3Blue1Brown', kind: 'youtube', verification: 'checked', existing: null}});
       t.replies.set('/api/settings/feed/youtube', {body: {...t.replies.get('/api/settings/oko/global').body, feed}});
     });
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('#rss-connection summary').click();
+    await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw');
     await expect(r.page.locator('#rss-add')).toBeDisabled();
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-title')).toHaveValue('3Blue1Brown');
     await r.page.locator('#rss-folder').fill('Учёба');
     await r.page.locator('#rss-add').click();
-    await expect(r.page.locator('#rss-message')).toContainText('YouTube');
+    await expect(r.page.locator('#feeds-dialog')).toBeVisible();
+    await expect(r.page.locator('#rss-url')).toHaveValue('');
     await expect(r.page.locator('#feed-options')).toContainText('YouTube подключён');
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/feeds' && r.method === 'POST'));
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#add-open').click();
+    await expect(r.page.locator('#rss-url')).toHaveValue('');
+    await expect(r.page.locator('#rss-url')).toBeEnabled();
+    await expect(r.page.locator('#rss-checked-fields')).toBeHidden();
     expect(request.body).toEqual({url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw', title: '3Blue1Brown', folder: 'Учёба', verification: 'checked', initial_history: {mode: 'count', count: 20, date: null, timezone: await r.page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)}});
   } finally { await r.close(); }
 });
@@ -60,8 +65,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
       t.replies.set('/api/processors/llamacpp', {body: null});
       t.held.set('/api/feeds/verify', true);
     });
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('#rss-connection summary').click();
+    await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/old');
     await r.page.locator('#rss-check').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/feeds/verify'));
@@ -79,7 +83,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
       readerTransport.replies.set('/api/settings/feed/existing', {body: {...readerTransport.replies.get('/api/settings/oko/global').body, feed}});
     });
     await r.page.locator('#rss-check').click();
-    await expect(r.page.locator('#rss-message')).toHaveText('Уже добавлен: Старое имя');
+    await expect(r.page.locator('#feeds-dialog')).toBeVisible();
     await expect(r.page.locator('#settings-owner')).toHaveValue('feed/existing');
     expect(await r.page.evaluate(() => readerTransport.requests.filter(r => r.url === '/api/feeds' && r.method === 'POST').length)).toBe(0);
   } finally { await r.close(); }

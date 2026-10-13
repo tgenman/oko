@@ -12,7 +12,7 @@ test('initial history shows partial, retry and unavailable outcomes with errors'
       t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
       t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global').body,feed}});
     });
-    await r.page.locator('#settings-open').click();
+    await r.page.locator('#feeds-open').click();
     await r.page.locator('#settings-owner').selectOption('feed/rss');
     await expect(r.page.locator('#feed-options')).toContainText('Загружено 18 из 20');
     await expect(r.page.locator('#feed-options')).toContainText('2 неполных');
@@ -33,7 +33,7 @@ test('count selection does not announce shortfall before metadata scan completes
       t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
       t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global').body,feed}});
     });
-    await r.page.locator('#settings-open').click();
+    await r.page.locator('#feeds-open').click();
     await r.page.locator('#settings-owner').selectOption('feed/rss');
     await expect(r.page.locator('#feed-options')).not.toContainText('доступно 10');
     await expect(r.page.locator('#feed-options')).toContainText('Выбираются публикации начальной истории');
