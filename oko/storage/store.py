@@ -1,5 +1,5 @@
 from oko.diagnostics import record_caught
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import os
@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from oko.storage.versions import Versions
+from oko.storage.youtube import YouTubeAccess
 from oko.reader.composition import FolderContents, ReadingComposition
 from oko.collection.telegram.read_sync import ReadSync
 from oko.reviews.events import Events
@@ -90,6 +91,7 @@ class Store:
         self.processing = ProcessingCoordination(self)
         self.reading = ReadingComposition(self)
         self.read_sync = ReadSync(self)
+        self.youtube = YouTubeAccess(self)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
@@ -193,6 +195,7 @@ class Store:
         if self.publication(item) is None:
             return False
         with self.db:
+            self.youtube.reset(item)
             self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (item,))
         return True
 
@@ -244,6 +247,8 @@ class Store:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         fallback = self.material(item) if row else None
         teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', [])), captions=fallback.get('captions'), description=fallback.get('description', ''), attachments=tuple(Attachment(Path(a['url']).name, (self.path(item).parent / Path(a['url']).name).read_bytes(), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
+        if teaser and fallback:
+            teaser = replace(teaser, reason=fallback.get('reason', ''))
         return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members'])), bool(row['published_known'])) if row else None
 
     def save(self, job: Job, material: Material, now: float | None = None) -> None:
@@ -292,6 +297,7 @@ class Store:
                 self.subscriptions.history.viewed(member)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
                 self.filters.forget(member)
+                self.youtube.reset(member)
                 self.versions.forget(member)
                 self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (member,))
                 self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))

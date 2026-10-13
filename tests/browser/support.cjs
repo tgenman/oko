@@ -46,6 +46,7 @@ async function reader() {
         t.replies.set('/api/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
         t.replies.set('/api/navigation', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0}], count:0}});
         t.replies.set('/api/processors/codex', {body:{config:null}});
+        t.replies.set('/api/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0}});
         t.replies.set('/api/processors/codex/models', {body:{models:[]}});
         const settings = {events: true, event_hours: 24, originals: true, theses: true, digests: false, prompt_theses: 'Тезисы', prompt_digest: 'Темы', prompt_filters: '', schedule: 'off', digest_days: 1, processor: 'codex'};
         t.replies.set('/api/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});

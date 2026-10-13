@@ -1,6 +1,7 @@
 import {createOperations} from './ui-operations.js';
 import {createSettingsEditor} from './settings-editor.js';
 import {createModelSettings} from './model-settings.js';
+import {createYouTubeSettings} from './youtube-settings.js';
 import {createFeedConnection} from './feed-connection.js';
 import {createTelegramConnection} from './telegram-connection.js';
 import {createOpmlImport} from './opml-import.js';
@@ -13,6 +14,7 @@ export function createMenus({api, onChanged}) {
   const editor = createSettingsEditor({api, onChanged,
     onDetail: () => byId('feeds-layout').classList.add('show-detail')});
   const models = createModelSettings({api});
+  const youtube = createYouTubeSettings({api});
   const context = () => operations.capture();
   async function selected(feed, action) {
     onChanged();
@@ -29,7 +31,7 @@ export function createMenus({api, onChanged}) {
     });
   }});
   function leave() {
-    operations.invalidate(); editor.deactivate(); models.deactivate();
+    operations.invalidate(); editor.deactivate(); models.deactivate(); youtube.deactivate();
   }
   function close(name) {
     if (active !== name) return;
@@ -54,6 +56,7 @@ export function createMenus({api, onChanged}) {
       }
       else await editor.open(name === 'settings', preferred);
       if (name === 'settings') await action.commit(() => models.open());
+      if (name === 'settings') await action.commit(() => youtube.open());
     } catch(error) {
       reportError(error, 'Меню Око');
       action.commit(() => {byId(name === 'add' ? 'add-message' : 'settings-message').textContent = error.message;});
@@ -81,11 +84,11 @@ export function createMenus({api, onChanged}) {
     };
   }
   return {
-    status: editor.status,
+    status(state) {editor.status(state.initial_histories || []); youtube.status(state.youtube);},
     sources: editor.sources,
     openFeed: (id, trigger) => open('feeds', trigger, 'feed/' + id),
     stop() {
-      stopped = true; leave(); editor.stop(); models.stop(); rss.stop(); telegram.stop(); opml.stop();
+      stopped = true; leave(); editor.stop(); models.stop(); youtube.stop(); rss.stop(); telegram.stop(); opml.stop();
       for (const name of ['add', 'feeds', 'settings']) {byId(name + '-dialog').close(); byId(name + '-open').disabled = true;}
     },
   };

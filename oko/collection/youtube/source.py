@@ -12,6 +12,7 @@ import httpx
 from oko.collection.rss import RSSSource, Entry, entries
 from oko.collection.contracts import SourceError, SourceSkipped
 from oko.collection.contracts import Image, Material, Publication
+from oko.collection.youtube.access import CaptionsBlocked
 
 
 class CaptionsClient(Protocol):
@@ -20,13 +21,20 @@ class CaptionsClient(Protocol):
 
 class LocalCaptions:
     """Bound the synchronous SDK in an owned, cancellable, content-free worker."""
+    def __init__(self, proxy: str | None = None) -> None:
+        self.proxy = proxy
+
     async def fetch(self, video: str) -> str | None:
         process = await asyncio.create_subprocess_exec(
             sys.executable, '-m', 'oko.collection.youtube.worker', video,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         assert process.stdout is not None
         try:
             async with asyncio.timeout(60):
+                assert process.stdin is not None
+                process.stdin.write(json.dumps(dict(proxy=self.proxy)).encode())
+                await process.stdin.drain()
+                process.stdin.close()
                 raw = bytearray()
                 while chunk := await process.stdout.read(65536):
                     raw.extend(chunk)
@@ -39,7 +47,9 @@ class LocalCaptions:
             if result.get('skip'):
                 raise SourceSkipped('Анонс будущей трансляции пропущен')
             if result.get('error'):
-                raise SourceError.from_worker('Не удалось получить субтитры; повторите загрузку', result)
+                if result.get('blocked'):
+                    raise CaptionsBlocked(float(result.get('retry_after', 0)))
+                raise SourceError.from_worker('Не удалось получить субтитры; проверьте подключение и повторите загрузку', result)
             text = result['text']
             if text is not None and not isinstance(text, str):
                 raise ValueError('text')
@@ -81,7 +91,7 @@ class YouTubeSource(RSSSource):
         return [replace(p, teaser=replace(p.teaser, text='', description=p.teaser.text))
                 if p.teaser else p for p in publications], next_cursor
 
-    async def fetch(self, publication: Publication) -> Material:
+    async def fetch(self, publication: Publication, *, captions: CaptionsClient | None = None, request_captions: bool = True) -> Material:
         if not re.fullmatch(r'[A-Za-z0-9_-]{11}', publication.id):
             raise SourceError('Неверный ID YouTube')
         batch = await self.read_entries()
@@ -91,15 +101,19 @@ class YouTubeSource(RSSSource):
         text, state, reason = '', 'not_requested', 'Субтитры не запрошены: включите тезисы или высокую важность'
         if publication.teaser and publication.teaser.captions == 'available':
             text, state, reason = publication.teaser.text, 'available', ''
-        elif self.want_captions:
+        elif self.want_captions and request_captions:
             try:
-                transcript = await self.captions_client.fetch(publication.id)
+                transcript = await (captions or self.captions_client).fetch(publication.id)
                 text, state, reason = ((transcript, 'available', '') if transcript else ('', 'unavailable', 'Субтитры недоступны'))
             except SourceSkipped:
                 raise
             except SourceError as error:
                 record_caught('source.fetch')
                 state, reason = 'error', error.label
+        elif self.want_captions and publication.teaser:
+            text, state, reason = publication.teaser.text, publication.teaser.captions or 'error', publication.teaser.reason
+            if state == 'not_requested' or not publication.teaser.captions:
+                state, reason = 'error', 'Попытки получения субтитров исчерпаны; повторите загрузку'
         images: list[Image] = []
         preview_complete = True
         try:

@@ -139,8 +139,16 @@ def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_pa
             return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
         assert request.url.path == '/feeds/videos.xml'
         return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>Учёба</title>' + ''.join(f'<entry><id>yt:video:{video}</id><title>{video}</title><link href="https://www.youtube.com/watch?v={video}"/><published>2025-10-0{n}T12:00:00Z</published></entry>' for n, video in enumerate(['abcdefghijk', 'lmnopqrstuv', 'wxyzabcdefg'], 1)) + '</feed>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+    clock = [100.0]
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), clock=lambda: clock[0], wall_clock=lambda: clock[0], lease=60), headers=HEADERS) as client:
         feed = add(client, verify(client, YOUTUBE), initial_history={'mode': 'count', 'count': 2}).json()
+        for _ in range(100):
+            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
+            if history['loaded'] == 1:
+                break
+            time.sleep(.02)
+        assert history['loaded'] == 1
+        clock[0] += 10
         for _ in range(100):
             history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
             if history['loaded'] == 2:

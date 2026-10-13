@@ -27,6 +27,7 @@ from oko.storage.store import Job, Store
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram, TelegramPeer
 from oko.subscriptions.subscriptions import AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, identify
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions
+from oko.collection.youtube.access import CaptionsBlocked, CaptionsDeferred, proxy_url
 from oko.diagnostics import Journal, active_journal, diagnostic_source, capture_scope, record_caught
 
 T = TypeVar('T')
@@ -42,8 +43,10 @@ class ActionError(Exception):
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None) -> None:
+                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, wall_clock: Callable[[], float] = time.time) -> None:
         self._youtube_captions = youtube_captions or LocalCaptions()
+        self._wall_clock = wall_clock
+        self._captions_active = False
         self._codex_client = codex_client or LocalCodex()
         self._codex_status = codex_status()
         self._ai_transport = ai_transport
@@ -182,6 +185,7 @@ class Runtime:
 
     def status(self) -> dict[str, Any]:
         state: dict[str, Any] = self._store.status() if self._store and not self.stopped else dict(jobs=[], errors=[], deleting=False)
+        state['youtube'] = self.youtube_status() if self._store and not self.stopped else None
         pending = any(j['status'] in ('pending', 'running') for j in state['jobs'])
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
@@ -242,6 +246,19 @@ class Runtime:
         async with self._actions:
             if not self.require_store().retry_material(item):
                 raise ActionError('missing', 'Материал недоступен')
+
+    def youtube_status(self) -> dict[str, Any]:
+        return self.require_store().youtube.status(self._wall_clock())
+
+    async def configure_youtube(self, body: Any) -> dict[str, Any]:
+        async with self._actions:
+            current = self.require_store()
+            try:
+                current.youtube.configure(body)
+            except ValueError:
+                raise ActionError('invalid', 'Некорректные настройки прокси: нужен HTTP/HTTPS-адрес без учётных данных, пути и параметров', expected=True) from None
+            await self._cancel()
+            return self.youtube_status()
 
     async def create_digest(self, scope: str, owner: str, body: DigestRequest) -> str:
         async with self._actions:
@@ -733,12 +750,20 @@ class Runtime:
             elif publication:
                 if isinstance(source, (RSSSource, TelegramSource)) and bool(publication.members) != isinstance(source, TelegramSource):
                     raise SourceError('Материал получен другим способом; верните исходный транспорт для загрузки')
-                material = await source.fetch(publication)
+                caption_attempt = CaptionAttempt(self, current, job) if isinstance(source, YouTubeSource) else None
+                material = (await source.fetch(publication, captions=caption_attempt, request_captions=not current.youtube.terminal(job.item))
+                            if isinstance(source, YouTubeSource) else await source.fetch(publication))
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
                         current.save(job, material, self._clock())
+                        if caption_attempt and caption_attempt.attempted and not caption_attempt.blocked:
+                            current.youtube.completed(job.item, material.captions == 'available')
+                        if caption_attempt and caption_attempt.retry:
+                            current.youtube.defer(job, self._clock(), current.youtube.ready_at() - self._wall_clock(), 'Получение субтитров приостановлено: YouTube ограничил запросы')
                         current.read_sync.sync()
                         current.feed_status(feed, error=None, gap=getattr(source, 'gap', None), changes=getattr(source, 'changes', None))
+        except CaptionsDeferred:
+            pass
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -827,3 +852,46 @@ class Runtime:
                 self._closed = True
             self._shutdown()
             active_journal.reset(journal_context)
+
+
+class CaptionAttempt:
+    """One runtime-owned caption call; waiting releases the collection slot."""
+    def __init__(self, runtime: Runtime, store: Store, job: Job) -> None:
+        self.runtime, self.store, self.job = runtime, store, job
+        self.retry = False
+        self.attempted = False
+        self.blocked = False
+
+    def current(self) -> bool:
+        return self.runtime._store is self.store and self.runtime._live() and self.store.valid(self.job)
+
+    async def fetch(self, video: str) -> str | None:
+        runtime, store, job = self.runtime, self.store, self.job
+        async with runtime._actions:
+            if not self.current():
+                raise asyncio.CancelledError
+            delay = store.youtube.ready_at() - runtime._wall_clock()
+            if delay > 0 or runtime._captions_active:
+                store.youtube.defer(job, runtime._clock(), max(delay, .1), 'Ожидание допуска получения субтитров')
+                raise CaptionsDeferred
+            config = store.youtube.config()
+            client = LocalCaptions(proxy_url(config)) if isinstance(runtime._youtube_captions, LocalCaptions) else runtime._youtube_captions
+            store.youtube.start(job.item, runtime._wall_clock())
+            self.attempted = True
+            runtime._captions_active = True
+        try:
+            try:
+                text = await client.fetch(video)
+            except CaptionsBlocked as error:
+                async with runtime._actions:
+                    if not self.current():
+                        raise asyncio.CancelledError
+                    self.retry = store.youtube.blocked(job, runtime._wall_clock(), error.retry_after)
+                    self.blocked = True
+                raise
+            async with runtime._actions:
+                if not self.current():
+                    raise asyncio.CancelledError
+            return text
+        finally:
+            runtime._captions_active = False

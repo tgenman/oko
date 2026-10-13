@@ -1,0 +1,269 @@
+import asyncio
+import json
+import stat
+import threading
+import time
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from oko.collection.contracts import SourceError
+from oko.collection.youtube.access import CaptionsBlocked
+from tests.support.app import create_app
+from tests.support.youtube import CHANNEL, PNG, VIDEO, feed_xml
+
+HEADERS = {'Authorization': 'Bearer test'}
+
+
+class Clock:
+    tick = 100.0
+    wall = 1_900_000_000.0
+
+    def advance(self, seconds):
+        self.tick += seconds
+        self.wall += seconds
+
+
+class Captions:
+    def __init__(self, clock, outcomes):
+        self.clock, self.outcomes, self.calls = clock, list(outcomes), []
+
+    async def fetch(self, video):
+        self.calls.append((video, self.clock.wall))
+        result = self.outcomes.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def external(request):
+    if request.url.host == 'i.ytimg.com':
+        return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
+    if request.url.host == 'rss.test':
+        return httpx.Response(200, text='<rss><channel><title>Другой источник</title><item><guid>one</guid><title>Статья</title><link>https://rss.test/article</link><description>Текст</description></item></channel></rss>' if request.url.path == '/feed' else '<article>Независимый текст</article>')
+    channel = request.url.params.get('channel_id') or 'UC' + request.url.params.get('playlist_id', '')[4:]
+    video = VIDEO if channel == CHANNEL else 'lmnopqrstuv'
+    return httpx.Response(200, text=feed_xml().replace(VIDEO, video))
+
+
+def app(root, clock, captions):
+    return create_app(root, token='test', clock=lambda: clock.tick, wall_clock=lambda: clock.wall,
+                      lease=1_000_000, grace=1_000_000, rss_enabled=True,
+                      rss_transport=httpx.MockTransport(external), youtube_captions=captions)
+
+
+def add(client, channel=CHANNEL):
+    url = f'https://www.youtube.com/feeds/videos.xml?channel_id={channel}' if channel.startswith('UC') else channel
+    response = client.post('/api/import', json={'opml': f'<opml><body><outline text="Тема"><outline text="Источник" xmlUrl="{url}"/></outline></body></opml>'})
+    assert response.status_code == 200, response.text
+    feed = next(f for f in response.json()['feeds'] if url in f['original_urls'])
+    if channel.startswith('UC'):
+        client.patch('/api/feeds/' + feed['id'], json={'importance': 'high'})
+    return feed['id']
+
+
+def eventually(predicate):
+    for _ in range(300):
+        result = predicate()
+        if result:
+            return result
+        time.sleep(.01)
+    raise AssertionError('Condition did not become true')
+
+
+def materials(client):
+    return [client.get('/api/materials/' + row['id']).json() for row in client.get('/api/cards').json()]
+
+
+def heartbeat(client):
+    assert client.post('/api/tabs/reader/heartbeat').status_code == 200
+
+
+def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
+    clock = Clock()
+    captions = Captions(clock, ['Первый текст', 'Второй текст'])
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        add(client)
+        add(client, 'UC' + 'b' * 22)
+        heartbeat(client)
+        eventually(lambda: len(captions.calls) == 1 and any(m.get('captions') == 'available' for m in materials(client)))
+        add(client, 'https://rss.test/feed')
+        eventually(lambda: any(m.get('text') == 'Независимый текст' for m in materials(client)))
+        assert len(captions.calls) == 1
+        saved = next(m for m in materials(client) if m.get('captions') == 'available')
+        client.post('/api/materials/' + saved['id'] + '/retry')
+        eventually(lambda: not client.get('/api/materials/' + saved['id']).json().get('loading'))
+        assert len(captions.calls) == 1
+        clock.advance(9.9)
+        time.sleep(.1)
+        assert len(captions.calls) == 1
+        clock.advance(.1)
+        eventually(lambda: len(captions.calls) == 2)
+        assert captions.calls[1][1] - captions.calls[0][1] >= 10
+
+
+def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
+    clock = Clock()
+    captions = Captions(clock, [CaptionsBlocked(), 'После паузы', 'Следующий'])
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        add(client)
+        add(client, 'UC' + 'b' * 22)
+        heartbeat(client)
+        eventually(lambda: client.get('/api/youtube').json()['paused'])
+        item = eventually(lambda: next((m for m in materials(client) if m.get('captions') == 'error'), None))
+        assert client.get('/api/youtube').json()['next_at'] == clock.wall + 900
+        client.post('/api/materials/' + item['id'] + '/retry')
+        client.put('/api/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
+        add(client, 'https://rss.test/feed')
+        eventually(lambda: any(m.get('text') == 'Независимый текст' for m in materials(client)))
+        assert len(captions.calls) == 1
+    clock.tick = 0  # A new monotonic origin must not expire the durable pause.
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        heartbeat(client)
+        clock.advance(899)
+        time.sleep(.1)
+        assert len(captions.calls) == 1
+        assert client.get('/api/youtube').json()['paused']
+        clock.advance(1)
+        eventually(lambda: len(captions.calls) == 2 and client.get('/api/youtube').json()['strikes'] == 0)
+        time.sleep(.1)
+        assert len(captions.calls) == 2
+        clock.advance(10)
+        eventually(lambda: len(captions.calls) == 3)
+
+
+def test_exhausted_blocked_material_needs_explicit_retry(tmp_path):
+    clock = Clock()
+    captions = Captions(clock, [CaptionsBlocked(), CaptionsBlocked(), CaptionsBlocked(), 'Успех'])
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        add(client)
+        heartbeat(client)
+        for count, delay in enumerate((900, 1800, 3600), 1):
+            eventually(lambda: len(captions.calls) == count and client.get('/api/youtube').json()['strikes'] == count)
+            assert client.get('/api/youtube').json()['next_at'] == clock.wall + delay
+            clock.advance(delay)
+        client.post('/api/collect')
+        time.sleep(.15)
+        assert len(captions.calls) == 3
+        item = materials(client)[0]
+        assert item['captions'] == 'error'
+        assert not item['loading']
+        client.post('/api/materials/' + item['id'] + '/retry')
+        eventually(lambda: materials(client)[0].get('captions') == 'available')
+        assert len(captions.calls) == 4
+
+
+def test_retry_after_and_backoff_cap(tmp_path):
+    clock = Clock()
+    captions = Captions(clock, [CaptionsBlocked(30_000)] + [CaptionsBlocked() for _ in range(7)])
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        add(client)
+        heartbeat(client)
+        for count, delay in enumerate((30000, 1800, 3600, 7200, 14400, 21600, 21600), 1):
+            eventually(lambda: len(captions.calls) == count and client.get('/api/youtube').json()['next_at'] == clock.wall + delay)
+            item = eventually(lambda: next((m for m in materials(client) if m.get('captions') == 'error'), None))
+            # Explicit cycles let the test exercise the global cap beyond the per-item budget.
+            client.post('/api/materials/' + item['id'] + '/retry')
+            clock.advance(delay)
+
+
+@pytest.mark.parametrize('outcome,state', [(None, 'unavailable'), (SourceError('Сетевой сбой'), 'error')])
+def test_missing_and_network_failure_do_not_pause_or_automatically_retry(tmp_path, outcome, state):
+    clock = Clock()
+    captions = Captions(clock, [outcome, 'Другой материал'])
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        add(client)
+        add(client, 'UC' + 'b' * 22)
+        heartbeat(client)
+        eventually(lambda: any(m.get('captions') == state for m in materials(client)))
+        assert not client.get('/api/youtube').json()['paused']
+        clock.advance(10)
+        eventually(lambda: len(captions.calls) == 2)
+        clock.advance(1000)
+        client.post('/api/collect')
+        time.sleep(.2)
+        assert len(captions.calls) == 2
+
+
+def test_proxy_configuration_redacts_preserves_and_clears_secrets(tmp_path):
+    clock = Clock()
+    captions = Captions(clock, [])
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        assert client.get('/api/youtube').json()['mode'] == 'direct'
+        for bad in ({'mode': 'proxy', 'address': 'socks5://localhost:1'}, {'mode': 'proxy', 'address': 'http://user:secret@proxy.test:1'}, {'password': 123}):
+            response = client.put('/api/youtube', json=bad)
+            assert response.status_code == 400
+            assert 'secret' not in response.text
+        response = client.put('/api/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'username': 'private-user', 'password': 'private-password'})
+        assert response.status_code == 200
+        assert response.json()['has_password']
+        assert 'private-' not in response.text
+        assert not captions.calls
+        assert stat.S_IMODE((tmp_path / 'youtube-proxy.json').stat().st_mode) == 0o600
+        client.put('/api/youtube', json={'mode': 'direct'})
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        config = client.get('/api/youtube').json()
+        assert config['mode'] == 'direct' and config['has_password'] and config['has_username']
+        client.put('/api/youtube', json={'mode': 'proxy'})
+        assert client.get('/api/youtube').json()['has_password']
+        client.put('/api/youtube', json={'clear_credentials': True})
+        assert not client.get('/api/youtube').json()['has_password']
+        assert not client.get('/api/youtube').json()['has_username']
+        assert 'private-' not in json.dumps(client.get('/api/debug').json())
+
+
+def test_proxy_change_rejects_late_block_and_prevents_overlapping_calls(tmp_path):
+    clock = Clock()
+    started, release = threading.Event(), threading.Event()
+
+    class Late:
+        calls = 0
+
+        async def fetch(self, video):
+            self.calls += 1
+            if self.calls > 1:
+                return 'Новое подключение'
+            started.set()
+            while not release.is_set():
+                try:
+                    await asyncio.sleep(.01)
+                except asyncio.CancelledError:
+                    pass
+            raise CaptionsBlocked()
+
+    captions = Late()
+    try:
+        with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+            add(client)
+            heartbeat(client)
+            assert started.wait(3)
+            client.put('/api/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000'})
+            clock.advance(10)
+            time.sleep(.15)
+            assert captions.calls == 1
+            release.set()
+            time.sleep(.1)
+            clock.advance(1)
+            eventually(lambda: materials(client)[0].get('text') == 'Новое подключение')
+            assert not client.get('/api/youtube').json()['paused']
+    finally:
+        release.set()
+
+
+def test_viewed_waiting_material_and_closed_reader_do_not_resume(tmp_path):
+    clock = Clock()
+    captions = Captions(clock, [CaptionsBlocked()])
+    with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        add(client)
+        heartbeat(client)
+        item = eventually(lambda: next((m for m in materials(client) if m.get('captions') == 'error'), None))
+        client.post('/api/tabs/reader/close')
+        clock.advance(900)
+        time.sleep(.1)
+        assert len(captions.calls) == 1
+        client.post('/api/materials/' + item['id'] + '/viewed')
+        heartbeat(client)
+        time.sleep(.1)
+        assert client.get('/api/cards').json() == []
+        assert len(captions.calls) == 1

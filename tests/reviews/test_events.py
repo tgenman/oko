@@ -343,11 +343,15 @@ def test_two_youtube_titles_without_captions_never_enter_event_ai(tmp_path, capt
         if request.url.path == '/feeds/videos.xml':
             return httpx.Response(200, text=xml)
         return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=MissingCaptions(), ai_transport=model_transport(ai)), headers=HEADERS) as client:
+    clock = [100.0]
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=MissingCaptions(), ai_transport=model_transport(ai), clock=lambda: clock[0], wall_clock=lambda: clock[0], lease=60), headers=HEADERS) as client:
         subscribe(client)
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': captions_state != 'not_requested'})
         client.post('/api/tabs/reader/heartbeat')
+        if captions_state != 'not_requested':
+            wait_for(client, lambda: any(x.get('captions') == captions_state and not x.get('loading') for x in client.get('/api/cards').json()))
+            clock[0] += 10  # The second caption operation obeys the global interval.
         wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 2 and all(x.get('captions') == captions_state and not x.get('loading') for x in c))
         time.sleep(.7)
         assert ai == []

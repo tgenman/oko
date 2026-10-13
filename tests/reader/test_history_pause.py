@@ -110,6 +110,7 @@ def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp
     from tests.support.youtube import PNG
     blocked = True
     videos = ['abcdefghijk', 'lmnopqrstuv']
+    clock = [100.0]
     async def reply(request):
         if request.url.host == 'i.ytimg.com':
             if blocked and '/lmnopqrstuv/' in request.url.path:
@@ -117,20 +118,22 @@ def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp
             return httpx.Response(200, content=PNG, headers={'content-type':'image/png'})
         return httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom"><title>Видео</title>' + ''.join(f'<entry><id>yt:video:{v}</id><title>{v}</title><link href="https://www.youtube.com/watch?v={v}"/><published>2025-10-01T12:00:00Z</published></entry>' for v in videos) + '</feed>')
     def reader():
-        return TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=httpx.MockTransport(reply)),headers=HEADERS)
+        return TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=httpx.MockTransport(reply),clock=lambda:clock[0],wall_clock=lambda:clock[0],lease=60),headers=HEADERS)
     with reader() as client:
         feed=add(client,verify(client,YOUTUBE),initial_history=dict(mode='count',count=2)).json()['id']
         wait_history(client,feed,lambda h:h['loaded']==1)
         assert client.patch('/api/feeds/'+feed+'/history',json={'paused':True}).status_code==200
     blocked=False
+    clock[0] += 10
     videos.append('wxyzabcdefg')
     with reader() as client:
         client.post('/api/tabs/reader/heartbeat')
         for _ in range(200):
             cards=client.get('/api/cards').json()
-            if any(c['url'].endswith('wxyzabcdefg') and c['complete'] for c in cards):break
+            if any(c['url'].endswith('wxyzabcdefg') and c['complete'] and not c.get('loading') for c in cards):break
             time.sleep(.01)
-        assert any(c['url'].endswith('wxyzabcdefg') and c['complete'] for c in cards)
+        assert any(c['url'].endswith('wxyzabcdefg') and c['complete'] and not c.get('loading') for c in cards)
         assert wait_history(client,feed,lambda h:h['paused'])['loaded']==1
+        clock[0] += 10
         assert client.patch('/api/feeds/'+feed+'/history',json={'paused':False}).status_code==200
         assert wait_history(client,feed,lambda h:h['state']=='done')['loaded']==2

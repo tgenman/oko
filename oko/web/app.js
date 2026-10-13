@@ -83,7 +83,7 @@ async function refresh() {
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     statusAvailable = true;
     debug.updateStatus(state.debug_count, state.debug_persistence_error, debugRevision);
-    menus.status(state.initial_histories || []);
+    menus.status(state);
     if (state.stopped) { stopUi('Око остановлено'); return; }
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
     const progressMessages = [...new Set([...state.errors, ...readMessages])];
