@@ -88,7 +88,7 @@ test('completed OPML import preserves a newer settings menu, drafts and selected
   try {
     await r.start([]); await objects(r);
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.locator('#setting-prompt_theses').fill('Черновик фида');
     await r.page.locator('#feeds-add').click();
     await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
@@ -116,7 +116,7 @@ test('completed OPML import preserves a newer settings menu, drafts and selected
     await r.page.locator('#feeds-open').click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: one');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик фида');
-    await expect(r.page.getByRole('button',{name:'Импортированный',exact:true})).toBeVisible();
+    await expect(r.page.locator('#feed-tree').getByRole('button', {name:'Импортированный',exact:true})).toBeVisible();
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
@@ -126,16 +126,16 @@ test('object and global drafts are independent, field save preserves other unsav
   try {
     await r.start([]); await objects(r);
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button', {name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.locator('#setting-prompt_theses').fill('Черновик первого');
     await r.page.locator('#setting-prompt_digest').fill('Обзор первого');
     await r.page.locator('#feed-importance').selectOption('high');
-    await r.page.getByRole('button', {name:'two',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Тезисы');
     await r.page.locator('#setting-prompt_theses').fill('Черновик второго');
-    await r.page.getByRole('button', {name:'Учёба',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'Учёба',exact:true}).click();
     await r.page.locator('#setting-prompt_theses').fill('Черновик папки');
-    await r.page.getByRole('button', {name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик первого');
     await expect(r.page.locator('#feed-importance')).toHaveValue('high');
     await r.page.evaluate(() => {
@@ -158,7 +158,7 @@ test('object and global drafts are independent, field save preserves other unsav
     await expect(r.page.locator('#llamacpp-model')).toHaveValue('Другая модель');
     await r.page.keyboard.press('Escape');
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button', {name:'two',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик второго');
     const writes = await r.page.evaluate(() => readerTransport.requests.filter(q => ['PATCH','PUT','POST'].includes(q.method) && !q.url.includes('/tabs/') && q.url !== '/api/debug'));
     expect(writes).toEqual([{url:'/api/settings/feed/one',method:'PATCH',body:{prompt_theses:'Черновик первого'}}]);
@@ -182,14 +182,14 @@ test('reconnection drafts belong to each existing Telegram feed without changing
     await r.page.locator('#telegram-peer').fill('@newchannel');
     await r.page.keyboard.press('Escape');
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
     await r.page.locator('#reconnect-peer').fill('@draftone');
     await expect(r.page.locator('#reconnect-history')).toBeHidden();
-    await r.page.getByRole('button',{name:'two',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
     await r.page.locator('#reconnect-peer').fill('@drafttwo');
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
     await expect(r.page.locator('#reconnect-peer')).toHaveValue('@draftone');
     await r.page.keyboard.press('Escape');
@@ -204,13 +204,13 @@ test('late subscription and settings responses cannot replace newer object selec
   try {
     await r.start([]); await objects(r);
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: one');
     await r.page.evaluate(() => {readerTransport.held.set('/api/settings/feed/one',true); readerTransport.held.set('/api/subscriptions',true);});
     await r.page.keyboard.press('Escape');
     await r.page.locator('#feeds-open').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/subscriptions'));
-    await r.page.getByRole('button',{name:'two',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await r.page.evaluate(() => readerTransport.release('/api/subscriptions',readerTransport.replies.get('/api/subscriptions').body));
     await expect(r.page.locator('#settings-owner')).toHaveValue('feed/two');
@@ -227,9 +227,9 @@ test('late subscription and settings responses cannot replace newer object selec
     });
     await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Более новый черновик');
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/settings/feed/one'));
-    await r.page.getByRole('button',{name:'two',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await r.page.evaluate(() => readerTransport.release('/api/settings/feed/one',readerTransport.replies.get('/api/settings/oko/global').body));
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Более новый черновик');
@@ -244,7 +244,7 @@ test('narrow feed menu navigates list and detail, OPML returns to the list witho
     await r.start([]); await objects(r);
     await r.page.locator('#feeds-open').click();
     await expect(r.page.locator('#feed-list')).toBeVisible();
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await expect(r.page.locator('#feed-list')).toBeHidden();
     await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
     await r.page.getByRole('button',{name:'Назад',exact:true}).click();
@@ -278,7 +278,7 @@ test('feed inherited fields show their owner and resetting only one override pre
       readerTransport.replies.set('PATCH /api/settings/feed/one',{body:{}});
     });
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     const theses = r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')});
     const digest = r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_digest')});
     await expect(theses).toContainText('Фид: one');
@@ -304,7 +304,7 @@ test('late failed save cannot replace messages after closing and reopening the s
   try {
     await r.start([]); await objects(r);
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button', {name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.locator('#setting-prompt_theses').fill('Отправлено');
     await r.page.evaluate(() => readerTransport.held.set('/api/settings/feed/one', true));
     await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить поле',exact:true}).click();
@@ -378,7 +378,7 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
     await expect(r.page.locator('#rss-add')).toBeDisabled();
     await r.page.keyboard.press('Escape');
     await r.page.locator('#feeds-open').click();
-    await expect(r.page.getByRole('button',{name:'Новый фид',exact:true})).toBeVisible();
+    await expect(r.page.locator('#feed-tree').getByRole('button', {name:'Новый фид',exact:true})).toBeVisible();
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
@@ -394,10 +394,10 @@ test('pending Telegram accounts configure the newly selected feed', async () => 
       readerTransport.held.set('/api/telegram/accounts',true);
     });
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/accounts'));
-    await r.page.getByRole('button',{name:'two',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
     await r.page.evaluate(() => readerTransport.release('/api/telegram/accounts',['personal']));
     await expect(r.page.locator('#reconnect-peer')).toHaveValue('@twochannel');
@@ -412,7 +412,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
   try {
     await r.start([material('before')]); await objects(r);
     await r.page.locator('#feeds-open').click();
-    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/subscriptions').body);
     let catalogRead = 0, statusRead = 0;
     let heldCatalog, heldStatus;

@@ -17,6 +17,11 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
   };
   const importanceNames = {normal: 'Обычная', elevated: 'Повышенная', high: 'Высокая'};
   let subscriptions = {folders: [], feeds: []};
+  let sourceStatus = [];
+  function sourceHelp() {
+    const target = document.getElementById('source-help');
+    if (target) {target.textContent = sourceStatus.find(s => currentPath === 'feed/' + s.feed_id)?.changes || ''; target.parentElement.hidden = !target.textContent;}
+  }
   let selectedOwner = null, currentPath = null;
   const drafts = new Map();
   const operations = createOperations();
@@ -141,6 +146,7 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
       input.oninput = input.onchange = () => {values[input.id] = input.type === 'checkbox' ? input.checked : input.value;};
     };
     const container = byId('feed-options');
+    const help = element('p'); help.id = 'source-help'; const capabilities = element('details'); capabilities.append(element('summary', 'Возможности проверки изменений'), help); container.append(capabilities); sourceHelp();
     container.append(element('h2', 'Подключение фида'));
     if (feed.initial_history) {
       const progress = element('p', historyProgress(feed.initial_history)); progress.id = 'history-progress'; progress.dataset.feed = feed.id; progress.setAttribute('role', 'status');
@@ -228,6 +234,7 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
     },
     deactivate,
     refresh: loadSubscriptions,
+    sources(status) {sourceStatus = status; sourceHelp();},
     status(histories) {
       const progress = histories.find(history => currentPath === 'feed/' + history.feed_id);
       if (progress) renderHistoryState(progress);

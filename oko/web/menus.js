@@ -82,6 +82,8 @@ export function createMenus({api, onChanged}) {
   }
   return {
     status: editor.status,
+    sources: editor.sources,
+    openFeed: (id, trigger) => open('feeds', trigger, 'feed/' + id),
     stop() {
       stopped = true; leave(); editor.stop(); models.stop(); rss.stop(); telegram.stop(); opml.stop();
       for (const name of ['add', 'feeds', 'settings']) {byId(name + '-dialog').close(); byId(name + '-open').disabled = true;}

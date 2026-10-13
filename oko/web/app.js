@@ -1,3 +1,4 @@
+import {createReadingTree} from './reading-tree.js';
 import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './debug.js';
 import {createOpenedMaterial} from './opened-material.js';
@@ -11,7 +12,9 @@ const bus = new BroadcastChannel('oko-reader');
 let contentEpoch = 0;
 let stopped = false;
 let folderId = null;
+let feedId = null;
 let refreshTimer = null;
+let refreshSequence = 0;
 async function api(path, method = 'GET', body = undefined, signal = undefined) {
   try {
     const response = await fetch('/api/' + path, {method, signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
@@ -34,6 +37,7 @@ const opened = createOpenedMaterial({
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
 const menus = createMenus({api, onChanged: () => {contentEpoch++; refresh();}});
+const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); for (const id of ['compress','folder-viewed','digest-now']) byId(id).disabled = !folderId; refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => {byId('debug-toggle').checked = true; byId('debug-toggle').dispatchEvent(new Event('change'));}});
 function stopUi(message) {
   menus.stop();
   stopped = true;
@@ -67,30 +71,28 @@ async function refresh() {
   clearTimeout(refreshTimer);
   if (stopped) return;
   const epoch = contentEpoch;
+  const sequence = ++refreshSequence;
   const debugRevision = debug.revision();
   try {
     const state = await api('status');
-    if (stopped || epoch !== contentEpoch) return;
+    if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     debug.updateStatus(state.debug_count, state.debug_persistence_error, debugRevision);
     menus.status(state.initial_histories || []);
     if (state.stopped) { stopUi('Око остановлено'); return; }
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
     const progressMessages = [...new Set([...state.errors, ...readMessages])];
     byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (progressMessages.length ? ' · ' + progressMessages.join(', ') : '');
-    const changesOpen = !!byId('source-status').querySelector('details[open]');
-    byId('source-status').replaceChildren(...(state.sources || []).filter(source => source.error || source.gap).map(source => element('p', source.title + ': ' + [source.error, source.gap].filter(Boolean).join(' · '))));
-    const changes = (state.sources || []).filter(source => source.changes);
-    if (changes.length) {
-      const details = element('details'); details.open = changesOpen; details.append(element('summary', 'Возможности проверки изменений'));
-      for (const source of changes) details.append(element('p', source.title + ': ' + source.changes));
-      byId('source-status').append(details);
-    }
+    menus.sources(state.sources || []);
+    const navigation = await api('navigation');
+    if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
+    if (tree.update(navigation, state.sources || [])) return;
     if (state.error) { opened.clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
     if (byId('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);
+    if (feedId) params.set('feed', feedId);
     const cards = await api('cards?' + params);
-    if (stopped || epoch !== contentEpoch) return;
+    if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     opened.reconcile(cards);
     byId('compress').disabled = !folderId;
     byId('folder-viewed').disabled = !folderId;
@@ -103,19 +105,12 @@ async function refresh() {
       const date = document.createElement('small');
       date.textContent = card.published_known === false ? 'Дата неизвестна' : new Date(card.published * 1000).toLocaleString('ru');
       button.append(date);
+      if (card.sources?.length) {const sources = element('small', [...new Set(card.sources.map(s => s.title || s.feed_id).filter(Boolean))].join(', ')); button.append(sources);}
       button.onclick = () => opened.open(card);
       return button;
     }));
-    const folders = await api('folders');
-    if (stopped || epoch !== contentEpoch) return;
-    byId('folders').replaceChildren(...folders.map(folder => {
-      const button = document.createElement('button');
-      button.textContent = `${folder.title} · ${folder.count}`;
-      button.classList.toggle('active', folder.id === folderId);
-      button.onclick = () => { folderId = folder.id; contentEpoch++; opened.clear(); refresh(); };
-      return button;
-    }));
-  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch) { opened.clear(); byId('progress').textContent = error.message; } }
+
+  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { opened.clear(); byId('progress').textContent = error.message; } }
   finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
 byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); byId('progress').textContent = error.message; } };
@@ -134,7 +129,7 @@ window.addEventListener('pagehide', () => {
   opened.clear();
 });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
-byId('all-folders').onclick = () => { folderId = null; contentEpoch++; opened.clear(); refresh(); };
+
 byId('sort').onchange = () => { contentEpoch++; refresh(); };
 heartbeat().then(refresh);
 
