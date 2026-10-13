@@ -160,3 +160,43 @@ test('imported Telegram feed uses the same account selection and keeps its feed 
     assert.deepEqual(r.errors, []);
   } finally {await r.close();}
 });
+
+test('pending accounts populate Telegram after leaving and returning to its tab', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.page.evaluate(() => {
+      readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
+      readerTransport.held.set('/api/telegram/accounts', true);
+    });
+    await r.page.locator('#add-open').click();
+    await r.page.locator('#add-telegram-tab').click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/accounts'));
+    await r.page.locator('#add-rss-tab').click();
+    await r.page.locator('#add-telegram-tab').click();
+    await r.page.evaluate(() => readerTransport.release('/api/telegram/accounts', ['personal']));
+    await expect(r.page.locator('#telegram-account')).toHaveValue('personal');
+    await r.page.locator('#telegram-peer').fill('@channel');
+    await expect(r.page.locator('#telegram-add')).toBeEnabled();
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});
+
+test('pending accounts populate Telegram after closing and reopening addition', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.page.evaluate(() => {
+      readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
+      readerTransport.held.set('/api/telegram/accounts', true);
+    });
+    await r.page.locator('#add-open').click();
+    await r.page.locator('#add-telegram-tab').click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/accounts'));
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#add-open').click();
+    await r.page.evaluate(() => readerTransport.release('/api/telegram/accounts', ['personal']));
+    await expect(r.page.locator('#telegram-account')).toHaveValue('personal');
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});

@@ -30,7 +30,7 @@ async function reader() {
       const held = new Map();
       const pending = new Map();
       window.readerTransport = {
-        replies, held, pending, cards: [], requests: [], debugGroups: [],
+        replies, held, pending, native: new Set(), cards: [], requests: [], debugGroups: [],
         release(url, body, status = 200) {
           const resolve = pending.get(url); pending.delete(url); held.delete(url);
           resolve(new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}}));
@@ -39,6 +39,7 @@ async function reader() {
       window.fetch = async (url, options) => {
         const key = String(url);
         window.readerTransport.requests.push({url: key, method: options?.method || 'GET', body: options?.body ? JSON.parse(options.body) : null});
+        if (window.readerTransport.native.has(key)) return nativeFetch(url, options);
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
         const replyKey = (options?.method || 'GET') + ' ' + key;
         if (replies.has(replyKey) || replies.has(key)) {

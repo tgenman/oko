@@ -382,3 +382,64 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
+
+test('pending Telegram accounts configure the newly selected feed', async () => {
+  const r = await reader();
+  try {
+    await r.start([]); await objects(r);
+    await r.page.evaluate(() => {
+      for (const feed of readerTransport.replies.get('/api/subscriptions').body.feeds) {
+        Object.assign(feed, {kind:'telegram', identity:'telegram:' + feed.id + 'channel', telegram_account:'personal', transport:'telegram', auto_read:false});
+      }
+      readerTransport.held.set('/api/telegram/accounts',true);
+    });
+    await r.page.locator('#feeds-open').click();
+    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/accounts'));
+    await r.page.getByRole('button',{name:'two',exact:true}).click();
+    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
+    await r.page.evaluate(() => readerTransport.release('/api/telegram/accounts',['personal']));
+    await expect(r.page.locator('#reconnect-peer')).toHaveValue('@twochannel');
+    await expect(r.page.locator('#reconnect-account')).toHaveValue('personal');
+    await expect(r.page.locator('#reconnect-add')).toBeEnabled();
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});
+
+test('a saved feed updates reading even when navigation cancels its catalog refresh', async () => {
+  const r = await reader();
+  try {
+    await r.start([material('before')]); await objects(r);
+    await r.page.locator('#feeds-open').click();
+    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/subscriptions').body);
+    let catalogRead = 0, statusRead = 0;
+    let heldCatalog, heldStatus;
+    await r.page.route('**/api/subscriptions', async route => {
+      if (++catalogRead === 1) heldCatalog = route;
+      else await route.fulfill({json:subscriptions});
+    });
+    await r.page.route('**/api/status', async route => {
+      if (++statusRead === 1) heldStatus = route;
+      else await route.fulfill({json:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1}});
+    });
+    await r.page.evaluate(() => {
+      readerTransport.native.add('/api/status');
+      readerTransport.native.add('/api/subscriptions');
+      readerTransport.replies.set('PATCH /api/feeds/one',{body:{}});
+    });
+    // An old background read is still pending when the server write completes.
+    await expect.poll(() => Boolean(heldStatus)).toBe(true);
+    await r.page.evaluate(() => {readerTransport.cards = [{id:'after',title:'После сохранения',published:100,folder_id:'f',feed_id:'one'}];});
+    await r.page.locator('#feed-importance').selectOption('high');
+    await r.page.getByRole('button',{name:'Сохранить фид',exact:true}).click();
+    await expect.poll(() => Boolean(heldCatalog)).toBe(true);
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#add-open').click();
+    await expect.poll(() => catalogRead).toBe(2);
+    await expect(r.page.locator('#cards button')).toContainText('После сохранения');
+    await expect(r.page.locator('#add-dialog')).toBeVisible();
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});

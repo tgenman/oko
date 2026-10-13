@@ -15,14 +15,14 @@ export function createMenus({api, onChanged}) {
   const models = createModelSettings({api});
   const context = () => operations.capture();
   async function selected(feed, action) {
-    await editor.refresh();
     onChanged();
+    await editor.refresh();
     await action.commit(() => open('feeds', null, 'feed/' + feed.id));
   }
   const rss = createFeedConnection({api, context, onSelected: selected});
   const telegram = createTelegramConnection({api, context, onConnected: selected});
   const opml = createOpmlImport({api, context, onImported: async action => {
-    await editor.refresh(); onChanged();
+    onChanged(); await editor.refresh();
     await action.commit(async () => {
       byId('feeds-layout').classList.remove('show-detail');
       await open('feeds', null, null);
@@ -46,7 +46,12 @@ export function createMenus({api, onChanged}) {
     if (!byId(name + '-dialog').open) byId(name + '-dialog').showModal();
     const action = operations.begin('open');
     try {
-      if (name === 'add') await editor.refresh();
+      if (name === 'add') {
+        await editor.refresh();
+        action.commit(() => {
+          if (!byId('telegram-connection').hidden && !byId('telegram-account').value) telegram.loadAccounts();
+        });
+      }
       else await editor.open(name === 'settings', preferred);
       if (name === 'settings') await action.commit(() => models.open());
     } catch(error) {
