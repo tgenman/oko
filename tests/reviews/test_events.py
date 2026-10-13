@@ -77,6 +77,7 @@ def test_cross_feed_permissions_folder_boundary_importance_and_sort(tmp_path):
             return httpx.Response(200, text=rss('https://' + request.url.host + '/article'))
         return httpx.Response(200, text='<article>Открылась библиотека</article>')
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), codex_client=service), headers=HEADERS) as client:
+        client.patch('/api/settings/oko/global', json={'theses': False})
         configure_codex(client)
         feeds = []
         for name, folder in [('a', 'Новости'), ('b', 'Новости'), ('c', 'Отдельно')]:

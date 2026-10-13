@@ -63,14 +63,15 @@ async def _probe(binary: str, directory: str, *args: str) -> tuple[int, str]:
 async def diagnose() -> dict[str, Any]:
     result = status()
     result.update(version=None, auth='unchecked')
-    binary = shutil.which('codex')
+    candidate = binary_path()
+    binary = str(candidate) if candidate else None
     if not binary:
         return dict(result, reason='Codex CLI не найден. ' + UNAVAILABLE)
     try:
         # No content, prompt, credentials copy or raw diagnostics are persisted.
         with tempfile.TemporaryDirectory(prefix='oko-codex-check-') as directory:
             code, version = await _probe(binary, directory, '--version')
-            match = re.fullmatch(r'codex-cli (\d+\.\d+\.\d+)', version.strip().splitlines()[-1] if version.strip() else '')
+            match = re.fullmatch(r'codex-cli (\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)', version.strip().splitlines()[-1] if version.strip() else '')
             if code or not match:
                 return dict(result, reason='Не удалось проверить версию Codex. ' + UNAVAILABLE)
             result['version'] = match[1]
@@ -94,11 +95,17 @@ async def diagnose() -> dict[str, Any]:
 # External CLI boundary. Tests replace the service; the real connection always
 # applies the OS profile and owns its child process and scratch directory.
 
-APPROVED_SHA256 = '2c056bf3bd3a0ba04cdaa6d1db84c81974e6785f5fd72deaa2a3fcdcfb573d10'
+APPROVED_SHA256 = '0d5ac7aae20c4eda6242428d5e218c55ba96d8763fda2a271088ff37104b9d28'
 FEATURES = ('shell_tool', 'unified_exec', 'plugins', 'apps', 'memories', 'hooks',
             'multi_agent', 'computer_use', 'browser_use', 'in_app_browser',
             'browser_use_external', 'code_mode', 'code_mode_only',
-            'workspace_dependencies', 'image_generation', 'goals', 'shell_snapshot')
+            'workspace_dependencies', 'image_generation', 'goals', 'shell_snapshot',
+            'code_mode_host', 'code_mode_tool_search', 'remote_plugin', 'plugin_sharing',
+            'in_app_local_automation', 'in_app_chat', 'realtime_conversation',
+            'skill_search', 'skill_mcp_dependency_install', 'mentions_v2', 'tool_suggest',
+            'sleep_tool', 'daemon_auto_start', 'worktrees', 'browser_annotation_api',
+            'browser_use_full_cdp_access', 'view_image', 'unified_exec_tty',
+            'auth_elicitation', 'tool_call_mcp_elicitation')
 
 
 class CodexClient(Protocol):
@@ -107,11 +114,25 @@ class CodexClient(Protocol):
     async def complete(self, prompt: str, schema: dict[str, Any], directory: Path, choice: CodexChoice) -> str: ...
 
 
+BUNDLED_BINARY = Path('/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex')
+
+
+def binary_path() -> Path | None:
+    explicit = os.environ.get('OKO_CODEX_BINARY')
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        return candidate.resolve() if candidate.is_file() else None
+    if BUNDLED_BINARY.is_file():
+        return BUNDLED_BINARY.resolve()
+    installed = shutil.which('codex')
+    return Path(installed).resolve() if installed else None
+
+
 def supported_binary() -> Path | None:
-    path = shutil.which('codex')
+    path = binary_path()
     if sys.platform != 'darwin' or not path or not Path('/usr/bin/sandbox-exec').exists():
         return None
-    binary = Path(path).resolve()
+    binary = path.resolve()
     try:
         with binary.open('rb') as handle:
             digest = hashlib.file_digest(handle, 'sha256').hexdigest()
@@ -331,7 +352,18 @@ class LocalCodex:
                     with closing(sqlite3.connect('file:' + str(log) + '?mode=ro', uri=True)) as db:
                         if db.execute('SELECT count(*) FROM logs').fetchone()[0]:
                             raise ProcessingError('Codex создал журнал; результат не принят')
-                allowed = {'schema.json', 'state_5.sqlite', 'state_5.sqlite-wal', 'state_5.sqlite-shm',
+                queue = work / 'queue_1.sqlite'
+                if queue.exists():
+                    try:
+                        with closing(sqlite3.connect('file:' + str(queue) + '?mode=ro', uri=True)) as db:
+                            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                            if tables - {'_sqlx_migrations', 'sqlite_sequence', 'queued_items', 'queued_thread_revisions'}:
+                                raise ProcessingError('Codex создал неизвестную очередь; результат не принят')
+                            if any(db.execute('SELECT count(*) FROM ' + table).fetchone()[0] for table in ('queued_items', 'queued_thread_revisions')):
+                                raise ProcessingError('Codex сохранил задания в очереди; результат не принят')
+                    except sqlite3.Error:
+                        raise ProcessingError('Очередь Codex не проверена; результат не принят') from None
+                allowed = {'queue_1.sqlite', 'queue_1.sqlite-wal', 'queue_1.sqlite-shm', 'schema.json', 'state_5.sqlite', 'state_5.sqlite-wal', 'state_5.sqlite-shm',
                            'logs_2.sqlite', 'logs_2.sqlite-wal', 'logs_2.sqlite-shm',
                            'memories_1.sqlite', 'memories_1.sqlite-wal', 'memories_1.sqlite-shm',
                            'goals_1.sqlite', 'goals_1.sqlite-wal', 'goals_1.sqlite-shm'}

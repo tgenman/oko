@@ -34,6 +34,7 @@ def fake_cli(tmp_path, monkeypatch, body):
     script.write_text('#!/bin/sh\n' + body)
     script.chmod(0o700)
     monkeypatch.setenv('PATH', str(binary))
+    monkeypatch.setenv('OKO_CODEX_BINARY', str(script))
     return script
 
 
@@ -65,6 +66,7 @@ esac
 
 def test_missing_cli_is_a_visible_blocker_without_local_model_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv('PATH', str(tmp_path))
+    monkeypatch.setenv('OKO_CODEX_BINARY', str(tmp_path / 'missing-codex'))
     with TestClient(create_app(tmp_path / 'store', source=DemoSource(), token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
         setup_reader(client, theses=True)
         result = client.post('/api/processors/codex/check').json()
@@ -285,3 +287,21 @@ def test_large_cli_output_cannot_block_connection_check(tmp_path,monkeypatch):
                     pending.result(timeout=3)
             assert response.status_code==200
             assert 'Проверка Codex не завершена' in response.json()['reason']
+
+
+def test_current_cli_prerelease_version_is_reported_without_losing_patch_suffix(tmp_path, monkeypatch):
+    from oko.processing.codex import LocalCodex
+    fake_cli(tmp_path, monkeypatch, """
+case "$*" in
+  --version) echo 'codex-cli 0.162.0-alpha.17.2' ;;
+  'exec --help') echo '--ephemeral --ignore-user-config --ignore-rules --output-schema' ;;
+  'login status') echo 'Logged in using ChatGPT' ;;
+  *) exit 99 ;;
+esac
+""")
+    with TestClient(create_app(tmp_path / 'store', token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
+        client.post('/api/tabs/reader/heartbeat')
+        response = client.post('/api/processors/codex/check')
+        assert response.status_code == 200
+        assert response.json()['version'] == '0.162.0-alpha.17.2', response.json()
+        assert response.json()['available'] is False  # Synthetic binary is not approved.
