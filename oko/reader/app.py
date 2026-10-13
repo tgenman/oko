@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.codex import CodexClient
@@ -25,6 +25,8 @@ from oko.storage.store import Store
 from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
+from oko.reader.static import install_frontend
+from oko.reader.contracts import Navigation, Card, Material, Version, Status
 from oko.collection.youtube.source import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.subscriptions.history import InitialHistory
@@ -170,7 +172,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                             stream_id=body.stream_id, sequence=body.sequence)
         return dict(ok=not bool(journal.persistence_error), group=group, entry=next((entry for entry in journal.entries() if entry['id'] == group), None), persistence_error=journal.persistence_error)
 
-    @app.get('/api/status')
+    @app.get('/api/status', response_model=Status, response_model_exclude_unset=True)
     async def status() -> dict[str, Any]:
         return dict(runtime.status(), debug_count=len(journal.records), debug_persistence_error=journal.persistence_error)
 
@@ -283,10 +285,6 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise ActionError('invalid', 'Некорректные настройки прокси', expected=True) from None
         return await runtime.configure_youtube(body)
 
-    @app.get('/youtube-settings.js')
-    async def youtube_settings_script() -> FileResponse:
-        return FileResponse(web / 'youtube-settings.js', media_type='text/javascript')
-
     @app.get('/api/settings/{scope}/{owner}')
     async def effective_settings(scope: str, owner: str) -> dict[str, Any]:
         try:
@@ -318,11 +316,11 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def folders() -> list[dict[str, Any]]:
         return store().reading.navigation()['folders']
 
-    @app.get('/api/navigation')
+    @app.get('/api/navigation', response_model=Navigation, response_model_exclude_unset=True)
     async def navigation() -> dict[str, Any]:
         return dict(store().reading.navigation())
 
-    @app.get('/api/cards')
+    @app.get('/api/cards', response_model=list[Card], response_model_exclude_unset=True)
     async def cards(folder: str | None = None, feed: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest', show_hidden: bool = False) -> list[dict[str, Any]]:
         result = store().reading.cards(show_hidden, folder, feed)
         if sort == 'importance':
@@ -375,7 +373,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise HTTPException(404, 'Вложение недоступно')
         return Response(path.read_bytes(), media_type=media['mime'], headers={'Content-Disposition': 'inline'})
 
-    @app.get('/api/materials/{item}/versions/{number}')
+    @app.get('/api/materials/{item}/versions/{number}', response_model=Version, response_model_exclude_unset=True)
     async def previous_version(item: str, number: int) -> dict[str, Any]:
         result = store().versions.read(item, number)
         if result is None:
@@ -402,7 +400,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise HTTPException(404, 'Вложение недоступно')
         return Response(path.read_bytes(), media_type=mime)
 
-    @app.get('/api/materials/{item}')
+    @app.get('/api/materials/{item}', response_model=Material, response_model_exclude_unset=True)
     async def material(item: str) -> dict[str, Any]:
         result = store().reading.material(item)
         if not result:
@@ -428,78 +426,6 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         await runtime.viewed(item)
         return {'ok': True}
 
-    web = Path(__file__).resolve().parents[1] / 'web'
-
-    @app.get('/')
-    async def index() -> FileResponse:
-        return FileResponse(web / 'index.html')
-
-    @app.get('/app.js')
-    async def js() -> FileResponse:
-        return FileResponse(web / 'app.js', media_type='text/javascript')
-
-    @app.get('/reading-tree.js')
-    async def reading_tree_js() -> FileResponse:
-        return FileResponse(web / 'reading-tree.js', media_type='text/javascript')
-
-    @app.get('/material-list.js')
-    async def material_list_js() -> FileResponse:
-        return FileResponse(web / 'material-list.js', media_type='text/javascript')
-
-    @app.get('/debug.js')
-    async def debug_js() -> FileResponse:
-        return FileResponse(web / 'debug.js', media_type='text/javascript')
-
-    @app.get('/initial-history.js')
-    async def initial_history_module() -> FileResponse:
-        return FileResponse(web / 'initial-history.js', media_type='text/javascript')
-
-    @app.get('/youtube-history.js')
-    async def youtube_history_module() -> FileResponse:
-        return FileResponse(web / 'youtube-history.js', media_type='text/javascript')
-
-    @app.get('/feed-connection.js')
-    async def feed_connection_js() -> FileResponse:
-        return FileResponse(web / 'feed-connection.js', media_type='text/javascript')
-
-    @app.get('/opened-material.js')
-    async def opened_material_js() -> FileResponse:
-        return FileResponse(web / 'opened-material.js', media_type='text/javascript')
-
-    @app.get('/telegram-connection.js')
-    def telegram_connection_js() -> FileResponse:
-        return FileResponse(web / 'telegram-connection.js', media_type='text/javascript')
-
-    @app.get('/controls.js')
-    async def controls_js() -> FileResponse:
-        return FileResponse(web / 'controls.js', media_type='text/javascript')
-
-    @app.get('/ui-operations.js')
-    async def ui_operations_js() -> FileResponse:
-        return FileResponse(web / 'ui-operations.js', media_type='text/javascript')
-
-    @app.get('/menus.js')
-    async def menus_js() -> FileResponse:
-        return FileResponse(web / 'menus.js', media_type='text/javascript')
-
-    @app.get('/settings-editor.js')
-    async def settings_editor_js() -> FileResponse:
-        return FileResponse(web / 'settings-editor.js', media_type='text/javascript')
-
-    @app.get('/codex-settings.js')
-    async def codex_settings_script() -> FileResponse:
-        return FileResponse(web / 'codex-settings.js', media_type='text/javascript')
-
-    @app.get('/model-settings.js')
-    async def model_settings_js() -> FileResponse:
-        return FileResponse(web / 'model-settings.js', media_type='text/javascript')
-
-    @app.get('/opml-import.js')
-    async def opml_import_js() -> FileResponse:
-        return FileResponse(web / 'opml-import.js', media_type='text/javascript')
-
-    @app.get('/style.css')
-    async def css() -> FileResponse:
-        return FileResponse(web / 'style.css', media_type='text/css')
+    install_frontend(app)
 
     return app

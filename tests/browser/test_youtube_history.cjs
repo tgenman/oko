@@ -102,7 +102,7 @@ test('reopened first history gets progress and resume after a late response', as
  await r.page.evaluate(()=>{
   const t=readerTransport,history={feed_id:'A',mode:'count',count:60,loaded:0,available:0,state:'waiting',paused:false,discovery_error:'limit'};
   t.replies.get('/api/subscriptions').body.feeds[0].initial_history=history;
-  t.replies.set('/api/status',{body:{initial_histories:[history],sources:[]}});
+  t.replies.set('/api/status',{body:{stage:'Ожидание',errors:[],ready_sources:1,total_sources:1,initial_histories:[history],sources:[]}});
   t.release('/api/feeds/A/history',history);
  });
  await expect(r.page.locator('#youtube-history-start')).toBeDisabled();

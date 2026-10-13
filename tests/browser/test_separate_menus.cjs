@@ -434,7 +434,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     });
     // An old background read is still pending when the server write completes.
     await expect.poll(() => Boolean(heldStatus)).toBe(true);
-    await r.page.evaluate(() => {readerTransport.replies.get('/api/cards').body = [{id:'after',title:'После сохранения',published:100,folder_id:'f',feed_id:'one'}];});
+    await r.page.evaluate(() => {readerTransport.replies.get('/api/cards').body = [{id:'after',title:'После сохранения',published:100,folder_id:'f',feed_id:'one',url:'https://example.org/after',complete:true}];});
     await r.page.locator('#feed-importance').selectOption('high');
     await r.page.getByRole('button',{name:'Сохранить фид',exact:true}).click();
     await expect.poll(() => Boolean(heldCatalog)).toBe(true);

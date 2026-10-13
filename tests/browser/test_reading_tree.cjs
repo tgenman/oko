@@ -37,7 +37,7 @@ test('tree keeps current choice across moves and deletion and rejects late cards
   await r.page.waitForFunction(()=>readerTransport.pending.has('/api/cards?sort=newest&feed=feed'));
   await r.page.locator('#all-folders').click();
   await expect(r.page.locator('#cards button')).toHaveCount(2);
-  await r.page.evaluate(()=>readerTransport.release('/api/cards?sort=newest&feed=feed',[{id:'late',title:'Late reply'}]));
+  await r.page.evaluate(()=>readerTransport.release('/api/cards?sort=newest&feed=feed',[{...readerTransport.replies.get('/api/cards').body[0],id:'late',title:'Late reply'}]));
   await expect(r.page.locator('#cards')).not.toContainText('Late reply');
   await r.page.locator('[data-feed="feed"]').click();
   await r.page.evaluate(()=>{const n=readerTransport.replies.get('/api/navigation').body;n.feeds=[];});
@@ -77,7 +77,7 @@ test('width, focus, source warning and settings help remain separate from select
 
 test('tree uses publication counts, alphabetical feeds and compact local icons', async () => {
  const r=await reader(); try {
-  await r.start([material('group',{event:true,sources:[{id:'one',feed_id:'a',title:'Альфа'},{id:'two',feed_id:'b',title:'Бета'}]})]);
+  await r.start([material('group',{event:{members:['one','two'],title:'Событие',points:[],updates:[],conflicts:[]},sources:[material('one',{feed_id:'a',title:'Альфа'}),material('two',{feed_id:'b',title:'Бета'})]})]);
   await r.page.evaluate(()=>{
    readerTransport.replies.set('/api/navigation',{body:{count:45,folders:[{id:'f',title:'Наука',count:45},{id:'empty',title:'Пустая',count:0}],feeds:[{id:'b',title:'Бета',kind:'telegram',folder_id:'f',count:20},{id:'a',title:'Альфа — очень длинное название синтетического YouTube-канала',kind:'youtube',folder_id:'f',count:25},{id:'c',title:'Вести',kind:'rss',folder_id:'f',count:0}]}});
   });

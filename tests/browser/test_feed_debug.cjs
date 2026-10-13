@@ -158,7 +158,7 @@ test('switch works with keyboard and clearing history rejects a late journal res
     await expect(r.page.locator('#debug-empty')).toBeVisible();
     await expect(r.page.locator('#debug-count')).toHaveText('0');
     await r.page.evaluate(groups => readerTransport.release('/api/debug', {groups, persistence_error: ''}), old);
-    await r.page.evaluate(() => readerTransport.release('/api/status', {stage: 'Готово', errors: [], sources: [], debug_count: 31, debug_persistence_error: 'old disk error'}));
+    await r.page.evaluate(() => readerTransport.release('/api/status', {stage: 'Готово', errors: [], sources: [], ready_sources:1, total_sources:1, debug_count: 31, debug_persistence_error: 'old disk error'}));
     await expect(r.page.locator('#debug-errors')).not.toContainText('old error');
     await expect(r.page.locator('#debug-count')).toHaveText('0');
     await expect(r.page.locator('#debug-status')).toHaveText('');

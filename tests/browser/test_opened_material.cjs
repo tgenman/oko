@@ -57,7 +57,7 @@ test('previous version and media delivered after switching never reach the new c
     await expect(r.page.locator('#text')).toHaveText('Текст B');
     await r.page.evaluate(() => {
       readerTransport.release('/api/image-A', 'late image');
-      readerTransport.release('/api/versions/A', {title: 'Прежнее A', text: 'СЕКРЕТ ПРЕЖНЕГО A', images: []});
+      readerTransport.release('/api/versions/A', {title: 'Прежнее A', text: 'СЕКРЕТ ПРЕЖНЕГО A', full:true, reason:'', images: [], attachments:[]});
     });
     await settle(r.page);
     await expect(r.page.locator('#material')).not.toContainText('СЕКРЕТ');
@@ -185,7 +185,7 @@ test('digest originals and previous versions retain images, video and circles', 
       readerTransport.replies.set('/api/image', {base64: png, mime: 'image/png'});
       readerTransport.replies.set('/api/video', {base64, mime: 'video/webm'});
       readerTransport.replies.set('/api/circle', {base64, mime: 'video/webm'});
-      readerTransport.replies.set('/api/previous', {body: {title: 'Предыдущий заголовок', text: 'Предыдущий текст', images: ['/api/image'], attachments: []}});
+      readerTransport.replies.set('/api/previous', {body: {title: 'Предыдущий заголовок', text: 'Предыдущий текст', full:true, reason:'', images: ['/api/image'], attachments: []}});
     }, {base64, png});
     await r.page.getByRole('button', {name: /^Обзор/}).click();
     await expect(r.page.locator('#event-body')).toContainText('Тезис обзора');

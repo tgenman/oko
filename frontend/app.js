@@ -3,10 +3,12 @@ import {createReadingTree} from './reading-tree.js';
 import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './debug.js';
 import {createOpenedMaterial} from './opened-material.js';
+import {createTransport} from './transport.js';
 
 'use strict';
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
-const debug = createDebugPanel({token});
+const transport = createTransport({fetch:window.fetch.bind(window), token, origin:location.origin});
+const debug = createDebugPanel({token, transport});
 const tab = crypto.randomUUID();
 const byId = id => document.getElementById(id);
 const bus = new BroadcastChannel('oko-reader');
@@ -19,26 +21,17 @@ let refreshSequence = 0;
 let readingCatalog = {folders:[], feeds:[]};
 async function api(path, method = 'GET', body = undefined, signal = undefined) {
   try {
-    const response = await fetch('/api/' + path, {method, signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
-    const result = await response.json();
-    if (!response.ok) {
-      const error = new Error(typeof result.detail === 'string' ? result.detail : response.status === 422 ? 'Проверьте значения настроек' : 'Связь с Око потеряна');
-      error.detail = result.detail;
-    error.diagnosticId = response.headers.get('X-Oko-Error');
-    if (response.headers.get('X-Oko-Expected')) error.name = 'AbortError';
-      throw error;
-    }
-    return result;
+    return await transport.json('/api/' + path, method, body, signal);
   } catch (error) { reportError(error, method + ' /api/' + path, true); throw error; }
 }
 
 const opened = createOpenedMaterial({
   api,
-  fetchMedia: (path, signal) => fetch(path, {signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}}),
+  fetchMedia: (path, signal) => transport.media(path, signal, 'no-store'),
   onViewed: id => { contentEpoch++; opened.viewed(id); list.removed(id); bus.postMessage(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
-const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: (path, signal) => fetch(path, {signal, headers: {'Authorization': 'Bearer ' + token}})});
+const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
 const menus = createMenus({api, onChanged: () => {contentEpoch++; refresh();}});
 const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => {byId('debug-toggle').checked = true; byId('debug-toggle').dispatchEvent(new Event('change'));}});
 function stopUi(message) {
@@ -130,7 +123,7 @@ async function heartbeat() {
   if (!stopped) setTimeout(heartbeat, 2000);
 }
 window.addEventListener('pagehide', () => {
-  fetch('/api/tabs/' + tab + '/close', {method:'POST', keepalive:true, headers:{'Authorization':'Bearer '+token}}).catch(error => reportError(error, 'Закрытие вкладки'));
+  transport.close('/api/tabs/' + tab + '/close').catch(error => reportError(error, 'Закрытие вкладки'));
   opened.clear(); list.clear();
 });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });

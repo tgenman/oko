@@ -74,7 +74,7 @@ test('ready material displays old model and offers explicit recreation', async (
   const {material} = require('./support.cjs');
   const r = await reader();
   try {
-    const source = material('one',{ai:{status:'done'},theses:{points:[{text:'Тезис',sources:[{id:'one',url:'https://example.org/one'}]}]},provenance:{processor:'codex',model:'old-model',reasoning_effort:'high',fast:false}});
+    const source = material('one',{ai:{status:'done',error:null},theses:{points:[{text:'Тезис',sources:[{id:'one',url:'https://example.org/one'}]}]},provenance:{processor:'codex',model:'old-model',reasoning_effort:'high',fast:false}});
     await r.start([source]);
     await r.page.locator('#cards button').click();
     await r.page.locator('#processing-details summary').click();

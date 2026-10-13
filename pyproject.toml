@@ -23,3 +23,9 @@ testpaths = ["tests"]
 python_version = "3.11"
 strict = true
 files = ["oko"]
+
+[tool.setuptools.packages.find]
+include = ["oko*", "frontend"]
+
+[tool.setuptools.package-data]
+frontend = ["*.html", "*.css", "*.js", "*.mjs", "**/*.html", "**/*.css", "**/*.js", "**/*.mjs"]

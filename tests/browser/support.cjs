@@ -1,10 +1,18 @@
 const {productionReader} = require('./http-reader.cjs');
 const {expect} = require('playwright/test');
+const {contractFor, validate} = require('./contracts.cjs');
 
 async function reader() {
   const fixture = await productionReader();
   const {page, context, origin, token} = fixture;
+  const schemaFailures = [];
   try {
+    await context.exposeBinding('validateReaderReply', (_, url, method, status, body, alias, record = false) => {
+      const name = alias || contractFor(url, method);
+      if (name && status >= 200 && status < 300) {
+        try {validate(name, body);} catch (error) {if (record) schemaFailures.push(error.message); throw error;}
+      }
+    });
     await context.addInitScript(() => {
       // External transport adapter deliberately ignores cancellation: a late
       // response must be harmless even when abort cannot stop its delivery.
@@ -12,11 +20,16 @@ async function reader() {
       const replies = new Map();
       const held = new Map();
       const pending = new Map();
+      const aliases = new Map();
+      const response = async (url, method, body, status = 200) => {
+        await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
+        return new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
+      };
       window.readerTransport = {
-        replies, held, pending, native: new Set(), requests: [],
+        replies, held, pending, aliases, native: new Set(), requests: [],
         release(url, body, status = 200) {
           const resolve = pending.get(url); pending.delete(url); held.delete(url);
-          resolve(new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}}));
+          resolve(response(url, 'GET', body, status));
         },
       };
       window.fetch = async (url, options) => {
@@ -29,7 +42,7 @@ async function reader() {
         if (reply) {
           for (const [route, next] of reply.next || []) replies.set(route, next);
           if (reply.base64) return new Response(Uint8Array.from(atob(reply.base64), c => c.charCodeAt(0)), {headers: {'Content-Type': reply.mime}});
-          return new Response(JSON.stringify(reply.body), {status: reply.status || 200, headers: {'Content-Type': 'application/json'}});
+          return response(key, method, reply.body, reply.status || 200);
         }
         return nativeFetch(url, options);
       };
@@ -50,13 +63,17 @@ async function reader() {
         t.replies.set('/api/processors/codex/models', {body:{models:[]}});
         const settings = {events: true, event_hours: 24, originals: true, theses: true, digests: false, prompt_theses: 'Тезисы', prompt_digest: 'Темы', prompt_filters: '', schedule: 'off', digest_days: 1, processor: 'codex'};
         t.replies.set('/api/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
-        t.replies.set('/api/cards', {body: materials.map(({text, ...card}) => card)});
-        for (const material of materials) t.replies.set('/api/materials/' + material.id, {body: material});
+        t.replies.set('/api/cards', {body: materials.map(({text, description, display_text, sources, ...card}) => ({...card, ...(sources ? {sources:sources.map(({id,url,feed_id,title})=>({id,url,feed_id,title}))} : {})}))});
+        for (const material of materials) {
+          const {snippet, feed_title, ...opened} = material;
+          t.replies.set('/api/materials/' + material.id, {body: opened});
+          for (const version of [...(material.previous || []), ...(material.sources || []).flatMap(source => source.previous || [])]) t.aliases.set(version.url, 'version');
+        }
       }, materials);
       await target.goto(origin + '/#token=' + token);
       await expect(target.locator('#cards button')).toHaveCount(materials.length);
     }
-  return {...fixture, errors, start};
+  return {...fixture, errors, start, async close() {await fixture.close(); expect(schemaFailures).toEqual([]);}};
   } catch (error) {await fixture.close(); throw error;}
 }
 function material(id, extra = {}) { return {id, title: id, text: 'Текст ' + id, published: 100, folder_id: 'f', feed_id: 'feed', url: 'https://example.org/' + id, complete: true, full: true, version: '1', images: [], attachments: [], ...extra}; }

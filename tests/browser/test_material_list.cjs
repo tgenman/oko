@@ -3,7 +3,7 @@ const {reader, material, expect} = require('./support.cjs');
 
 test('compact rows show excerpts, group types and current area with actions in menu', async () => {
  const r=await reader(); try {
-  await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('event',{event:true,snippet:'Сводка события',sources:[{id:'source',feed_id:'feed',title:'Канал'}]})]);
+  await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('event',{event:{members:['source'],title:'Событие',points:[],updates:[],conflicts:[]},snippet:'Сводка события',sources:[material('source',{title:'Канал'})]})]);
   await expect(r.page.locator('#list-title')).toHaveText('Все материалы');
   await expect(r.page.locator('#count-label')).toHaveText('2 карточки');
   await expect(r.page.locator('#cards .card-snippet').first()).toHaveText('Описание сохранённого видео');
@@ -80,15 +80,15 @@ test('opened YouTube material preserves description separately from captions', a
  } finally {await r.close();}
 });
 
-test('current and previous video descriptions remain available with their own captions', async () => {
+test('current video description and previous captions remain available independently', async () => {
  const r=await reader(); try {
-  await r.page.addInitScript(()=>readerTransport.replies.set('/api/previous-video',{body:{title:'Прежнее видео',description:'Прежнее описание',text:'Прежние субтитры',images:[]}}));
+  await r.page.addInitScript(()=>readerTransport.replies.set('/api/previous-video',{body:{title:'Прежнее видео',text:'Прежние субтитры',full:true,reason:'',images:[],attachments:[]}}));
   await r.start([material('video',{description:'Текущее описание',text:'Текущие субтитры',previous:[{url:'/api/previous-video'}]})]);
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#title')).toHaveText('video');
   await expect(r.page.locator('#description')).toHaveText('Текущее описание');
   await r.page.locator('#versions summary').click();
-  await expect(r.page.locator('#versions')).toContainText('Прежнее описание');
+  await expect(r.page.locator('#description')).toHaveText('Текущее описание');
   await expect(r.page.locator('#versions')).toContainText('Прежние субтитры');
   await expect(r.page.locator('#text')).toHaveText('Текущие субтитры');
   expect(r.errors).toEqual([]);
@@ -101,7 +101,7 @@ test('polling preserves row focus and anchored scroll, and returning restores ar
   await r.start(items);
   await r.page.evaluate(items => {const t=readerTransport;
    t.replies.set('/api/cards?sort=newest&feed=feed',{body:[{...items[0],id:'new',title:'Новый материал',published:2000}, ...items]});
-  }, items.filter((_,index)=>index%2===0));
+  }, items.filter((_,index)=>index%2===0).map(({text,...card})=>card));
   await r.page.locator('[data-card="item-20"]').focus();
   const before=await r.page.locator('[data-card="item-20"]').evaluate(n=>n.getBoundingClientRect().top);
   await r.page.evaluate(()=>readerTransport.replies.get('/api/cards').body.unshift({...readerTransport.replies.get('/api/cards').body[0],id:'new',title:'Новый материал',published:2000}));

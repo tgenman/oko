@@ -31,6 +31,26 @@ def test_ui_command_reports_complete_run(tmp_path):
     assert 'python-tests' not in result.stdout
 
 
+def test_syntax_discovers_nested_frontend_modules(tmp_path):
+    import shutil
+    checkout = tmp_path / 'checkout'
+    (checkout / 'scripts').mkdir(parents=True)
+    (checkout / 'frontend/nested').mkdir(parents=True)
+    shutil.copy(ROOT / 'scripts/check', checkout / 'scripts/check')
+    (checkout / 'frontend/app.js').write_text('')
+    nested = checkout / 'frontend/nested/new.mjs'
+    nested.write_text('')
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'syntax'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert str(nested) in record.read_text()
+
+
 def test_failed_browser_does_not_hide_other_results(tmp_path):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])

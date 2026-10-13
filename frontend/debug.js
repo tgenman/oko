@@ -1,7 +1,7 @@
 let reporter = () => {};
 export function reportError(error, source = 'Браузер', newOccurrence = false) { reporter(error, source, newOccurrence); }
 
-export function createDebugPanel({token}) {
+export function createDebugPanel({token, transport}) {
   const panel = document.getElementById('debug-panel'), list = document.getElementById('debug-errors');
   const status = document.getElementById('debug-status'), toggle = document.getElementById('debug-toggle');
   const seen = new WeakSet();
@@ -12,7 +12,6 @@ export function createDebugPanel({token}) {
   let serverCount = 0, storageError = '', transportError = '';
   let clearing = false, delivery = Promise.resolve();
   const clearButton = document.getElementById('debug-clear');
-  const headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'};
   function clean(value) {
     let text = String(value ?? '');
     if (token) text = text.replaceAll(token, '[session]');
@@ -68,9 +67,7 @@ export function createDebugPanel({token}) {
       while (pending.length && !clearing) {
         const entry = pending[0]; entry.sealed = true;
         const {sealed, ...body} = entry;
-        const response = await fetch('/api/debug', {method: 'POST', cache: 'no-store', headers, body: JSON.stringify(body)});
-        if (!response.ok) throw new Error('Не удалось сохранить диагностику: HTTP ' + response.status);
-        const result = await response.json();
+        const result = await transport.json('/api/debug', 'POST', body);
         if (result.entry) {
           remote = remote.filter(group => group.id !== result.entry.id); remote.push(result.entry);
           revision++;
@@ -111,9 +108,7 @@ export function createDebugPanel({token}) {
     loading = true;
     const stamp = revision;
     try {
-      const response = await fetch('/api/debug', {cache: 'no-store', headers});
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const result = await response.json();
+      const result = await transport.json('/api/debug');
       const groups = Array.isArray(result) ? result : result.groups;
       if (!Array.isArray(groups)) throw new Error('Некорректный ответ журнала');
       if (stamp === revision) {
@@ -133,9 +128,7 @@ export function createDebugPanel({token}) {
     try {
       // Finish an old delivery before deleting it; newer occurrences wait.
       await delivery;
-      const response = await fetch('/api/debug', {method: 'DELETE', cache: 'no-store', headers});
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const result = await response.json();
+      const result = await transport.json('/api/debug', 'DELETE');
       if (!result.ok) throw new Error(result.persistence_error || 'Не удалось сохранить очистку журнала');
       remote = []; pending = pending.filter(entry => entry.sequence > cutoff);
       serverCount = 0; storageError = ''; transportError = ''; revision++; render();
