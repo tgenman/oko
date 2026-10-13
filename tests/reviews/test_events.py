@@ -22,7 +22,8 @@ def test_event_has_exact_sources_updates_conflicts_and_deletes_only_members(tmp_
         assert {s['url'] for s in material['sources']} == {'https://example.org/event/0', 'https://example.org/event/1'}
         assert material['event']['updates'][0]['text'] == 'Мэрия назвала вместимость 30 мест.'
         assert len(material['event']['conflicts'][0]['sources']) == 2
-        assert sum(f['count'] for f in client.get('/api/folders').json()) == 2
+        # Two cards represent three publications: two in the event and one standalone.
+        assert sum(f['count'] for f in client.get('/api/folders').json()) == 3
         assert client.post('/api/materials/' + event['id'] + '/viewed').status_code == 200
         assert client.get('/api/materials/' + event['id']).status_code == 404
         assert len(client.get('/api/cards').json()) == 1
