@@ -1,7 +1,9 @@
 # Список материалов в стиле News Explorer
 
-Status: claimed
+Status: done
 Implementation: authorized
+
+Реализовано и проверено: [отчёт](../../docs/verification/material-list.md). Все три задачи закрыты. Пользовательский экземпляр не перезапускался.
 
 2026-10-13. Решения 1–18 согласованы пользователем в [проектировании](design.md). Пользователь отдельно разрешил реализацию через implement-spec. Задачи: [данные](issues/01-card-data.md), [UI](issues/02-list-ui.md), [приёмка](issues/03-acceptance.md).
 
