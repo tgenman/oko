@@ -70,6 +70,8 @@ class Versions:
         stage.mkdir()
         header = dict(title=material.title, full=material.full, reason=material.reason, members=list(material.members), captions=material.captions,
                       attachments=[dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments])
+        if material.description:
+            header['description'] = material.description
         payload = json.dumps(header, ensure_ascii=False) + '\n\n' + material.text
         self._write(stage / 'original.md', payload.encode())
         for image in material.images:

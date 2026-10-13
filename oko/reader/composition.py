@@ -1,5 +1,6 @@
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Any, TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
@@ -16,6 +17,36 @@ class Navigation(TypedDict):
 class FolderContents:
     members: tuple[tuple[str, str], ...]
     cards: tuple[str, ...]
+
+
+class _Snippet(HTMLParser):
+    """Plain list preview, omitting executable markup and normalizing space."""
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.ignored = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ('script', 'style'):
+            self.ignored += 1
+        elif tag in ('p', 'div', 'br', 'li'):
+            self.parts.append(' ')
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ('script', 'style') and self.ignored:
+            self.ignored -= 1
+        elif tag in ('p', 'div', 'li'):
+            self.parts.append(' ')
+
+    def handle_data(self, data: str) -> None:
+        if not self.ignored:
+            self.parts.append(data)
+
+
+def snippet(text: str) -> str:
+    parser = _Snippet()
+    parser.feed(text)
+    return ' '.join(''.join(parser.parts).split())[:500]
 
 
 def represented_originals(views: list[dict[str, Any]]) -> set[str]:
@@ -42,11 +73,21 @@ class ReadingComposition:
             material = self._store.material(row['id'])
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):
                 card = dict(material)
+                preview_text = material.get('description') or material.get('display_text', material['text'])
+                filtered = material.get('filter', {})
+                if filtered.get('status') == 'done' and not filtered.get('restored'):
+                    for fragment in filtered['removed']:
+                        preview_text = preview_text.replace(fragment, '')
+                card['snippet'] = snippet(preview_text)
+                card.pop('description', None)
                 card.pop('display_text', None)
                 del card['text']
                 cards.append(card)
         for view in views:
             card = dict(view)
+            summary = view.get('event', view.get('digest', {}))
+            card['snippet'] = snippet(' '.join(point['text'] for point in summary.get('points', [])))
+            card['published_known'] = any(source.get('published_known', True) for source in view['sources'])
             card.pop('text')
             card['sources'] = []
             for source in view['sources']:
@@ -55,7 +96,7 @@ class ReadingComposition:
                                             feed_id=source['feed_id'],
                                             title=source_feed['title'] if source_feed else ''))
             cards.append(card)
-        return [dict(card, folder_id=card.get('folder_id', feeds[card['feed_id']]['folder_id']),
+        return [dict(card, feed_title=feeds[card['feed_id']]['title'], folder_id=card.get('folder_id', feeds[card['feed_id']]['folder_id']),
                      importance=card.get('importance', feeds[card['feed_id']]['importance']))
                 for card in cards if card['feed_id'] in feeds
                 and (folder is None or card.get('folder_id', feeds[card['feed_id']]['folder_id']) == folder)

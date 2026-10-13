@@ -57,6 +57,7 @@ def test_hidden_publications_stay_excluded_inside_digest(tmp_path):
         digest = client.post('/api/digests/folder/demo', json={}).json()['id']
         wait_for(client, lambda: client.get('/api/materials/' + digest).json().get('digest'))
         assert [c['id'] for c in client.get('/api/cards?feed=demo').json()] == [digest]
+        assert client.get('/api/cards?feed=demo').json()[0]['snippet'] == 'Темы: библиотека и космос.'
         navigation = client.get('/api/navigation').json()
         assert navigation['count'] == 2
         assert navigation['folders'][0]['count'] == 2
@@ -85,6 +86,7 @@ def test_event_selected_by_each_participating_feed_has_all_sources(tmp_path):
         for feed in plan['feeds']:
             cards = client.get('/api/cards', params={'feed': feed['id']}).json()
             assert len(cards) == 1 and cards[0]['event']
+            assert cards[0]['snippet'] == 'Открылась библиотека.'
             assert {(s['feed_id'], s['title']) for s in cards[0]['sources']} == expected
         assert client.get('/api/cards?feed=missing').json() == []
         assert client.get('/api/cards?sort=oldest&feed=' + plan['feeds'][0]['id']).json()[0]['event']

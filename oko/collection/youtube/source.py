@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import sys
+from dataclasses import replace
 from typing import Protocol
 
 import httpx
@@ -72,8 +73,13 @@ class YouTubeSource(RSSSource):
             match = re.fullmatch(r'yt:video:([A-Za-z0-9_-]{11})', entry.publication.id)
             if match:
                 video = match[1]
-                result.append(Entry(Publication(video, f'https://www.youtube.com/watch?v={video}', entry.publication.published, published_known=entry.publication.published_known), entry.title, ''))
+                result.append(Entry(Publication(video, f'https://www.youtube.com/watch?v={video}', entry.publication.published, published_known=entry.publication.published_known), entry.title, entry.excerpt))
         return result
+
+    async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+        publications, next_cursor = await super().discover(cursor)
+        return [replace(p, teaser=replace(p.teaser, text='', description=p.teaser.text))
+                if p.teaser else p for p in publications], next_cursor
 
     async def fetch(self, publication: Publication) -> Material:
         if not re.fullmatch(r'[A-Za-z0-9_-]{11}', publication.id):
@@ -81,6 +87,7 @@ class YouTubeSource(RSSSource):
         batch = await self.read_entries()
         entry = next((entry for entry in batch if entry.publication.id == publication.id), None)
         title = entry.title if entry else publication.teaser.title if publication.teaser else 'YouTube'
+        description = self.excerpt(entry.excerpt) if entry else publication.teaser.description if publication.teaser else ''
         text, state, reason = '', 'not_requested', 'Субтитры не запрошены: включите тезисы или высокую важность'
         if publication.teaser and publication.teaser.captions == 'available':
             text, state, reason = publication.teaser.text, 'available', ''
@@ -109,4 +116,4 @@ class YouTubeSource(RSSSource):
             if publication.teaser:
                 images.extend(publication.teaser.images)
             reason = (reason + '; ' if reason else '') + 'Превью недоступно'
-        return Material(title, text, state == 'available' and bool(images) and preview_complete, reason, tuple(images), captions=state)
+        return Material(title, text, state == 'available' and bool(images) and preview_complete, reason, tuple(images), captions=state, description=description)

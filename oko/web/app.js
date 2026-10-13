@@ -1,3 +1,4 @@
+import {createMaterialList} from './material-list.js';
 import {createReadingTree} from './reading-tree.js';
 import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './debug.js';
@@ -15,6 +16,7 @@ let folderId = null;
 let feedId = null;
 let refreshTimer = null;
 let refreshSequence = 0;
+let readingCatalog = {folders:[], feeds:[]};
 async function api(path, method = 'GET', body = undefined, signal = undefined) {
   try {
     const response = await fetch('/api/' + path, {method, signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
@@ -33,17 +35,18 @@ async function api(path, method = 'GET', body = undefined, signal = undefined) {
 const opened = createOpenedMaterial({
   api,
   fetchMedia: (path, signal) => fetch(path, {signal, cache: 'no-store', headers: {'Authorization': 'Bearer ' + token}}),
-  onViewed: id => { contentEpoch++; opened.viewed(id); bus.postMessage(id); refresh(); },
+  onViewed: id => { contentEpoch++; opened.viewed(id); list.removed(id); bus.postMessage(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
+const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: (path, signal) => fetch(path, {signal, headers: {'Authorization': 'Bearer ' + token}})});
 const menus = createMenus({api, onChanged: () => {contentEpoch++; refresh();}});
-const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); for (const id of ['compress','folder-viewed','digest-now']) byId(id).disabled = !folderId; refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => {byId('debug-toggle').checked = true; byId('debug-toggle').dispatchEvent(new Event('change'));}});
+const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => {byId('debug-toggle').checked = true; byId('debug-toggle').dispatchEvent(new Event('change'));}});
 function stopUi(message) {
   menus.stop();
   stopped = true;
   contentEpoch++;
   opened.clear();
-  byId('cards').replaceChildren();
+  list.clear();
   byId('folders').replaceChildren();
   byId('count').textContent = '0';
   byId('progress').textContent = message;
@@ -64,7 +67,7 @@ bus.onmessage = event => {
     refresh();
   } else {
     contentEpoch++;
-    opened.viewed(event.data);
+    opened.viewed(event.data); list.removed(event.data); refresh();
   }
 };
 async function refresh() {
@@ -85,7 +88,9 @@ async function refresh() {
     menus.sources(state.sources || []);
     const navigation = await api('navigation');
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
+    readingCatalog = navigation;
     if (tree.update(navigation, state.sources || [])) return;
+    list.setArea(tree.selection, navigation);
     if (state.error) { opened.clear(); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
     if (byId('show-hidden').checked) params.set('show_hidden', 'true');
@@ -94,23 +99,9 @@ async function refresh() {
     const cards = await api('cards?' + params);
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     opened.reconcile(cards);
-    byId('compress').disabled = !folderId;
-    byId('folder-viewed').disabled = !folderId;
-    byId('digest-now').disabled = !folderId;
-    byId('count').textContent = cards.filter(card => !card.filter?.hidden).length;
-    byId('cards').replaceChildren(...cards.map(card => {
-      const button = document.createElement('button');
-      button.classList.toggle('active', opened.selection?.id === card.id);
-      button.textContent = (card.digest ? 'Обзор · ' : card.event ? 'Событие · ' : card.filter?.hidden ? 'Скрыто · ' : '') + card.title + (card.changed ? ' · Изменено' : '');
-      const date = document.createElement('small');
-      date.textContent = card.published_known === false ? 'Дата неизвестна' : new Date(card.published * 1000).toLocaleString('ru');
-      button.append(date);
-      if (card.sources?.length) {const sources = element('small', [...new Set(card.sources.map(s => s.title || s.feed_id).filter(Boolean))].join(', ')); button.append(sources);}
-      button.onclick = () => opened.open(card);
-      return button;
-    }));
+    list.update(cards, opened.selection?.id);
 
-  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { opened.clear(); byId('progress').textContent = error.message; } }
+  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { list.error(error.message); byId('progress').textContent = error.message; } }
   finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
 byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); byId('progress').textContent = error.message; } };
@@ -121,12 +112,12 @@ byId('stop').onclick = async () => {
 async function heartbeat() {
   if (stopped) return;
   try { await api('tabs/' + tab + '/heartbeat', 'POST'); }
-  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { opened.clear(); byId('progress').textContent = error.message; } }
+  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { list.error(error.message); byId('progress').textContent = error.message; } }
   if (!stopped) setTimeout(heartbeat, 2000);
 }
 window.addEventListener('pagehide', () => {
   fetch('/api/tabs/' + tab + '/close', {method:'POST', keepalive:true, headers:{'Authorization':'Bearer '+token}}).catch(error => reportError(error, 'Закрытие вкладки'));
-  opened.clear();
+  opened.clear(); list.clear();
 });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 
@@ -194,7 +185,7 @@ byId('completion-confirm').onclick = async () => {
     await api('folders/' + confirmedFolder + '/completion', 'POST', {token: completionToken});
     contentEpoch++;
     opened.folderCompleted(confirmedFolder);
-    byId('cards').replaceChildren();
+    if (folderId === confirmedFolder) list.clear();
     bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
     byId('completion-dialog').close();
     refresh();

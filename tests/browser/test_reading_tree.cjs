@@ -82,6 +82,7 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   await r.page.locator('[data-folder="f"]').click();
   await expect(r.page.locator('#count')).toHaveText('1');
   await expect(r.page.locator('#cards')).toContainText('Альфа, Бета');
+  await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('[data-folder="f"] .tree-count')).toHaveText('45');
   const clipped=await r.page.locator('[data-feed="a"] .tree-title').evaluate(n=>n.scrollWidth>n.clientWidth);

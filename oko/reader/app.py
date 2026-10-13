@@ -287,7 +287,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         if sort == 'importance':
             result.sort(key=lambda c: (-{'normal': 0, 'elevated': 1, 'high': 2}[c['importance']], -c['published'], c['id']))
         else:
-            result.sort(key=lambda c: (c['published'] if sort == 'oldest' else -c['published'], c['id']))
+            result.sort(key=lambda c: (not c.get('published_known', True), c['published'] if sort == 'oldest' else -c['published'], c['id']))
         return result
 
     @app.post('/api/folders/{folder}/completion/preview')
@@ -400,6 +400,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/reading-tree.js')
     async def reading_tree_js() -> FileResponse:
         return FileResponse(web / 'reading-tree.js', media_type='text/javascript')
+
+    @app.get('/material-list.js')
+    async def material_list_js() -> FileResponse:
+        return FileResponse(web / 'material-list.js', media_type='text/javascript')
 
     @app.get('/debug.js')
     async def debug_js() -> FileResponse:

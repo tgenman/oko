@@ -145,7 +145,9 @@ def entries(raw: bytes, base: str) -> list[Entry]:
             stamp, known = 0., False
         identity = value('guid') or value('id') or url
         result.append(Entry(Publication(identity, url, stamp, published_known=known), value('title') or 'Без заголовка',
-                            markup('description') or markup('summary') or markup('encoded') or markup('content')))
+                            markup('description') or markup('summary') or markup('encoded') or markup('content')
+                            or next((''.join(c.itertext()).strip() for c in node.iter()
+                                     if c.tag == '{http://search.yahoo.com/mrss/}description'), '')))
     counts: dict[str, int] = {}
     for entry in result:
         counts[entry.publication.id] = counts.get(entry.publication.id, 0) + 1

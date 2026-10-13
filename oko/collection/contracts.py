@@ -37,6 +37,7 @@ class Material:
     members: tuple[int, ...] = ()
     captions: str | None = None
     collection_error: 'SourceError | None' = None
+    description: str = ''
 
 
 class Source(Protocol):
