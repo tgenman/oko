@@ -397,6 +397,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def js() -> FileResponse:
         return FileResponse(web / 'app.js', media_type='text/javascript')
 
+    @app.get('/reading-tree.js')
+    async def reading_tree_js() -> FileResponse:
+        return FileResponse(web / 'reading-tree.js', media_type='text/javascript')
+
     @app.get('/debug.js')
     async def debug_js() -> FileResponse:
         return FileResponse(web / 'debug.js', media_type='text/javascript')
