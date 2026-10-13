@@ -124,6 +124,15 @@ class Journal:
         except OSError as error:
             self.persistence_error = self.clean(str(error))
 
+    def clear(self) -> bool:
+        previous = self.records
+        self.records = []
+        self.flush()
+        if self.persistence_error:
+            self.records = previous
+            return False
+        return True
+
     def capture(self, error: BaseException, source: str) -> str | None:
         if isinstance(error, (asyncio.CancelledError, SourceDeleted)) or getattr(error, 'diagnostic_skip', False):
             return None

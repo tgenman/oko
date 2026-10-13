@@ -62,3 +62,8 @@ class SourceError(Exception):
 class SourceDeleted(SourceError):
     def __init__(self) -> None:
         super().__init__('Публикация удалена или недоступна в источнике')
+
+
+class SourceSkipped(SourceError):
+    """An intentionally ignored publication, with no future collection."""
+    diagnostic_skip = True

@@ -5,6 +5,29 @@ from oko.reader.app import create_app
 HEADERS = {'Authorization': 'Bearer test-secret'}
 
 
+def test_clear_debug_is_authorized_persistent_and_accepts_new_errors(tmp_path):
+    with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
+        client.post('/api/debug', json={'source': 'browser', 'message': 'old error'})
+        assert client.delete('/api/debug', headers={'Authorization': ''}).status_code == 403
+        assert client.get('/api/debug').json()['groups']
+        assert client.delete('/api/debug').json()['ok']
+        assert client.get('/api/debug').json()['groups'] == []
+        assert client.get('/api/status').json()['debug_count'] == 0
+    with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
+        assert client.get('/api/debug').json()['groups'] == []
+        client.post('/api/debug', json={'source': 'browser', 'message': 'new error'})
+        assert client.get('/api/debug').json()['groups'][0]['message'] == 'new error'
+
+
+def test_failed_clear_keeps_debug_history(tmp_path):
+    with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
+        client.post('/api/debug', json={'source': 'browser', 'message': 'keep error'})
+        (tmp_path / 'debug.tmp').mkdir()
+        result = client.delete('/api/debug').json()
+        assert not result['ok'] and result['persistence_error']
+        assert client.get('/api/debug').json()['groups'][0]['message'] == 'keep error'
+
+
 def test_debug_captures_background_traceback_and_survives_restart(tmp_path):
     class Broken:
         async def discover(self, cursor):

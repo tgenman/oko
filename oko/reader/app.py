@@ -154,6 +154,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def debug_entries() -> dict[str, Any]:
         return dict(groups=journal.entries(), persistence_error=journal.persistence_error)
 
+    @app.delete('/api/debug')
+    async def clear_debug() -> dict[str, Any]:
+        return dict(ok=journal.clear(), persistence_error=journal.persistence_error)
+
     @app.post('/api/debug')
     async def debug_browser(body: BrowserError) -> dict[str, Any]:
         group = journal.add(body.source, body.message, body.traceback, error_type=body.error_type,

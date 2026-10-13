@@ -9,7 +9,7 @@ from typing import Protocol
 import httpx
 
 from oko.collection.rss import RSSSource, Entry, entries
-from oko.collection.contracts import SourceError
+from oko.collection.contracts import SourceError, SourceSkipped
 from oko.collection.contracts import Image, Material, Publication
 
 
@@ -35,6 +35,8 @@ class LocalCaptions:
             result = json.loads(raw)
             if process.returncode or not isinstance(result, dict):
                 raise ValueError('worker')
+            if result.get('skip'):
+                raise SourceSkipped('Анонс будущей трансляции пропущен')
             if result.get('error'):
                 raise SourceError.from_worker('Не удалось получить субтитры; повторите загрузку', result)
             text = result['text']
@@ -53,7 +55,7 @@ class LocalCaptions:
 
 
 class YouTubeSource(RSSSource):
-    changes = 'YouTube: повторно проверяются название, доступные субтитры и превью видео в окне Atom. Удаление видео и правки вне этого окна не определяются.'
+    changes = 'YouTube: повторно проверяются название и превью видео в окне Atom. Полученные субтитры сохраняются без повторных запросов. Удаление видео и правки вне этого окна не определяются.'
     def __init__(self, url: str, initial_days: int, captions: CaptionsClient,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
         super().__init__(url, initial_days, transport)
@@ -80,16 +82,16 @@ class YouTubeSource(RSSSource):
         entry = next((entry for entry in batch if entry.publication.id == publication.id), None)
         title = entry.title if entry else publication.teaser.title if publication.teaser else 'YouTube'
         text, state, reason = '', 'not_requested', 'Субтитры не запрошены: включите тезисы или высокую важность'
-        if not self.want_captions and publication.teaser and publication.teaser.captions == 'available':
+        if publication.teaser and publication.teaser.captions == 'available':
             text, state, reason = publication.teaser.text, 'available', ''
-        if self.want_captions:
+        elif self.want_captions:
             try:
                 transcript = await self.captions_client.fetch(publication.id)
                 text, state, reason = ((transcript, 'available', '') if transcript else ('', 'unavailable', 'Субтитры недоступны'))
+            except SourceSkipped:
+                raise
             except SourceError as error:
                 record_caught('source.fetch')
-                if publication.teaser and publication.teaser.captions == 'available':
-                    raise
                 state, reason = 'error', error.label
         images: list[Image] = []
         preview_complete = True

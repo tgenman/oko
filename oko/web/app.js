@@ -67,10 +67,11 @@ async function refresh() {
   clearTimeout(refreshTimer);
   if (stopped) return;
   const epoch = contentEpoch;
+  const debugRevision = debug.revision();
   try {
     const state = await api('status');
     if (stopped || epoch !== contentEpoch) return;
-    debug.updateStatus(state.debug_count, state.debug_persistence_error);
+    debug.updateStatus(state.debug_count, state.debug_persistence_error, debugRevision);
     menus.status(state.initial_histories || []);
     if (state.stopped) { stopUi('Око остановлено'); return; }
     const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);

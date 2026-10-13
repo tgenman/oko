@@ -136,3 +136,36 @@ test('browser pending diagnostics mask quoted passwords and Basic credentials', 
     expect(JSON.stringify(body)).not.toContain('dXNlcjpwYXNz');
   } finally { await r.close(); }
 });
+
+test('switch works with keyboard and clearing history rejects a late journal response', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.page.evaluate(() => window.dispatchEvent(new ErrorEvent('error', {error: new Error('old error')})));
+    await r.page.locator('#debug-toggle').focus();
+    await r.page.keyboard.press('Space');
+    await expect(r.page.locator('#debug-errors')).toContainText('old error');
+    const size = await r.page.locator('#debug-toggle').boundingBox();
+    expect(size.width).toBeGreaterThan(size.height);
+    await r.page.evaluate(() => {
+      readerTransport.held.set('/api/debug', true);
+      readerTransport.held.set('/api/status', true);
+    });
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/debug'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/status'));
+    const old = await r.page.evaluate(() => readerTransport.debugGroups);
+    // Release only the old GET; DELETE uses the normal transport immediately.
+    await r.page.evaluate(() => readerTransport.held.delete('/api/debug'));
+    await r.page.locator('#debug-clear').click();
+    await expect(r.page.locator('#debug-empty')).toBeVisible();
+    await expect(r.page.locator('#debug-count')).toHaveText('0');
+    await r.page.evaluate(groups => readerTransport.release('/api/debug', {groups, persistence_error: ''}), old);
+    await r.page.evaluate(() => readerTransport.release('/api/status', {stage: 'Готово', errors: [], sources: [], debug_count: 31, debug_persistence_error: 'old disk error'}));
+    await expect(r.page.locator('#debug-errors')).not.toContainText('old error');
+    await expect(r.page.locator('#debug-count')).toHaveText('0');
+    await expect(r.page.locator('#debug-status')).toHaveText('');
+    await r.page.evaluate(() => window.dispatchEvent(new ErrorEvent('error', {error: new Error('new error')})));
+    await expect(r.page.locator('#debug-errors')).toContainText('new error');
+    await r.page.screenshot({path: '/private/tmp/oko-debug-switches.png'});
+  } finally { await r.close(); }
+});

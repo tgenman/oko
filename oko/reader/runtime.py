@@ -14,7 +14,7 @@ from typing import Any, Literal, TypeVar
 import httpx
 
 from oko.collection.rss import RSSSource, feed_title, normalized
-from oko.collection.contracts import SourceError, SourceDeleted
+from oko.collection.contracts import SourceError, SourceDeleted, SourceSkipped
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
@@ -697,6 +697,9 @@ class Runtime:
             record_caught('runtime._execute')
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
+                    if isinstance(error, SourceSkipped) and job.kind == 'fetch':
+                        current.viewed(job.item)
+                        return
                     if isinstance(error, SourceDeleted) and job.kind == 'fetch':
                         current.source_removed(job)
                         return

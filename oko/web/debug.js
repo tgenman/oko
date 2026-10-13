@@ -10,6 +10,8 @@ export function createDebugPanel({token}) {
   let remote = [], pending = [], sending = false, loading = false, revision = 0;
   let lastRender = '';
   let serverCount = 0, storageError = '', transportError = '';
+  let clearing = false, delivery = Promise.resolve();
+  const clearButton = document.getElementById('debug-clear');
   const headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'};
   function clean(value) {
     let text = String(value ?? '');
@@ -55,11 +57,15 @@ export function createDebugPanel({token}) {
     document.getElementById('debug-empty').hidden = entries.length > 0;
     status.textContent = storageError ? 'Журнал не сохранён на диск: ' + clean(storageError) : transportError;
   }
-  async function flush() {
-    if (sending || !pending.length) return;
+  function flush() {
+    if (sending || clearing || !pending.length) return delivery;
+    delivery = sendPending();
+    return delivery;
+  }
+  async function sendPending() {
     sending = true;
     try {
-      while (pending.length) {
+      while (pending.length && !clearing) {
         const entry = pending[0]; entry.sealed = true;
         const {sealed, ...body} = entry;
         const response = await fetch('/api/debug', {method: 'POST', cache: 'no-store', headers, body: JSON.stringify(body)});
@@ -101,7 +107,7 @@ export function createDebugPanel({token}) {
   };
   async function refresh() {
     void flush();
-    if (panel.hidden || loading) return;
+    if (panel.hidden || loading || clearing) return;
     loading = true;
     const stamp = revision;
     try {
@@ -110,18 +116,39 @@ export function createDebugPanel({token}) {
       const result = await response.json();
       const groups = Array.isArray(result) ? result : result.groups;
       if (!Array.isArray(groups)) throw new Error('Некорректный ответ журнала');
-      if (stamp === revision) remote = groups;
-      serverCount = groups.length; storageError = result.persistence_error || ''; transportError = ''; render();
-    } catch (error) { transportError = 'Журнал сервера недоступен: ' + clean(error.message); render(); }
+      if (stamp === revision) {
+        remote = groups;
+        serverCount = groups.length; storageError = result.persistence_error || ''; transportError = ''; render();
+      }
+    } catch (error) { if (stamp === revision) {transportError = 'Журнал сервера недоступен: ' + clean(error.message); render();} }
     finally { loading = false; }
   }
   toggle.onchange = () => { panel.hidden = !toggle.checked; void refresh(); };
+  clearButton.onclick = async () => {
+    if (clearing) return;
+    clearing = true; clearButton.disabled = true;
+    const cutoff = sequence;
+    for (const entry of pending) entry.sealed = true;
+    revision++;
+    try {
+      // Finish an old delivery before deleting it; newer occurrences wait.
+      await delivery;
+      const response = await fetch('/api/debug', {method: 'DELETE', cache: 'no-store', headers});
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.persistence_error || 'Не удалось сохранить очистку журнала');
+      remote = []; pending = pending.filter(entry => entry.sequence > cutoff);
+      serverCount = 0; storageError = ''; transportError = ''; revision++; render();
+    } catch (error) { transportError = 'Не удалось очистить историю: ' + clean(error.message); render(); }
+    finally { clearing = false; clearButton.disabled = false; void flush(); }
+  };
   window.addEventListener('error', event => reportError(event.error || new Error(event.message || 'Не загрузился ресурс'), event.filename || 'Браузер', true));
   window.addEventListener('unhandledrejection', event => reportError(event.reason, 'Необработанный Promise', true));
   render();
   const timer = setInterval(refresh, 2000);
   window.addEventListener('pagehide', () => clearInterval(timer), {once: true});
-  return {refresh, updateStatus(count, error) {
+  return {refresh, revision: () => revision, updateStatus(count, error, stamp) {
+    if (clearing || stamp !== revision) return;
     if (typeof count === 'number') serverCount = count;
     if (typeof error === 'string') storageError = error;
     render();

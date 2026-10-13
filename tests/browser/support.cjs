@@ -49,6 +49,10 @@ async function reader() {
         }
         if (key === '/api/debug') {
           const t = window.readerTransport;
+          if (options?.method === 'DELETE') {
+            t.debugGroups = [];
+            return new Response(JSON.stringify({ok: true, persistence_error: ''}));
+          }
           if (options?.method === 'POST') {
             const body = JSON.parse(options.body);
             const old = t.debugGroups.find(g => g.source === body.source && g.location === body.location && g.message === body.message);
