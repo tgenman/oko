@@ -71,7 +71,7 @@ async function reader() {
         if (key.startsWith('/api/cards?')) {
           const params = new URL(key, location.origin).searchParams;
           const folder = params.get('folder'), feed = params.get('feed');
-          return new Response(JSON.stringify(window.readerTransport.cards.filter(card => (!folder || card.folder_id === folder) && (!feed || card.feed_id === feed || (card.sources || []).some(s => s.feed_id === feed)))));
+          return new Response(JSON.stringify(window.readerTransport.cards.filter(card => (!folder || card.folder_id === folder) && (!feed || (card.sources?.length ? card.sources.some(s => s.feed_id === feed) : card.feed_id === feed)))));
         }
         if (key.endsWith('/viewed')) {
           const id = key.split('/')[3];
