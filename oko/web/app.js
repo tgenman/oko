@@ -450,13 +450,17 @@ byId('opml-file').onchange = async () => {
 };
 byId('import-confirm').onclick = async () => {
   if (!importText) return;
+  const stamp = menuGeneration;
   try {
     await api('import', 'POST', {opml: importText, choices: importChoices});
     importText = null; importChoices = {}; byId('opml-file').value = ''; byId('import-confirm').hidden = true;
     byId('import-plan').replaceChildren(element('p', 'Подписки импортированы. RSS и YouTube подключены автоматически; для Telegram настройте подключение.'));
-    selectedOwner = null; byId('feeds-layout').classList.remove('show-detail');
-    await openMenu('feeds', null, null); contentEpoch++; refresh();
-    editorMessage('Импорт завершён');
+    if (stamp === menuGeneration && currentMenu === 'add') {
+      selectedOwner = null; byId('feeds-layout').classList.remove('show-detail');
+      await openMenu('feeds', null, null);
+      editorMessage('Импорт завершён');
+    } else await loadSubscriptions();
+    contentEpoch++; refresh();
   } catch (error) { reportError(error, 'Интерфейс Око');
     if (error.detail?.conflicts) { byId('import-plan').replaceChildren(element('p', 'Выберите одну папку для каждого конфликта и повторите импорт.')); showConflicts(error.detail.conflicts); }
     else editorMessage(error.message);

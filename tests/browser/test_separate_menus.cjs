@@ -52,6 +52,75 @@ async function objects(r) {
   });
 }
 
+test('completed OPML import does not reopen a menu closed while import was pending', async () => {
+  const r = await reader();
+  try {
+    await r.start([material('one', {text: 'Продолжить чтение. '.repeat(3000)})]);
+    await objects(r);
+    await r.page.locator('#cards button').click();
+    await expect(r.page.locator('#title')).toHaveText('one');
+    await r.page.locator('main > article').evaluate(n => n.scrollTop = 450);
+    await r.page.locator('#add-open').click();
+    await r.page.getByRole('tab', {name:'Импорт OPML',exact:true}).click();
+    await r.page.evaluate(() => {
+      readerTransport.replies.set('/api/import/preview',{body:{folders:[],feeds:[]}});
+      readerTransport.held.set('/api/import',true);
+    });
+    await r.page.locator('#opml-file').setInputFiles({name:'example.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body/></opml>')});
+    await r.page.getByRole('button',{name:'Импортировать',exact:true}).click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/import'));
+    await r.page.keyboard.press('Escape');
+    await r.page.evaluate(() => readerTransport.release('/api/import',{}));
+    await expect(r.page.locator('#import-plan')).toContainText('Подписки импортированы');
+    await expect(r.page.locator('dialog[open]')).toHaveCount(0);
+    await expect(r.page.locator('#add-open')).toBeFocused();
+    await expect(r.page.locator('#title')).toHaveText('one');
+    expect(await r.page.locator('main > article').evaluate(n => n.scrollTop)).toBe(450);
+    await r.page.locator('#add-open').click();
+    await expect(r.page.locator('#import-confirm')).toBeHidden();
+    expect(await r.page.locator('#opml-file').evaluate(n => n.files.length)).toBe(0);
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});
+
+test('completed OPML import preserves a newer settings menu, drafts and selected feed while updating subscriptions', async () => {
+  const r = await reader();
+  try {
+    await r.start([]); await objects(r);
+    await r.page.locator('#feeds-open').click();
+    await r.page.getByRole('button',{name:'one',exact:true}).click();
+    await r.page.locator('#setting-prompt_theses').fill('Черновик фида');
+    await r.page.locator('#feeds-add').click();
+    await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
+    await r.page.evaluate(() => {
+      readerTransport.replies.set('/api/import/preview',{body:{folders:[],feeds:[]}});
+      readerTransport.held.set('/api/import',true);
+    });
+    await r.page.locator('#opml-file').setInputFiles({name:'example.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body/></opml>')});
+    await r.page.getByRole('button',{name:'Импортировать',exact:true}).click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/import'));
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('#setting-prompt_theses').fill('Черновик Око');
+    await r.page.evaluate(() => {
+      const subscriptions = readerTransport.replies.get('/api/subscriptions').body;
+      subscriptions.feeds.push({...subscriptions.feeds[0],id:'imported',title:'Импортированный'});
+      readerTransport.release('/api/import',{});
+    });
+    await expect(r.page.locator('#import-plan')).toContainText('Подписки импортированы');
+    await expect(r.page.locator('#settings-dialog')).toBeVisible();
+    await expect(r.page.locator('dialog[open]')).toHaveCount(1);
+    await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик Око');
+    await expect(r.page.locator('#setting-prompt_theses')).toBeFocused();
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#feeds-open').click();
+    await expect(r.page.locator('#owner-heading')).toHaveText('Фид: one');
+    await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик фида');
+    await expect(r.page.getByRole('button',{name:'Импортированный',exact:true})).toBeVisible();
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});
+
 test('object and global drafts are independent, field save preserves other unsaved changes and close never saves', async () => {
   const r = await reader();
   try {
