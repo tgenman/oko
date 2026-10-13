@@ -1,15 +1,43 @@
-# Browser checks
+# Проверки разработки
 
-`test_opened_material.cjs` runs the actual Oko HTML and JavaScript in headless Chrome. It exercises reader actions and observes DOM, playback and browser object URL lifecycle. Only external fetch responses are substituted. The delayed transport deliberately ignores AbortSignal so tests prove that late results are harmless independently of cancellation.
-
-Install/use Node.js and Playwright (`playwright`, including its test assertions). Point `NODE_PATH` to the directory containing these packages when they are not locally installed. Set `OKO_BROWSER_EXECUTABLE` to Chrome/Chromium on other hosts; the default is the macOS Google Chrome installation.
+Единая команда (macOS/Linux, Python 3.11+ для runner):
 
 ```sh
-NODE_PATH=/path/to/node_modules node --test tests/browser/test_*.cjs
+./scripts/check ui
+./scripts/check all
 ```
 
-In Codex on this host, the bundled Node and packages are available via `load_workspace_dependencies`. The runner creates a temporary loopback HTTP server and a separate browser profile, closes both after each test, and uses no personal sources or AI. It needs permission to listen on loopback and launch Chrome when run in a restricted sandbox.
+[Runner](../../scripts/check) — источник состава режимов. Он обнаруживает актуальные JavaScript-модули и браузерные сценарии, печатает результаты и время, возвращает ненулевой код при падении, отсутствующей зависимости или прерывании. При прерывании завершает принадлежащие ему дочерние процессы. Проверка diff охватывает staged и unstaged изменения; успешная проверка не означает чистое рабочее дерево.
 
-A generated canvas WebM exercises real video playback without external fixtures. These checks complement the Python reader/storage acceptance tests; they do not verify real RSS, Telegram, YouTube or model connections.
+## Подготовка окружения
 
-`test_telegram_connection.cjs` проверяет список аккаунтов, пустые поля, блокировку повторного подключения, ошибки/повтор, выбор темы и поздние ответы, обычный канал и подключение импортированного фида.
+Один раз установите Python-зависимости по [README](../../README.md), включая extra `dev`, и Node.js 20+. Браузерные зависимости закреплены в корневом package.json и lock-файле:
+
+```sh
+npm ci
+```
+
+Используйте установленный Chrome/Chromium либо отдельно установите браузер Playwright:
+
+```sh
+npx playwright install chromium
+```
+
+Эти команды выполняет разработчик при настройке. Сам runner ничего не устанавливает и не скачивает.
+
+| Переменная | Назначение | По умолчанию |
+| --- | --- | --- |
+| `OKO_NODE` | Исполняемый файл Node | `node` из PATH |
+| `OKO_PYTHON` | Python с зависимостями проекта, для полного режима | `.venv/bin/python` checkout, иначе `python3` из PATH |
+| `NODE_PATH` | Каталог внешних Node-пакетов, если нет локального node_modules | Стандартный поиск Node |
+| `OKO_BROWSER_EXECUTABLE` | Исполняемый файл Chrome/Chromium | Установленный браузер Playwright, затем стандартные пути Chrome/Chromium macOS/Linux |
+
+Для worktree без своего virtualenv задайте `OKO_PYTHON` путём к существующему окружению. В Codex runtime и пакеты можно найти через `load_workspace_dependencies`; персональные пути в репозиторий не копируются. Для sandbox нужны разрешения на loopback, запуск браузера и чтение дерева процессов через POSIX `ps` (для завершения потомков, в том числе отдельных групп браузера).
+
+## Граница браузерных тестов
+
+Сценарии открывают настоящий HTML/JavaScript Око в headless Chrome, проверяют DOM, воспроизведение и освобождение URL медиа. Подменяется только внешний транспорт. Задержанный транспорт намеренно игнорирует AbortSignal: поздний ответ должен быть безопасен независимо от отмены.
+
+Каждый сценарий использует временный loopback HTTP-сервер и отдельный профиль браузера; личные источники и AI не вызываются. Canvas WebM проверяет воспроизведение без внешнего файла. Настоящие RSS, Telegram, YouTube и подключения моделей этими тестами не проверяются.
+
+Отдельный файл можно запустить через `node --test tests/browser/test_opened_material.cjs` с тем же окружением. Для прямого запуска без runner явно задайте `OKO_BROWSER_EXECUTABLE`, если Chrome находится не в стандартном macOS-пути.

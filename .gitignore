@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 data/
 Око.app/
+node_modules/
