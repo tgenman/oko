@@ -116,6 +116,7 @@ test('a completed field write reconciles after Back without discarding a newer d
     await r.page.locator('#settings-dialog .settings-back').click();
     await held.continue(); held=null;
     await expect(r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true})).toContainText('Выключено');
+    await expect(r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true})).toBeFocused();
     await r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true}).click();
     await expect(r.page.locator('#setting-originals')).toBeChecked();
     await expect(r.page.locator('.setting-row:visible details summary')).toBeVisible();

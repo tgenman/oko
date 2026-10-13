@@ -79,9 +79,11 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
     if (!path) return;
     const values = draft(path);
     try {
-      const focused = document.activeElement?.id;
       const result = await api('settings/' + path, 'GET', undefined, operation.signal);
       if (!operation.current) return;
+      const focused = document.activeElement;
+      const focusedId = focused?.id, focusedTarget = focused?.dataset.settingsTarget;
+      const focusedPage = focused?.closest('[data-settings-page]')?.dataset.settingsPage;
       byId('settings-editor').hidden = false;
       byId('owner-heading').textContent = describeOwner(...path.split('/'));
       byId('feed-options').replaceChildren();
@@ -90,13 +92,13 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
       needsRefresh.delete(path);
       renderFields(result, path, values);
       onRendered();
-      const restore = focused && byId(focused);
+      const restore = focusedId ? byId(focusedId) : focusedTarget ? [...byId('setting-fields').querySelectorAll('[data-settings-target]')].find(node => node.dataset.settingsTarget === focusedTarget && node.closest('[data-settings-page]')?.dataset.settingsPage === focusedPage) : null;
       if (restore && !restore.closest('[hidden]')) restore.focus({preventScroll:true});
     } catch (error) { reportError(error, 'Интерфейс Око'); operation.commit(() => editorMessage(error.message)); }
   }
   function settingPage(name, heading) {
     const panel = element('div'); panel.dataset.settingsPage = name;
-    const title = element('h2', heading); title.className = 'settings-page-title'; panel.append(title);
+    const title = element('h2', heading); title.className = 'settings-page-title'; title.id = 'settings-page-' + name.replaceAll('/','-'); panel.append(title);
     return panel;
   }
   function settingLink(title, value, page, color = '', symbol = '') {
