@@ -27,11 +27,15 @@ def response(request):
     return httpx.Response(200, text=f'<article><p>Открылась библиотека на 24 места.</p><img src="https://{request.url.host}/image.png"></article>')
 
 
-if __name__ == '__main__':
-    token = secrets.token_urlsafe(24)
-    app = create_app(Path(sys.argv[1]), token=token, rss_enabled=True,
+def build_app(root, token):
+    return create_app(root, token=token, rss_enabled=True,
                      rss_transport=httpx.MockTransport(response), ai_transport=event_transport([]), codex_client=CodexService(),
                      lease=60, grace=60)
+
+
+if __name__ == '__main__':
+    token = secrets.token_urlsafe(24)
+    app = build_app(Path(sys.argv[1]), token)
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
     print(json.dumps({'origin': f'http://127.0.0.1:{sock.getsockname()[1]}', 'token': token}), flush=True)
