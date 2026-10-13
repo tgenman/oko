@@ -1,5 +1,6 @@
 # Интеграция, проверки и ревью
-Status: ready-for-agent
+Status: claimed
+Assignee: root
 Label: ready-for-agent
 Blocked by: 01, 02
 
