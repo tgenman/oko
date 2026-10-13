@@ -69,9 +69,10 @@ export function createMaterialList({onOpen, onRetry, fetchMedia}) {
     if(stamp.toDateString()===yesterday.toDateString())return 'Вчера';
     return stamp.toLocaleDateString('ru',{year:'numeric',month:'long',day:'numeric'});
   }
+  function previewPath(card) {return card.digest||card.event?null:(card.images?.[0]||card.attachments?.find(a=>a.kind==='image')?.url);}
   function makeRow(card) {
     const node=element('button','','material-row'); node.type='button'; node.dataset.card=card.id;
-    const entry={node,card,preview:element('span','','card-preview'),symbol:card.digest?'▤':card.event?'▧':'▥',path:card.digest||card.event?null:(card.images?.[0]||card.attachments?.find(a=>a.kind==='image')?.url),started:false,url:null,controller:null};
+    const entry={node,card,preview:element('span','','card-preview'),symbol:card.digest?'▤':card.event?'▧':'▥',path:previewPath(card),started:false,url:null,controller:null};
     entry.preview.setAttribute('aria-hidden','true'); entry.preview.append(element('span',entry.symbol));
     node.onclick=()=>{select(card.id); onOpen(entry.card);};
     node.onkeydown=event=>{if(!['ArrowUp','ArrowDown'].includes(event.key))return; event.preventDefault(); const index=cards.findIndex(c=>c.id===entry.card.id), next=cards[Math.max(0,Math.min(cards.length-1,index+(event.key==='ArrowDown'?1:-1)))]; if(next){rows.get(next.id)?.node.focus();}};
@@ -82,13 +83,13 @@ export function createMaterialList({onOpen, onRetry, fetchMedia}) {
     const body=element('span','','card-body'), heading=element('span',card.title,'card-title'); heading.title=card.title;
     body.append(heading);
     const kind=card.digest?'Обзор':card.event?'Событие':card.filter?.hidden?'Скрыто':'';
-    const status=[kind,card.changed?'Изменено':'',card.loading?'Загружается':''].filter(Boolean).join(' · ');
+    const status=[kind,card.changed?'Изменено':'',card.loading||card.complete===false?'Загружается':''].filter(Boolean).join(' · ');
     if(status)body.append(element('span',status,'card-kind'));
     if(card.snippet)body.append(element('span',card.snippet,'card-snippet'));
     const meta=element('span','','card-meta'), sources=card.sources?.length?[...new Set(card.sources.map(s=>s.title||s.feed_id).filter(Boolean))].join(', '):(card.feed_title||card.feed_id||'');
     const source=element('span',sources,'card-source'); source.title=sources;
     meta.append(source,element('time',date(card),'card-date')); body.append(meta);
-    entry.node.replaceChildren(entry.preview,body); entry.node.setAttribute('aria-label',card.title+' · '+sources+' · '+date(card));
+    entry.node.replaceChildren(entry.preview,body); entry.node.setAttribute('aria-label',(kind?kind+' · ':'')+card.title+' · '+sources+' · '+date(card));
   }
   function select(id) {selected=id; for(const [identity,entry] of rows){entry.node.classList.toggle('active',identity===id); entry.node.setAttribute('aria-pressed',String(identity===id));}}
   function count() {byId('count').textContent=String(cards.length); const n=cards.length, word=n%10===1&&n%100!==11?'карточка':n%10>=2&&n%10<=4&&(n%100<12||n%100>14)?'карточки':'карточек'; byId('count-word').textContent=word;}
@@ -106,7 +107,7 @@ export function createMaterialList({onOpen, onRetry, fetchMedia}) {
       const label=byId('sort').value==='importance'?null:group(card);
       if(label&&label!==previous){nodes.push(element('div',label,'date-group')); previous=label;}
       let entry=rows.get(card.id);
-      const path=card.digest||card.event?null:(card.images?.[0]||card.attachments?.find(a=>a.kind==='image')?.url);
+      const path=previewPath(card);
       if(entry&&(entry.path!==path||entry.card.version!==card.version)){dispose(entry); rows.delete(card.id); entry=null;}
       if(!entry){entry=makeRow(card); rows.set(card.id,entry); content(entry,card); observer.observe(entry.node);}
       else if(JSON.stringify(entry.card)!==JSON.stringify(card))content(entry,card);

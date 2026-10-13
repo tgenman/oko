@@ -50,10 +50,13 @@ test('keyboard focus does not open content and viewing focuses next without open
 test('date groups, saved sorting and displayed hidden card count use current rows', async () => {
  const r=await reader(); try {
   const now=Date.now()/1000;
-  await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false}),material('hidden',{filter:{hidden:true},published:now})]);
-  await expect(r.page.locator('.date-group')).toHaveText(['Сегодня','Вчера','Дата неизвестна','Сегодня']);
-  await expect(r.page.locator('#count-label')).toHaveText('4 карточки');
+  await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false})]);
+  await expect(r.page.locator('.date-group')).toHaveText(['Сегодня','Вчера','Дата неизвестна']);
+  await expect(r.page.locator('#count-label')).toHaveText('3 карточки');
+  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/cards?sort=newest&show_hidden=true',{body:[t.cards[0],{...t.cards[0],id:'hidden',filter:{hidden:true}},...t.cards.slice(1)]});});
   await r.page.locator('#list-menu-toggle').click();
+  await r.page.locator('#show-hidden').check();
+  await expect(r.page.locator('#count-label')).toHaveText('4 карточки');
   await r.page.locator('#sort').selectOption('importance');
   await expect(r.page.locator('.date-group')).toHaveCount(0);
   await r.page.reload();
@@ -69,6 +72,21 @@ test('opened YouTube material preserves description separately from captions', a
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#description')).toHaveText('Описание из Atom');
   await expect(r.page.locator('#text')).toHaveText('Сохранённые субтитры');
+  expect(r.errors).toEqual([]);
+ } finally {await r.close();}
+});
+
+test('current and previous video descriptions remain available with their own captions', async () => {
+ const r=await reader(); try {
+  await r.page.addInitScript(()=>readerTransport.replies.set('/api/previous-video',{body:{title:'Прежнее видео',description:'Прежнее описание',text:'Прежние субтитры',images:[]}}));
+  await r.start([material('video',{description:'Текущее описание',text:'Текущие субтитры',previous:[{url:'/api/previous-video'}]})]);
+  await r.page.locator('[data-card="video"]').click();
+  await expect(r.page.locator('#title')).toHaveText('video');
+  await expect(r.page.locator('#description')).toHaveText('Текущее описание');
+  await r.page.locator('#versions summary').click();
+  await expect(r.page.locator('#versions')).toContainText('Прежнее описание');
+  await expect(r.page.locator('#versions')).toContainText('Прежние субтитры');
+  await expect(r.page.locator('#text')).toHaveText('Текущие субтитры');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });
@@ -157,6 +175,21 @@ test('list width supports pointer and keyboard, persists, and shrinks to availab
   await expect(divider).toHaveAttribute('aria-valuenow','348');
   await r.page.setViewportSize({width:1280,height:720});
   await expect(divider).toHaveAttribute('aria-valuenow','500');
+  expect(r.errors).toEqual([]);
+ } finally {await r.close();}
+});
+
+test('incomplete materials and unavailable previews keep usable rows and diagnostic errors', async () => {
+ const r=await reader(); try {
+  await r.page.addInitScript(()=>readerTransport.replies.set('/api/broken-preview',{status:500,body:{detail:'Превью недоступно'}}));
+  await r.start([material('pending',{complete:false}),material('broken',{images:['/api/broken-preview']})]);
+  await expect(r.page.locator('[data-card="pending"] .card-kind')).toHaveText('Загружается');
+  await expect(r.page.locator('[data-card="broken"] .card-preview')).toBeVisible();
+  await expect(r.page.locator('[data-card="broken"] img')).toHaveCount(0);
+  await r.page.locator('[data-card="broken"]').click();
+  await expect(r.page.locator('#title')).toHaveText('broken');
+  await r.page.locator('#debug-toggle').check();
+  await expect(r.page.locator('#debug-errors')).toContainText('Не удалось загрузить превью');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });

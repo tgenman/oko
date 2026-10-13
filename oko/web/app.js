@@ -76,9 +76,11 @@ async function refresh() {
   const epoch = contentEpoch;
   const sequence = ++refreshSequence;
   const debugRevision = debug.revision();
+  let statusAvailable = false;
   try {
     const state = await api('status');
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
+    statusAvailable = true;
     debug.updateStatus(state.debug_count, state.debug_persistence_error, debugRevision);
     menus.status(state.initial_histories || []);
     if (state.stopped) { stopUi('Око остановлено'); return; }
@@ -91,7 +93,7 @@ async function refresh() {
     readingCatalog = navigation;
     if (tree.update(navigation, state.sources || [])) return;
     list.setArea(tree.selection, navigation);
-    if (state.error) { opened.clear(); return; }
+    if (state.error) { opened.clear(); list.error(state.error); return; }
     const params = new URLSearchParams({sort: byId('sort').value});
     if (byId('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);
@@ -101,7 +103,7 @@ async function refresh() {
     opened.reconcile(cards);
     list.update(cards, opened.selection?.id);
 
-  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { list.error(error.message); byId('progress').textContent = error.message; } }
+  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) opened.clear(); list.error(error.message); byId('progress').textContent = error.message; } }
   finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
 byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); byId('progress').textContent = error.message; } };
@@ -112,7 +114,7 @@ byId('stop').onclick = async () => {
 async function heartbeat() {
   if (stopped) return;
   try { await api('tabs/' + tab + '/heartbeat', 'POST'); }
-  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { list.error(error.message); byId('progress').textContent = error.message; } }
+  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { opened.clear(); list.error(error.message); byId('progress').textContent = error.message; } }
   if (!stopped) setTimeout(heartbeat, 2000);
 }
 window.addEventListener('pagehide', () => {

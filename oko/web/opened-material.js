@@ -89,7 +89,6 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
     container.replaceChildren();
     for (const previous of material.previous || []) {
       const details = element('details');
-      if(source.description) details.append(element('p',source.description));
       details.append(element('summary', 'Предыдущая версия'));
       const body = element('div'); details.append(body);
       let loaded = false;
