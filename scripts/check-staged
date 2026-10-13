@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Check the exact staged Python/JavaScript bytes, including partial staging."""
+import os
+import shutil
+import subprocess
+import sys
+
+
+def main():
+    failed = subprocess.run(['git', 'diff', '--cached', '--check']).returncode != 0
+    names = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'])
+    for raw in names.split(b'\0'):
+        if not raw:
+            continue
+        name = os.fsdecode(raw)
+        python = name.endswith('.py') or name in ('scripts/check', 'scripts/check-staged')
+        javascript = name.endswith(('.js', '.mjs', '.cjs'))
+        if not (python or javascript):
+            continue
+        content = subprocess.check_output(['git', 'show', ':' + name])
+        if python:
+            try:
+                compile(content, name, 'exec')
+            except (SyntaxError, ValueError) as error:
+                print(f'{name}: {error}', file=sys.stderr)
+                failed = True
+        else:
+            node = shutil.which(os.environ.get('OKO_NODE', 'node'))
+            if not node:
+                print('Node missing; set OKO_NODE or install Node >=20.', file=sys.stderr)
+                return 1
+            print(f'CHECK staged {name}', flush=True)
+            mode = 'commonjs' if name.endswith('.cjs') else 'module'
+            if subprocess.run([node, '--check', '--input-type=' + mode], input=content).returncode:
+                failed = True
+    return int(failed)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -106,3 +106,31 @@ def test_missing_browser_dependency_is_not_success(tmp_path):
     assert 'Browser dependencies unavailable' in result.stderr
     assert 'NOT RUN python-tests' in result.stdout
     assert 'PASS' not in result.stdout
+
+
+def test_ui_checks_production_http_modules_before_browser(tmp_path):
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
+                            env=runtimes(tmp_path), capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.index('RUN http') < result.stdout.index('RUN browser')
+    assert 'PASS http' in result.stdout
+
+
+def test_python_and_types_do_not_require_node(tmp_path):
+    env = runtimes(tmp_path)
+    env['OKO_NODE'] = str(tmp_path / 'absent-node')
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', 'types'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS python-tests' in result.stdout and 'PASS types' in result.stdout
+    assert 'RUN browser' not in result.stdout and 'RUN syntax' not in result.stdout
+
+
+def test_failed_http_module_check_fails_ui(tmp_path):
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if 'tests/reader/test_web_assets.py' in sys.argv else 0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'FAIL http' in result.stdout

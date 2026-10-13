@@ -5,9 +5,22 @@
 ```sh
 ./scripts/check ui
 ./scripts/check all
+./scripts/check python types
+./scripts/check http
+./scripts/check browser
 ```
 
 [Runner](../../scripts/check) — источник состава режимов. Он обнаруживает актуальные JavaScript-модули и браузерные сценарии, печатает результаты и время, возвращает ненулевой код при падении, отсутствующей зависимости или прерывании. При прерывании завершает принадлежащие ему дочерние процессы. Проверка diff охватывает staged и unstaged изменения; успешная проверка не означает чистое рабочее дерево.
+
+`ui` включает синтаксис, HTTP-проверку выдачи всего графа JavaScript настоящим сервером, браузер и diff. `all` добавляет весь Python-набор, типизацию и CLI. Отдельно доступны `syntax`, `http`, `browser`, `python`, `types`, `diff`, `entrypoint`, `staged`; можно указать несколько, повторы выполняются один раз. `python`, `types` и `http` не требуют Node/Playwright. `syntax` требует Node, но не браузер. После локального исправления повторяйте затронутый набор; полный прогон нужен перед push и в CI.
+
+## Обязательные проверки
+
+Для нового checkout выполните `./scripts/install-hooks`. Скрипт включает локальный `core.hooksPath=.githooks` и сохраняет чужую настройку hooks, завершаясь с ошибкой при конфликте.
+
+- `pre-commit` вызывает `check staged`: проверяет whitespace и синтаксис Python/JavaScript именно из индекса, в том числе при частичном staging. Зависимости приложения и браузер для этой проверки не нужны; Node требуется при staged JavaScript.
+- `pre-push` вызывает `check all`; ошибка блокирует push.
+- GitHub Actions запускает `check all` на push и pull request с Python 3.11, Node 22 и Chromium. Установку зависимостей выполняют отдельные шаги CI; runner их не устанавливает. После подключения remote настройте `Full checks` как required check в правилах защищённой ветки, если нужна серверная блокировка merge.
 
 ## Подготовка окружения
 
