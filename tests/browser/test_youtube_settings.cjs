@@ -89,12 +89,12 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await page.locator('#youtube-mode').selectOption('proxy');
     await expect(page.locator('#youtube-save')).toBeVisible();
     assert.equal(await page.locator('#settings-dialog').evaluate(el => el.scrollWidth <= el.clientWidth), true);
-    await page.screenshot({path:path.join(root, '.scratch/settings-ios-preview/youtube-mobile.png')});
+    await page.screenshot({path:'/private/tmp/oko-settings-youtube-mobile.png'});
     await page.locator('#youtube-save').scrollIntoViewIfNeeded();
     await expect(page.locator('#youtube-save')).toBeInViewport();
     await expect(page.locator('#settings-close')).toBeInViewport();
     await page.setViewportSize({width:1200, height:940});
-    await page.screenshot({path:path.join(root, '.scratch/settings-ios-preview/youtube-desktop.png')});
+    await page.screenshot({path:'/private/tmp/oko-settings-youtube-desktop.png'});
     assert.deepEqual(errors, []);
   } finally {
     t.signal.removeEventListener('abort', abort);
