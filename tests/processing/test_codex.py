@@ -1,7 +1,8 @@
+from oko.processing.codex import LocalCodex
 from tests.support.codex import CodexService, configure_codex
 from pathlib import Path
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from oko.collection.demo import DemoSource
 from tests.support.reader import HEADERS, setup_reader, wait_for
 
@@ -9,7 +10,7 @@ from tests.support.reader import HEADERS, setup_reader, wait_for
 def test_codex_reports_unavailable_before_any_content_is_sent(tmp_path: Path, monkeypatch):
     record = tmp_path / 'unexpected-command'
     fake_cli(tmp_path, monkeypatch, f"echo \"$*\" >> '{record}'\nexit 99\n")
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test'), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
         item = setup_reader(client)
         client.patch('/api/settings/oko/global', json={'processor': 'codex', 'theses': True})
         denied = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
@@ -47,7 +48,7 @@ case "$*" in
   *) exit 99 ;;
 esac
 """)
-    with TestClient(create_app(tmp_path / 'store', token='test'), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path / 'store', token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
         client.post('/api/tabs/reader/heartbeat')
         response = client.post('/api/processors/codex/check')
         assert response.status_code == 200
@@ -64,7 +65,7 @@ esac
 
 def test_missing_cli_is_a_visible_blocker_without_local_model_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv('PATH', str(tmp_path))
-    with TestClient(create_app(tmp_path / 'store', source=DemoSource(), token='test'), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path / 'store', source=DemoSource(), token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
         setup_reader(client)
         result = client.post('/api/processors/codex/check').json()
         assert result['available'] is False
@@ -82,7 +83,7 @@ def test_stop_cancels_only_the_owned_connection_probe(tmp_path, monkeypatch):
 echo $$ > '{marker}'
 exec /bin/sleep 30
 """)
-    with TestClient(create_app(tmp_path / 'store', token='test'), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path / 'store', token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
         client.post('/api/tabs/reader/heartbeat')
         with concurrent.futures.ThreadPoolExecutor() as pool:
             pending = pool.submit(client.post, '/api/processors/codex/check')
@@ -103,7 +104,7 @@ exec /bin/sleep 30
 
 def test_probe_output_limit_does_not_expose_diagnostics(tmp_path, monkeypatch):
     fake_cli(tmp_path, monkeypatch, "/usr/bin/head -c 20000 /dev/zero\n")
-    with TestClient(create_app(tmp_path / 'store', token='test'), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path / 'store', token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
         client.post('/api/tabs/reader/heartbeat')
         response = client.post('/api/processors/codex/check')
         assert response.status_code == 200
@@ -232,7 +233,7 @@ case "$*" in
   *) exit 99 ;;
 esac
 """)
-    with TestClient(create_app(tmp_path/'store',source=DemoSource(),token='test'),headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path/'store',source=DemoSource(),token='test', codex_client=LocalCodex()),headers=HEADERS) as client:
         item=setup_reader(client)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
@@ -272,7 +273,7 @@ def test_codex_exhausted_quota_is_visible_without_source_transfer(tmp_path):
 def test_large_cli_output_cannot_block_connection_check(tmp_path,monkeypatch):
     import concurrent.futures
     fake_cli(tmp_path,monkeypatch,"/usr/bin/head -c 10000000 /dev/zero\n")
-    with TestClient(create_app(tmp_path/'store',token='test'),headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path/'store',token='test', codex_client=LocalCodex()),headers=HEADERS) as client:
         client.post('/api/tabs/r/heartbeat')
         with concurrent.futures.ThreadPoolExecutor() as pool:
             pending=pool.submit(client.post,'/api/processors/codex/check')

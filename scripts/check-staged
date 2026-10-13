@@ -36,6 +36,7 @@ def main():
                 failed = True
             elif subprocess.run([node, str(Path(__file__).with_name('lint-js.cjs')), '--stdin', name], input=content).returncode:
                 failed = True
+    failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check_test_contracts.py')), '--staged']).returncode != 0 or failed
     return int(failed)
 
 

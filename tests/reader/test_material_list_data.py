@@ -1,7 +1,7 @@
 import httpx
 from fastapi.testclient import TestClient
 
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.reader import HEADERS, wait_for
 from tests.support.youtube import PNG, subscribe, feed_xml
 

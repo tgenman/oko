@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import httpx
 import uvicorn
 
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.events import event_transport
 from tests.support.codex import CodexService
 from tests.support.youtube import PNG

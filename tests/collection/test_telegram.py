@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import time
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 

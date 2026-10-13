@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.telegram import Telegram
 from tests.support.feed_url import HEADERS, client_for, verify, add
 

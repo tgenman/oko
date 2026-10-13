@@ -25,7 +25,7 @@ def test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count(tm
             return httpx.Response(200, text=xml)
         return httpx.Response(200, text='<article>Полный материал</article>')
     from fastapi.testclient import TestClient
-    from oko.reader.app import create_app
+    from tests.support.app import create_app
     from tests.support.feed_url import HEADERS
     def open_reader():
         return TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
@@ -69,7 +69,7 @@ def test_seven_of_twenty_restart_keeps_selected_history_and_progress(tmp_path):
     import asyncio
     import httpx
     from fastapi.testclient import TestClient
-    from oko.reader.app import create_app
+    from tests.support.app import create_app
     from tests.support.feed_url import HEADERS
     blocked = True
     posts = list(range(20, 0, -1))
@@ -110,7 +110,7 @@ def test_seven_of_twenty_restart_keeps_selected_history_and_progress(tmp_path):
 def test_selected_date_includes_midnight_and_every_later_post(tmp_path):
     import httpx
     from fastapi.testclient import TestClient
-    from oko.reader.app import create_app
+    from tests.support.app import create_app
     from tests.support.feed_url import HEADERS
     def reply(request):
         if request.url.path == '/feed':
@@ -131,7 +131,7 @@ def test_selected_date_includes_midnight_and_every_later_post(tmp_path):
 def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_path):
     import httpx
     from fastapi.testclient import TestClient
-    from oko.reader.app import create_app
+    from tests.support.app import create_app
     from tests.support.feed_url import HEADERS, YOUTUBE
     from tests.support.youtube import PNG
     def reply(request):
@@ -161,7 +161,7 @@ def test_count_has_no_product_limit_and_preserves_large_integer(tmp_path):
 def test_rss_unknown_dates_included_and_window_warnings_survive_rotation(tmp_path):
     import httpx
     from fastapi.testclient import TestClient
-    from oko.reader.app import create_app
+    from tests.support.app import create_app
     from tests.support.feed_url import HEADERS
     rows = [('unknown', ''), ('new', '2025-10-02T12:00:00Z'), ('old', '2025-09-01T12:00:00Z')]
     def reply(request):
@@ -194,7 +194,7 @@ def test_rss_unknown_dates_included_and_window_warnings_survive_rotation(tmp_pat
 def test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed(tmp_path, dates, warning):
     import httpx
     from fastapi.testclient import TestClient
-    from oko.reader.app import create_app
+    from tests.support.app import create_app
     from tests.support.feed_url import HEADERS
     def reply(request):
         if request.url.path == '/feed':
@@ -214,7 +214,7 @@ def test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed
 def test_finite_rss_history_reports_requested_and_available_without_archive(tmp_path):
     import httpx
     from fastapi.testclient import TestClient
-    from oko.reader.app import create_app
+    from tests.support.app import create_app
     from tests.support.feed_url import HEADERS
     def reply(request):
         if request.url.path == '/feed':

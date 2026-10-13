@@ -1,6 +1,6 @@
 import httpx
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 
 HEADERS = {'Authorization': 'Bearer test'}
 YOUTUBE = 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw'

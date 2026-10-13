@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from oko.collection.demo import DemoSource
 from tests.support.processes import wait_cards
 from tests.support.reader import HEADERS

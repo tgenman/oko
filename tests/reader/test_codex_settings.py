@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.reader import HEADERS
 from tests.support.codex import CodexService
 

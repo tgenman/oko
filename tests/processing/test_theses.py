@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 from fastapi.testclient import TestClient
 
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from oko.collection.demo import DemoSource
 
 

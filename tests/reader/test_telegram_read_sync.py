@@ -1,7 +1,7 @@
 import time
 import pytest
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.telegram import Telegram, connect, settled
 
 H = {'Authorization': 'Bearer test'}

@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from oko.collection.demo import DemoSource
 
 
@@ -69,7 +69,7 @@ def test_process_death_after_theses_move_retries_without_publishing_orphan(tmp_p
     server = ThreadingHTTPServer(('127.0.0.1', 0), ModelServer)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
-    process = launch(tmp_path, 'after_theses_move')
+    process = launch(tmp_path, 'after_theses_move', model_origin=f'http://127.0.0.1:{server.server_port}')
     try:
         with connect(tmp_path, process) as client:
             client.post('/api/tabs/a/heartbeat')
@@ -78,7 +78,7 @@ def test_process_death_after_theses_move_retries_without_publishing_orphan(tmp_p
             client.put('/api/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
             client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         assert process.wait(timeout=5) == 79
-        process = launch(tmp_path)
+        process = launch(tmp_path, model_origin=f'http://127.0.0.1:{server.server_port}')
         with connect(tmp_path, process) as client:
             assert client.get('/api/materials/' + item).json()['theses'] is None
             client.post('/api/tabs/a/heartbeat')

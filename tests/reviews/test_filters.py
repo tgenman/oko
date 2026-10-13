@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import httpx
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from oko.collection.contracts import Material
 from tests.support.reader import HEADERS, wait_for
 
@@ -175,7 +175,7 @@ def test_process_death_after_filter_move_does_not_publish_orphan(tmp_path):
     server = ThreadingHTTPServer(('127.0.0.1', 0), ModelServer)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
-    process = launch(tmp_path, 'after_filter_move')
+    process = launch(tmp_path, 'after_filter_move', model_origin=f'http://127.0.0.1:{server.server_port}')
     try:
         with connect(tmp_path, process) as client:
             client.post('/api/tabs/a/heartbeat')
@@ -183,7 +183,7 @@ def test_process_death_after_filter_move_does_not_publish_orphan(tmp_path):
             client.put('/api/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
             client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'prompt_filters': 'Скрыть тестовые публикации.'})
         assert process.wait(timeout=5) == 79
-        process = launch(tmp_path)
+        process = launch(tmp_path, model_origin=f'http://127.0.0.1:{server.server_port}')
         with connect(tmp_path, process) as client:
             assert len(client.get('/api/cards').json()) == 3
             assert client.get('/api/materials/' + item).json()['filter']['status'] == 'pending'

@@ -1,6 +1,6 @@
 from pathlib import Path
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 OPML = (Path(__file__).resolve().parents[1] / 'fixtures' / 'subscriptions.opml').read_text()

@@ -2,7 +2,7 @@ from tests.support.reader import Clock
 import time
 from pathlib import Path
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from oko.collection.demo import DemoSource
 
 HEADERS = {'Authorization': 'Bearer test-token'}

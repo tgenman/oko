@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 import httpx
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 PNG = bytes.fromhex('89504e470d0a1a0a') + b'local-image'

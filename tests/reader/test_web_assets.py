@@ -3,7 +3,7 @@ from urllib.parse import urljoin
 
 from fastapi.testclient import TestClient
 
-from oko.reader.app import create_app
+from tests.support.app import create_app
 
 
 def test_reader_serves_entire_browser_module_graph_without_exposing_reader_data(tmp_path):

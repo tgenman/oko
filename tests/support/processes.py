@@ -5,8 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15'):
-    env = dict(os.environ, PYTHONPATH=str(ROOT), OKO_TEST_FAULT=fault)
+def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = ''):
+    env = dict(os.environ, PYTHONPATH=str(ROOT), OKO_TEST_FAULT=fault, OKO_TEST_MODEL_ORIGIN=model_origin)
     return subprocess.Popen([sys.executable, '-m', 'tests.process_server', '--data', str(root), '--no-browser', '--demo', '--lease', lease, '--grace', grace], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

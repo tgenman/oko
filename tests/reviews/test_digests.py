@@ -2,7 +2,7 @@ from tests.support.digests import configure, digest_transport
 import json
 import httpx
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.sources import EventSource
 from tests.support.reader import HEADERS, setup_reader, wait_for
 from tests.support.models import model_transport

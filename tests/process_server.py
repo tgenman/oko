@@ -2,7 +2,8 @@ import asyncio
 import os
 from pathlib import Path
 from oko.collection.demo import DemoSource
-from oko.__main__ import run
+import oko.__main__ as entrypoint
+from tests.support.app import create_app, OwnedServerTransport
 
 
 def fault(point: str) -> None:
@@ -23,4 +24,10 @@ class ResistantSource(DemoSource):
 
 
 if __name__ == '__main__':
-    run(fault=fault, source=ResistantSource() if os.environ.get('OKO_TEST_FAULT') == 'resist_cancel' else None)
+    origin = os.environ.get('OKO_TEST_MODEL_ORIGIN')
+    def fixture_app(root, **options):
+        if origin:
+            options['ai_transport'] = OwnedServerTransport(origin)
+        return create_app(root, **options)
+    entrypoint.create_app = fixture_app
+    entrypoint.run(fault=fault, source=ResistantSource() if os.environ.get('OKO_TEST_FAULT') == 'resist_cancel' else None)

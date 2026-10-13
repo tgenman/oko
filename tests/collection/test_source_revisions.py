@@ -2,7 +2,7 @@
 import time
 import httpx
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.rss import rss, import_feed, wait_cards
 from tests.support.reader import wait_for
 

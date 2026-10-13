@@ -1,10 +1,11 @@
+from oko.collection.youtube.source import LocalCaptions
 from tests.support.youtube import VIDEO, PNG, subscribe, feed_xml
 import json
 import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.models import model_transport
 
 HEADERS = {'Authorization': 'Bearer test'}
@@ -31,7 +32,7 @@ class YouTubeTranscriptApi:
         return [Track()]
 ''')
     monkeypatch.setenv('PYTHONPATH', str(package.parent) + os.pathsep + os.environ.get('PYTHONPATH', ''))
-    with TestClient(create_app(tmp_path / 'data', token='test', rss_enabled=True, rss_transport=transport([])), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path / 'data', token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=LocalCaptions()), headers=HEADERS) as client:
         feed = subscribe(client)
         client.patch('/api/feeds/' + feed, json={'importance': 'high'})
         client.post('/api/tabs/reader/heartbeat')
@@ -229,7 +230,7 @@ class YouTubeTranscriptApi:
         raise RuntimeError('SDK failed password=private-caption-key')
 ''')
     monkeypatch.setenv('PYTHONPATH', str(package.parent) + os.pathsep + os.environ.get('PYTHONPATH', ''))
-    with TestClient(create_app(tmp_path / 'data', token='test', rss_enabled=True, rss_transport=transport([])), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path / 'data', token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=LocalCaptions()), headers=HEADERS) as client:
         feed = subscribe(client)
         client.patch('/api/feeds/' + feed, json={'importance': 'high'})
         client.post('/api/tabs/reader/heartbeat')
@@ -286,7 +287,7 @@ class YouTubeTranscriptApi:
 ''')
     monkeypatch.setenv('PYTHONPATH', str(package.parent) + os.pathsep + os.environ.get('PYTHONPATH', ''))
     data = tmp_path / 'data'
-    kwargs = dict(token='test', rss_enabled=True, rss_transport=transport([]))
+    kwargs = dict(token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=LocalCaptions())
     with TestClient(create_app(data, **kwargs), headers=HEADERS) as client:
         feed = subscribe(client)
         client.patch('/api/feeds/' + feed, json={'importance': 'high'})

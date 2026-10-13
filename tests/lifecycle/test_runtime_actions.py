@@ -5,7 +5,7 @@ from pathlib import Path
 import threading
 import time
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from oko.collection.contracts import SourceError
 from tests.support.telegram import Telegram, connect
 

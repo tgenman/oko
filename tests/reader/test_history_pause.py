@@ -3,7 +3,7 @@ import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.feed_url import HEADERS, add, verify
 
 

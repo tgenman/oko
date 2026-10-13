@@ -5,7 +5,7 @@ import time
 import httpx
 from fastapi.testclient import TestClient
 
-from oko.reader.app import create_app
+from tests.support.app import create_app
 from tests.support.codex import CodexService, configure_codex
 from tests.support.digests import digest_transport
 from tests.support.events import event_transport
