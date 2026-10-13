@@ -1,11 +1,12 @@
 import {bindInitialHistory} from './initial-history.js';
 import {reportError} from './debug.js';
-export function createTelegramConnection({api, onConnected, prefix = 'telegram', context = () => ({current:true, commit: effect => effect()})}) {
+export function createTelegramConnection({api, onConnected, prefix = 'telegram', folderPicker, context = () => ({current:true, commit: effect => effect()})}) {
   const byId = id => document.getElementById(id.replace(/^telegram-/, prefix + '-'));
   const account = byId('telegram-account'), peer = byId('telegram-peer');
   const folder = byId('telegram-folder'), topic = byId('telegram-topic');
   const add = byId('telegram-add'), accounts = byId('telegram-accounts');
   const topics = byId('telegram-topics'), message = byId('telegram-message');
+  const folderValue = () => folderPicker ? folderPicker.value() : folder.value.trim();
   const initialHistory = bindInitialHistory(prefix);
   const historyFields = byId('telegram-history');
   const inputs = [account, peer, folder, topic, byId('telegram-auto')];
@@ -22,10 +23,11 @@ export function createTelegramConnection({api, onConnected, prefix = 'telegram',
 
   const validPeer = () => /^(@?[a-zA-Z][a-zA-Z0-9_]{3,31}|-[0-9]+)$/.test(peer.value.trim());
   function update() {
-    add.disabled = stopped || busy || loadingAccounts || loadingTopics || !account.value || !validPeer() || !folder.value.trim() || (topic.options.length > 0 && !topic.value);
+    add.disabled = stopped || busy || loadingAccounts || loadingTopics || !account.value || !validPeer() || !folderValue() || (topic.options.length > 0 && !topic.value);
     accounts.disabled = stopped || busy || loadingAccounts;
     topics.disabled = stopped || busy || loadingAccounts || loadingTopics || !account.value || !validPeer();
     for (const input of inputs) input.disabled = stopped || busy || (input === account && loadingAccounts) || (input === topic && !topic.options.length) || (input === folder && feedId !== null);
+    if (folderPicker) folderPicker.setDisabled(stopped || busy);
     historyFields.disabled = stopped || busy;
     historyFields.hidden = feedId !== null;
     add.textContent = busy ? 'Подключение…' : 'Подключить источник';
@@ -59,7 +61,8 @@ export function createTelegramConnection({api, onConnected, prefix = 'telegram',
   }
   account.onchange = resetTopics;
   peer.oninput = resetTopics;
-  folder.oninput = update;
+  if (folderPicker) folderPicker.onChange(update);
+  else folder.oninput = update;
   topic.onchange = update;
   accounts.onclick = loadAccounts;
   topics.onclick = async () => {
@@ -77,16 +80,16 @@ export function createTelegramConnection({api, onConnected, prefix = 'telegram',
     finally { if (stamp === generation) {loadingTopics = false; update();} }
   };
   add.onclick = async () => {
-    if (add.disabled) return;
+    if (add.disabled || (folderPicker && !folderPicker.valid())) return;
     const history = feedId ? null : initialHistory();
     if (!feedId && !history) return;
     const screen = context();
     busy = true; update(); message.textContent = 'Подключение…';
     try {
-      const feed = await api('telegram/connect', 'POST', {account: account.value, peer: peer.value.trim(), folder: folder.value.trim(), auto_read: byId('telegram-auto').checked, topic_id: topic.value ? Number(topic.value) : null, ...(feedId ? {feed_id: feedId} : {initial_history: history})});
+      const feed = await api('telegram/connect', 'POST', {account: account.value, peer: peer.value.trim(), folder: folderValue(), auto_read: byId('telegram-auto').checked, topic_id: topic.value ? Number(topic.value) : null, ...(feedId ? {feed_id: feedId} : {initial_history: history})});
       if (stopped) return;
       if (feedId) drafts.delete(feedId);
-      peer.value = ''; feedId = null; folder.value = 'Telegram'; byId('telegram-auto').checked = false;
+      peer.value = ''; feedId = null; if (folderPicker) folderPicker.reset(); else folder.value = 'Telegram'; byId('telegram-auto').checked = false;
       byId('telegram-history-mode').value = 'count'; byId('telegram-history-mode').dispatchEvent(new Event('change'));
       byId('telegram-history-count').value = '20'; byId('telegram-history-date').value = '';
       byId('telegram-new').hidden = true; resetTopics();
@@ -97,7 +100,7 @@ export function createTelegramConnection({api, onConnected, prefix = 'telegram',
   };
   byId('telegram-new').onclick = () => {
     if (busy || stopped) return;
-    feedId = null; peer.value = ''; folder.value = 'Telegram';
+    feedId = null; peer.value = ''; if (folderPicker) folderPicker.reset(); else folder.value = 'Telegram';
     byId('telegram-new').hidden = true; message.textContent = ''; resetTopics();
   };
   update();

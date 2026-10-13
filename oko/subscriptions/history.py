@@ -2,6 +2,7 @@
 from datetime import date, datetime, time
 import json
 import sqlite3
+import secrets
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -80,10 +81,41 @@ class History:
         selection['warnings'] = cursor.get('warnings', selection.get('warnings', []))
         selection['discovery_error'] = cursor.get('history_error')
         selection['discovery_retry_at'] = cursor.get('history_retry_at')
+        if 'youtube_history' in cursor:
+            selection['waiting'] = cursor.get('history_waiting', False)
+            selection['requests'] = cursor.get('history_requests', 0)
         self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
 
     def configure(self, feed: str, selection: InitialHistory) -> None:
         self.db.execute('INSERT INTO initial_history(feed,selection) VALUES (?,?)', (feed, json.dumps(selection.selection())))
+
+    def start(self, feed: str, selection: InitialHistory) -> dict[str, Any]:
+        current = self.status(feed)
+        if current and current['state'] not in ('done', 'cancelled'):
+            raise ValueError('Сначала остановите текущую загрузку истории')
+        if selection.mode != 'count':
+            raise ValueError('Догрузка YouTube поддерживает последние N видео')
+        self.db.execute('DELETE FROM history_members WHERE feed=?', (feed,))
+        value = dict(**selection.selection(), run=secrets.token_hex(16), resume=0)
+        self.db.execute('''INSERT INTO initial_history(feed,selection) VALUES (?,?)
+            ON CONFLICT(feed) DO UPDATE SET selection=excluded.selection,frozen=0,paused=0,scan_complete=0''',
+            (feed, json.dumps(value)))
+        result = self.status(feed)
+        assert result is not None
+        return result
+
+    def cancel(self, feed: str) -> dict[str, Any]:
+        current = self.status(feed)
+        if current is None:
+            raise ValueError('История не настроена')
+        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        value = json.loads(row['selection'])
+        value.update(cancelled=True, waiting=False)
+        self.db.execute('UPDATE initial_history SET selection=?,paused=1 WHERE feed=?', (json.dumps(value), feed))
+        self.db.execute("UPDATE jobs SET status='done',generation=generation+1 WHERE kind='fetch' AND item IN (SELECT item FROM history_members WHERE feed=?)", (feed,))
+        result = self.status(feed)
+        assert result is not None
+        return result
 
     def freeze(self, feed: str, items: list[str]) -> None:
         row = self.db.execute('SELECT frozen FROM initial_history WHERE feed=?', (feed,)).fetchone()
@@ -100,6 +132,13 @@ class History:
         status = self.status(feed)
         if status is None:
             raise ValueError('Начальная история не настроена')
+        if status.get('cancelled'):
+            raise ValueError('История остановлена; начните новый подбор')
+        if not paused:
+            row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+            selection = json.loads(row['selection'])
+            selection.update(resume=selection.get('resume', 0) + 1, waiting=False, discovery_error=None)
+            self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
         if status['state'] != 'done':
             self.db.execute('UPDATE initial_history SET paused=? WHERE feed=?', (paused, feed))
         result = self.status(feed)
@@ -130,4 +169,8 @@ class History:
             result['state'] = 'selecting'
         if row['paused'] and result['state'] != 'done':
             result['state'] = 'paused'
+        elif result.get('waiting') and result['state'] != 'done':
+            result['state'] = 'waiting'
+        if result.get('cancelled'):
+            result['state'] = 'cancelled'
         return result

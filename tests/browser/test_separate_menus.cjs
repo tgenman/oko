@@ -23,13 +23,14 @@ test('three menus keep reading position and addition tabs, Escape restores openi
     await expect(r.page.locator('#add-open')).toBeFocused();
     await r.page.locator('#feeds-open').click();
     await expect(r.page.getByRole('dialog', {name: 'Фиды и папки', exact: true})).toBeVisible();
-    await r.page.locator('#feeds-add').click();
+    await r.page.locator('#feeds-close').click();
+    await r.page.locator('#add-open').click();
     await expect(r.page.locator('dialog[open]')).toHaveCount(1);
     await expect(r.page.locator('#telegram-peer')).toHaveValue('@draft');
     await r.page.getByRole('tab', {name: 'RSS / YouTube', exact: true}).click();
     await expect(r.page.locator('#rss-url')).toHaveValue('https://example.org/draft');
     await r.page.keyboard.press('Escape');
-    await expect(r.page.locator('#feeds-open')).toBeFocused();
+    await expect(r.page.locator('#add-open')).toBeFocused();
     await r.page.locator('#settings-open').click();
     await expect(r.page.getByRole('dialog', {name: 'Настройки Око', exact: true})).toBeVisible();
     await expect(r.page.getByRole('heading', {name: 'Обработка и представление', exact: true})).toBeVisible();
@@ -90,7 +91,8 @@ test('completed OPML import preserves a newer settings menu, drafts and selected
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await r.page.locator('#setting-prompt_theses').fill('Черновик фида');
-    await r.page.locator('#feeds-add').click();
+    await r.page.locator('#feeds-close').click();
+    await r.page.locator('#add-open').click();
     await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
     await r.page.evaluate(() => {
       readerTransport.replies.set('/api/import/preview',{body:{folders:[],feeds:[]}});
@@ -213,7 +215,7 @@ test('late subscription and settings responses cannot replace newer object selec
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await r.page.evaluate(() => readerTransport.release('/api/subscriptions',readerTransport.replies.get('/api/subscriptions').body));
-    await expect(r.page.locator('#settings-owner')).toHaveValue('feed/two');
+    await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await r.page.locator('#setting-prompt_theses').fill('Отправленный');
     await r.page.evaluate(() => readerTransport.held.set('/api/settings/feed/two',true));
     await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить поле',exact:true}).click();
@@ -250,7 +252,8 @@ test('narrow feed menu navigates list and detail, OPML returns to the list witho
     await r.page.getByRole('button',{name:'Назад',exact:true}).click();
     await expect(r.page.locator('#feed-list')).toBeVisible();
     await expect(r.page.locator('#feed-detail')).toBeHidden();
-    await r.page.locator('#feeds-add').click();
+    await r.page.locator('#feeds-close').click();
+    await r.page.locator('#add-open').click();
     await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
     await r.page.evaluate(() => {
       readerTransport.replies.set('/api/import/preview',{body:{folders:[{title:'Учёба'}],feeds:[]}});

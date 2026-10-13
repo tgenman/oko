@@ -59,7 +59,7 @@ class FeedPatch(BaseModel):
 
 
 DEFAULTS: dict[str, Any] = dict(
-    events=True, event_hours=24, originals=True, theses=False, digests=False, prompt_theses='Выдели основные тезисы публикации.',
+    events=True, event_hours=24, originals=True, theses=True, digests=False, prompt_theses='Выдели основные тезисы публикации.',
     prompt_digest='Собери темы и основные тезисы за период.', prompt_filters='',
     schedule='off', digest_days=1, processor='codex')
 

@@ -4,14 +4,17 @@ import asyncio
 import json
 import re
 import sys
+import time
 from dataclasses import replace
-from typing import Protocol
+from typing import Any, Protocol
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
 from oko.collection.rss import RSSSource, Entry, entries
 from oko.collection.contracts import SourceError, SourceSkipped
 from oko.collection.contracts import Image, Material, Publication
+from oko.collection.youtube.history import HistoryClient, LocalHistory
 from oko.collection.youtube.access import CaptionsBlocked
 
 
@@ -68,34 +71,129 @@ class LocalCaptions:
 class YouTubeSource(RSSSource):
     changes = 'YouTube: повторно проверяются название и превью видео в окне Atom. Полученные субтитры сохраняются без повторных запросов. Удаление видео и правки вне этого окна не определяются.'
     def __init__(self, url: str, initial_days: int, captions: CaptionsClient,
-                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 transport: httpx.AsyncBaseTransport | None = None,
+                 history: HistoryClient | None = None) -> None:
         super().__init__(url, initial_days, transport)
         self.captions_client = captions
         self.want_captions = False
+        self.history_client = history or LocalHistory()
+        self.latest: dict[str, Entry] = {}
+        self.rss_errors: list[str] = []
+        self.rss_windows: dict[str, list[Entry]] = {}
 
     async def read_entries(self) -> list[Entry]:
-        # RSSSource owns finite-window discovery/cursors; only stable video IDs
-        # and canonical links are accepted from the YouTube feed.
-        raw, url, _ = await self.download(self.url)
-        batch = entries(raw, url)
+        channel = parse_qs(urlsplit(self.url).query).get('channel_id', [''])[0]
+        urls = [f'https://www.youtube.com/feeds/videos.xml?playlist_id={kind}{channel[2:]}'
+                for kind in ('UULF', 'UULV')] if channel.startswith('UC') else [self.url]
+        batch = []
+        self.rss_errors = []
+        self.rss_windows = {}
+        for feed_url in urls:
+            try:
+                raw, url, _ = await self.download(feed_url)
+                window = entries(raw, url)
+                self.rss_windows[feed_url] = window
+                batch.extend(window)
+            except SourceError as error:
+                record_caught('source.discover')
+                self.rss_errors.append(error.label)
         result = []
         for entry in batch:
             match = re.fullmatch(r'yt:video:([A-Za-z0-9_-]{11})', entry.publication.id)
             if match:
                 video = match[1]
                 result.append(Entry(Publication(video, f'https://www.youtube.com/watch?v={video}', entry.publication.published, published_known=entry.publication.published_known), entry.title, entry.excerpt))
-        return result
+        self.latest = {entry.publication.id: entry for entry in result}
+        return list(self.latest.values())
 
     async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+        selection = self.initial_history
+        previous: dict[str, Any] = json.loads(cursor) if cursor else {}
+        # An existing frozen RSS window must not start backfill on upgrade.
+        if selection and selection['mode'] == 'count' and (
+                not selection.get('frozen') or selection.get('run') or 'youtube_history' in previous):
+            return await self.discover_history(previous, selection)
         publications, next_cursor = await super().discover(cursor)
+        if not self.rss_windows and self.rss_errors:
+            raise SourceError(' · '.join(self.rss_errors))
+        if selection and selection['mode'] == 'date':
+            # A previously unavailable RSS window must still obey the chosen date.
+            publications = [p for p in publications if not p.published_known or p.published >= selection['since']]
+        if self.rss_errors:
+            self.gap = ' · '.join(self.rss_errors)
         return [replace(p, teaser=replace(p.teaser, text='', description=p.teaser.text))
                 if p.teaser else p for p in publications], next_cursor
+
+    async def discover_history(self, previous: dict[str, Any], selection: dict[str, Any]) -> tuple[list[Publication], str]:
+        batch = await self.read_entries()
+        run = selection.get('run', 'initial')
+        saved = previous.get('youtube_history', {})
+        if saved.get('run') != run:
+            saved = dict(run=run, baseline=[e.publication.id for e in batch], state={}, entries=[], complete=False,
+                         since=time.time(), baseline_urls=list(self.rss_windows), waiting=False, resume=selection.get('resume', 0))
+        # A recovered RSS window is not itself a set of new arrivals. Its first
+        # successful response establishes the missing baseline; known dates can
+        # still admit publications genuinely posted after this operation began.
+        for url, window in self.rss_windows.items():
+            if url not in saved.setdefault('baseline_urls', []):
+                for entry in window:
+                    p = entry.publication
+                    if not p.published_known or p.published < saved['since']:
+                        saved['baseline'].append(p.id.removeprefix('yt:video:'))
+                saved['baseline_urls'].append(url)
+        if saved.get('resume') != selection.get('resume', 0):
+            saved.update(waiting=False, resume=selection.get('resume', 0), error=None)
+        picked = False
+        if not saved['complete'] and not saved['waiting'] and not selection.get('paused') and not selection.get('cancelled'):
+            channel = parse_qs(urlsplit(self.url).query).get('channel_id', [''])[0]
+            try:
+                result = await self.history_client.fetch(channel, selection['count'], saved['state'])
+                if result.get('diagnostic'):
+                    try:
+                        raise SourceError.from_worker('Не удалось подобрать историю YouTube', result['diagnostic'])
+                    except SourceError:
+                        record_caught('youtube.history')
+                saved.update(state=result['state'], entries=result['entries'], complete=result['complete'],
+                             error=result.get('error'), requests=result.get('requests', 0), waiting=not result['complete'])
+                picked = True
+            except SourceError as error:
+                record_caught('youtube.history')
+                saved.update(waiting=True, error=error.label)
+        chosen = {entry['id'] for entry in saved['entries']}
+        result_publications = []
+        for entry in saved['entries']:
+            identity = entry['id']
+            current = self.latest.get(identity)
+            if saved['complete'] and not picked and not current:
+                continue
+            result_publications.append(Publication(identity, f'https://www.youtube.com/watch?v={identity}',
+                current.publication.published if current else 0,
+                Material(current.title if current else entry.get('title', 'YouTube'), '', False, 'Загрузка материала ожидается',
+                         description=self.excerpt(current.excerpt) if current else ''),
+                published_known=bool(current and current.publication.published_known)))
+        # The original RSS window cannot bypass N. Later arrivals are independent.
+        for entry in batch:
+            p = entry.publication
+            if p.id not in chosen and p.id not in saved['baseline']:
+                result_publications.append(replace(p, teaser=Material(entry.title, '', False,
+                    'Загрузка материала ожидается', description=self.excerpt(entry.excerpt))))
+        self.gap = ' · '.join(self.rss_errors) or None
+        # Publication titles belong to the already prepared Material files,
+        # not to a second content copy in SQLite's discovery cursor. Resuming
+        # only needs IDs; freshly enumerated entries supply their own titles.
+        for values in saved['state'].get('lists', {}).values():
+            for value in values:
+                value.pop('title', None)
+        saved['entries'] = [dict(id=entry['id']) for entry in saved['entries']]
+        next_cursor = dict(youtube_history=saved, history_enroll=list(chosen),
+                           scan_complete=saved['complete'], history_waiting=saved['waiting'],
+                           history_error=saved.get('error'), history_requests=saved.get('requests', 0))
+        return result_publications, json.dumps(next_cursor)
 
     async def fetch(self, publication: Publication, *, captions: CaptionsClient | None = None, request_captions: bool = True) -> Material:
         if not re.fullmatch(r'[A-Za-z0-9_-]{11}', publication.id):
             raise SourceError('Неверный ID YouTube')
-        batch = await self.read_entries()
-        entry = next((entry for entry in batch if entry.publication.id == publication.id), None)
+        entry = self.latest.get(publication.id)
         title = entry.title if entry else publication.teaser.title if publication.teaser else 'YouTube'
         description = self.excerpt(entry.excerpt) if entry else publication.teaser.description if publication.teaser else ''
         text, state, reason = '', 'not_requested', 'Субтитры не запрошены: включите тезисы или высокую важность'

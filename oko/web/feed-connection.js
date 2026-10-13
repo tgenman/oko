@@ -1,12 +1,22 @@
 import {reportError} from './debug.js';
 import {bindInitialHistory} from './initial-history.js';
 
-export function createFeedConnection({api, onSelected, context = () => ({current:true, commit: effect => effect()})}) {
+export function createFeedConnection({api, onSelected, folderPicker, context = () => ({current:true, commit: effect => effect()})}) {
   const byId = id => document.getElementById(id);
   const historySelection = bindInitialHistory('rss');
   const url = byId('rss-url'), check = byId('rss-check'), add = byId('rss-add');
   let generation = 0, checked = null, pending = false, saving = false, stopped = false, controller = null;
+  const historyHint = document.createElement('p'); historyHint.id = 'rss-history-warning';
+  byId('rss-history-mode').closest('fieldset').append(historyHint);
+  function historyWarning() {
+    historyHint.hidden = checked?.kind !== 'youtube';
+    historyHint.textContent = byId('rss-history-mode').value === 'date'
+      ? 'История по дате ограничена доступным окном RSS. Полнота за выбранный период не подтверждена. Для глубокой истории выберите последние N видео.'
+      : 'Последние N обычных видео и записей трансляций, без Shorts. Даты старых видео могут отсутствовать.';
+  }
+  byId('rss-history-mode').addEventListener('change', historyWarning);
   function controls() {
+    historyWarning();
     url.disabled = stopped || saving;
     check.disabled = stopped || pending || !url.value.trim();
     add.disabled = stopped || pending || !checked;
@@ -14,7 +24,7 @@ export function createFeedConnection({api, onSelected, context = () => ({current
   function reset() {
     generation++; controller?.abort(); checked = null; pending = false;
     byId('rss-checked-fields').hidden = true;
-    byId('rss-title').disabled = byId('rss-folder').disabled = true;
+    byId('rss-title').disabled = true; folderPicker.setDisabled(true);
     byId('rss-message').textContent = '';
     controls();
   }
@@ -25,7 +35,7 @@ export function createFeedConnection({api, onSelected, context = () => ({current
     const stamp = ++generation;
     checked = null; pending = true; controller = new AbortController(); controls();
     byId('rss-checked-fields').hidden = true;
-    byId('rss-title').disabled = byId('rss-folder').disabled = true;
+    byId('rss-title').disabled = true; folderPicker.setDisabled(true);
     byId('rss-message').textContent = 'Проверка фида…';
     try {
       const result = await api('feeds/verify', 'POST', {url: url.value.trim()}, controller.signal);
@@ -37,7 +47,7 @@ export function createFeedConnection({api, onSelected, context = () => ({current
       } else {
         checked = result;
         byId('rss-title').value = result.title;
-        byId('rss-title').disabled = byId('rss-folder').disabled = false;
+        byId('rss-title').disabled = false; folderPicker.setDisabled(false);
         byId('rss-checked-fields').hidden = false;
         byId('rss-message').textContent = result.kind === 'youtube' ? 'YouTube-фид проверен' : 'RSS/Atom-фид проверен';
       }
@@ -50,15 +60,15 @@ export function createFeedConnection({api, onSelected, context = () => ({current
     event.preventDefault();
     if (add.disabled || !checked) return;
     const initialHistory = historySelection();
-    if (!initialHistory) return;
+    if (!initialHistory || !folderPicker.valid()) return;
     const screen = context();
     const stamp = generation, preview = checked;
     pending = true; saving = true; controls(); byId('rss-message').textContent = 'Добавление…';
     try {
       const result = await api('feeds', 'POST', {url: preview.url, verification: preview.verification,
-        title: byId('rss-title').value.trim(), folder: byId('rss-folder').value.trim(), initial_history: initialHistory});
+        title: byId('rss-title').value.trim(), folder: folderPicker.value(), initial_history: initialHistory});
       if (stamp !== generation || stopped) return;
-      saving = false; byId('rss-form').reset(); reset();
+      saving = false; byId('rss-form').reset(); folderPicker.reset(); reset();
       byId('rss-history-mode').dispatchEvent(new Event('change'));
       await onSelected(result, screen);
     } catch (error) {

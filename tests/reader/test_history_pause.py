@@ -107,7 +107,7 @@ def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
 
 def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp_path):
     from tests.support.feed_url import YOUTUBE
-    from tests.support.youtube import PNG
+    from tests.support.youtube import PNG, History, NoCaptions
     blocked = True
     videos = ['abcdefghijk', 'lmnopqrstuv']
     clock = [100.0]
@@ -118,7 +118,7 @@ def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp
             return httpx.Response(200, content=PNG, headers={'content-type':'image/png'})
         return httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom"><title>Видео</title>' + ''.join(f'<entry><id>yt:video:{v}</id><title>{v}</title><link href="https://www.youtube.com/watch?v={v}"/><published>2025-10-01T12:00:00Z</published></entry>' for v in videos) + '</feed>')
     def reader():
-        return TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=httpx.MockTransport(reply),clock=lambda:clock[0],wall_clock=lambda:clock[0],lease=60),headers=HEADERS)
+        return TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=httpx.MockTransport(reply),youtube_history=History(['abcdefghijk','lmnopqrstuv']),youtube_captions=NoCaptions(),clock=lambda:clock[0],wall_clock=lambda:clock[0],lease=60),headers=HEADERS)
     with reader() as client:
         feed=add(client,verify(client,YOUTUBE),initial_history=dict(mode='count',count=2)).json()['id']
         wait_history(client,feed,lambda h:h['loaded']==1)

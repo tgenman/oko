@@ -115,6 +115,7 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
     wall = [time.time()]
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, ai_transport=model_transport(ai), wall_clock=lambda: wall[0]), headers=HEADERS) as client:
         feed = subscribe(client)
+        client.patch('/api/settings/feed/' + feed, json={'theses': False})
         client.post('/api/tabs/reader/heartbeat')
         material = wait(client, lambda m: m.get('captions') == 'not_requested')
         assert not captions.calls and not ai
@@ -247,8 +248,9 @@ class YouTubeTranscriptApi:
 
 
 def test_youtube_added_through_checked_url_uses_existing_collector(tmp_path):
+    from tests.support.youtube import History
     captions = Captions()
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, youtube_history=History([VIDEO])), headers=HEADERS) as client:
         client.post('/api/tabs/reader/heartbeat')
         url = 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw'
         checked = client.post('/api/feeds/verify', json={'url': url}).json()
@@ -318,3 +320,17 @@ class YouTubeTranscriptApi:
         assert client.get('/api/cards').json() == []
         assert client.get('/api/debug').json()['groups'] == []
         assert calls.read_text().splitlines() == [VIDEO]
+
+
+def test_default_theses_request_youtube_captions_without_high_importance(tmp_path):
+    captions = Captions()
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions), headers=HEADERS) as client:
+        feed = subscribe(client)
+        settings = client.get('/api/settings/feed/' + feed).json()
+        assert settings['effective']['theses']['value'] is True
+        assert settings['feed']['importance'] == 'normal'
+        assert settings['feed']['public_ai'] is False
+        client.post('/api/tabs/reader/heartbeat')
+        material = wait(client, lambda m: m.get('captions') == 'available' and not m['loading'])
+        assert material['text'] == 'Модель принимает только текст. Источники сохраняются точно.'
+        assert captions.calls == [VIDEO]

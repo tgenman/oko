@@ -23,9 +23,10 @@ test('Telegram accounts are selectable and incomplete or pending connection is d
     await r.page.locator('#telegram-peer').fill('   ');
     await expect(r.page.locator('#telegram-add')).toBeDisabled();
     await r.page.locator('#telegram-peer').fill('@channel');
-    await r.page.locator('#telegram-folder').fill(' ');
+    await r.page.locator('#telegram-folder').selectOption('');
+    await r.page.locator('#telegram-folder-new').fill(' ');
     await expect(r.page.locator('#telegram-add')).toBeDisabled();
-    await r.page.locator('#telegram-folder').fill('Работа');
+    await r.page.locator('#telegram-folder-new').fill('Работа');
     await expect(r.page.locator('#telegram-add')).toBeEnabled();
     await r.page.locator('#telegram-add').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/connect'));
@@ -144,7 +145,7 @@ test('imported Telegram feed uses the same account selection and keeps its feed 
     await r.start([]);
     await r.page.evaluate(() => readerTransport.replies.set('/api/settings/feed/imported', readerTransport.replies.get('/api/settings/oko/global')));
     await r.page.locator('#feeds-open').click();
-    await r.page.locator('#settings-owner').selectOption('feed/imported');
+    await r.page.locator('#feed-tree [data-owner="feed/imported"]').click();
     await r.page.getByRole('button', {name: 'Настроить подключение Telegram-фида', exact: true}).click();
     await expect(r.page.locator('#reconnect-account')).toHaveValue('personal');
     await expect(r.page.locator('#reconnect-peer')).toHaveValue('@fixture');

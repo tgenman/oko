@@ -20,6 +20,7 @@ from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
 from oko.collection.contracts import SourceDeleted, Attachment, Image, Material, Publication
 from oko.subscriptions.subscriptions import Subscriptions
+from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.execution import CodexSettings, UNKNOWN_REVIEW
 
@@ -84,6 +85,9 @@ class Store:
         if 'published_known' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
             self.db.execute('ALTER TABLE items ADD COLUMN published_known INTEGER DEFAULT 1')
             self.db.commit()
+        if 'source_order' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
+            self.db.execute('ALTER TABLE items ADD COLUMN source_order INTEGER')
+            self.db.commit()
         self.subscriptions = Subscriptions(self.db, self.fault)
         self.filters = Filters(self)
         self.events = Events(self)
@@ -129,6 +133,14 @@ class Store:
         with self.db:
             return self.subscriptions.history.pause(feed, paused)
 
+    def change_youtube_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
+        self.subscriptions.check_owner('feed', feed)
+        configured = next(f for f in self.subscriptions.feeds() if f['id'] == feed)
+        if configured['kind'] != 'youtube' or configured['transport'] != 'youtube':
+            raise ValueError('Догрузка доступна подключённому YouTube-фиду')
+        with self.db:
+            return self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
+
     def enqueue_discovery(self, feed: str = 'demo', next_at: float = 0) -> None:
         with self.db:
             self.db.execute("INSERT INTO jobs(kind,item,next) VALUES ('discover',?,?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=excluded.next,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed, next_at))
@@ -158,6 +170,8 @@ class Store:
                     self.versions.publish(item, self.versions.prepare(item, p.teaser), False)
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
+                if row and p.published_known and not row['published_known']:
+                    self.db.execute('UPDATE items SET published=?,published_known=1 WHERE id=?', (p.published, row['id']))
                 if row and p.id in history_ids:
                     history_items.append(row['id'])
                 if row and not row['viewed'] and not self.db.execute("SELECT 1 FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE d.item=? AND h.outcome='unavailable'", (row['id'],)).fetchone():
@@ -166,12 +180,29 @@ class Store:
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
                         self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (row['id'],))
                     self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done'", (row['id'],))
+            if 'youtube_history' in selection:
+                # A new prefix can overlap an older, longer selection. Reorder
+                # retained history after that prefix instead of keeping colliding ranks.
+                positions = {feed + ':' + entry['id']: rank for rank, entry in enumerate(selection['youtube_history']['entries'])}
+                rows = self.db.execute('SELECT id,source_id,source_order FROM items WHERE feed_id=? ORDER BY source_order,id', (feed,)).fetchall()
+                prefix = sorted((row for row in rows if row['source_id'] in positions), key=lambda row: positions[row['source_id']])
+                retained = [row for row in rows if row['source_order'] is not None and row['source_id'] not in positions]
+                self.db.executemany('UPDATE items SET source_order=? WHERE id=?',
+                                    [(rank, row['id']) for rank, row in enumerate(prefix + retained) if row['source_order'] != rank])
             if 'history_ids' in selection:
                 self.subscriptions.history.freeze(feed, history_items)
                 if 'warnings' in selection:
                     self.subscriptions.history.warnings(feed, selection['warnings'])
             if 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed, history_items, selection['scan_complete'])
+                for item in history_items:
+                    row = self.db.execute('SELECT viewed FROM items WHERE id=?', (item,)).fetchone()
+                    if row['viewed']:
+                        self.subscriptions.history.viewed(item)
+                    elif self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status='done'", (item,)).fetchone():
+                        material = self.material(item)
+                        if material:
+                            self.subscriptions.history.saved(item, material.get('full', False))
             if selection:
                 self.subscriptions.history.discovery_state(feed, selection)
             if namespace == 'telegram':
@@ -348,7 +379,7 @@ class Store:
             if filtered['status'] == 'done' and not filtered['restored']:
                 for fragment in filtered['removed']:
                     display_text = display_text.replace(fragment, '')
-            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), description=json.loads(header).get('description', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), source_order=row['source_order'], title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), description=json.loads(header).get('description', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             record_caught('store.material')
             return None

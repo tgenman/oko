@@ -6,7 +6,7 @@ const {productionReader} = require('./http-reader.cjs');
 test('production HTTP reader keeps folder/feed membership, previews, grouping and viewed actions', {timeout:45000}, async t => {
  const {page, api, origin, token} = await productionReader(t);
   assert.equal((await fetch(origin+'/api/cards')).status,403);
-  await api('settings/oko/global','PATCH',{events:false,processor:'llamacpp'});
+  await api('settings/oko/global','PATCH',{events:false,theses:false,processor:'llamacpp'});
   const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа" xmlUrl="https://a.test/feed"/><outline text="Бета" xmlUrl="https://b.test/feed"/><outline text="Пустой" xmlUrl="https://empty.test/feed"/></outline></body></opml>'});
   const errors=[]; page.on('pageerror',error=>errors.push(error.message));
   await page.goto(origin+'/#token='+token);

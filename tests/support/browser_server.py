@@ -12,10 +12,15 @@ import uvicorn
 from tests.support.app import create_app
 from tests.support.events import event_transport
 from tests.support.codex import CodexService
-from tests.support.youtube import PNG
+from tests.support.youtube import PNG, History, NoCaptions
 
 
 def response(request):
+    if request.url.host == 'i.ytimg.com':
+        return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
+    if request.url.host == 'www.youtube.com':
+        assert request.url.path == '/feeds/videos.xml'
+        return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>Synthetic channel</title></feed>')
     assert request.url.host in ('a.test', 'b.test', 'empty.test'), request.url
     if request.url.path == '/image.png':
         return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
@@ -30,6 +35,7 @@ def response(request):
 def build_app(root, token):
     return create_app(root, token=token, rss_enabled=True,
                      rss_transport=httpx.MockTransport(response), ai_transport=event_transport([]), codex_client=CodexService(),
+                     youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
                      lease=60, grace=60)
 
 

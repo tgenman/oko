@@ -6,12 +6,15 @@ import {createFeedConnection} from './feed-connection.js';
 import {createTelegramConnection} from './telegram-connection.js';
 import {createOpmlImport} from './opml-import.js';
 import {reportError} from './debug.js';
+import {createFolderPicker} from './controls.js';
 
 export function createMenus({api, onChanged}) {
   const byId = id => document.getElementById(id);
   const operations = createOperations();
   let active = null, opener = null, stopped = false;
-  const editor = createSettingsEditor({api, onChanged,
+  const rssFolder = createFolderPicker('rss', 'Без папки');
+  const telegramFolder = createFolderPicker('telegram', 'Telegram');
+  const editor = createSettingsEditor({api, onChanged, onFolders: folders => {rssFolder.refresh(folders); telegramFolder.refresh(folders);},
     onDetail: () => byId('feeds-layout').classList.add('show-detail')});
   const models = createModelSettings({api});
   const youtube = createYouTubeSettings({api});
@@ -21,8 +24,8 @@ export function createMenus({api, onChanged}) {
     await editor.refresh();
     await action.commit(() => open('feeds', null, 'feed/' + feed.id));
   }
-  const rss = createFeedConnection({api, context, onSelected: selected});
-  const telegram = createTelegramConnection({api, context, onConnected: selected});
+  const rss = createFeedConnection({api, context, onSelected: selected, folderPicker: rssFolder});
+  const telegram = createTelegramConnection({api, context, onConnected: selected, folderPicker: telegramFolder});
   const opml = createOpmlImport({api, context, onImported: async action => {
     onChanged(); await editor.refresh();
     await action.commit(async () => {
@@ -71,7 +74,6 @@ export function createMenus({api, onChanged}) {
       if (!byId(name + '-dialog').open) close(name);
     });
   }
-  byId('feeds-add').onclick = event => open('add', event.currentTarget);
   byId('feeds-back').onclick = () => byId('feeds-layout').classList.remove('show-detail');
   for (const name of ['rss', 'telegram', 'opml']) {
     byId('add-' + name + '-tab').onclick = () => {

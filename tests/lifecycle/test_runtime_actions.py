@@ -116,6 +116,7 @@ def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
             return self.rows
     source = Client()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         connect(client)
         card = settled(client)[0]

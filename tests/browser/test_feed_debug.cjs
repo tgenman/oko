@@ -18,7 +18,7 @@ test('add URL uses one form and automatically shows YouTube connection', async (
     await expect(r.page.locator('#rss-add')).toBeDisabled();
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-title')).toHaveValue('3Blue1Brown');
-    await r.page.locator('#rss-folder').fill('Учёба');
+    await r.page.locator('#rss-folder').selectOption('Учёба');
     await r.page.locator('#rss-add').click();
     await expect(r.page.locator('#feeds-dialog')).toBeVisible();
     await expect(r.page.locator('#rss-url')).toHaveValue('');
@@ -82,7 +82,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
     });
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#feeds-dialog')).toBeVisible();
-    await expect(r.page.locator('#settings-owner')).toHaveValue('feed/existing');
+    await expect(r.page.locator('#owner-heading')).toHaveText('Фид: Старое имя');
     expect(await r.page.evaluate(() => readerTransport.requests.filter(r => r.url === '/api/feeds' && r.method === 'POST').length)).toBe(0);
   } finally { await r.close(); }
 });
@@ -166,4 +166,49 @@ test('switch works with keyboard and clearing history rejects a late journal res
     await expect(r.page.locator('#debug-errors')).toContainText('new error');
     await r.page.screenshot({path: '/private/tmp/oko-debug-switches.png'});
   } finally { await r.close(); }
+});
+
+test('adding a feed selects existing folders or keeps a new folder draft across tabs and reopening', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.page.evaluate(() => {
+      const t = readerTransport;
+      t.replies.set('/api/subscriptions', {body: {folders: [{id:'science',title:'Наука'}], feeds:[]}});
+      t.replies.set('/api/feeds/verify', {body: {url:'https://source.test/feed',title:'Источник',kind:'rss',verification:'checked'}});
+      t.replies.set('/api/feeds', {status:400,body:{detail:'Тестовый отказ'}});
+      t.replies.set('/api/telegram/accounts', {body:['personal']});
+      t.replies.set('/api/telegram/connect', {status:400,body:{detail:'Тестовый отказ'}});
+    });
+    await r.page.locator('#add-open').click();
+    await r.page.locator('#rss-url').fill('https://source.test/feed');
+    await r.page.locator('#rss-check').click();
+    await expect(r.page.locator('#rss-title')).toHaveValue('Источник');
+    for (const prefix of ['rss', 'telegram']) {
+      if (prefix === 'telegram') {
+        await r.page.locator('#add-telegram-tab').click();
+        await expect(r.page.locator('#telegram-account')).toHaveValue('personal');
+        await r.page.locator('#telegram-peer').fill('@channel');
+      }
+      const endpoint = prefix === 'rss' ? '/api/feeds' : '/api/telegram/connect';
+      await r.page.locator('#' + prefix + '-folder').selectOption('Наука');
+      await expect(r.page.locator('#' + prefix + '-folder-new')).toBeHidden();
+      await r.page.locator('#' + prefix + '-add').click();
+      await expect(r.page.locator('#' + prefix + '-message')).toHaveText('Тестовый отказ');
+      expect(await r.page.evaluate(url => readerTransport.requests.filter(request => request.url === url && request.method === 'POST').at(-1).body.folder, endpoint)).toBe('Наука');
+      await r.page.locator('#' + prefix + '-folder').selectOption('');
+      await expect(r.page.locator('#' + prefix + '-folder-new')).toBeVisible();
+      await r.page.locator('#' + prefix + '-folder-new').fill('Новая папка ' + prefix);
+      await r.page.locator(prefix === 'rss' ? '#add-telegram-tab' : '#add-rss-tab').click();
+      await r.page.locator('#add-' + prefix + '-tab').click();
+      await r.page.locator('#add-close').click();
+      await r.page.locator('#add-open').click();
+      await expect(r.page.locator('#' + prefix + '-folder')).toHaveValue('');
+      await expect(r.page.locator('#' + prefix + '-folder-new')).toHaveValue('Новая папка ' + prefix);
+      await r.page.locator('#' + prefix + '-add').click();
+      await expect.poll(() => r.page.evaluate(url => readerTransport.requests.filter(request => request.url === url && request.method === 'POST').at(-1).body.folder, endpoint)).toBe('Новая папка ' + prefix);
+      await expect(r.page.locator('#' + prefix + '-message')).toHaveText('Тестовый отказ');
+    }
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
 });

@@ -231,3 +231,19 @@ def test_literal_slash_folder_does_not_merge_with_nested_folder(tmp_path: Path):
         result = client.post('/api/import', json={'opml': opml}).json()
         assert len(result['folders']) == 3
         assert result['feeds'][0]['folder_id'] != result['feeds'][1]['folder_id']
+
+
+def test_theses_are_enabled_by_default_for_all_feeds_and_can_be_disabled(tmp_path: Path):
+    opml = '<opml><body><outline text="Папка"><outline text="RSS" xmlUrl="https://source.test/feed"/><outline text="YouTube" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa"/><outline text="Telegram" xmlUrl="https://t.me/example_channel"/></outline></body></opml>'
+    with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
+        result = client.post('/api/import', json={'opml': opml})
+        assert result.status_code == 200
+        feeds = result.json()['feeds']
+        for feed in feeds:
+            url = '/api/settings/feed/' + feed['id']
+            assert client.get(url).json()['effective']['theses'] == {'value': True, 'scope': 'default', 'owner': None}
+        url = '/api/settings/feed/' + feeds[0]['id']
+        assert client.patch(url, json={'theses': False}).json()['effective']['theses']['value'] is False
+    with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
+        assert client.get(url).json()['effective']['theses']['value'] is False
+        assert client.patch(url, json={'theses': None}).json()['effective']['theses']['value'] is True

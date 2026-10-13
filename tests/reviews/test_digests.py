@@ -46,7 +46,7 @@ def test_hundred_sources_are_chunked_without_losing_frozen_members(tmp_path):
             return Material('Тема '+publication.id, 'Текст '+publication.id)
     calls = []
     with TestClient(create_app(tmp_path, source=Many(), token='test', ai_transport=digest_transport(calls)), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp'})
+        client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp', 'theses': False})
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.post('/api/tabs/reader/heartbeat')
         import time

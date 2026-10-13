@@ -14,7 +14,7 @@ test('history can pause and resume in feed settings without offering restart aft
       t.replies.set('/api/feeds/rss/history',{body:{...history,paused:true,state:'paused'}});
     });
     await r.page.locator('#feeds-open').click();
-    await r.page.locator('#settings-owner').selectOption('feed/rss');
+    await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
     await r.page.getByRole('button',{name:'Приостановить историю',exact:true}).click();
     await expect(r.page.locator('#history-progress')).toContainText('приостановлена');
     await expect(r.page.getByRole('button',{name:'Продолжить историю',exact:true})).toBeVisible();

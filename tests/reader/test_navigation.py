@@ -8,7 +8,7 @@ from tests.support.reader import HEADERS
 def test_navigation_counts_and_feed_selection(tmp_path):
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test'), headers=HEADERS) as client:
         assert client.get('/api/navigation', headers={'Authorization': 'Bearer wrong'}).status_code == 403
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
         client.post('/api/tabs/a/heartbeat')
         cards = wait_cards(client, 3)
         navigation = client.get('/api/navigation').json()
@@ -26,7 +26,7 @@ def test_navigation_counts_loading_publications_and_empty_feeds(tmp_path):
     from tests.support.sources import LateSource
     from tests.support.reader import wait_for
     with TestClient(create_app(tmp_path, source=LateSource(), token='test'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
         assert client.get('/api/navigation').json()['count'] == 0
         client.post('/api/tabs/a/heartbeat')
         wait_for(client, lambda: len(client.get('/api/cards').json()) == 3)

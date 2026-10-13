@@ -74,6 +74,7 @@ def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: 
         return httpx.Response(200, text='<article>Полный текст</article>')
     kwargs = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response))
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
+        client.patch('/api/settings/oko/global', json={'theses': False})
         for path in ('feed', 'atom', 'denied', 'limited', 'down'):
             import_feed(client, 'https://source.test/' + path)
         client.post('/api/tabs/test/heartbeat')

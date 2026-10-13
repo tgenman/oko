@@ -20,6 +20,7 @@ def test_rss_edit_keeps_previous_media_and_viewed_identity_never_returns(tmp_pat
         return httpx.Response(200, content=PNG + str(revision[0]).encode(), headers={'Content-Type': 'image/png'})
     options = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
+        client.patch('/api/settings/oko/global', json={'theses': False})
         import_feed(client)
         client.post('/api/tabs/test/heartbeat')
         item = wait_cards(client)[0]['id']
@@ -322,6 +323,7 @@ def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_med
             return b'saved-image'
     source = Editable()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.patch('/api/settings/oko/global', json={'events': False})
         client.post('/api/tabs/test/heartbeat')
         connect(client)

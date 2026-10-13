@@ -3,8 +3,9 @@ import {reportError} from './debug.js';
 import {createOperations} from './ui-operations.js';
 import {element, selectControl, labelled} from './controls.js';
 import {createTelegramConnection} from './telegram-connection.js';
+import {createYouTubeHistory} from './youtube-history.js';
 
-export function createSettingsEditor({api, onChanged, onDetail}) {
+export function createSettingsEditor({api, onChanged, onDetail, onFolders}) {
   const byId = id => document.getElementById(id);
   const reconnect = createTelegramConnection({api, prefix: 'reconnect', context: () => operations.capture(), onConnected: async (_feed, action) => {onChanged(); await loadSubscriptions(); await action.commit(loadSettings);}});
   const fields = {
@@ -23,6 +24,7 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
     if (target) {target.textContent = sourceStatus.find(s => currentPath === 'feed/' + s.feed_id)?.changes || ''; target.parentElement.hidden = !target.textContent;}
   }
   let selectedOwner = null, currentPath = null;
+  let youtubeHistory = null;
   const drafts = new Map();
   const operations = createOperations();
   const subscriptionOperations = createOperations();
@@ -40,12 +42,9 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
     const result = await api('subscriptions', 'GET', undefined, operation.signal);
     if (!operation.current) return;
     subscriptions = result;
-    byId('rss-folders').replaceChildren(...subscriptions.folders.map(folder => {const option = element('option'); option.value = folder.title; return option;}));
+    onFolders(subscriptions.folders);
     const options = [...subscriptions.folders.map(f => ['folder/' + f.id, 'Папка: ' + f.title]), ...subscriptions.feeds.map(f => ['feed/' + f.id, 'Фид: ' + f.title])];
     if (!options.some(([id]) => id === selectedOwner)) selectedOwner = null;
-    const owner = byId('settings-owner'); owner.replaceChildren();
-    for (const [id, title] of [['', 'Выберите объект'], ...options]) {const option = element('option', title); option.value = id; owner.append(option);}
-    owner.value = selectedOwner || '';
     const tree = byId('feed-tree'); tree.replaceChildren();
     for (const folder of subscriptions.folders) {
       const group = element('div'); group.className = 'feed-group';
@@ -64,7 +63,7 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
   async function selectOwner(path) {
     operations.invalidate();
     reconnect.deactivate();
-    selectedOwner = path || null; currentPath = selectedOwner; byId('settings-owner').value = path || '';
+    selectedOwner = path || null; currentPath = selectedOwner;
     byId('feed-detail').hidden = !selectedOwner;
     byId('settings-editor').hidden = true;
     byId('reconnect-connection').hidden = true;
@@ -129,16 +128,20 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
     } catch (error) { reportError(error, 'Интерфейс Око'); operation.commit(() => editorMessage(error.message)); }
   }
   function renderHistoryState(history) {
+    youtubeHistory?.update(history);
     const progress = byId('history-progress');
-    if (progress) progress.textContent = historyProgress(history);
+    if (progress) {progress.textContent = historyProgress(history); progress.hidden = !history;}
+    if (history) byId('history-legacy')?.remove();
     const toggle = byId('history-toggle');
     if (toggle) {
-      toggle.hidden = history.state === 'done';
-      toggle.textContent = history.paused ? 'Продолжить историю' : 'Приостановить историю';
-      toggle.dataset.paused = String(history.paused);
+      toggle.hidden = !history || ['done','cancelled'].includes(history.state);
+      const resume = history?.paused || history?.state === 'waiting';
+      toggle.textContent = resume ? 'Продолжить историю' : 'Приостановить историю';
+      toggle.dataset.paused = String(Boolean(resume));
     }
   }
   function renderFeed(feed) {
+    youtubeHistory = null;
     const values = draft('feed/' + feed.id);
     const remember = (input, name) => {
       input.id = 'feed-' + name;
@@ -148,7 +151,7 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
     const container = byId('feed-options');
     const help = element('p'); help.id = 'source-help'; const capabilities = element('details'); capabilities.append(element('summary', 'Возможности проверки изменений'), help); container.append(capabilities); sourceHelp();
     container.append(element('h2', 'Подключение фида'));
-    if (feed.initial_history) {
+    if (feed.initial_history || (feed.kind === 'youtube' && feed.transport === 'youtube')) {
       const progress = element('p', historyProgress(feed.initial_history)); progress.id = 'history-progress'; progress.dataset.feed = feed.id; progress.setAttribute('role', 'status');
       const toggle = element('button'); toggle.id = 'history-toggle';
       toggle.onclick = async () => {
@@ -162,13 +165,17 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
       };
       container.append(progress, toggle);
       renderHistoryState(feed.initial_history);
-    } else if (feed.kind !== 'demo') {
-      container.append(element('p', feed.legacy_since ? `Зафиксированное начало истории: ${new Date(feed.legacy_since * 1000).toLocaleString()}` : Number.isInteger(feed.initial_days) ? `Сохранённая настройка глубины: ${feed.initial_days} дней; фактическая граница не сохранена` : 'Фактическая граница истории не сохранена'),
+    }
+    if (!feed.initial_history && feed.kind !== 'demo') {
+      const legacy = element('div'); legacy.id = 'history-legacy';
+      container.append(legacy);
+      legacy.append(element('p', feed.legacy_since ? `Зафиксированное начало истории: ${new Date(feed.legacy_since * 1000).toLocaleString()}` : Number.isInteger(feed.initial_days) ? `Сохранённая настройка глубины: ${feed.initial_days} дней; фактическая граница не сохранена` : 'Фактическая граница истории не сохранена'),
         element('p', 'Количество и прогресс начальной загрузки не сохранены. Существующая граница и курсор сохраняются; повторная загрузка истории не запускается.'));
     }
+    if (feed.kind === 'youtube' && feed.transport === 'youtube') youtubeHistory = createYouTubeHistory({container, feed, api, operations, values, onChanged, reload: async () => {await loadSubscriptions(); await loadSettings();}, message: editorMessage});
     const connection = feed.kind === 'demo' ? 'Тестовый источник подключён' : feed.transport === 'telegram' ? 'Telegram: ' + (feed.telegram_peer ? 'подключение настроено' : 'требуется подключение') : feed.transport === 'rss' ? 'RSS подключён: сбор при открытой вкладке' : feed.transport === 'youtube' ? 'YouTube подключён: сбор при открытой вкладке' : feed.kind === 'youtube' ? 'YouTube отключён' : feed.connection === 'ambiguous' ? 'Адрес неоднозначен: требуется явный выбор подключения' : 'Требуется подключение сборщика';
     container.append(element('p', connection), element('p', 'Исходные адреса: ' + feed.original_urls.join(', ')));
-    if (feed.kind === 'youtube') container.append(element('p', (feed.transport === 'youtube' ? 'YouTube: обновления собираются при открытой вкладке. ' : 'YouTube подключается автоматически при добавлении URL фида. ') + 'Высокая важность автоматически включает субтитры и тезисы; для остальных включите режим «Тезисы». Видео не скачивается.'));
+    if (feed.kind === 'youtube') container.append(element('p', (feed.transport === 'youtube' ? 'YouTube: обновления собираются при открытой вкладке. ' : 'YouTube подключается автоматически при добавлении URL фида. ') + 'Тезисы включены по умолчанию; для YouTube запрашиваются доступные субтитры. Высокая важность также включает субтитры и тезисы. Видео не скачивается.'));
     const folder = selectControl(subscriptions.folders.map(f => [f.id, f.title]), feed.folder_id);
     const importance = selectControl(Object.entries(importanceNames), feed.importance);
     const publicAi = element('input'); publicAi.type = 'checkbox'; publicAi.checked = feed.public_ai;
@@ -216,7 +223,6 @@ export function createSettingsEditor({api, onChanged, onDetail}) {
     }
   }
 
-  byId('settings-owner').onchange = () => selectOwner(byId('settings-owner').value);
   function deactivate() { operations.invalidate(); currentPath = null; reconnect.deactivate(); }
   return {
     async open(global, preferred) {

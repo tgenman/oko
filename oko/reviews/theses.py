@@ -15,6 +15,9 @@ class PublicationTheses:
         self.store = store
 
     def signature(self, item: str) -> str | None:
+        return self._signature(item)
+
+    def _signature(self, item: str, legacy: bool = False) -> str | None:
         row = self.store.db.execute('SELECT * FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
         if not row or not self.store.path(item).is_file():
             return None
@@ -23,14 +26,20 @@ class PublicationTheses:
             return None
         settings = self.store.subscriptions.effective('feed', row['feed_id'])
         values = {k: v['value'] for k, v in settings['effective'].items()}
+        version = self.store.content_version(item)
+        filter_input = filtered
         if settings['feed']['kind'] == 'youtube':
-            header = json.loads(self.store.path(item).read_text().split('\n\n', 1)[0])
+            raw, text = self.store.path(item).read_text().split('\n\n', 1)
+            header = json.loads(raw)
             if not self.store.subscriptions.youtube_theses(row['feed_id']) or header.get('captions') != 'available':
                 return None
+            if not legacy:
+                version = hashlib.sha256(text.encode()).hexdigest()
+                filter_input = {}
         elif not values['theses']:
             return None
         config = self.store.processor_config()
-        payload = [self.store.content_version(item), filtered, row['members'], self.store.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
+        payload = [version, filter_input, row['members'], self.store.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def sync(self) -> None:
@@ -39,6 +48,15 @@ class PublicationTheses:
             signature = self.signature(item)
             old = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
             state = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+            if signature and old and old[0] != signature and state and state[0] == 'done':
+                self._upgrade_caption_result(item, old[0], signature)
+                old = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
+            if signature is None and old and state and state[0] == 'done':
+                feed = self.store.item_feed(item)
+                if self.store.subscriptions.effective('feed', feed)['feed']['kind'] == 'youtube':
+                    # Filtering may temporarily hide a completed caption result.
+                    # Keep its committed file and job until the inputs are known.
+                    continue
             if signature is None and old is None and (not state or state[0] == 'cancelled') and not (self.store.path(item).parent / 'theses.md').exists():
                 continue
             if old and old[0] == signature:
@@ -54,6 +72,29 @@ class PublicationTheses:
                 else:
                     self.store.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
 
+    def _upgrade_caption_result(self, item: str, old: str, signature: str) -> None:
+        feed = self.store.item_feed(item)
+        if self.store.subscriptions.effective('feed', feed)['feed']['kind'] != 'youtube':
+            return
+        if self.store.filters.read(item)['removed'] or old != self._signature(item, legacy=True):
+            return
+        path = self.store.path(item).parent / 'theses.md'
+        try:
+            header = json.loads(path.read_text().split('\n\n', 1)[0])
+            if header['signature'] not in (old, signature):
+                return
+            result = Theses.model_validate(header['result'])
+        except (OSError, ValueError, KeyError):
+            record_caught('theses.upgrade')
+            return
+        if header['signature'] == old:
+            from oko.storage.store import Job
+            row = self.store.db.execute("SELECT id,generation FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
+            job = Job(row['id'], 'theses', item, row['generation'])
+            self.store.save_derivative(job, signature, result.model_dump(), '\n'.join('- ' + p.text for p in result.points), finish=False)
+        with self.store.db:
+            self.store.db.execute('UPDATE thesis_inputs SET signature=? WHERE item=?', (signature, item))
+
     def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
         signature = self.signature(job.item)
         row = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (job.item,)).fetchone()
@@ -62,7 +103,12 @@ class PublicationTheses:
             return None
         settings = self.store.subscriptions.effective('feed', material['feed_id'])
         values = settings['effective']
-        request = ProcessingRequest(sources=(InputSource(id=job.item, version=self.store.content_version(job.item), url=material['url'], title=material['title'], text=material['display_text']),), settings_version=self.store.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        text = material['display_text']
+        version = self.store.content_version(job.item)
+        if settings['feed']['kind'] == 'youtube':
+            text = material['text']
+            version = hashlib.sha256(text.encode()).hexdigest()
+        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text),), settings_version=self.store.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, settings['feed']['public_ai']
 
     def retry(self, item: str) -> bool:
@@ -83,14 +129,24 @@ class PublicationTheses:
         row = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
         if not row or row[0] != 'done':
             return None
-        try:
-            header = json.loads((self.store.path(item).parent / 'theses.md').read_text().split('\n\n', 1)[0])
-            if header['signature'] != self.signature(item):
-                return None
-            return Theses.model_validate(header['result']).model_dump()
-        except (OSError, ValueError, KeyError):
-            record_caught('theses.read')
-            return None
+        signature = self.signature(item)
+        paths = [self.store.path(item).parent / 'theses.md']
+        feed = self.store.item_feed(item)
+        if feed and self.store.subscriptions.effective('feed', feed)['feed']['kind'] == 'youtube':
+            # Metadata revisions share the caption result in its published version.
+            versions = self.store.db.execute('SELECT number FROM content_versions WHERE item=? AND number!=? ORDER BY number DESC',
+                                             (item, self.store.versions.number(item))).fetchall()
+            paths.extend(self.store.versions.path(item, v['number']).parent / 'theses.md' for v in versions)
+        for path in paths:
+            if not path.is_file():
+                continue
+            try:
+                header = json.loads(path.read_text().split('\n\n', 1)[0])
+                if header['signature'] == signature:
+                    return Theses.model_validate(header['result']).model_dump()
+            except (OSError, ValueError, KeyError):
+                record_caught('theses.read')
+        return None
 
     def provenance(self, item: str) -> dict[str, Any] | None:
         if self.read(item) is None:

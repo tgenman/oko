@@ -27,6 +27,8 @@ from oko.storage.store import Job, Store
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram, TelegramPeer
 from oko.subscriptions.subscriptions import AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, identify
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions
+from oko.collection.youtube.history import HistoryClient
+from oko.subscriptions.history import InitialHistory
 from oko.collection.youtube.access import CaptionsBlocked, CaptionsDeferred, proxy_url
 from oko.diagnostics import Journal, active_journal, diagnostic_source, capture_scope, record_caught
 
@@ -43,8 +45,9 @@ class ActionError(Exception):
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, wall_clock: Callable[[], float] = time.time) -> None:
+                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> None:
         self._youtube_captions = youtube_captions or LocalCaptions()
+        self._youtube_history = youtube_history
         self._wall_clock = wall_clock
         self._captions_active = False
         self._codex_client = codex_client or LocalCodex()
@@ -140,7 +143,7 @@ class Runtime:
                 continue
             if feed['transport'] == 'youtube' and self._rss_enabled:
                 if not isinstance(self._sources.get(feed['id']), YouTubeSource):
-                    self._sources[feed['id']] = YouTubeSource(feed['original_urls'][0], feed['initial_days'], self._youtube_captions, self._rss_transport)
+                    self._sources[feed['id']] = YouTubeSource(feed['original_urls'][0], feed['initial_days'], self._youtube_captions, self._rss_transport, self._youtube_history)
                     self._store.enqueue_discovery(feed['id'])
                 youtube = self._sources[feed['id']]
                 if isinstance(youtube, YouTubeSource):
@@ -339,6 +342,20 @@ class Runtime:
                 raise ActionError('invalid', str(error)) from None
             # Invalidate in-flight generations before cancellation. An adapter
             # ignoring cancellation cannot publish an old history result.
+            await self._cancel()
+            self._sync_sources()
+            current.enqueue_discovery(identity)
+            return result
+
+    async def change_youtube_history(self, identity: str, selection: InitialHistory | None) -> dict[str, Any]:
+        async with self._actions:
+            current = self.require_store()
+            try:
+                result = current.change_youtube_history(identity, selection)
+            except LookupError as error:
+                raise ActionError('missing', str(error)) from None
+            except ValueError as error:
+                raise ActionError('conflict', str(error), expected=True) from None
             await self._cancel()
             self._sync_sources()
             current.enqueue_discovery(identity)

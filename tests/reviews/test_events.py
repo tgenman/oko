@@ -247,7 +247,7 @@ def test_process_death_after_event_move_and_after_view_recovers_without_content_
             client.post('/api/tabs/a/heartbeat')
             wait_cards(client, 3)
             client.put('/api/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
-            client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
+            client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': False})
         assert process.wait(timeout=5) == 79
         process = launch(tmp_path, 'after_viewed_commit', model_origin=f'http://127.0.0.1:{server.server_port}')
         with connect(tmp_path, process) as client:
@@ -302,7 +302,7 @@ def test_view_invalidates_other_event_but_preserves_unrelated_members_and_retrie
         client.post('/api/tabs/reader/heartbeat')
         wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 4 and all(x['complete'] for x in c))
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': False})
         cards = wait_for(client, lambda: c if len(c := client.get('/api/cards').json()) == 2 and all(x.get('event') for x in c) else None)
         event = next(c for c in cards if c['title'] == 'Библиотека')
         old_other = next(c for c in cards if c['title'] == 'Спутник')
@@ -345,7 +345,8 @@ def test_two_youtube_titles_without_captions_never_enter_event_ai(tmp_path, capt
         return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
     clock = [100.0]
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=MissingCaptions(), ai_transport=model_transport(ai), clock=lambda: clock[0], wall_clock=lambda: clock[0], lease=60), headers=HEADERS) as client:
-        subscribe(client)
+        feed = subscribe(client)
+        client.patch('/api/settings/feed/' + feed, json={'theses': captions_state != 'not_requested'})
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': captions_state != 'not_requested'})
         client.post('/api/tabs/reader/heartbeat')

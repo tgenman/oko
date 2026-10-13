@@ -26,6 +26,8 @@ from oko.collection.telegram.source import TelegramClient, ConnectTelegram, Tele
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
 from oko.collection.youtube.source import CaptionsClient
+from oko.collection.youtube.history import HistoryClient
+from oko.subscriptions.history import InitialHistory
 from oko.diagnostics import Journal, BrowserError, active_journal, diagnostic_source, capture_scope, record_caught
 
 
@@ -44,9 +46,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                lease: float = 6, grace: float = 15, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
                telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
-               youtube_captions: CaptionsClient | None = None, wall_clock: Callable[[], float] = time.time) -> FastAPI:
+               youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> FastAPI:
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, wall_clock)
+    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
     journal = Journal(root, token)
     runtime.diagnostics = journal
 
@@ -300,6 +302,14 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def history_pause(identity: str, body: HistoryPause) -> dict[str, Any]:
         return await runtime.pause_history(identity, body.paused)
 
+    @app.post('/api/feeds/{identity}/history')
+    async def history_start(identity: str, body: InitialHistory) -> dict[str, Any]:
+        return await runtime.change_youtube_history(identity, body)
+
+    @app.delete('/api/feeds/{identity}/history')
+    async def history_cancel(identity: str) -> dict[str, Any]:
+        return await runtime.change_youtube_history(identity, None)
+
     @app.patch('/api/feeds/{identity}')
     async def feed_patch(identity: str, body: FeedPatch) -> dict[str, Any]:
         return await runtime.patch_feed(identity, body)
@@ -318,7 +328,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         if sort == 'importance':
             result.sort(key=lambda c: (-{'normal': 0, 'elevated': 1, 'high': 2}[c['importance']], -c['published'], c['id']))
         else:
-            result.sort(key=lambda c: (not c.get('published_known', True), c['published'] if sort == 'oldest' else -c['published'], c['id']))
+            result.sort(key=lambda c: (not c.get('published_known', True), c['published'] if c.get('published_known', True) and sort == 'oldest' else -c['published'] if c.get('published_known', True) else 0, c['feed_id'], -(c.get('source_order') or 0) if sort == 'oldest' else (c.get('source_order') or 0), c['id']))
         return result
 
     @app.post('/api/folders/{folder}/completion/preview')
@@ -443,6 +453,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/initial-history.js')
     async def initial_history_module() -> FileResponse:
         return FileResponse(web / 'initial-history.js', media_type='text/javascript')
+
+    @app.get('/youtube-history.js')
+    async def youtube_history_module() -> FileResponse:
+        return FileResponse(web / 'youtube-history.js', media_type='text/javascript')
 
     @app.get('/feed-connection.js')
     async def feed_connection_js() -> FileResponse:

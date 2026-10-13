@@ -37,7 +37,7 @@ test('legacy settings show the actual frozen boundary instead of mutable days', 
       t.replies.set('/api/settings/feed/legacy', {body:{...t.replies.get('/api/settings/oko/global').body, feed}});
     });
     await r.page.locator('#feeds-open').click();
-    await r.page.locator('#settings-owner').selectOption('feed/legacy');
+    await r.page.locator('#feed-tree [data-owner="feed/legacy"]').click();
     await expect(r.page.locator('#feed-options')).toContainText('Зафиксированное начало истории:');
     await expect(r.page.locator('#feed-options')).not.toContainText('7 дней');
     await expect(r.page.locator('#feed-options')).not.toContainText('Загружено');

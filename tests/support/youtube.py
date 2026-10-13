@@ -24,3 +24,20 @@ def feed_xml():
 
 
 CHANNEL = 'UC' + 'a' * 22
+
+
+class History:
+    """Synthetic history transport; never contacts a real YouTube playlist."""
+    def __init__(self, videos):
+        self.videos = tuple(videos)
+        self.calls = 0
+
+    async def fetch(self, channel, count, state):
+        self.calls += 1
+        return dict(entries=[dict(id=v, title=v) for v in self.videos[:count]],
+                    complete=True, state={}, error=None, requests=3)
+
+
+class NoCaptions:
+    async def fetch(self, video):
+        return None
