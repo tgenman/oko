@@ -137,7 +137,7 @@ def main():
         commands = {
             'syntax': [[node, '--check', str(path)] for path in (selected_files['syntax'] or sorted((ROOT / 'oko/web').glob('*.js')))],
             'lint': [[node, str(ROOT / 'scripts/lint-js.cjs'), *dict.fromkeys(selected_files['lint'])]],
-            'browser': [[node, '--test', '--test-concurrency=1', *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.cjs'))))]],
+            'browser': [[node, '--test', '--test-concurrency=2', *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.cjs'))))]],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
         if {'contracts', 'http', 'python-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):

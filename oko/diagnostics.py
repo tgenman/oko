@@ -12,7 +12,7 @@ from typing import Any
 import uuid
 from anyio import EndOfStream, WouldBlock
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from oko.collection.contracts import SourceDeleted
 
 
@@ -29,6 +29,12 @@ class BrowserError(BaseModel):
     count: int = Field(default=1, ge=1, le=1_000_000)
     stream_id: str = Field(default='', max_length=100)
     sequence: int = Field(default=1, ge=1, le=9_007_199_254_740_991)
+
+    @field_validator('occurred_at', 'first_at', mode='before')
+    @classmethod
+    def browser_timestamp(cls, value: Any) -> Any:
+        # JSON carries ISO strings; keep strict validation for all other types.
+        return datetime.fromisoformat(value) if isinstance(value, str) else value
 
 
 def redact(value: str, secret: str = '') -> str:

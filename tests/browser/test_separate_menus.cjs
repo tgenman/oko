@@ -315,7 +315,7 @@ test('late failed save cannot replace messages after closing and reopening the s
     await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
     await r.page.locator('#setting-prompt_theses').fill('Новый черновик');
     await r.page.evaluate(() => readerTransport.release('/api/settings/feed/one', {detail:'Старая ошибка'}, 500));
-    await expect.poll(() => r.page.evaluate(() => readerTransport.debugGroups.some(g=>g.message==='Старая ошибка'))).toBe(true);
+    await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старая ошибка'))).toBe(true);
     await expect(r.page.locator('#settings-message')).not.toContainText('Старая ошибка');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Новый черновик');
   } finally {await r.close();}
@@ -345,7 +345,7 @@ test('model check and settings save are independent; an earlier check cannot rep
     await r.page.keyboard.press('Escape');
     await r.page.locator('#settings-open').click();
     await r.page.evaluate(() => readerTransport.release('/api/processors/llamacpp/check',{detail:'Старый сбой модели'},500));
-    await expect.poll(() => r.page.evaluate(() => readerTransport.debugGroups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
+    await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
     await expect(r.page.locator('#llamacpp-status')).not.toContainText('Старый сбой модели');
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
@@ -431,7 +431,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     });
     // An old background read is still pending when the server write completes.
     await expect.poll(() => Boolean(heldStatus)).toBe(true);
-    await r.page.evaluate(() => {readerTransport.cards = [{id:'after',title:'После сохранения',published:100,folder_id:'f',feed_id:'one'}];});
+    await r.page.evaluate(() => {readerTransport.replies.get('/api/cards').body = [{id:'after',title:'После сохранения',published:100,folder_id:'f',feed_id:'one'}];});
     await r.page.locator('#feed-importance').selectOption('high');
     await r.page.getByRole('button',{name:'Сохранить фид',exact:true}).click();
     await expect.poll(() => Boolean(heldCatalog)).toBe(true);

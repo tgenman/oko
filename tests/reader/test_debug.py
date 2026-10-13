@@ -233,3 +233,17 @@ def test_cancelled_codex_check_is_expected_and_not_recorded(tmp_path):
             assert stopped.status_code == 409
             assert stopped.headers['X-Oko-Expected'] == '1'
         assert client.get('/api/debug').json()['groups'] == []
+
+
+def test_browser_iso_timestamps_survive_http_delivery_and_retry(tmp_path):
+    payload = dict(source='browser', message='dated error', event_id='dated',
+                   first_at='2026-10-13T10:00:00.000Z', occurred_at='2026-10-13T10:00:01.250Z')
+    with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
+        response = client.post('/api/debug', json=payload)
+        assert response.status_code == 200, response.text
+        entry = response.json()['entry']
+        assert entry['first_time'] == '2026-10-13T10:00:00+00:00'
+        assert entry['last_time'] == '2026-10-13T10:00:01.250000+00:00'
+        assert client.post('/api/debug', json=payload).json()['entry']['count'] == 1
+        for invalid in (123, True, 'not-a-date'):
+            assert client.post('/api/debug', json={**payload, 'occurred_at': invalid}).status_code == 422

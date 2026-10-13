@@ -8,7 +8,8 @@ from oko.collection.contracts import Material
 from tests.support.reader import HEADERS, wait_for
 
 
-def configure(client):
+def setup_filters(client):
+    client.patch('/api/settings/oko/global', json={'events': False, 'theses': False, 'digests': False, 'prompt_filters': '', 'processor': 'llamacpp'})
     client.post('/api/tabs/reader/heartbeat')
     wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 3 and all(x['complete'] for x in c))
     client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
@@ -19,7 +20,7 @@ def test_hidden_ads_and_clean_view_preserve_original_and_restore_same_version(tm
     calls = []
     options = dict(source=FilterSource(), token='test', ai_transport=transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        configure(client)
+        setup_filters(client)
         cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards').json()) == 2 and all(x['filter']['status'] == 'done' for x in c) else None))
         all_cards = client.get('/api/cards?show_hidden=true').json()
         assert len(all_cards) == 3
@@ -45,8 +46,8 @@ def test_hidden_ads_and_clean_view_preserve_original_and_restore_same_version(tm
 
 def test_theses_receive_clean_text_and_hidden_material_is_not_summarized(tmp_path):
     calls = []
-    with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport(calls)), headers=HEADERS) as client:
-        configure(client)
+    with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport(calls, theses=True)), headers=HEADERS) as client:
+        setup_filters(client)
         client.patch('/api/settings/oko/global', json={'theses': True})
         wait_for(client, lambda: all(c.get('theses') for c in client.get('/api/cards').json()))
         inputs = [json.loads(json.loads(r.content)['messages'][1]['content']) for r in calls if r.url.path == '/v1/chat/completions']
@@ -62,7 +63,7 @@ def test_unknown_filter_fragment_is_error_and_forbidden_ai_sends_nothing(tmp_pat
             return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(dict(hidden=False, reason='Реклама', removed=['несуществующий текст']))}}]})
         return native.handler(request)
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        configure(client)
+        setup_filters(client)
         item = client.get('/api/cards').json()[0]['id']
         material = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json())['filter'].get('error') else None))
         assert 'отсутствующий фрагмент' in material['filter']['error']
@@ -95,7 +96,7 @@ def test_filter_delete_and_stop_reject_cancel_resistant_late_reply(tmp_path):
             return self.native.handler(request)
     held = HeldFilter()
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=held), headers=HEADERS) as client:
-        configure(client)
+        setup_filters(client)
         assert held.started.wait(2)
         # First item is wholly advertising; the late answer would hide it.
         item = next(c['id'] for c in client.get('/api/cards').json() if c['url'].endswith('/0'))
@@ -116,7 +117,7 @@ def test_filter_missing_file_retries_without_losing_user_correction(tmp_path):
     calls = []
     options = dict(source=FilterSource(), token='test', ai_transport=transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        configure(client)
+        setup_filters(client)
         cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards?show_hidden=true').json()) == 3 and all(x['filter']['status'] == 'done' for x in c) else None))
         item = next(c['id'] for c in cards if c['filter']['hidden'])
         client.post('/api/materials/' + item + '/filter/restore')
@@ -138,7 +139,7 @@ def test_restore_applies_only_to_original_version_and_media_survive_filter(tmp_p
             return Material(result.title, result.text + (' Новая версия.' if self.revision else ''), attachments=(Attachment('media-0.txt', b'attachment', 'file', 'text/plain'),))
     source = ChangingSource()
     with TestClient(create_app(tmp_path, source=source, token='test', ai_transport=transport([])), headers=HEADERS) as client:
-        configure(client)
+        setup_filters(client)
         cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards?show_hidden=true').json()) == 3 and all(x['filter']['status'] == 'done' for x in c) else None))
         hidden = next(c for c in cards if c['filter']['hidden'])
         item = hidden['id']
@@ -211,7 +212,7 @@ def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):
     service = FilterCodex()
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', codex_client=service), headers=HEADERS) as client:
         configure_codex(client)
-        configure(client)
+        setup_filters(client)
         client.patch('/api/settings/oko/global', json={'processor': 'codex'})
         item = client.get('/api/cards').json()[0]['id']
         wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/materials/' + item).json()['filter'].get('error') or ''))

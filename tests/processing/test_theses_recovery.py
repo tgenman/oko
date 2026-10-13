@@ -12,7 +12,7 @@ def test_completed_theses_survive_restart_without_second_model_call(tmp_path: Pa
     calls = []
     options = dict(source=DemoSource(), token='test', ai_transport=model_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        item = setup_reader(client)
+        item = setup_reader(client, theses=True)
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         wait_for(client, lambda: all(m.get('theses') for m in client.get('/api/cards').json()))
@@ -28,7 +28,7 @@ def test_missing_theses_file_is_regenerated_after_restart(tmp_path: Path):
     calls = []
     options = dict(source=DemoSource(), token='test', ai_transport=model_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        item = setup_reader(client)
+        item = setup_reader(client, theses=True)
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))

@@ -108,6 +108,7 @@ test('viewing during media loading stops playback, releases URLs and rejects lat
       window.testVideo = document.querySelector('#images video');
       testVideo.muted = true; testVideo.loop = true; await testVideo.play();
     });
+    await r.page.evaluate(() => readerTransport.replies.set('POST /api/materials/A/viewed', {body:{ok:true},next:[['/api/cards',{body:[]}]]}));
     await r.page.getByRole('button', {name: 'Просмотрено', exact: true}).click();
     await expect(r.page.locator('#material')).toBeHidden();
     assert.equal(await r.page.evaluate(() => testVideo.paused && !testVideo.hasAttribute('src')), true);
@@ -134,6 +135,7 @@ test('viewing a source in another tab closes its pending digest but preserves un
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/digest'));
     await otherTab.getByRole('button', {name: /^source/}).click();
     await expect(otherTab.locator('#text')).toHaveText('Текст source');
+    await otherTab.evaluate(() => readerTransport.replies.set('POST /api/materials/source/viewed', {body:{ok:true},next:[['/api/cards',{body:[]}]]}));
     await otherTab.getByRole('button', {name: 'Просмотрено', exact: true}).click();
     await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
     await r.page.evaluate(body => readerTransport.release('/api/materials/digest', body), digest);
@@ -194,6 +196,7 @@ test('digest originals and previous versions retain images, video and circles', 
     await r.page.locator('#event-sources summary').filter({hasText: 'Предыдущая версия'}).click();
     await expect(r.page.locator('#event-sources')).toContainText('Предыдущий текст');
     await expect(r.page.locator('#event-sources img')).toHaveCount(2);
+    await r.page.evaluate(() => readerTransport.replies.set('POST /api/materials/digest/viewed', {body:{ok:true},next:[['/api/cards',{body:[]}]]}));
     await r.page.getByRole('button', {name: 'Просмотрено', exact: true}).click();
     await expect(r.page.locator('#event-sources')).toBeEmpty();
     assert.equal(await r.page.evaluate(() => browserResources.created.length), 4);

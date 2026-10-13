@@ -5,27 +5,32 @@ const os = require('node:os');
 const path = require('node:path');
 const {once} = require('node:events');
 const {createInterface} = require('node:readline');
-const {chromium, expect} = require('playwright/test');
+const {expect} = require('playwright/test');
+const {newContext} = require('./browser-context.cjs');
 const assert = require('node:assert/strict');
 
 exports.productionReader = async function(t) {
   const root=path.resolve(__dirname,'../..'), data=await fs.mkdtemp(path.join(os.tmpdir(),'oko-history-http-'));
   const venv=path.join(root,'.venv/bin/python'), python=process.env.OKO_PYTHON || (existsSync(venv)?venv:'python3');
   const child=spawn(python,['-m','tests.support.browser_server',data],{cwd:root,stdio:['ignore','pipe','pipe']});
-  let browser, stderr=''; child.stderr.on('data',chunk=>{stderr+=chunk;});
+  let context, stderr=''; child.stderr.on('data',chunk=>{stderr+=chunk;});
   const exit=once(child,'exit'); exit.catch(()=>{});
-  const abort=()=>{child.kill('SIGTERM'); void browser?.close().catch(()=>{});};
-  t.signal.addEventListener('abort',abort,{once:true});
-  t.after(async()=>{
-    t.signal.removeEventListener('abort',abort);
-    try {await browser?.close();} finally {
+  const abort=()=>{child.kill('SIGTERM'); void context?.close().catch(()=>{});};
+  t?.signal.addEventListener('abort',abort,{once:true});
+  let cleanup;
+  const close=()=>cleanup ??= (async()=>{
+    t?.signal.removeEventListener('abort',abort);
+    try {await context?.close();} finally {
+     try {
       if(child.exitCode===null&&child.signalCode===null){
         child.kill('SIGTERM'); const timer=setTimeout(()=>child.kill('SIGKILL'),3000);
         try{await exit;}finally{clearTimeout(timer);}
       }
-      await fs.rm(data,{recursive:true,force:true});
+     } finally {await fs.rm(data,{recursive:true,force:true});}
     }
-  });
+  })();
+  t?.after(close);
+  try {
   const lines=createInterface({input:child.stdout});
   let timer, first;
   try {
@@ -39,7 +44,9 @@ exports.productionReader = async function(t) {
     assert.equal(response.status,200,await response.clone().text()); return response.json();
   }
   await expect.poll(async()=>{try{return(await fetch(origin)).status;}catch{return 0;}},{timeout:10000}).toBe(200);
-  browser=await chromium.launch({headless:true,executablePath:process.env.OKO_BROWSER_EXECUTABLE||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
-  const page=await browser.newPage();
-  return {page,api,origin,token};
+  context=await newContext();
+  if (t?.signal.aborted) {await context.close(); t.signal.throwIfAborted();}
+  const page=await context.newPage();
+  return {page,context,api,origin,token,close};
+  } catch (error) {await close(); throw error;}
 };

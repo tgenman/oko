@@ -25,6 +25,10 @@ test('compact rows show excerpts, group types and current area with actions in m
 test('keyboard focus does not open content and viewing focuses next without opening it', async () => {
  const r=await reader(); try {
   await r.start([material('one'),material('two'),material('three')]);
+  await r.page.evaluate(() => {const t=readerTransport, [one,two,three]=t.replies.get('/api/cards').body;
+   for (const [id, rows] of [['two',[one,three]], ['three',[one]], ['one',[]]])
+    t.replies.set('POST /api/materials/'+id+'/viewed', {body:{ok:true}, next:[['/api/cards',{body:rows}]]});
+  });
   await r.page.locator('[data-card="one"]').focus();
   await r.page.keyboard.press('ArrowDown');
   await expect(r.page.locator('[data-card="two"]')).toBeFocused();
@@ -53,7 +57,7 @@ test('date groups, saved sorting and displayed hidden card count use current row
   await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false})]);
   await expect(r.page.locator('.date-group')).toHaveText(['Сегодня','Вчера','Дата неизвестна']);
   await expect(r.page.locator('#count-label')).toHaveText('3 карточки');
-  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/cards?sort=newest&show_hidden=true',{body:[t.cards[0],{...t.cards[0],id:'hidden',filter:{hidden:true}},...t.cards.slice(1)]});});
+  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/cards').body[0],{...t.replies.get('/api/cards').body[0],id:'hidden',filter:{hidden:true}},...t.replies.get('/api/cards').body.slice(1)]});});
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('#count-label')).toHaveText('4 карточки');
@@ -95,9 +99,12 @@ test('polling preserves row focus and anchored scroll, and returning restores ar
  const r=await reader(); try {
   const items=Array.from({length:30},(_,i)=>material('item-'+String(i).padStart(2,'0'),{published:1000-i,feed_id:i%2?'second':'feed',snippet:'Краткий текст'}));
   await r.start(items);
+  await r.page.evaluate(items => {const t=readerTransport;
+   t.replies.set('/api/cards?sort=newest&feed=feed',{body:[{...items[0],id:'new',title:'Новый материал',published:2000}, ...items]});
+  }, items.filter((_,index)=>index%2===0));
   await r.page.locator('[data-card="item-20"]').focus();
   const before=await r.page.locator('[data-card="item-20"]').evaluate(n=>n.getBoundingClientRect().top);
-  await r.page.evaluate(()=>readerTransport.cards.unshift({...readerTransport.cards[0],id:'new',title:'Новый материал',published:2000}));
+  await r.page.evaluate(()=>readerTransport.replies.get('/api/cards').body.unshift({...readerTransport.replies.get('/api/cards').body[0],id:'new',title:'Новый материал',published:2000}));
   await expect(r.page.locator('#cards button')).toHaveCount(31);
   await expect(r.page.locator('[data-card="item-20"]')).toBeFocused();
   expect(await r.page.locator('[data-card="item-20"]').evaluate(n=>n.getBoundingClientRect().top)).toBe(before);
@@ -117,11 +124,15 @@ test('previews are reused during polling and late media cannot repopulate anothe
   const path='/api/materials/one/images/image-0.png';
   await r.page.addInitScript(path=>readerTransport.replies.set(path,{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='}),path);
   await r.start([material('one',{images:[path],version:'1'}),material('two',{feed_id:'second'})]);
+  await r.page.evaluate(() => {const t=readerTransport;
+   t.replies.get('/api/navigation').body.feeds.push({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
+   t.replies.set('/api/cards?sort=newest&feed=second',{body:[t.replies.get('/api/cards').body[1]]});
+  });
   await expect(r.page.locator('[data-card="one"] img')).toHaveCount(1);
   const requests=await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path);
   await r.page.waitForTimeout(1100);
   expect(await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path)).toBe(requests);
-  await r.page.evaluate(path=>{readerTransport.held.set(path,true); readerTransport.cards[0].version='2';},path);
+  await r.page.evaluate(path=>{readerTransport.held.set(path,true); readerTransport.replies.get('/api/cards').body[0].version='2';},path);
   await r.page.waitForFunction(path=>readerTransport.pending.has(path),path);
   await r.page.locator('[data-feed="second"]').click();
   await expect(r.page.locator('#cards button')).toHaveCount(1);
@@ -136,6 +147,10 @@ test('previews are reused during polling and late media cannot repopulate anothe
 test('failed refresh keeps rows and retry updates current area, late failed selection is ignored', async () => {
  const r=await reader(); try {
   await r.start([material('one'),material('two',{feed_id:'second'})]);
+  await r.page.evaluate(() => {const t=readerTransport;
+   t.replies.get('/api/navigation').body.feeds.push({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
+   t.replies.set('/api/cards?sort=newest&feed=second',{body:[t.replies.get('/api/cards').body[1]]});
+  });
   await r.page.evaluate(()=>readerTransport.replies.set('/api/cards?sort=newest',{status:500,body:{detail:'Сбой списка'}}));
   await expect(r.page.locator('#list-status')).toContainText('Сбой списка');
   await expect(r.page.locator('#cards button')).toHaveCount(2);

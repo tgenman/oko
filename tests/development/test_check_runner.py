@@ -145,6 +145,7 @@ def test_browser_file_selection_only_runs_requested_file(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.cjs'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = record.read_text()
+    assert '--test-concurrency=2' in commands
     assert 'test_material_list.cjs' in commands
     assert 'test_opened_material.cjs' not in commands
     assert 'PASS browser' in result.stdout

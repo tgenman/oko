@@ -41,7 +41,7 @@ class ReadingTelegram(Telegram):
 
 
 def reading_transport():
-    filters = filter_transport([])
+    filters = filter_transport([], theses=True)
     events = event_transport([])
     digests = digest_transport([])
 
@@ -116,7 +116,7 @@ def test_local_mixed_digest_cannot_transfer_private_content_when_switched_to_cod
             return [dict(id=11, date=time.time()-60, text='PUBLIC-ORIGINAL' if peer == -1001234567890 else 'PRIVATE-ORIGINAL', group=None, media=None)]
 
     calls = []
-    local = digest_transport(calls)
+    local = digest_transport(calls, theses=True)
     service = CodexService()
     with TestClient(create_app(tmp_path, token='test', telegram_client=MixedTelegram(), ai_transport=local, codex_client=service), headers=HEADERS) as client:
         configure_codex(client)

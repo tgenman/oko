@@ -115,7 +115,7 @@ def test_snippet_does_not_restore_filtered_fragments(tmp_path):
 
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport([])), headers=HEADERS) as client:
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp', 'prompt_filters': 'Убери рекламу'})
+        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False, 'digests': False, 'processor': 'llamacpp', 'prompt_filters': 'Убери рекламу'})
         client.post('/api/tabs/reader/heartbeat')
         cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards').json()) == 2 and all(card.get('filter', {}).get('status') == 'done' for card in c) else None))
         card = next(c for c in cards if c['title'] == 'Материал 1')

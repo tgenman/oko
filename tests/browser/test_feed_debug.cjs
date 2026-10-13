@@ -37,10 +37,8 @@ test('debug toggle shows server traceback and caught browser errors are sent whi
   const r = await reader();
   try {
     await r.start([]);
-    await r.page.evaluate(() => {
-      readerTransport.debugGroups.push({id: 'server', first_time: '2026-10-12T10:00:00Z', last_time: '2026-10-12T10:00:00Z', count: 1, error_type: 'RuntimeError', location: 'discover:42', source: 'collector', message: 'broken source', traceback: 'RuntimeError at discover'});
-      readerTransport.replies.set('/api/collect', {status: 500, body: {detail: 'collection failed'}});
-    });
+    await r.api('debug', 'POST', {source:'collector', message:'broken source', traceback:'RuntimeError at discover', error_type:'RuntimeError', location:'discover:42'});
+    await r.page.evaluate(() => readerTransport.replies.set('/api/collect', {status: 500, body: {detail: 'collection failed'}}));
     await expect(r.page.locator('#debug-panel')).toBeHidden();
     await r.page.locator('#collect').click();
     await r.page.waitForFunction(() => readerTransport.requests.some(r => r.url === '/api/debug' && r.method === 'POST' && r.body.message === 'collection failed'));
@@ -153,7 +151,7 @@ test('switch works with keyboard and clearing history rejects a late journal res
     });
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/debug'));
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/status'));
-    const old = await r.page.evaluate(() => readerTransport.debugGroups);
+    const old = (await r.api('debug')).groups;
     // Release only the old GET; DELETE uses the normal transport immediately.
     await r.page.evaluate(() => readerTransport.held.delete('/api/debug'));
     await r.page.locator('#debug-clear').click();

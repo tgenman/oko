@@ -12,15 +12,16 @@ class FilterSource:
         return Material('Материал ' + publication.id, texts[int(publication.id)])
 
 
-def transport(calls):
+def transport(calls, *, theses=False):
     native = model_transport(calls)
     def respond(request):
         if request.url.path != '/v1/chat/completions':
             return native.handler(request)
-        calls.append(request)
         task = json.loads(json.loads(request.content)['messages'][1]['content'])
         if task['operation'] != 'filter':
+            assert theses and task['operation'] == 'theses', f"Filter model does not support operation: {task['operation']}"
             return native.handler(request)
+        calls.append(request)
         text = task['sources'][0]['text']
         result = dict(hidden=text.startswith('Реклама:'), reason='Реклама' if 'Реклама:' in text else '', removed=['Реклама: купите курс.'] if text.startswith('Открылась') else [])
         return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(result)}}]})

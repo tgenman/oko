@@ -9,6 +9,7 @@ def event_transport(calls):
         if request.url.path != '/v1/chat/completions':
             return native.handler(request)
         task = json.loads(json.loads(request.content)['messages'][1]['content'])
+        assert task['operation'] == 'events', f"Event model does not support operation: {task['operation']}"
         calls.append(task)
         sources = task['sources']
         refs = [dict(id=s['id'], url=s['url']) for s in sources]
@@ -22,7 +23,8 @@ def event_transport(calls):
 
 
 def configure(client):
+    client.patch('/api/settings/oko/global', json={'events': False, 'theses': False, 'digests': False, 'prompt_filters': '', 'processor': 'llamacpp'})
+    client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
     client.post('/api/tabs/reader/heartbeat')
     wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 3 and all(x['complete'] for x in c))
-    client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-    client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
+    client.patch('/api/settings/oko/global', json={'events': True})

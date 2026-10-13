@@ -11,7 +11,7 @@ def test_codex_reports_unavailable_before_any_content_is_sent(tmp_path: Path, mo
     record = tmp_path / 'unexpected-command'
     fake_cli(tmp_path, monkeypatch, f"echo \"$*\" >> '{record}'\nexit 99\n")
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
-        item = setup_reader(client)
+        item = setup_reader(client, theses=True)
         client.patch('/api/settings/oko/global', json={'processor': 'codex', 'theses': True})
         denied = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
         assert 'Запрещена публичная' in denied['ai']['error']
@@ -66,7 +66,7 @@ esac
 def test_missing_cli_is_a_visible_blocker_without_local_model_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv('PATH', str(tmp_path))
     with TestClient(create_app(tmp_path / 'store', source=DemoSource(), token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
-        setup_reader(client)
+        setup_reader(client, theses=True)
         result = client.post('/api/processors/codex/check').json()
         assert result['available'] is False
         assert 'CLI не найден' in result['reason']
@@ -117,7 +117,7 @@ def test_allowed_codex_theses_use_contract_and_are_deleted(tmp_path):
     service = CodexService()
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', codex_client=service), headers=HEADERS) as client:
         configure_codex(client)
-        item = setup_reader(client)
+        item = setup_reader(client, theses=True)
         client.patch('/api/settings/oko/global', json={'processor': 'codex', 'theses': True, 'prompt_theses': 'Один тезис'})
         denied = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
         assert 'Запрещена публичная' in denied['ai']['error']
@@ -139,7 +139,7 @@ def test_codex_refuses_unknown_source_and_keeps_original(tmp_path):
             return '{"points":[{"text":"Чужой тезис","sources":[{"id":"alien","url":"https://alien.example"}]}]}'
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', codex_client=BadSource()), headers=HEADERS) as client:
         configure_codex(client)
-        item = setup_reader(client)
+        item = setup_reader(client, theses=True)
         client.patch('/api/feeds/demo', json={'public_ai': True})
         client.patch('/api/settings/oko/global', json={'processor': 'codex', 'theses': True})
         material = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
@@ -166,7 +166,7 @@ def test_late_codex_result_after_permission_change_is_not_published(tmp_path):
     service=Held()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
         configure_codex(client)
-        item=setup_reader(client)
+        item=setup_reader(client, theses=True)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
         assert entered.wait(2)
@@ -183,7 +183,7 @@ def test_completed_codex_theses_survive_restart_without_another_call(tmp_path):
     service=CodexService()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
         configure_codex(client)
-        item=setup_reader(client)
+        item=setup_reader(client, theses=True)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
         wait_for(client,lambda: all(c.get('theses') for c in client.get('/api/cards').json()))
@@ -211,7 +211,7 @@ def test_codex_cancellation_on_view_keeps_late_result_deleted(tmp_path):
     service=Held()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
         configure_codex(client)
-        item=setup_reader(client)
+        item=setup_reader(client, theses=True)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
         assert entered.wait(2)
@@ -234,7 +234,7 @@ case "$*" in
 esac
 """)
     with TestClient(create_app(tmp_path/'store',source=DemoSource(),token='test', codex_client=LocalCodex()),headers=HEADERS) as client:
-        item=setup_reader(client)
+        item=setup_reader(client, theses=True)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
         material=wait_for(client,lambda: (m if (m:=client.get('/api/materials/'+item).json()).get('ai',{}).get('error') else None))
@@ -248,7 +248,7 @@ def test_codex_unknown_quota_prevents_source_transfer(tmp_path):
             return dict(available=True,local=False,auth='chatgpt',version='0.136.0',reason='',limits_checked=False)
     service=UnknownQuota()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
-        item=setup_reader(client)
+        item=setup_reader(client, theses=True)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
         material=wait_for(client,lambda: (m if (m:=client.get('/api/materials/'+item).json()).get('theses') or m.get('ai',{}).get('error') else None))
@@ -262,7 +262,7 @@ def test_codex_exhausted_quota_is_visible_without_source_transfer(tmp_path):
             return dict(available=False,local=False,auth='chatgpt',version='0.136.0',reason='Лимит Codex исчерпан; ожидание сброса',limits_checked=True)
     service=Exhausted()
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
-        item=setup_reader(client)
+        item=setup_reader(client, theses=True)
         client.patch('/api/feeds/demo',json={'public_ai':True})
         client.patch('/api/settings/oko/global',json={'processor':'codex','theses':True})
         material=wait_for(client,lambda: (m if (m:=client.get('/api/materials/'+item).json()).get('ai',{}).get('error') else None))

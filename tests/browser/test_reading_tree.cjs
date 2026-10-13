@@ -4,6 +4,9 @@ const {reader, material, expect} = require('./support.cjs');
 test('reading tree selects a feed and collapses folders without changing reading', async () => {
  const r = await reader(); try {
   await r.start([material('one'), material('two', {feed_id:'second'})]);
+  await r.page.evaluate(() => {const t=readerTransport;
+   t.replies.set('/api/cards?sort=newest&feed=feed', {body:[t.replies.get('/api/cards').body[0]]});
+  });
   await expect(r.page.locator('#folders [data-feed="feed"]')).toBeVisible();
   await r.page.locator('#folders [data-feed="feed"]').click();
   await expect(r.page.locator('#cards button')).toHaveCount(1);
@@ -19,6 +22,9 @@ test('reading tree selects a feed and collapses folders without changing reading
 test('tree keeps current choice across moves and deletion and rejects late cards', async () => {
  const r=await reader(); try {
   await r.start([material('one'),material('two',{feed_id:'second'})]);
+  await r.page.evaluate(() => {const t=readerTransport;
+   t.replies.set('/api/cards?sort=newest&feed=feed', {body:[t.replies.get('/api/cards').body[0]]});
+  });
   await r.page.locator('[data-feed="feed"]').click();
   await expect(r.page.locator('#cards button')).toHaveCount(1);
   await r.page.evaluate(() => {

@@ -58,7 +58,7 @@ def test_edit_regenerates_same_digest_members_and_current_theses(tmp_path):
             return Material('Новость', self.text)
     source = Editable()
     calls = []
-    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=digest_transport(calls)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=digest_transport(calls, theses=True)), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp', 'theses': True})
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.post('/api/tabs/test/heartbeat')
@@ -222,7 +222,8 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
 
 
 def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(tmp_path):
-    from tests.support.youtube import feed_xml, subscribe, NoCaptions, PNG as PREVIEW
+    from tests.support.youtube import feed_xml, subscribe, PNG as PREVIEW
+    from tests.support.app import NoCaptions
     title, present = ['О границах модели'], [True]
     def reply(request):
         if request.url.path == '/feeds/videos.xml':
@@ -287,7 +288,7 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
         async def fetch(self, publication):
             return Material('Новость', self.text)
     source, calls = Editable(), []
-    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=digest_transport(calls)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=digest_transport(calls, theses=True)), headers=HEADERS) as client:
         client.put('/api/processors/llamacpp', json={'endpoint': 'https://remote.test', 'model': 'local:latest', 'local_execution': False})
         client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp', 'theses': True})
         feed = 'demo'

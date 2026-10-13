@@ -45,13 +45,17 @@ def test_installer_preserves_custom_hooks(tmp_path):
     assert run('git', 'config', '--get', 'core.hooksPath').stdout.strip() == 'custom-hooks'
 
 
-def test_prepush_propagates_failed_full_check(tmp_path):
+def test_push_does_not_repeat_checks(tmp_path):
     run = repo(tmp_path)
+    assert run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test',
+               'commit', '--allow-empty', '-m', 'fixture').returncode == 0
     check = tmp_path / 'scripts/check'
     check.write_text('#!/bin/sh\nprintf "%s" "$1" > selected-check\nexit 7\n')
-    result = run('git', 'hook', 'run', 'pre-push')
-    assert result.returncode != 0
-    assert (tmp_path / 'selected-check').read_text() == 'all'
+    remote = tmp_path / 'remote.git'
+    assert run('git', 'init', '--bare', str(remote)).returncode == 0
+    result = run('git', 'push', str(remote), 'HEAD:refs/heads/main')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (tmp_path / 'selected-check').exists()
 
 
 @pytest.mark.skipif(shutil.which(os.environ.get('OKO_NODE', 'node')) is None,

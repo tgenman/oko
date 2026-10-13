@@ -17,4 +17,4 @@ if [ -z "$current" ]; then
     done
 fi
 git config --local core.hooksPath .githooks
-echo 'Oko hooks installed: staged syntax before commit; full checks before push.'
+echo 'Oko hooks installed: staged checks before commit; full checks run in CI.'

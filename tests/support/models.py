@@ -3,6 +3,9 @@ import json, httpx
 
 def model_transport(calls):
     def reply(request):
+        if request.url.path == '/v1/chat/completions':
+            task = json.loads(json.loads(request.content)['messages'][1]['content'])
+            assert task['operation'] == 'theses', f"Theses model does not support operation: {task['operation']}"
         calls.append(request)
         if request.url.path == '/v1/models':
             return httpx.Response(200, json={'data': [{'id': 'local:latest', 'owned_by': 'llamacpp', 'meta': {'size': 100}}]})

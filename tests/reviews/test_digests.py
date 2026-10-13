@@ -197,7 +197,7 @@ def test_permission_change_during_generation_discards_late_public_result(tmp_pat
     service = Held()
     with TestClient(create_app(tmp_path, source=EventSource(), token='test', codex_client=service), headers=HEADERS) as client:
         configure_codex(client)
-        setup_reader(client)
+        setup_reader(client, theses=True)
         identity = client.post('/api/digests/folder/demo', json={}).json()['id']
         wait_for(client, lambda: any('всех фидов' in e for e in client.get('/api/status').json()['errors']))
         assert not service.inputs
@@ -261,7 +261,7 @@ def test_folder_digest_stays_in_selected_folder_when_member_feed_moves(tmp_path)
 
 
 def test_original_presentation_mode_inherits_independently_of_theses(tmp_path):
-    with TestClient(create_app(tmp_path,source=EventSource(),token='test',ai_transport=digest_transport([])),headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path,source=EventSource(),token='test',ai_transport=digest_transport([], theses=True)),headers=HEADERS) as client:
         configure(client)
         assert all(c['originals'] for c in client.get('/api/cards').json())
         client.patch('/api/settings/oko/global',json={'originals':False, 'theses':True})
