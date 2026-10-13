@@ -90,6 +90,12 @@ sys.exit(0)
         assert stopped.read_text() == 'stopped'
         assert 'INTERRUPTED browser' in stdout
         assert 'NOT RUN diff' in stdout
+        import json
+        report_path = Path(stdout.split('Report: ', 1)[1].strip())
+        report = json.loads(report_path.read_text())
+        assert report['exit_code'] == 130
+        assert report['suites']['browser']['status'] == 'INTERRUPTED'
+        assert report['suites']['diff']['status'] == 'NOT RUN'
     finally:
         if process.poll() is None:
             process.kill()
@@ -197,3 +203,88 @@ def test_browser_gets_resolved_python_in_checkout_without_virtualenv(tmp_path):
     result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'browser'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert record.read_text() == str(tmp_path / 'python3')
+
+
+def test_report_keeps_full_output_failures_and_separate_reruns(tmp_path):
+    import json
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', '''
+if '--test' in sys.argv:
+    print('large diagnostic: ' + 'x' * 100000)
+    print('stderr diagnostic', file=sys.stderr)
+    print('not ok 1 - selected browser scenario')
+    sys.exit(7)
+if 'pytest' in sys.argv:
+    print('FAILED tests/example.py::test_example - assertion')
+    print('ERROR tests/example.py::test_setup - setup')
+    sys.exit(8)
+sys.exit(0)
+'''))
+    reports = tmp_path / 'reports'
+    command = [sys.executable, str(ROOT / 'scripts/check'), 'all', '--report-dir', str(reports)]
+    result = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    first = next(reports.iterdir())
+    report = json.loads((first / 'report.json').read_text())
+    assert report['exit_code'] == 1
+    assert report['suites']['browser']['status'].startswith('FAIL')
+    assert report['suites']['browser']['failures'] == ['selected browser scenario']
+    assert report['suites']['python-tests']['failures'] == ['tests/example.py::test_example', 'tests/example.py::test_setup']
+    assert report['suites']['browser']['commands'][0]['exit_code'] == 7
+    assert report['suites']['types']['status'].startswith('PASS')
+    log = (first / 'output.log').read_text()
+    assert 'x' * 100000 in log and 'stderr diagnostic' in log
+    first_json = (first / 'report.json').read_text()
+    runtime.write_text('#!/usr/bin/env python3\nimport os, sys\nif \"-e\" in sys.argv: print(os.environ[\"OKO_BROWSER_EXECUTABLE\"])\nsys.exit(0)\n')
+    retry = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.cjs', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    assert (first / 'report.json').read_text() == first_json
+    second = next(path for path in reports.iterdir() if path != first)
+    rerun = json.loads((second / 'report.json').read_text())
+    assert list(rerun['suites']) == ['browser']
+    assert rerun['selected_files']['browser'] == [str(ROOT / 'tests/browser/test_material_list.cjs')]
+
+
+def test_report_records_missing_dependency_without_claiming_success(tmp_path):
+    import json
+    env = runtimes(tmp_path)
+    env['OKO_NODE'] = str(tmp_path / 'missing-node')
+    reports = tmp_path / 'reports'
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    directory = next(reports.iterdir())
+    report = json.loads((directory / 'report.json').read_text())
+    assert all(suite['status'] == 'NOT RUN' for suite in report['suites'].values())
+    assert 'Node missing' in (directory / 'output.log').read_text()
+
+
+def test_report_does_not_wait_for_exited_commands_child_holding_stdout(tmp_path):
+    import json
+    import signal
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_PYTHON'])
+    child_pid = tmp_path / 'child-pid'
+    env['CHILD_PID'] = str(child_pid)
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', '''
+if 'pytest' in sys.argv:
+    import subprocess
+    from pathlib import Path
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+    Path(os.environ['CHILD_PID']).write_text(str(child.pid))
+    os.write(1, 'FAILED tests/example.py::test_последняя'.encode('utf-8'))
+    sys.exit(7)
+sys.exit(0)
+'''))
+    reports = tmp_path / 'reports'
+    try:
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--report-dir', str(reports)], env=env, capture_output=True, text=True, timeout=8)
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads((next(reports.iterdir()) / 'report.json').read_text())
+        assert report['suites']['python-tests']['failures'] == ['tests/example.py::test_последняя']
+    finally:
+        if child_pid.exists():
+            try:
+                os.kill(int(child_pid.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass

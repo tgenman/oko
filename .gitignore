@@ -7,3 +7,12 @@ __pycache__/
 data/
 Око.app/
 node_modules/
+
+.scratch/check-runs/
+/.idea/inspectionProfiles/profiles_settings.xml
+/.idea/inspectionProfiles/Project_Default.xml
+/.idea/.gitignore
+/.idea/modules.xml
+/.idea/oko.iml
+/.idea/vcs.xml
+/.idea/misc.xml

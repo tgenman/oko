@@ -26,3 +26,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: ./scripts/check all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-reports
+          path: .scratch/check-runs/
+          if-no-files-found: ignore

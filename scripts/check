@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Run checkout checks without installing dependencies or contacting real sources."""
 import argparse
+import codecs
+import json
+import re
+import shlex
+import select
 import os
 from pathlib import Path
 import shutil
@@ -9,8 +14,55 @@ import subprocess
 import sys
 import time
 import tempfile
+from datetime import datetime, timezone
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class Report:
+    def __init__(self, base, names, selected_files):
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        self.directory = base / (stamp + '-' + uuid4().hex[:8])
+        self.directory.mkdir(parents=True)
+        self.log = (self.directory / 'output.log').open('w', encoding='utf-8')
+        self.data = dict(started_at=stamp, selected_files=selected_files,
+                         suites={name: dict(status='NOT RUN', commands=[], failures=[]) for name in names})
+        self.current = None
+        self.pending_line = ''
+
+    def write(self, value):
+        self.log.write(value)
+        self.log.flush()
+
+    def output(self, value, stream=None):
+        self.write(value)
+        print(value, end='', file=stream or sys.stdout, flush=True)
+        lines = (self.pending_line + value).split('\n')
+        self.pending_line = lines.pop()
+        for line in lines:
+            self.failure(line)
+
+    def failure(self, line):
+        if self.current:
+            match = re.match(r'^(?:FAILED|ERROR) (\S+)', line)
+            tap = re.match(r'^\s*not ok \d+ - (.+)', line)
+            failure = match.group(1) if match else tap.group(1).strip() if tap else None
+            failures = self.data['suites'][self.current]['failures']
+            if failure and failure not in failures:
+                failures.append(failure)
+
+    def flush_line(self):
+        self.failure(self.pending_line)
+        self.pending_line = ''
+
+    def finish(self, results, exit_code, started):
+        for name, status in results.items():
+            self.data['suites'][name]['status'] = status
+        self.data.update(exit_code=exit_code, duration_seconds=round(time.monotonic() - started, 2),
+                         log=str(self.directory / 'output.log'))
+        (self.directory / 'report.json').write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + '\n')
+        self.log.close()
 
 
 def descendants(pid):
@@ -26,47 +78,85 @@ def descendants(pid):
         owned.update(more)
 
 
-def execute(command, env, **output):
+def execute(command, env, report=None, **output):
+    record = None
+    if report and report.current:
+        record = dict(command=[str(part) for part in command], exit_code=None)
+        report.data['suites'][report.current]['commands'].append(record)
+        report.write('$ ' + shlex.join(record['command']) + '\n')
+    if report and not output:
+        output = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     process = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True, **output)
+    decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+    eof = False
+    def read_output(timeout):
+        nonlocal eof
+        ready, _, _ = select.select([process.stdout], [], [], timeout)
+        if not ready:
+            return False
+        chunk = os.read(process.stdout.fileno(), 65536)
+        if not chunk:
+            eof = True
+            return False
+        report.output(decoder.decode(chunk))
+        return True
+    def finish_output():
+        if report and process.stdout is not None:
+            while read_output(0):
+                pass
+            report.output(decoder.decode(b'', final=True))
+            if report.pending_line:
+                report.output('\n')
+            report.flush_line()
+            process.stdout.close()
     try:
-        return process.wait()
+        if report and process.stdout is not None:
+            while process.poll() is None and not eof:
+                read_output(0.1)
+        code = process.wait()
+        if record is not None:
+            record['exit_code'] = code
+        return code
     finally:
         try:
-            owned = descendants(process.pid)
-        except (OSError, subprocess.SubprocessError):
-            # Preserve process-group cleanup even if process inspection fails.
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+                owned = descendants(process.pid)
+            except (OSError, subprocess.SubprocessError):
+                # Preserve process-group cleanup even if process inspection fails.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+                raise
+            def stop(sig):
+                try:
+                    os.killpg(process.pid, sig)
+                except ProcessLookupError:
+                    pass
+                for pid in owned:
+                    try:
+                        os.kill(pid, sig)
+                    except ProcessLookupError:
+                        pass
+            stop(signal.SIGTERM)
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                process.poll()
+                alive = False
+                for pid in owned | {process.pid}:
+                    try:
+                        os.kill(pid, 0)
+                        alive = True
+                    except ProcessLookupError:
+                        pass
+                if not alive:
+                    break
+                time.sleep(0.02)
+            stop(signal.SIGKILL)
             process.wait()
-            raise
-        def stop(sig):
-            try:
-                os.killpg(process.pid, sig)
-            except ProcessLookupError:
-                pass
-            for pid in owned:
-                try:
-                    os.kill(pid, sig)
-                except ProcessLookupError:
-                    pass
-        stop(signal.SIGTERM)
-        deadline = time.monotonic() + 1
-        while time.monotonic() < deadline:
-            process.poll()
-            alive = False
-            for pid in owned | {process.pid}:
-                try:
-                    os.kill(pid, 0)
-                    alive = True
-                except ProcessLookupError:
-                    pass
-            if not alive:
-                break
-            time.sleep(0.02)
-        stop(signal.SIGKILL)
-        process.wait()
+        finally:
+            finish_output()
 
 
 def executable(value, name):
@@ -84,6 +174,7 @@ def main():
     suites = ('contracts', 'syntax', 'lint', 'http', 'browser', 'diff', 'types', 'entrypoint', 'staged')
     parser.add_argument('sets', nargs='+', choices=(*groups, *suites))
     parser.add_argument('--files', nargs='+', help='Explicit browser/Python test files or JavaScript files for lint/syntax; put check sets before this option')
+    parser.add_argument('--report-dir', type=Path, default=ROOT / '.scratch/check-runs', help='Parent directory for separate full logs and JSON reports for each run')
     args = parser.parse_args()
     env = os.environ.copy()
     started = time.monotonic()
@@ -105,6 +196,7 @@ def main():
                 matched = True
         if not matched:
             parser.error(f'File does not match selected checks: {value}')
+    report = Report(args.report_dir.resolve(), names, selected_files)
     results = dict.fromkeys(names, 'NOT RUN')
     current = None
     exit_code = 1
@@ -131,6 +223,7 @@ def main():
     '''], env, stdout=output, stderr=output)
                 output.seek(0)
                 probe_text = output.read()
+                report.write(probe_text)
             if probe_code:
                 raise RuntimeError('Browser dependencies unavailable. See tests/browser/README.md.\n' + probe_text)
             env['OKO_BROWSER_EXECUTABLE'] = probe_text.strip()
@@ -152,10 +245,11 @@ def main():
         if ('syntax' in names and not commands['syntax']) or ('browser' in names and len(commands['browser'][0]) == 3):
             raise RuntimeError('Required UI modules or browser tests are missing.')
         for current in names:
-            print(f'\nRUN {current}', flush=True)
+            report.current = current
+            report.output(f'\nRUN {current}\n')
             tick = time.monotonic()
             for command in commands[current]:
-                if execute(command, env):
+                if execute(command, env, report=report):
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
                     break
             else:
@@ -164,21 +258,24 @@ def main():
     except KeyboardInterrupt:
         if current:
             results[current] = 'INTERRUPTED'
-        print('\nInterrupted', file=sys.stderr)
+        report.output('\nInterrupted\n', stream=sys.stderr)
         exit_code = 130
     except (RuntimeError, OSError, subprocess.SubprocessError) as error:
         if current:
             results[current] = 'FAIL'
-        print(str(error), file=sys.stderr)
+        report.output(str(error) + '\n', stream=sys.stderr)
     finally:
-        print('\nCheck summary', flush=True)
+        report.current = None
+        report.output('\nCheck summary\n')
         for name, status in results.items():
             state, *detail = status.split(' ', 1)
             if status == 'NOT RUN':
-                print(f'NOT RUN {name}')
+                report.output(f'NOT RUN {name}\n')
             else:
-                print(f'{state} {name} {" ".join(detail)}'.rstrip())
-        print(f'Total {time.monotonic() - started:.2f}s')
+                report.output(f'{state} {name} {" ".join(detail)}'.rstrip() + '\n')
+        report.output(f'Total {time.monotonic() - started:.2f}s\n')
+        report.output(f'Report: {report.directory / "report.json"}\n')
+        report.finish(results, exit_code, started)
     return exit_code
 
 
