@@ -298,3 +298,87 @@ test('feed inherited fields show their owner and resetting only one override pre
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
+
+test('late failed save cannot replace messages after closing and reopening the same editor', async () => {
+  const r = await reader();
+  try {
+    await r.start([]); await objects(r);
+    await r.page.locator('#feeds-open').click();
+    await r.page.getByRole('button', {name:'one',exact:true}).click();
+    await r.page.locator('#setting-prompt_theses').fill('Отправлено');
+    await r.page.evaluate(() => readerTransport.held.set('/api/settings/feed/one', true));
+    await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить поле',exact:true}).click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/settings/feed/one'));
+    await r.page.keyboard.press('Escape');
+    await r.page.evaluate(() => readerTransport.held.delete('/api/settings/feed/one'));
+    await r.page.locator('#feeds-open').click();
+    await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
+    await r.page.locator('#setting-prompt_theses').fill('Новый черновик');
+    await r.page.evaluate(() => readerTransport.release('/api/settings/feed/one', {detail:'Старая ошибка'}, 500));
+    await expect.poll(() => r.page.evaluate(() => readerTransport.debugGroups.some(g=>g.message==='Старая ошибка'))).toBe(true);
+    await expect(r.page.locator('#settings-message')).not.toContainText('Старая ошибка');
+    await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Новый черновик');
+  } finally {await r.close();}
+});
+
+test('model check and settings save are independent; an earlier check cannot report into a reopened menu', async () => {
+  const r = await reader();
+  try {
+    await r.start([]); await objects(r);
+    await r.page.locator('#settings-open').click();
+    await r.page.getByText('Модель llama.cpp', {exact:true}).click();
+    await r.page.evaluate(() => {
+      readerTransport.held.set('/api/processors/llamacpp/check',true);
+      readerTransport.replies.set('PATCH /api/settings/oko/global',{body:{}});
+    });
+    await r.page.locator('#llamacpp-check').click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/processors/llamacpp/check'));
+    await r.page.locator('#setting-prompt_theses').fill('Сохранить параллельно');
+    await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить поле',exact:true}).click();
+    await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
+    await r.page.evaluate(() => readerTransport.release('/api/processors/llamacpp/check',{mode:'Локальная',model:'working-model',models:['working-model']}));
+    await expect(r.page.locator('#llamacpp-status')).toContainText('working-model');
+    await expect(r.page.locator('#llamacpp-models option')).toHaveCount(1);
+    await r.page.evaluate(() => readerTransport.held.set('/api/processors/llamacpp/check',true));
+    await r.page.locator('#llamacpp-check').click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/processors/llamacpp/check'));
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#settings-open').click();
+    await r.page.evaluate(() => readerTransport.release('/api/processors/llamacpp/check',{detail:'Старый сбой модели'},500));
+    await expect.poll(() => r.page.evaluate(() => readerTransport.debugGroups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
+    await expect(r.page.locator('#llamacpp-status')).not.toContainText('Старый сбой модели');
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});
+
+test('RSS addition reconciles after closing and reopening but cannot navigate the new menu', async () => {
+  const r = await reader();
+  try {
+    await r.start([]); await objects(r);
+    await r.page.evaluate(() => {
+      readerTransport.replies.set('/api/feeds/verify',{body:{url:'https://source.test/new',title:'Новый фид',kind:'rss',verification:'verified'}});
+      readerTransport.held.set('/api/feeds', true);
+    });
+    await r.page.locator('#add-open').click();
+    await r.page.locator('#rss-url').fill('https://source.test/new');
+    await r.page.locator('#rss-check').click();
+    await expect(r.page.locator('#rss-title')).toHaveValue('Новый фид');
+    await r.page.locator('#rss-add').click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/feeds'));
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#add-open').click();
+    await r.page.evaluate(() => {
+      const data = readerTransport.replies.get('/api/subscriptions').body;
+      const feed = {...data.feeds[0],id:'new',title:'Новый фид'};
+      data.feeds.push(feed);
+      readerTransport.release('/api/feeds',feed);
+    });
+    await expect(r.page.locator('#rss-url')).toHaveValue('');
+    await expect(r.page.locator('#add-dialog')).toBeVisible();
+    await expect(r.page.locator('#rss-add')).toBeDisabled();
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#feeds-open').click();
+    await expect(r.page.getByRole('button',{name:'Новый фид',exact:true})).toBeVisible();
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});

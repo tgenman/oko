@@ -1,7 +1,7 @@
 import {reportError} from './debug.js';
 import {bindInitialHistory} from './initial-history.js';
 
-export function createFeedConnection({api, onSelected}) {
+export function createFeedConnection({api, onSelected, context = () => ({current:true, commit: effect => effect()})}) {
   const byId = id => document.getElementById(id);
   const historySelection = bindInitialHistory('rss');
   const url = byId('rss-url'), check = byId('rss-check'), add = byId('rss-add');
@@ -21,6 +21,7 @@ export function createFeedConnection({api, onSelected}) {
   url.addEventListener('input', reset);
   check.onclick = async () => {
     if (check.disabled || !url.reportValidity()) return;
+    const screen = context();
     const stamp = ++generation;
     checked = null; pending = true; controller = new AbortController(); controls();
     byId('rss-checked-fields').hidden = true;
@@ -28,9 +29,9 @@ export function createFeedConnection({api, onSelected}) {
     byId('rss-message').textContent = 'Проверка фида…';
     try {
       const result = await api('feeds/verify', 'POST', {url: url.value.trim()}, controller.signal);
-      if (stamp !== generation || stopped) return;
+      if (stamp !== generation || stopped || !screen.current) return;
       if (result.existing) {
-        await onSelected(result.existing);
+        await onSelected(result.existing, screen);
         if (stamp !== generation || stopped) return;
         byId('rss-message').textContent = 'Уже добавлен: ' + result.existing.title;
       } else {
@@ -42,7 +43,7 @@ export function createFeedConnection({api, onSelected}) {
       }
     } catch (error) {
       reportError(error, 'Проверка фида');
-      if (stamp === generation && !stopped && error.name !== 'AbortError') byId('rss-message').textContent = error.message;
+      if (stamp === generation && !stopped && error.name !== 'AbortError') screen.commit(() => {byId('rss-message').textContent = error.message;});
     } finally { if (stamp === generation) { pending = false; controls(); } }
   };
   byId('rss-form').onsubmit = async event => {
@@ -50,19 +51,19 @@ export function createFeedConnection({api, onSelected}) {
     if (add.disabled || !checked) return;
     const initialHistory = historySelection();
     if (!initialHistory) return;
+    const screen = context();
     const stamp = generation, preview = checked;
     pending = true; saving = true; controls(); byId('rss-message').textContent = 'Добавление…';
     try {
       const result = await api('feeds', 'POST', {url: preview.url, verification: preview.verification,
         title: byId('rss-title').value.trim(), folder: byId('rss-folder').value.trim(), initial_history: initialHistory});
       if (stamp !== generation || stopped) return;
-      await onSelected(result);
-      if (stamp !== generation || stopped) return;
       saving = false; byId('rss-form').reset(); reset();
       byId('rss-history-mode').dispatchEvent(new Event('change'));
+      await onSelected(result, screen);
     } catch (error) {
       reportError(error, 'Добавление фида');
-      if (stamp === generation && !stopped) byId('rss-message').textContent = error.message;
+      if (stamp === generation && !stopped) screen.commit(() => {byId('rss-message').textContent = error.message;});
     } finally { if (stamp === generation) { pending = false; saving = false; controls(); } }
   };
   controls();
