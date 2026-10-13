@@ -474,3 +474,25 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
+
+test('Back closes Telegram reconnection and rejects delayed accounts from the previous section', async () => {
+  const r=await reader();try{
+    await r.start([]);await objects(r);
+    await r.page.evaluate(()=>{
+      const feed=readerTransport.replies.get('/api/subscriptions').body.feeds[0];
+      Object.assign(feed,{kind:'telegram',identity:'telegram:onechannel',transport:'telegram',telegram_peer:'@onechannel',telegram_account:'personal',auto_read:false});
+      readerTransport.replies.set('/api/telegram/accounts',{body:['personal']});
+      readerTransport.held.set('/api/telegram/accounts',true);
+    });
+    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/one"]').click();await feedOptions(r.page);
+    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/telegram/accounts'));
+    await r.page.locator('#feeds-dialog .settings-back').click();
+    await r.page.evaluate(()=>readerTransport.release('/api/telegram/accounts',['personal']));
+    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
+    await settingsHome(r.page);await editSetting(r.page,'prompt_theses');
+    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
+    await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
+    expect(r.errors).toEqual([]);
+  }finally{await r.close();}
+});

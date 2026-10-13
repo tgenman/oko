@@ -12,7 +12,9 @@ export function createSettingsNavigation({onLeave, onEnter}) {
       if (!previous) return;
       const leaving = page; page = previous.page;
       onLeave(leaving, page); refresh(); onEnter(page);
-      if (previous.trigger?.isConnected && !previous.trigger.closest('[hidden]')) previous.trigger.focus({preventScroll:true});
+      const target = previous.trigger?.isConnected ? previous.trigger : [...dialog.querySelectorAll('[data-settings-target]')].find(node => node.dataset.settingsTarget === previous.target && !node.closest('[hidden]'));
+      if (target && !target.closest('[hidden]')) target.focus({preventScroll:true});
+      else focusHeading();
     };
     owner.querySelector('.dialog-header').prepend(button); buttons.set(owner, button);
   }
@@ -24,9 +26,12 @@ export function createSettingsNavigation({onLeave, onEnter}) {
   }
   function show(next, trigger) {
     if (!dialog || next === page) return;
-    const leaving = page; stack.push({page, trigger}); page = next;
+    const leaving = page; stack.push({page, trigger, target:trigger?.dataset.settingsTarget}); page = next;
     onLeave(leaving, page); refresh(); onEnter(page);
     dialog.scrollTop = 0;
+    focusHeading();
+  }
+  function focusHeading() {
     const heading = [...dialog.querySelectorAll('[data-settings-page] h2')].find(n => !n.closest('[hidden]'));
     if (heading) {heading.tabIndex = -1; heading.focus({preventScroll:true});}
   }

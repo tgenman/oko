@@ -6,7 +6,7 @@ const kinds = {filter:'Фильтрация',theses:'Тезисы публика
 export function createCodexSettings({api}) {
   const byId = id => document.getElementById(id);
   const operations = createOperations();
-  let draft = null, models = [], loaded = false, revision = 0, saving = false, catalogError = '';
+  let draft = null, models = [], loaded = false, revision = 0, saving = false, catalogError = '', catalogSettled = false;
   function option(value, label = value) {const node = element('option', label); node.value = value; return node;}
   function error() {
     if (!draft) return 'Загрузите каталог и выберите модель для каждого действия.';
@@ -56,14 +56,14 @@ export function createCodexSettings({api}) {
     try {
       const result = await api('processors/codex/models','GET',undefined,action.signal);
       action.commit(() => {
-        models = result.models; catalogError = '';
+        models = result.models; catalogError = ''; catalogSettled = true;
         if (loaded && !draft) {
           const initial = models.find(m=>m.default) || models[0];
           if (initial) draft = Object.fromEntries(Object.keys(kinds).map(kind=>[kind,{model:initial.model,reasoning_effort:initial.default_reasoning_effort,fast:false}]));
         }
         render();
       });
-    } catch (error) {action.commit(() => {catalogError = error.message; validate();});}
+    } catch (error) {action.commit(() => {catalogError = error.message; catalogSettled = true; validate();});}
   }
   byId('codex-models-refresh').onclick = catalog;
   byId('codex-save').onclick = async () => {
@@ -85,7 +85,7 @@ export function createCodexSettings({api}) {
           action.commit(() => {if (before === revision && !draft) draft = result.config; loaded = true; render();});
         } catch(error) {action.commit(() => {byId('codex-choice-status').textContent = error.message;});}
         if (action.current) await catalog();
-      } else {render();}
+      } else {render(); if (!catalogSettled) await catalog();}
     },
     deactivate() {operations.invalidate(); saving = false;},
   };

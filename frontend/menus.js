@@ -23,6 +23,7 @@ export function createMenus({api, onChanged}) {
   const navigation = createSettingsNavigation({
     onLeave() {editor.viewChanged(); models.deactivate(); youtube.deactivate();},
     onEnter(page) {
+      void editor.refreshView();
       if (['models','llamacpp','codex'].includes(page)) void models.open();
       if (page === 'youtube') void youtube.open();
     },

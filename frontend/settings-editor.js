@@ -26,6 +26,8 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
   let selectedOwner = null, currentPath = null;
   let youtubeHistory = null;
   const drafts = new Map();
+  const needsRefresh = new Set();
+  let linkId = 0;
   const operations = createOperations();
   const subscriptionOperations = createOperations();
   function draft(path) { if (!drafts.has(path)) drafts.set(path, {}); return drafts.get(path); }
@@ -85,6 +87,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
       byId('feed-options').replaceChildren();
       const feed = subscriptions.feeds.find(f => 'feed/' + f.id === path);
       if (feed) renderFeed(feed);
+      needsRefresh.delete(path);
       renderFields(result, path, values);
       onRendered();
       const restore = focused && byId(focused);
@@ -98,10 +101,11 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
   }
   function settingLink(title, value, page, color = '', symbol = '') {
     const button = element('button'); button.className = 'settings-link';
-    button.setAttribute('aria-label', title);
+    button.setAttribute('aria-label', title); button.dataset.settingsTarget = page;
     if (symbol) {const icon = element('span', symbol); icon.className = 'settings-icon ' + color; icon.setAttribute('aria-hidden','true'); button.append(icon);}
     const label = element('span', title); label.className = 'settings-label';
     const current = element('span', value); current.className = 'settings-value';
+    current.id = 'settings-value-' + (++linkId); if (value) button.setAttribute('aria-describedby',current.id);
     const arrow = element('span', '›'); arrow.setAttribute('aria-hidden','true');
     button.append(label, current, arrow);
     button.onclick = () => onNavigate(page, button);
@@ -170,7 +174,9 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
       }
       input.id = 'setting-' + field;
       const currentValue = () => type === 'boolean' ? String(input.checked) : field === 'schedule' && !enabled.checked ? 'off' : input.value;
-      const remember = () => {values[input.id] = currentValue();}; input.oninput = input.onchange = remember;
+      const saved = element('details'); saved.append(element('summary','Сохранённое значение'), element('p', type === 'text' ? String(effective.value) || 'Пустое поле' : fieldValue(field,effective.value)));
+      const showDraft = () => {saved.hidden = currentValue() === String(effective.value);};
+      const remember = () => {values[input.id] = currentValue(); showDraft();}; input.oninput = input.onchange = remember;
       if (enabled) enabled.onchange = () => {input.disabled = !enabled.checked; remember();};
       const label = labelled(field === 'schedule' ? 'Местное время' : title, input); label.className = 'settings-control';
       const info = element('small', (field in result.overrides ? 'Своё значение · ' : 'Наследуется · ') + describeOwner(effective.scope,effective.owner));
@@ -185,14 +191,15 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
         try {
           await api('settings/' + path,'PATCH',{[field]:value});
           if (values[input.id] === submittedDraft) delete values[input.id];
-          await action.commit(loadSettings);
+          needsRefresh.add(path);
+          if (path === scopePath()) await loadSettings();
           action.commit(() => editorMessage('Настройка сохранена'));
         } catch (error) {reportError(error,'Интерфейс Око'); action.commit(() => editorMessage(error.message));}
         finally {saving = false; save.disabled = false; reset.disabled = !(field in result.overrides);}
       }
       row.onsubmit = event => {event.preventDefault(); if (row.reportValidity()) void update(type === 'boolean' ? input.checked : type === 'number' ? Number(input.value) : currentValue());};
       reset.onclick = () => update(null);
-      row.append(label, info, save, reset); panel.append(row);
+      showDraft(); row.append(label, info, saved, save, reset); panel.append(row);
       if (field === 'prompt_filters') panel.append(element('p','Пустое поле выключает фильтрацию. Скрытые материалы остаются доступны.'));
       if (field === 'schedule') panel.append(element('p','Расписание действует только при работающем Око.'));
       container.append(panel);
@@ -282,14 +289,15 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
         for (const [key, value] of Object.entries(submitted)) if (values[key] === value) delete values[key];
         onChanged();
         await loadSubscriptions();
-        await action.commit(loadSettings);
+        needsRefresh.add('feed/' + feed.id);
+        if (scopePath() === 'feed/' + feed.id) await loadSettings();
         action.commit(() => editorMessage('Фид сохранён'));
       } catch (error) { reportError(error, 'Интерфейс Око'); action.commit(() => editorMessage(error.message)); }
     };
     container.append(save);
     if (feed.kind === 'telegram') {
       const connect = element('button', 'Настроить подключение Telegram-фида');
-      connect.onclick = () => reconnect.configure(feed, subscriptions.folders.find(f => f.id === feed.folder_id).title);
+      connect.onclick = () => {onNavigate('reconnect', connect); void reconnect.configure(feed, subscriptions.folders.find(f => f.id === feed.folder_id).title);};
       container.append(connect);
     }
   }
@@ -310,7 +318,8 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
       await action.commit(loadSettings);
     },
     deactivate,
-    viewChanged() {operations.invalidate(); editorMessage('');},
+    viewChanged() {operations.invalidate(); reconnect.deactivate(); editorMessage('');},
+    refreshView() {if (needsRefresh.has(scopePath())) return loadSettings();},
     refresh: loadSubscriptions,
     sources(status) {sourceStatus = status; sourceHelp();},
     status(histories) {
