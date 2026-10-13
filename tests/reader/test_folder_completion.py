@@ -159,7 +159,7 @@ def test_event_members_and_hidden_originals_are_not_double_counted(tmp_path):
         wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 2 and any(x.get('event') for x in c))
         preview = client.post('/api/folders/demo/completion/preview').json()
         assert preview['cards'] == 2 and preview['originals'] == 3
-        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == 'demo') == 2
+        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == 'demo') == 3
         assert client.post('/api/folders/demo/completion', json={'token': preview['token']}).status_code == 200
         assert client.get('/api/cards').json() == []
         assert not list((tmp_path / 'events').glob('*'))
@@ -246,12 +246,18 @@ def test_completion_respects_folder_of_frozen_digest_when_feed_moves(tmp_path):
         assert preview['cards'] == 0 and preview['originals'] == 0
         assert client.get('/api/cards?folder=' + other).json() == []
         assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == other) == 0
+        navigation = client.get('/api/navigation').json()
+        assert navigation['count'] == 2
+        assert next(f['count'] for f in navigation['feeds'] if f['id'] == plan['feeds'][0]['id']) == 1
+        assert [c['id'] for c in client.get('/api/cards?feed=' + plan['feeds'][0]['id']).json()] == [digest]
+        assert client.get('/api/cards', params={'feed': plan['feeds'][0]['id'], 'folder': other}).json() == []
+        assert [c['id'] for c in client.get('/api/cards', params={'feed': plan['feeds'][0]['id'], 'folder': folder}).json()] == [digest]
         assert client.post(f'/api/folders/{other}/completion', json={'token': preview['token']}).status_code == 200
         assert client.get('/api/materials/' + digest).status_code == 200
         preview = client.post(f'/api/folders/{folder}/completion/preview').json()
         assert preview['cards'] == 1 and preview['originals'] == 2
         assert [c['id'] for c in client.get('/api/cards?folder=' + folder).json()] == [digest]
-        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == folder) == 1
+        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == folder) == 2
         assert client.post(f'/api/folders/{folder}/completion', json={'token': preview['token']}).status_code == 200
         assert client.get('/api/cards').json() == []
 
@@ -266,7 +272,7 @@ def test_unreadable_original_still_belongs_to_folder_completion(tmp_path):
         (tmp_path / 'content' / broken / '1' / 'original.md').write_text('unreadable')
         assert client.get('/api/materials/' + broken).status_code == 404
         assert len(client.get('/api/cards').json()) == 2
-        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == 'demo') == 2
+        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == 'demo') == 3
         preview = client.post('/api/folders/demo/completion/preview').json()
         assert preview['cards'] == 2 and preview['originals'] == 3
         assert client.post('/api/folders/demo/completion', json={'token': preview['token']}).status_code == 200

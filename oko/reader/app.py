@@ -275,13 +275,15 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.get('/api/folders')
     async def folders() -> list[dict[str, Any]]:
-        config = subscriptions()
-        cards = store().cards()
-        return [dict(**folder, count=sum(c['folder_id'] == folder['id'] for c in cards)) for folder in config.folders()]
+        return store().reading.navigation()['folders']
+
+    @app.get('/api/navigation')
+    async def navigation() -> dict[str, Any]:
+        return dict(store().reading.navigation())
 
     @app.get('/api/cards')
-    async def cards(folder: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest', show_hidden: bool = False) -> list[dict[str, Any]]:
-        result = [card for card in store().cards(show_hidden) if folder is None or card['folder_id'] == folder]
+    async def cards(folder: str | None = None, feed: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest', show_hidden: bool = False) -> list[dict[str, Any]]:
+        result = store().reading.cards(show_hidden, folder, feed)
         if sort == 'importance':
             result.sort(key=lambda c: (-{'normal': 0, 'elevated': 1, 'high': 2}[c['importance']], -c['published'], c['id']))
         else:
