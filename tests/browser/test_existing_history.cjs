@@ -13,8 +13,7 @@ test('legacy feed shows only known history settings and saving does not change i
       t.replies.set('/api/settings/feed/legacy', {body: {...t.replies.get('/api/settings/oko/global').body, feed}});
       t.replies.set('/api/feeds/legacy', {body: feed});
     });
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('#rss-connection summary').click();
+    await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/feed');
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#feed-options')).toContainText('Сохранённая настройка глубины: 7 дней; фактическая граница не сохранена');
@@ -37,7 +36,7 @@ test('legacy settings show the actual frozen boundary instead of mutable days', 
       t.replies.set('/api/subscriptions', {body:{folders:[{id:'f',title:'Учёба'}], feeds:[feed]}});
       t.replies.set('/api/settings/feed/legacy', {body:{...t.replies.get('/api/settings/oko/global').body, feed}});
     });
-    await r.page.locator('#settings-open').click();
+    await r.page.locator('#feeds-open').click();
     await r.page.locator('#settings-owner').selectOption('feed/legacy');
     await expect(r.page.locator('#feed-options')).toContainText('Зафиксированное начало истории:');
     await expect(r.page.locator('#feed-options')).not.toContainText('7 дней');

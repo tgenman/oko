@@ -1,17 +1,25 @@
 import {bindInitialHistory} from './initial-history.js';
 import {reportError} from './debug.js';
-export function createTelegramConnection({api, onConnected}) {
-  const byId = id => document.getElementById(id);
+export function createTelegramConnection({api, onConnected, prefix = 'telegram'}) {
+  const byId = id => document.getElementById(id.replace(/^telegram-/, prefix + '-'));
   const account = byId('telegram-account'), peer = byId('telegram-peer');
   const folder = byId('telegram-folder'), topic = byId('telegram-topic');
   const add = byId('telegram-add'), accounts = byId('telegram-accounts');
   const topics = byId('telegram-topics'), message = byId('telegram-message');
-  const initialHistory = bindInitialHistory('telegram');
+  const initialHistory = bindInitialHistory(prefix);
   const historyFields = byId('telegram-history');
   const inputs = [account, peer, folder, topic, byId('telegram-auto')];
   let busy = false, loadingAccounts = false, loadingTopics = false, stopped = false;
   let generation = 0;
-  let feedId = null, accountsTask = null;
+  let feedId = null, accountsTask = null, configureGeneration = 0;
+  const drafts = new Map();
+  function capture() {
+    if (!feedId || busy || byId('telegram-connection').hidden) return;
+    drafts.set(feedId, {account: account.value, peer: peer.value, folder: folder.value, auto: byId('telegram-auto').checked,
+      topic: topic.value, options: Array.from(topic.options, o => [o.value, o.textContent])});
+  }
+  function deactivate() {capture(); configureGeneration++; byId('telegram-connection').hidden = true;}
+
   const validPeer = () => /^(@?[a-zA-Z][a-zA-Z0-9_]{3,31}|-[0-9]+)$/.test(peer.value.trim());
   function update() {
     add.disabled = stopped || busy || loadingAccounts || loadingTopics || !account.value || !validPeer() || !folder.value.trim() || (topic.options.length > 0 && !topic.value);
@@ -78,7 +86,11 @@ export function createTelegramConnection({api, onConnected}) {
     try {
       const feed = await api('telegram/connect', 'POST', {account: account.value, peer: peer.value.trim(), folder: folder.value.trim(), auto_read: byId('telegram-auto').checked, topic_id: topic.value ? Number(topic.value) : null, ...(feedId ? {feed_id: feedId} : {initial_history: history})});
       if (stopped) return;
-      peer.value = ''; feedId = null; byId('telegram-new').hidden = true; resetTopics();
+      if (feedId) drafts.delete(feedId);
+      peer.value = ''; feedId = null; folder.value = 'Telegram'; byId('telegram-auto').checked = false;
+      byId('telegram-history-mode').value = 'count'; byId('telegram-history-mode').dispatchEvent(new Event('change'));
+      byId('telegram-history-count').value = '20'; byId('telegram-history-date').value = '';
+      byId('telegram-new').hidden = true; resetTopics();
       message.textContent = 'Источник подключён. Сбор начался; отметки прочитанного синхронизируются по настройкам фида.';
       await onConnected(feed);
     } catch (error) { reportError(error, 'telegram-connection.js'); if (!stopped) message.textContent = error.message; }
@@ -90,10 +102,12 @@ export function createTelegramConnection({api, onConnected}) {
     byId('telegram-new').hidden = true; message.textContent = ''; resetTopics();
   };
   update();
-  return {loadAccounts, async configure(feed, folderTitle) {
+  return {loadAccounts, deactivate, async configure(feed, folderTitle) {
     if (busy || stopped) return;
+    capture();
+    const stamp = ++configureGeneration;
     await loadAccounts();
-    if (busy || stopped) return;
+    if (busy || stopped || stamp !== configureGeneration) return;
     feedId = feed.id;
     peer.value = feed.telegram_peer || feed.identity.replace(/^telegram:/, '@');
     account.value = feed.telegram_account || account.value;
@@ -104,8 +118,10 @@ export function createTelegramConnection({api, onConnected}) {
       topic.replaceChildren(option(String(feed.telegram_topic), feed.title));
       byId('telegram-topic-label').hidden = false;
     }
-    byId('telegram-new').hidden = false;
-    byId('telegram-connection').open = true;
+    const saved = drafts.get(feed.id);
+    if (saved) {account.value = saved.account; peer.value = saved.peer; folder.value = saved.folder; byId('telegram-auto').checked = saved.auto; topic.replaceChildren(...saved.options.map(([value,title]) => option(value,title))); topic.value = saved.topic; byId('telegram-topic-label').hidden = !topic.options.length;}
+    byId('telegram-new').hidden = true;
+    byId('telegram-connection').hidden = false;
     byId('telegram-connection').scrollIntoView({block: 'start'});
     message.textContent = 'Подключение фида: ' + feed.title;
     update();
