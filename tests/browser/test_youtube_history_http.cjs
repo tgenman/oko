@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {expect} = require('playwright/test');
 const {productionReader} = require('./http-reader.cjs');
@@ -11,6 +12,7 @@ test('real HTTP settings load 60 YouTube materials and keep viewed IDs on a seco
   await page.goto(origin+'/#token='+token);
   await page.locator('#feeds-open').click();
   await page.locator(`[data-owner="feed/${feed.id}"]`).click();
+    await feedOptions(page);
   await page.locator('#youtube-history-count').fill('60');
   await page.locator('#youtube-history-start').click();
   await expect.poll(async()=>(await api('settings/feed/'+feed.id)).feed.initial_history.loaded,{timeout:20000}).toBe(60);
@@ -27,6 +29,7 @@ test('real HTTP settings load 60 YouTube materials and keep viewed IDs on a seco
   await expect(page.locator('#cards button')).toHaveCount(59);
   await page.locator('#feeds-open').click();
   await page.locator(`[data-owner="feed/${feed.id}"]`).click();
+    await feedOptions(page);
   await page.locator('#youtube-history-count').fill('2');
   await page.locator('#youtube-history-start').click();
   // The previous 60-item selection is already done while the new POST is in flight.

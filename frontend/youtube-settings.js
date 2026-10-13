@@ -9,14 +9,18 @@ export function createYouTubeSettings({api}) {
   let stopped = false, saving = false, loaded = false;
   byId('save').disabled = true;
   const value = key => key === 'clear' ? byId(key).checked : byId(key).value;
-  for (const key of fields) byId(key).addEventListener('input', () => dirty.add(key));
+  function proxyFields() {byId('proxy-fields').hidden = value('mode') !== 'proxy';}
+  for (const key of fields) byId(key).addEventListener('input', () => {dirty.add(key); if (key === 'mode') proxyFields();});
+  byId('mode').addEventListener('change', proxyFields);
   function fill(config) {
     for (const key of ['mode', 'address']) if (!dirty.has(key)) byId(key).value = config[key];
     byId('username').placeholder = config.has_username ? 'Логин сохранён' : 'Не задан';
     byId('password').placeholder = config.has_password ? 'Пароль сохранён' : 'Не задан';
+    proxyFields();
   }
   function status(config) {
     if (!config) return;
+    byId('short-status').textContent = config.paused ? 'Приостановлено' : config.mode === 'proxy' ? 'Через прокси' : 'Напрямую';
     byId('connection').textContent = config.mode === 'proxy' ? 'Прокси для субтитров: ' + config.address : 'Прямое подключение';
     byId('pause').textContent = config.paused
       ? 'Получение субтитров приостановлено. ' + config.reason + '. Следующая попытка не раньше ' + new Date(config.next_at * 1000).toLocaleString()

@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {reader, expect} = require('./support.cjs');
 
@@ -15,6 +16,7 @@ test('history can pause and resume in feed settings without offering restart aft
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
+    await feedOptions(r.page);
     await r.page.getByRole('button',{name:'Приостановить историю',exact:true}).click();
     await expect(r.page.locator('#history-progress')).toContainText('приостановлена');
     await expect(r.page.getByRole('button',{name:'Продолжить историю',exact:true})).toBeVisible();

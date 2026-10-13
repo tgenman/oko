@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {reader, expect} = require('./support.cjs');
@@ -146,6 +147,7 @@ test('imported Telegram feed uses the same account selection and keeps its feed 
     await r.page.evaluate(() => readerTransport.replies.set('/api/settings/feed/imported', readerTransport.replies.get('/api/settings/oko/global')));
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/imported"]').click();
+    await feedOptions(r.page);
     await r.page.getByRole('button', {name: 'Настроить подключение Telegram-фида', exact: true}).click();
     await expect(r.page.locator('#reconnect-account')).toHaveValue('personal');
     await expect(r.page.locator('#reconnect-peer')).toHaveValue('@fixture');

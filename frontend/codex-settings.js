@@ -6,7 +6,7 @@ const kinds = {filter:'Фильтрация',theses:'Тезисы публика
 export function createCodexSettings({api}) {
   const byId = id => document.getElementById(id);
   const operations = createOperations();
-  let draft = null, models = [], loaded = false, revision = 0, saving = false;
+  let draft = null, models = [], loaded = false, revision = 0, saving = false, catalogError = '';
   function option(value, label = value) {const node = element('option', label); node.value = value; return node;}
   function error() {
     if (!draft) return 'Загрузите каталог и выберите модель для каждого действия.';
@@ -21,12 +21,12 @@ export function createCodexSettings({api}) {
   function validate() {
     const message = error();
     byId('codex-save').disabled = saving || !!message;
-    byId('codex-choice-status').textContent = message || 'Выбор для новой работы. Готовые результаты сохраняются.';
+    byId('codex-choice-status').textContent = catalogError || message || 'Выбор для новой работы. Готовые результаты сохраняются.';
   }
   function render() {
     byId('codex-choices').replaceChildren();
     for (const [kind, title] of Object.entries(kinds)) {
-      const row = element('fieldset'); row.append(element('legend', title));
+      const row = element('fieldset'); row.className = 'settings-group'; row.append(element('legend', title));
       const choice = draft?.[kind] || {model:'',reasoning_effort:'',fast:false};
       const model = models.find(m => m.model === choice.model);
       const select = element('select'); select.id = 'codex-' + kind + '-model';
@@ -38,7 +38,7 @@ export function createCodexSettings({api}) {
       effort.append(...efforts.map(value=>option(value)));
       if (!efforts.includes(choice.reasoning_effort)) effort.append(option(choice.reasoning_effort,choice.reasoning_effort || 'Выберите усилие'));
       effort.value = choice.reasoning_effort; effort.disabled = !draft;
-      const fast = element('input'); fast.type = 'checkbox'; fast.id = 'codex-' + kind + '-fast'; fast.checked = choice.fast; fast.disabled = !draft;
+      const fast = element('input'); fast.type = 'checkbox'; fast.setAttribute('role', 'switch'); fast.id = 'codex-' + kind + '-fast'; fast.checked = choice.fast; fast.disabled = !draft;
       for (const [text, control] of [['Модель ',select],['Усилие рассуждения ',effort],['Fast ',fast]]) {
         const label = element('label',text); label.append(control); row.append(label);
       }
@@ -51,18 +51,19 @@ export function createCodexSettings({api}) {
   }
   async function catalog() {
     const action = operations.begin('catalog', {abortable:true});
+    catalogError = '';
     byId('codex-choice-status').textContent = 'Загрузка каталога…';
     try {
       const result = await api('processors/codex/models','GET',undefined,action.signal);
       action.commit(() => {
-        models = result.models;
+        models = result.models; catalogError = '';
         if (loaded && !draft) {
           const initial = models.find(m=>m.default) || models[0];
           if (initial) draft = Object.fromEntries(Object.keys(kinds).map(kind=>[kind,{model:initial.model,reasoning_effort:initial.default_reasoning_effort,fast:false}]));
         }
         render();
       });
-    } catch (error) {action.commit(() => {byId('codex-choice-status').textContent = error.message;});}
+    } catch (error) {action.commit(() => {catalogError = error.message; validate();});}
   }
   byId('codex-models-refresh').onclick = catalog;
   byId('codex-save').onclick = async () => {

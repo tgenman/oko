@@ -5,15 +5,15 @@ import {element, selectControl, labelled} from './controls.js';
 import {createTelegramConnection} from './telegram-connection.js';
 import {createYouTubeHistory} from './youtube-history.js';
 
-export function createSettingsEditor({api, onChanged, onDetail, onFolders}) {
+export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNavigate, onRendered}) {
   const byId = id => document.getElementById(id);
   const reconnect = createTelegramConnection({api, prefix: 'reconnect', context: () => operations.capture(), onConnected: async (_feed, action) => {onChanged(); await loadSubscriptions(); await action.commit(loadSettings);}});
   const fields = {
-    events: ['Объединять события (Око или папка)', 'boolean'], event_hours: ['Окно события, часов (Око или папка)', 'number'],
-    originals: ['Оригиналы при открытии публикации', 'boolean'], theses: ['Тезисы публикаций', 'boolean'],
+    events: ['Объединять события', 'boolean'], event_hours: ['Окно события, часов', 'number'],
+    originals: ['Показывать исходную публикацию', 'boolean'], theses: ['Тезисы публикаций', 'boolean'],
     digests: ['Обзоры за период', 'boolean'], prompt_theses: ['Промпт тезисов', 'text'],
-    prompt_digest: ['Промпт обзора', 'text'], prompt_filters: ['Правила фильтрации (промпт; пустое поле выключает фильтрацию)', 'text'],
-    schedule: ['Расписание обзора (off или ЧЧ:ММ, местное время)', 'string'],
+    prompt_digest: ['Промпт обзора', 'text'], prompt_filters: ['Правила фильтрации', 'text'],
+    schedule: ['Расписание обзора', 'string'],
     digest_days: ['Период обзора, дней', 'number'], processor: ['Обработчик', 'processor']
   };
   const importanceNames = {normal: 'Обычная', elevated: 'Повышенная', high: 'Высокая'};
@@ -77,6 +77,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders}) {
     if (!path) return;
     const values = draft(path);
     try {
+      const focused = document.activeElement?.id;
       const result = await api('settings/' + path, 'GET', undefined, operation.signal);
       if (!operation.current) return;
       byId('settings-editor').hidden = false;
@@ -84,48 +85,118 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders}) {
       byId('feed-options').replaceChildren();
       const feed = subscriptions.feeds.find(f => 'feed/' + f.id === path);
       if (feed) renderFeed(feed);
-      const container = byId('setting-fields');
-      container.replaceChildren();
-      if (path.startsWith('feed/') || path.startsWith('folder/')) {
-        const update = element('button', 'Обновить обзор сейчас');
-        update.onclick = async () => {
-          const action = operations.begin('digest');
-          try { await api('digests/' + path, 'POST', {period: true}); action.commit(() => editorMessage('Обзор поставлен в обработку')); onChanged(); }
-          catch (error) { reportError(error, 'Интерфейс Око'); action.commit(() => editorMessage(error.message)); }
-        };
-        container.append(update);
-      }
-      for (const [field, [title, type]] of Object.entries(fields)) {
-        if (path.startsWith('feed/') && ['events', 'event_hours'].includes(field)) continue;
-        const effective = result.effective[field];
-        const row = element('div'); row.className = 'setting-row';
-        let input;
-        if (type === 'boolean') input = selectControl([['true', 'Включено'], ['false', 'Выключено']], effective.value);
-        else if (type === 'processor') input = selectControl([['codex', 'Codex · существующий вход CLI'], ['llamacpp', 'llama.cpp · подключённая модель'], ...(!['codex', 'llamacpp'].includes(effective.value) ? [[effective.value, effective.value]] : [])], effective.value);
-        else if (type === 'text') { input = element('textarea'); input.value = effective.value; input.rows = 3; }
-        else { input = element('input'); input.type = type === 'number' ? 'number' : 'text'; input.value = effective.value; if (type === 'number') { input.min = '1'; input.max = field === 'event_hours' ? '87600' : '3650'; } }
-        input.id = 'setting-' + field;
-        if (input.id in values) input.value = values[input.id];
-        input.oninput = input.onchange = () => {values[input.id] = input.value;};
-        const info = element('small', 'Эффективное значение: ' + (type === 'boolean' ? (effective.value ? 'Включено' : 'Выключено') : String(effective.value)) + ' · ' + describeOwner(effective.scope, effective.owner));
-        const save = element('button', 'Сохранить поле');
-        const reset = element('button', 'Сбросить');
-        reset.disabled = !(field in result.overrides);
-        async function update(value) {
-          const action = operations.begin('field/' + field);
-          const submittedDraft = input.value;
-          try {
-            await api('settings/' + path, 'PATCH', {[field]: value});
-            if (values[input.id] === submittedDraft) delete values[input.id];
-            await action.commit(loadSettings);
-            action.commit(() => editorMessage('Настройка сохранена'));
-          } catch (error) { reportError(error, 'Интерфейс Око'); action.commit(() => editorMessage(error.message)); }
-        }
-        save.onclick = () => update(type === 'boolean' ? input.value === 'true' : type === 'number' ? Number(input.value) : input.value);
-        reset.onclick = () => update(null);
-        row.append(labelled(title, input), info, save, reset); container.append(row);
-      }
+      renderFields(result, path, values);
+      onRendered();
+      const restore = focused && byId(focused);
+      if (restore && !restore.closest('[hidden]')) restore.focus({preventScroll:true});
     } catch (error) { reportError(error, 'Интерфейс Око'); operation.commit(() => editorMessage(error.message)); }
+  }
+  function settingPage(name, heading) {
+    const panel = element('div'); panel.dataset.settingsPage = name;
+    const title = element('h2', heading); title.className = 'settings-page-title'; panel.append(title);
+    return panel;
+  }
+  function settingLink(title, value, page, color = '', symbol = '') {
+    const button = element('button'); button.className = 'settings-link';
+    button.setAttribute('aria-label', title);
+    if (symbol) {const icon = element('span', symbol); icon.className = 'settings-icon ' + color; icon.setAttribute('aria-hidden','true'); button.append(icon);}
+    const label = element('span', title); label.className = 'settings-label';
+    const current = element('span', value); current.className = 'settings-value';
+    const arrow = element('span', '›'); arrow.setAttribute('aria-hidden','true');
+    button.append(label, current, arrow);
+    button.onclick = () => onNavigate(page, button);
+    return button;
+  }
+  function fieldValue(field, value) {
+    if (fields[field][1] === 'boolean') return value ? 'Включено' : 'Выключено';
+    if (field === 'schedule') return value === 'off' ? 'Выключено' : value;
+    if (field === 'processor') return value === 'codex' ? 'Codex' : value === 'llamacpp' ? 'llama.cpp' : value;
+    if (fields[field][1] === 'text') return value ? 'Настроен' : 'Не задан';
+    return String(value);
+  }
+  function renderFields(result, path, values) {
+    const container = byId('setting-fields'); container.replaceChildren();
+    const home = settingPage('home', 'Настройки'); container.append(home);
+    if (path.startsWith('feed/')) {
+      const group = element('div'); group.className = 'settings-group';
+      group.append(settingLink('Подключение и параметры', '', 'feed-connection', 'gray', '▣')); home.append(group);
+    }
+    const groups = [
+      ['events', 'Объединение событий', ['events','event_hours'], 'orange', '▤'],
+      ['reading', 'Чтение', ['originals','theses'], 'green', '▥'],
+      ['digests', 'Обзоры за период', ['digests','schedule','digest_days','prompt_digest'], 'purple', '◷'],
+      ['filters', 'Фильтрация', ['prompt_filters'], '', '▽'],
+      ['prompts', 'Промпты', ['prompt_theses','prompt_digest'], 'purple', '☷'],
+      ['processor', 'Обработчик', ['processor'], '', '▣'],
+    ];
+    let homeGroup;
+    for (const [name, title, keys, color, symbol] of groups) {
+      if (name === 'events' && path.startsWith('feed/')) continue;
+      if (name === 'events' || name === 'reading' && path.startsWith('feed/') || name === 'prompts') {
+        const label = element('h3', name === 'prompts' ? 'Обработка' : 'Материалы'); label.className = 'settings-group-title'; home.append(label);
+        homeGroup = element('div'); homeGroup.className = 'settings-group'; home.append(homeGroup);
+      }
+      const value = name === 'filters' ? (result.effective.prompt_filters.value ? 'Настроена' : 'Выключена') : ['events','digests','processor'].includes(name) ? fieldValue(keys[0],result.effective[keys[0]].value) : '';
+      homeGroup.append(settingLink(title, value, name, color, symbol));
+      const panel = settingPage(name, title), list = element('div'); list.className = 'settings-group'; panel.append(list);
+      for (const key of keys) list.append(settingLink(fields[key][0], fieldValue(key,result.effective[key].value), 'field/' + key));
+      if (name === 'reading') list.append(settingLink('Промпт тезисов', '', 'field/prompt_theses'));
+      if (name === 'digests') panel.append(element('p', 'Расписание действует только при работающем Око.'));
+      container.append(panel);
+    }
+    if (!path.startsWith('oko/')) {
+      const update = element('button', 'Обновить обзор сейчас'); update.className = 'settings-action';
+      update.onclick = async () => {
+        const action = operations.begin('digest');
+        try {await api('digests/' + path, 'POST', {period:true}); action.commit(() => editorMessage('Обзор поставлен в обработку')); onChanged();}
+        catch (error) {reportError(error, 'Интерфейс Око'); action.commit(() => editorMessage(error.message));}
+      }; home.append(update);
+    }
+    for (const [field, [title, type]] of Object.entries(fields)) {
+      if (path.startsWith('feed/') && ['events','event_hours'].includes(field)) continue;
+      const effective = result.effective[field], panel = settingPage('field/' + field, title);
+      const row = element('form'); row.className = 'setting-row settings-group';
+      let input, enabled;
+      const initial = 'setting-' + field in values ? values['setting-' + field] : String(effective.value);
+      if (type === 'boolean') {input = element('input'); input.type = 'checkbox'; input.setAttribute('role','switch'); input.checked = initial === 'true';}
+      else if (type === 'processor') input = selectControl([['codex','Codex'],['llamacpp','llama.cpp'], ...(!['codex','llamacpp'].includes(effective.value) ? [[effective.value,effective.value]] : [])], initial);
+      else if (type === 'text') {input = element('textarea'); input.rows = 8; input.value = initial;}
+      else {input = element('input'); input.type = field === 'schedule' ? 'time' : 'number'; input.required = true;
+        if (field === 'schedule') {
+          enabled = element('input'); enabled.type = 'checkbox'; enabled.setAttribute('role','switch'); enabled.checked = initial !== 'off';
+          input.value = initial === 'off' ? '09:00' : initial; input.disabled = !enabled.checked;
+          row.append(labelled('Каждый день', enabled));
+        } else {input.min = '1'; input.max = field === 'event_hours' ? '87600' : '3650'; input.step = '1'; input.value = initial;}
+      }
+      input.id = 'setting-' + field;
+      const currentValue = () => type === 'boolean' ? String(input.checked) : field === 'schedule' && !enabled.checked ? 'off' : input.value;
+      const remember = () => {values[input.id] = currentValue();}; input.oninput = input.onchange = remember;
+      if (enabled) enabled.onchange = () => {input.disabled = !enabled.checked; remember();};
+      const label = labelled(field === 'schedule' ? 'Местное время' : title, input); label.className = 'settings-control';
+      const info = element('small', (field in result.overrides ? 'Своё значение · ' : 'Наследуется · ') + describeOwner(effective.scope,effective.owner));
+      if (path.startsWith('oko/') && !(field in result.overrides)) info.textContent = describeOwner(effective.scope,effective.owner);
+      const save = element('button', 'Сохранить'); save.id = 'setting-save-' + field; save.type = 'submit'; save.className = 'settings-action';
+      const reset = element('button', 'Сбросить'); reset.id = 'setting-reset-' + field; reset.type = 'button'; reset.className = 'settings-action'; reset.disabled = !(field in result.overrides);
+      let saving = false;
+      async function update(value) {
+        if (saving) return;
+        saving = true; save.disabled = reset.disabled = true;
+        const action = operations.begin('field/' + field), submittedDraft = currentValue();
+        try {
+          await api('settings/' + path,'PATCH',{[field]:value});
+          if (values[input.id] === submittedDraft) delete values[input.id];
+          await action.commit(loadSettings);
+          action.commit(() => editorMessage('Настройка сохранена'));
+        } catch (error) {reportError(error,'Интерфейс Око'); action.commit(() => editorMessage(error.message));}
+        finally {saving = false; save.disabled = false; reset.disabled = !(field in result.overrides);}
+      }
+      row.onsubmit = event => {event.preventDefault(); if (row.reportValidity()) void update(type === 'boolean' ? input.checked : type === 'number' ? Number(input.value) : currentValue());};
+      reset.onclick = () => update(null);
+      row.append(label, info, save, reset); panel.append(row);
+      if (field === 'prompt_filters') panel.append(element('p','Пустое поле выключает фильтрацию. Скрытые материалы остаются доступны.'));
+      if (field === 'schedule') panel.append(element('p','Расписание действует только при работающем Око.'));
+      container.append(panel);
+    }
   }
   function renderHistoryState(history) {
     youtubeHistory?.update(history);
@@ -239,6 +310,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders}) {
       await action.commit(loadSettings);
     },
     deactivate,
+    viewChanged() {operations.invalidate(); editorMessage('');},
     refresh: loadSubscriptions,
     sources(status) {sourceStatus = status; sourceHelp();},
     status(histories) {

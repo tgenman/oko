@@ -7,28 +7,28 @@ export function createModelSettings({api}) {
   const byId = id => document.getElementById(id);
   const operations = createOperations();
   const codex = createCodexSettings({api});
-  let stopped = false, dirty = false, loaded = false;
+  let stopped = false, dirty = false, loaded = false, revision = 0;
   for (const id of ['llamacpp-endpoint', 'llamacpp-model']) {
-    byId(id).oninput = () => {dirty = true; byId('llamacpp-local').checked = false;};
+    byId(id).oninput = () => {dirty = true; revision++; byId('llamacpp-local').checked = false;};
   }
-  byId('llamacpp-local').onchange = () => {dirty = true;};
+  byId('llamacpp-local').onchange = () => {dirty = true; revision++;};
   byId('llamacpp-save').onclick = async () => {
-    const action = operations.begin('llamacpp-status');
+    const action = operations.begin('llamacpp-save'), sentRevision = revision;
     try {
       await api('processors/llamacpp', 'PUT', {endpoint:byId('llamacpp-endpoint').value, model:byId('llamacpp-model').value, local_execution:byId('llamacpp-local').checked});
-      action.commit(() => {byId('llamacpp-status').textContent = 'Подключение сохранено. Выберите llama.cpp и включите тезисы для Око, папки или фида.';});
+      action.commit(() => {byId('llamacpp-status').textContent = sentRevision === revision ? 'Подключение сохранено. Выберите llama.cpp и включите тезисы для Око, папки или фида.' : 'Подключение сохранено. Новый ввод ещё не сохранён.';});
     } catch(error) {reportError(error, 'Подключения моделей'); action.commit(() => {byId('llamacpp-status').textContent = error.message;});}
   };
   byId('llamacpp-check').onclick = async () => {
-    const action = operations.begin('llamacpp-status');
-    byId('llamacpp-status').textContent = 'Проверка…';
+    const action = operations.begin('llamacpp-check');
+    byId('llamacpp-check-status').textContent = 'Проверка…';
     try {
       const result = await api('processors/llamacpp/check', 'POST');
       action.commit(() => {
-        byId('llamacpp-status').textContent = result.mode + ' · ' + result.model;
+        byId('llamacpp-check-status').textContent = result.mode + ' · ' + result.model;
         byId('llamacpp-models').replaceChildren(...result.models.map(name => {const option = element('option'); option.value = name; return option;}));
       });
-    } catch(error) {reportError(error, 'Подключения моделей'); action.commit(() => {byId('llamacpp-status').textContent = error.message;});}
+    } catch(error) {reportError(error, 'Подключения моделей'); action.commit(() => {byId('llamacpp-check-status').textContent = error.message;});}
   };
   byId('codex-check').onclick = async () => {
     const action = operations.begin('codex');
@@ -47,7 +47,7 @@ export function createModelSettings({api}) {
     operations.invalidate();
     codex.deactivate();
     byId('codex-check').disabled = stopped;
-    for (const id of ['codex-status', 'llamacpp-status']) byId(id).textContent = '';
+    for (const id of ['codex-status', 'llamacpp-status', 'llamacpp-check-status']) byId(id).textContent = '';
   }
   return {
     async open() {

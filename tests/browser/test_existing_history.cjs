@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {reader, expect} = require('./support.cjs');
 
@@ -16,6 +17,7 @@ test('legacy feed shows only known history settings and saving does not change i
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/feed');
     await r.page.locator('#rss-check').click();
+    await feedOptions(r.page);
     await expect(r.page.locator('#feed-options')).toContainText('Сохранённая настройка глубины: 7 дней; фактическая граница не сохранена');
     await expect(r.page.locator('#feed-options')).toContainText('Количество и прогресс начальной загрузки не сохранены');
     await expect(r.page.locator('#feed-options input[type=number]')).toHaveCount(0);
@@ -38,6 +40,7 @@ test('legacy settings show the actual frozen boundary instead of mutable days', 
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/legacy"]').click();
+    await feedOptions(r.page);
     await expect(r.page.locator('#feed-options')).toContainText('Зафиксированное начало истории:');
     await expect(r.page.locator('#feed-options')).not.toContainText('7 дней');
     await expect(r.page.locator('#feed-options')).not.toContainText('Загружено');

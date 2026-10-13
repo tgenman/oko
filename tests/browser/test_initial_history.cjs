@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {reader, expect} = require('./support.cjs');
 
@@ -69,6 +70,7 @@ test('finite history warning and unknown date are visible in settings and materi
     await expect(r.page.locator('#date')).toHaveText('Дата неизвестна');
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
+    await feedOptions(r.page);
     await expect(r.page.locator('#feed-options')).toContainText('Запрошено 100, доступно 15');
     await expect(r.page.locator('#feed-options')).toContainText('точность выбора последних N не подтверждена');
   } finally { await r.close(); }

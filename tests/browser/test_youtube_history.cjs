@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {reader, expect} = require('./support.cjs');
 
@@ -18,6 +19,7 @@ test('YouTube settings start N history and waiting resumes manually without chan
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/yt"]').click();
+    await feedOptions(r.page);
     await r.page.locator('#youtube-history-count').fill('60');
     await r.page.locator('#youtube-history-start').click();
     const request = await r.page.evaluate(() => readerTransport.requests.find(x=>x.method==='POST'&&x.url==='/api/feeds/yt/history'));
@@ -30,6 +32,7 @@ test('YouTube settings start N history and waiting resumes manually without chan
     await r.page.locator('#feeds-close').click();
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/yt"]').click();
+    await feedOptions(r.page);
     await expect(r.page.locator('#history-progress')).toContainText('YouTube недоступен');
     await expect(r.page.locator('#history-toggle')).toHaveText('Продолжить историю');
     await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
@@ -71,10 +74,12 @@ test('late history start preserves selection and input in another feed', async()
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('[data-owner="feed/A"]').click();
+    await feedOptions(r.page);
     await r.page.locator('#youtube-history-count').fill('60');
     await r.page.locator('#youtube-history-start').click();
     await r.page.waitForFunction(()=>readerTransport.pending.has('/api/feeds/A/history'));
     await r.page.locator('[data-owner="feed/B"]').click();
+    await feedOptions(r.page);
     await r.page.locator('#youtube-history-count').fill('13');
     await r.page.evaluate(()=>readerTransport.release('/api/feeds/A/history',{mode:'count',count:60,state:'pending'}));
     await expect(r.page.locator('#owner-heading')).toContainText('B');
@@ -95,9 +100,11 @@ test('reopened first history gets progress and resume after a late response', as
   t.held.set('/api/feeds/A/history',true);
  });
  await r.page.locator('#feeds-open').click(); await r.page.locator('[data-owner="feed/A"]').click();
+    await feedOptions(r.page);
  await r.page.locator('#youtube-history-start').click();
  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/feeds/A/history'));
  await r.page.locator('#feeds-close').click(); await r.page.locator('#feeds-open').click();
+    await feedOptions(r.page);
  await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
  await r.page.evaluate(()=>{
   const t=readerTransport,history=window.readerFixtures.history({feed_id:'A',mode:'count',count:60,loaded:0,available:0,state:'waiting',paused:false,discovery_error:'limit'});
@@ -124,6 +131,7 @@ test('saved history count retains exact decimal text when reopening settings',as
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('[data-owner="feed/large"]').click();
+    await feedOptions(r.page);
     await expect(r.page.locator('#youtube-history-count')).toHaveValue('9007199254740993');
     await r.page.locator('#youtube-history-start').click();
     await r.page.waitForFunction(()=>readerTransport.pending.has('/api/feeds/large/history'));

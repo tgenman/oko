@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {reader, material, expect} = require('./support.cjs');
 
@@ -67,7 +68,9 @@ test('width, focus, source warning and settings help remain separate from select
   await r.page.waitForTimeout(650); await expect(divider).toBeFocused();
   await r.page.locator('[data-feed="feed"]').dblclick();
   await expect(r.page.locator('#feeds-dialog')).toBeVisible();
+  await feedOptions(r.page);
   await r.page.locator('#feed-options summary').click();
+  await feedOptions(r.page);
   await expect(r.page.locator('#source-help')).toHaveText('Справка синтетического источника');
   await r.page.keyboard.press('Escape');
   await r.page.reload(); await expect(divider).toHaveAttribute('aria-valuenow','290');

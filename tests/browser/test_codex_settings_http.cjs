@@ -10,7 +10,8 @@ test('production HTTP saves choices, reads provenance and recreates material fro
   const feed=plan.feeds[0];
   await page.goto(origin+'/#token='+token);
   await page.locator('#settings-open').click();
-  await page.locator('#settings-dialog summary').filter({hasText:'Codex'}).click();
+  await page.locator('[data-settings-target="models"]').click();
+  await page.locator('[data-settings-target="codex"]').click();
   await expect(page.locator('#codex-theses-model')).toHaveValue('synthetic');
   await page.locator('#codex-save').click();
   await expect(page.locator('#codex-choice-status')).toContainText('сохранены');
@@ -28,4 +29,32 @@ test('production HTTP saves choices, reads provenance and recreates material fro
   expect((await completed).status()).toBe(200);
   await expect(page.locator('#ai-status')).toHaveText('Тезисы готовы');
   expect(errors).toEqual([]);
+});
+
+test('mobile model screens save connection and independent Codex choices through production HTTP', {timeout:30000}, async t=>{
+  const {page,api,origin,token}=await productionReader(t);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(origin+'/#token='+token);
+  await page.locator('#settings-open').click();
+  await page.locator('[data-settings-target="models"]').click();
+  await page.getByRole('button',{name:'llama.cpp',exact:true}).click();
+  await page.locator('#llamacpp-endpoint').fill('http://127.0.0.1:18080');
+  await page.locator('#llamacpp-model').fill('synthetic-local');
+  await page.locator('#llamacpp-local').check();
+  await page.locator('#llamacpp-save').click();
+  await expect(page.locator('#llamacpp-status')).toContainText('сохранено');
+  expect(await api('processors/llamacpp')).toMatchObject({endpoint:'http://127.0.0.1:18080',model:'synthetic-local',local_execution:true});
+  await page.locator('#settings-dialog .settings-back').click();
+  await page.getByRole('button',{name:'Codex',exact:true}).click();
+  await expect(page.locator('#codex-choices fieldset')).toHaveCount(4);
+  await expect(page.locator('#codex-theses-effort')).toHaveValue('low');
+  await expect(page.locator('#codex-theses-fast')).not.toBeChecked();
+  await page.locator('#codex-save').click();
+  await expect(page.locator('#codex-choice-status')).toContainText('сохранены');
+  const config=(await api('processors/codex')).config;
+  expect(config.theses).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
+  expect(Object.keys(config).sort()).toEqual(['digest','events','filter','theses']);
+  expect(config.filter).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
+  const width=await page.locator('#settings-dialog').evaluate(dialog=>({scroll:dialog.scrollWidth,client:dialog.clientWidth}));
+  expect(width.scroll).toBeLessThanOrEqual(width.client+1);
 });

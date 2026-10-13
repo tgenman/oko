@@ -1,3 +1,4 @@
+const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {reader, expect} = require('./support.cjs');
 
@@ -14,6 +15,7 @@ test('initial history shows partial, retry and unavailable outcomes with errors'
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
+    await feedOptions(r.page);
     await expect(r.page.locator('#feed-options')).toContainText('Загружено 18 из 20');
     await expect(r.page.locator('#feed-options')).toContainText('2 неполных');
     await expect(r.page.locator('#feed-options')).toContainText('1 ожидает повторной попытки');
@@ -35,6 +37,7 @@ test('count selection does not announce shortfall before metadata scan completes
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
+    await feedOptions(r.page);
     await expect(r.page.locator('#feed-options')).not.toContainText('доступно 10');
     await expect(r.page.locator('#feed-options')).toContainText('Выбираются публикации начальной истории');
     await expect(r.page.locator('#feed-options')).toContainText('Архив недоступен');

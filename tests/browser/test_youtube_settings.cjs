@@ -38,8 +38,11 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin + '/#token=' + token);
     await page.locator('#settings-open').click();
+    await page.locator('[data-settings-target="youtube"]').click();
     await expect(page.locator('#youtube-connection')).toHaveText('Прямое подключение');
+    await expect(page.locator('#youtube-address')).not.toBeVisible();
     await page.locator('#youtube-mode').selectOption('proxy');
+    await expect(page.locator('#youtube-address')).toBeVisible();
     await page.locator('#youtube-address').fill('socks5://proxy.test:8000');
     await page.locator('#youtube-save').click();
     await expect(page.locator('#youtube-message')).toContainText('Некорректные настройки');
@@ -48,6 +51,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await page.locator('#youtube-password').fill('fixture-password');
     await page.locator('#settings-close').click();
     await page.locator('#settings-open').click();
+    await page.locator('[data-settings-target="youtube"]').click();
     await expect(page.locator('#youtube-password')).toHaveValue('fixture-password');
     await page.locator('#youtube-save').click();
     await expect(page.locator('#youtube-message')).toHaveText('Настройки сохранены');
@@ -60,6 +64,14 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await expect.poll(async () => (await api('youtube')).address).toBe('http://proxy.test:8001');
     assert.equal((await api('youtube')).has_password, true);
     assert.ok(!JSON.stringify(await api('youtube')).includes('fixture-'));
+    await page.locator('#youtube-username').fill('draft-user');
+    await page.locator('#youtube-mode').selectOption('direct');
+    await expect(page.locator('#youtube-address')).not.toBeVisible();
+    await page.locator('#youtube-save').click();
+    await expect.poll(async () => (await api('youtube')).mode).toBe('direct');
+    assert.equal((await api('youtube')).has_password, true);
+    await page.locator('#youtube-mode').selectOption('proxy');
+    await expect(page.locator('#youtube-address')).toHaveValue('http://proxy.test:8001');
     await page.locator('#youtube-clear').check();
     await page.locator('#youtube-save').click();
     await expect.poll(async () => (await api('youtube')).has_password).toBe(false);
@@ -72,6 +84,17 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await expect(page.locator('#youtube-pause')).toContainText('Получение субтитров приостановлено');
     await expect(page.locator('#youtube-pause')).toContainText('Следующая попытка не раньше');
     assert.ok(!JSON.stringify(await api('debug')).includes('fixture-password'));
+    await expect(page.locator('#youtube-short-status')).toHaveText('Приостановлено');
+    await page.setViewportSize({width:390, height:844});
+    await page.locator('#youtube-mode').selectOption('proxy');
+    await expect(page.locator('#youtube-save')).toBeVisible();
+    assert.equal(await page.locator('#settings-dialog').evaluate(el => el.scrollWidth <= el.clientWidth), true);
+    await page.screenshot({path:path.join(root, '.scratch/settings-ios-preview/youtube-mobile.png')});
+    await page.locator('#youtube-save').scrollIntoViewIfNeeded();
+    await expect(page.locator('#youtube-save')).toBeInViewport();
+    await expect(page.locator('#settings-close')).toBeInViewport();
+    await page.setViewportSize({width:1200, height:940});
+    await page.screenshot({path:path.join(root, '.scratch/settings-ios-preview/youtube-desktop.png')});
     assert.deepEqual(errors, []);
   } finally {
     t.signal.removeEventListener('abort', abort);
@@ -94,6 +117,7 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
       readerTransport.replies.set('/api/processors/llamacpp', {body:null});
     });
     await r.page.locator('#settings-open').click();
+    await r.page.locator('[data-settings-target="youtube"]').click();
     await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
     await r.page.locator('#youtube-mode').selectOption('proxy');
     await r.page.locator('#youtube-address').fill('http://first.test:8000');
@@ -107,8 +131,47 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
     await r.page.evaluate(() => readerTransport.release('/api/youtube', {mode:'proxy', address:'http://first.test:8000', has_password:true, has_username:false, paused:false, next_at:0, strikes:0, reason:''}));
     await expect(r.page.locator('#settings-dialog')).not.toBeVisible();
     await r.page.locator('#settings-open').click();
+    await r.page.locator('[data-settings-target="youtube"]').click();
     await expect(r.page.locator('#youtube-address')).toHaveValue('http://second.test:8000');
     await expect(r.page.locator('#youtube-password')).toHaveValue('second-password');
+    await expect(r.page.locator('#youtube-message')).toHaveText('');
+    assert.deepEqual(r.errors, []);
+  } finally {await r.close();}
+});
+
+test('YouTube connection errors preserve input and late loads cannot replace a reopened draft', async () => {
+  const r = await reader();
+  const config = {mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''};
+  try {
+    await r.start([]);
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('[data-settings-target="youtube"]').click();
+    await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
+    await r.page.locator('#youtube-mode').selectOption('proxy');
+    await r.page.locator('#youtube-address').fill('http://draft.test:8000');
+    await r.page.locator('#youtube-password').fill('draft-password');
+    await r.page.locator('#youtube-mode').selectOption('direct');
+    await r.page.locator('#youtube-mode').selectOption('proxy');
+    await expect(r.page.locator('#youtube-password')).toHaveValue('draft-password');
+    await r.page.evaluate(() => readerTransport.replies.set('PUT /api/youtube', {status:500, body:{detail:'Ошибка записи подключения'}}));
+    await r.page.locator('#youtube-save').click();
+    await expect(r.page.locator('#youtube-message')).toContainText('Ошибка записи подключения');
+    await expect(r.page.locator('#youtube-password')).toHaveValue('draft-password');
+    await r.page.locator('#settings-close').click();
+    await r.page.evaluate(() => readerTransport.held.set('/api/youtube', true));
+    await r.page.locator('#settings-open').click();
+    await expect.poll(() => r.page.evaluate(() => readerTransport.pending.has('/api/youtube'))).toBe(true);
+    await r.page.locator('#settings-close').click();
+    await r.page.evaluate(() => {
+      window.lateYouTubeReply = readerTransport.pending.get('/api/youtube');
+      readerTransport.pending.delete('/api/youtube'); readerTransport.held.delete('/api/youtube');
+    });
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('[data-settings-target="youtube"]').click();
+    await r.page.locator('#youtube-address').fill('http://new-draft.test:8000');
+    await r.page.evaluate(config => window.lateYouTubeReply(new Response(JSON.stringify({...config, mode:'proxy', address:'http://old.test:8000'}), {headers:{'Content-Type':'application/json'}})), config);
+    await expect(r.page.locator('#youtube-address')).toHaveValue('http://new-draft.test:8000');
+    await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
     await expect(r.page.locator('#youtube-message')).toHaveText('');
     assert.deepEqual(r.errors, []);
   } finally {await r.close();}

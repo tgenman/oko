@@ -7,6 +7,7 @@ import {createTelegramConnection} from './telegram-connection.js';
 import {createOpmlImport} from './opml-import.js';
 import {reportError} from './debug.js';
 import {createFolderPicker} from './controls.js';
+import {createSettingsNavigation} from './settings-navigation.js';
 
 export function createMenus({api, onChanged}) {
   const byId = id => document.getElementById(id);
@@ -15,9 +16,18 @@ export function createMenus({api, onChanged}) {
   const rssFolder = createFolderPicker('rss', 'Без папки');
   const telegramFolder = createFolderPicker('telegram', 'Telegram');
   const editor = createSettingsEditor({api, onChanged, onFolders: folders => {rssFolder.refresh(folders); telegramFolder.refresh(folders);},
-    onDetail: () => byId('feeds-layout').classList.add('show-detail')});
+    onNavigate: (page, trigger) => navigation.show(page, trigger), onRendered: () => navigation.refresh(),
+    onDetail: () => {byId('feeds-layout').classList.add('show-detail'); navigation.activate(byId('feeds-dialog'));}});
   const models = createModelSettings({api});
   const youtube = createYouTubeSettings({api});
+  const navigation = createSettingsNavigation({
+    onLeave() {editor.viewChanged(); models.deactivate(); youtube.deactivate();},
+    onEnter(page) {
+      if (['models','llamacpp','codex'].includes(page)) void models.open();
+      if (page === 'youtube') void youtube.open();
+    },
+  });
+  for (const button of document.querySelectorAll('[data-settings-target]')) button.onclick = () => navigation.show(button.dataset.settingsTarget, button);
   const context = () => operations.capture();
   async function selected(feed, action) {
     onChanged();
@@ -49,6 +59,7 @@ export function createMenus({api, onChanged}) {
     leave(); active = name;
     if (previous && previous !== name) byId(previous + '-dialog').close();
     if (!byId(name + '-dialog').open) byId(name + '-dialog').showModal();
+    if (name !== 'add') navigation.activate(byId(name + '-dialog'));
     const action = operations.begin('open');
     try {
       if (name === 'add') {
@@ -58,8 +69,8 @@ export function createMenus({api, onChanged}) {
         });
       }
       else await editor.open(name === 'settings', preferred);
-      if (name === 'settings') await action.commit(() => models.open());
       if (name === 'settings') await action.commit(() => youtube.open());
+      action.commit(navigation.refresh);
     } catch(error) {
       reportError(error, 'Меню Око');
       action.commit(() => {byId(name === 'add' ? 'add-message' : 'settings-message').textContent = error.message;});
@@ -74,7 +85,7 @@ export function createMenus({api, onChanged}) {
       if (!byId(name + '-dialog').open) close(name);
     });
   }
-  byId('feeds-back').onclick = () => byId('feeds-layout').classList.remove('show-detail');
+  byId('feeds-back').onclick = () => {editor.viewChanged(); navigation.activate(byId('feeds-dialog')); byId('feeds-layout').classList.remove('show-detail');};
   for (const name of ['rss', 'telegram', 'opml']) {
     byId('add-' + name + '-tab').onclick = () => {
       operations.invalidate();
