@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the exact staged Python/JavaScript bytes, including partial staging."""
+"""Check exact staged Python/JavaScript/TypeScript bytes, including partial staging."""
 import os
 from pathlib import Path
 import shutil
@@ -16,7 +16,8 @@ def main():
         name = os.fsdecode(raw)
         python = name.endswith('.py') or name in ('scripts/check', 'scripts/check-staged')
         javascript = name.endswith(('.js', '.mjs', '.cjs'))
-        if not (python or javascript):
+        typescript = name.endswith(('.ts', '.tsx'))
+        if not (python or javascript or typescript):
             continue
         content = subprocess.check_output(['git', 'show', ':' + name])
         if python:
@@ -31,6 +32,10 @@ def main():
                 print('Node missing; set OKO_NODE or install Node >=20.', file=sys.stderr)
                 return 1
             print(f'CHECK staged {name}', flush=True)
+            if typescript:
+                if subprocess.run([node, str(Path(__file__).with_name('check-ts.cjs')), '--stdin', name], input=content).returncode:
+                    failed = True
+                continue
             mode = 'commonjs' if name.endswith('.cjs') else 'module'
             if subprocess.run([node, '--check', '--input-type=' + mode], input=content).returncode:
                 failed = True

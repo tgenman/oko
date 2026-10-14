@@ -38,6 +38,21 @@ def test_precommit_checks_index_not_working_copy(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_precommit_checks_typescript_and_jsx_index_not_working_copy(tmp_path):
+    run = repo(tmp_path)
+    source = tmp_path / 'example.tsx'
+    source.write_text('export const broken: = <p>bad</p>;\n')
+    assert run('git', 'add', 'example.tsx').returncode == 0
+    source.write_text('export const view = <p>good</p>;\n')
+    failed = run('git', 'hook', 'run', 'pre-commit')
+    assert failed.returncode != 0
+    assert 'example.tsx' in failed.stdout + failed.stderr
+    assert run('git', 'add', 'example.tsx').returncode == 0
+    source.write_text('export const broken: = <p>bad</p>;\n')
+    passed = run('git', 'hook', 'run', 'pre-commit')
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+
+
 def test_installer_preserves_custom_hooks(tmp_path):
     run = repo(tmp_path)
     run('git', 'config', 'core.hooksPath', 'custom-hooks')
