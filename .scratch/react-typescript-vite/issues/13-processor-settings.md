@@ -4,7 +4,7 @@
 
 Blocked by: 08 — Меню, переходы и одно поле настроек.
 
-Status: ready-for-agent
+Status: in-progress
 
 Parent: [Спецификация](../spec.md). Подготовка тикета не разрешает реализацию.
 
@@ -15,3 +15,5 @@ Parent: [Спецификация](../spec.md). Подготовка тикет�
 - [ ] HTTP/browser используют синтетические обработчики и каталоги; старые renderers настроек моделей удалены.
 
 - [ ] Для затронутого сценария сохранены существующие API/security, оформление и поведение; реальные HTTP/browser-проверки выполнены на временных данных и синтетических adapters. Фактический результат записан отдельно.
+
+Implementation component and model regressions: [actual verification](../../../docs/verification/react-model-settings.md). Awaiting settings integration of persistent React pages and removal of old model renderers before closure.
