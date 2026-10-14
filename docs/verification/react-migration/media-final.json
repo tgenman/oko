@@ -1,0 +1,63 @@
+{
+  "started_at": "20261014T183330Z",
+  "selected_files": {
+    "browser": [
+      "/private/tmp/oko-final-media-check/tests/browser/test_opened_material.cjs"
+    ],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "build": {
+      "status": "PASS (9.95s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-media-check/node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-media-check/scripts/build-frontend.mjs"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-media-check/scripts/build-frontend.mjs",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (8.40s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-final-media-check/tests/browser/test_opened_material.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 9,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "exit_code": 0,
+  "duration_seconds": 18.63,
+  "log": "/private/tmp/oko-final-media-check/.scratch/check-runs/20261014T183330Z-9e39fb21/output.log"
+}

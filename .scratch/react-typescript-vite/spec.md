@@ -1,6 +1,6 @@
 # Око: React + TypeScript + Vite и API-first
 
-Status: claimed
+Status: done
 Label: ready-for-agent
 Date: 2026-10-14
 
@@ -146,3 +146,5 @@ Date: 2026-10-14
 ## Comments
 
 2026-10-14: пользователь явно поручил implement-spec — реализовать всю спецификацию. Текущая разбивка: [20 задач](tickets.md); прежняя разбивка сохранена для истории. Фактические проверки реализации: [отчёт](verification-implementation.md).
+
+2026-10-14: реализация завершена, все20задачdone. Фактическаяприёмка — [verification](verification-implementation.md).

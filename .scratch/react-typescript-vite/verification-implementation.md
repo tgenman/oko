@@ -75,3 +75,17 @@ SDKbinary test сначала4/5 из-за неполного временног
 - После исправлений20status/transport/lifecycle browser PASS; отдельно2status-target PASS. Основной backend/storage/sources не изменён.
 
 Полный результат: /tmp/oko-final-acceptance-check/.scratch/check-runs/20261014T181333Z-ff9090ad/report.json. Повторные проверки и re-review affectedfindings ещё выполняются.
+
+Повтор UI/all-missing наборов подготовлен на0bd96ac после исправления ревью. Успешные433Python сценария предыдущего дерева не изменены; отдельное RawHTML UI assertion заменено браузерной проверкой.
+
+## Окончательная приёмка — 2026-10-14
+
+На prepared tree0bd96ac полныйUI: syntax/lint/build/HTTP11/diff PASS; browser123/124PASS. Единственныйсбой — синтетическаяWebM доplayback assertions. Test-only correction ждёт стартMediaRecorder и готовность настоящего decoder; assertions оplayback/pause/src cleanup/URL revoke/late media не изменены. На отдельномprepared tree с этойcorrection buildPASS +opened-material9/9PASS. Productionкод после полногоUI не менялся; остальные123сценария сохраняют своё доказательство. Согласноdevelopment.md послеtest-onlycorrection повторёнaffected suite, без повторения неизменного полногонабора.
+
+Таким образом проверены все124browser сценария и433Python сценария; один прежнийRawHTMLassertion перенесён в существующийbrowser сценарий. Это агрегированное доказательство полногонабора иaffectedrepeat, а не утверждение об одном новомallGREEN запуске. Все исходныеfailures/NOT RUN отражены выше.
+
+Независимое re-review на0bd96ac: Standardsfindingзакрыт, обаSpecfindingsзакрыты; дополнительныхfinding вaffectedchangesнет. Desktop/plain, mobileRSS и mobileStatus итоговогоpreparedUI просмотрены, toolbaricons restored, overflow/компоновка и данные сохранены.34surface geometry statesPASS. Installed-wheel/noNode +Swagger explicitAuthorize/memory-onlytoken/nolease/standalone входят вbrowser suite и прошли. Codegen/drift/compatibility/stagedindex guards прошли; normaluser launch не вызываетNode илиgenerators.
+
+Постоянные копии: [initialall](../../docs/verification/react-migration/all-initial.json), [finalUI](../../docs/verification/react-migration/ui-final.json), [affectedmedia](../../docs/verification/react-migration/media-final.json), [desktop](../../docs/verification/react-migration/desktop.png), [mobile](../../docs/verification/react-migration/mobile.png).
+
+Все20задач завершены. Веткаcodex/react-typescript-api-first. Пользовательский экземпляр и личныеисточники не запускались; push/deploy не выполнялись. Сохранённыеисторическиеотчёты относятся ксвоимверсиям; этазапись фиксирует миграцию.

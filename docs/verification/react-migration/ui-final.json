@@ -1,0 +1,488 @@
+{
+  "started_at": "20261014T182726Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "syntax": {
+      "status": "PASS (5.86s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/docs/initializer.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/errors.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/client/client.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/client/index.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/client/types.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/client/utils.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/client.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/auth.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/bodySerializer.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/params.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/pathSerializer.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/queryKeySerializer.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/serverSentEvents.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/types.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/core/utils.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/index.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/media.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/revision.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/sdk.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/generated/types.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/reader.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/api/transport.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/main.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/reader-session.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/reading/folder-actions.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/reading/list.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/reading/opened.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/reading/store.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/reading/tree.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/renderer.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/connections.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/editor.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/history.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/menus.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/models.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/operations.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/owner.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/settings/youtube.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/shell.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/status/actions.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/status/debug.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/check-ts.cjs",
+            "/private/tmp/oko-final-recheck/frontend/src/status/panel.tsx"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "lint": {
+      "status": "PASS (0.26s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/lint-js.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "build": {
+      "status": "PASS (9.80s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/build-frontend.mjs"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-final-recheck/scripts/build-frontend.mjs",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "http": {
+      "status": "PASS (41.80s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-final-recheck/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/reader/test_web_assets.py",
+            "tests/reader/test_frontend_delivery.py",
+            "tests/reader/test_frontend_build.py",
+            "tests/reader/test_http_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "FAIL (92.88s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-final-recheck/tests/browser/test_api_docs.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_browser_context.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_codex_settings.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_codex_settings_http.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_contracts.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_existing_history.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_feed_debug.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_feed_tree_ios.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_folder_actions.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_history_outcomes.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_history_pause.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_http_isolation.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_initial_history.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_installed_docs.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_material_list.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_opened_material.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_reader_appearance.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_reader_http.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_reader_surfaces.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_reading_tree.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_separate_menus.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_settings_navigation.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_status_panel.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_telegram_connection.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_transport.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_ui_lifecycle.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_youtube_history.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_youtube_history_http.cjs",
+            "/private/tmp/oko-final-recheck/tests/browser/test_youtube_settings.cjs"
+          ],
+          "exit_code": 1
+        }
+      ],
+      "failures": [
+        "viewing during media loading stops playback, releases URLs and rejects late media"
+      ],
+      "passed_scenarios": 123,
+      "checkout_changes": []
+    },
+    "diff": {
+      "status": "PASS (0.26s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    }
+  },
+  "browser_name_pattern": null,
+  "exit_code": 1,
+  "duration_seconds": 151.25,
+  "log": "/private/tmp/oko-final-recheck/.scratch/check-runs/20261014T182726Z-41daf790/output.log"
+}

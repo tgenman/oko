@@ -74,7 +74,11 @@ async function videoFixture(page) {
     const recorder = new MediaRecorder(stream, {mimeType: 'video/webm;codecs=vp8'});
     const chunks = []; recorder.ondataavailable = event => chunks.push(event.data);
     const complete = new Promise(resolve => recorder.onstop = resolve);
+    const started = new Promise(resolve => recorder.onstart = resolve);
     recorder.start();
+    canvas.getContext('2d').fillRect(0,0,32,32);
+    stream.getVideoTracks()[0].requestFrame();
+    await started;
     for (let frame = 0; frame < 8; frame++) {
       canvas.getContext('2d').fillStyle = frame % 2 ? 'red' : 'blue';
       canvas.getContext('2d').fillRect(0, 0, 32, 32);
@@ -104,6 +108,12 @@ test('viewing during media loading stops playback, releases URLs and rejects lat
     await r.page.getByRole('button', {name: /^A/}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/circle'));
     await expect(r.page.locator('#images img')).toBeVisible();
+    await expect(r.page.locator('#images video').first()).toHaveAttribute('src', /^blob:/);
+    await r.page.waitForFunction(() => {
+      const video = document.querySelector('#images video');
+      if (video?.error) throw new Error('Synthetic WebM decode failed: '+video.error.message);
+      return video && video.readyState >= 2;
+    });
     await r.page.evaluate(async () => {
       window.testVideo = document.querySelector('#images video');
       testVideo.muted = true; testVideo.loop = true; await testVideo.play();
