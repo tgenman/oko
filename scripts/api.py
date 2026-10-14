@@ -15,8 +15,19 @@ def contract(path: Path = ROOT / 'api/openapi.yaml') -> dict:
     document = yaml.safe_load(path.read_text())
     def local_references(value):
         if isinstance(value, dict):
-            if '$ref' in value and not value['$ref'].startswith('#/'):
-                raise ValueError('External contract references are not supported')
+            for keyword in ('$ref', '$dynamicRef', '$recursiveRef'):
+                if keyword not in value:
+                    continue
+                reference = value[keyword]
+                if not isinstance(reference, str) or not reference.startswith('#/'):
+                    raise ValueError('External contract references are not supported')
+                target = document
+                try:
+                    for part in reference[2:].split('/'):
+                        key = part.replace('~1', '/').replace('~0', '~')
+                        target = target[int(key)] if isinstance(target, list) else target[key]
+                except (KeyError, IndexError, TypeError, ValueError) as error:
+                    raise ValueError(f'Unresolved local contract reference: {reference}') from error
             for child in value.values():
                 local_references(child)
         elif isinstance(value, list):

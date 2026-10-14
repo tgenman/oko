@@ -10,12 +10,17 @@ import {execFileSync} from 'node:child_process';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const python = process.env.OKO_PYTHON || path.join(root, '.venv/bin/python');
 const command = process.argv[2] || 'check';
+if (['compat','baseline'].includes(command)) {
+  execFileSync(python,[path.join(root,'scripts/api-compat.py'),command==='compat'?'check':'baseline',...process.argv.slice(3)],{stdio:'inherit'});
+  process.exit(0);
+}
 if (['validate','docs'].includes(command)) {
   execFileSync(python,[path.join(root,'scripts/api.py'),command,...process.argv.slice(3)],{stdio:'inherit'});
   process.exit(0);
 }
 if (!['generate','check'].includes(command)) throw new Error('Expected generate or check');
 execFileSync(python, [path.join(root,'scripts/api.py'),'validate'], {stdio:'inherit'});
+execFileSync(python, [path.join(root,'scripts/api-compat.py'),'check'], {stdio:'inherit'});
 execFileSync(python, [path.join(root,'scripts/generate_api.py'),command], {stdio:'inherit'});
 const temporary = await mkdtemp(path.join(tmpdir(),'oko-sdk-'));
 const saved = path.join(root,'frontend/src/api/generated');
