@@ -1,12 +1,21 @@
 import {createOperations} from './ui-operations.js';
 import {reportError} from './debug.js';
+import {element} from './controls.js';
 
 export function createYouTubeSettings({api}) {
   const byId = id => document.getElementById('youtube-' + id);
   const operations = createOperations();
   const fields = ['mode', 'address', 'username', 'password', 'clear'];
   const dirty = new Set();
-  let stopped = false, saving = false, loaded = false;
+  let stopped = false, saving = false, loaded = false, savedConfig = null;
+  const discard = element('button', 'Отменить изменение'); discard.id = 'youtube-discard'; byId('save').after(discard);
+  discard.onclick = async () => {
+    if (saving || !savedConfig) return;
+    const action = operations.begin('discard');
+    dirty.clear(); byId('username').value = ''; byId('password').value = ''; byId('clear').checked = false; fill(savedConfig);
+    try {await api.discardDraft('youtube', '', 'PUT');}
+    catch (error) {action.commit(() => {byId('message').textContent = error.message;});}
+  };
   byId('save').disabled = true;
   const value = key => key === 'clear' ? byId(key).checked : byId(key).value;
   function proxyFields() {byId('proxy-fields').hidden = value('mode') !== 'proxy';}
@@ -36,6 +45,7 @@ export function createYouTubeSettings({api}) {
     for (const key of ['username', 'password']) if (dirty.has(key) && sent[key]) body[key] = sent[key];
     try {
       const config = await api('youtube', 'PUT', body);
+      savedConfig = config;
       // Reconcile the completed write even after closing the form; preserve edits
       // typed during the request. A late reply cannot replace visible status.
       for (const key of fields) if (value(key) === sent[key]) {
@@ -57,7 +67,7 @@ export function createYouTubeSettings({api}) {
       const action = operations.begin('load', {abortable:true});
       try {
         const config = await api('youtube', 'GET', undefined, action.signal);
-        action.commit(() => {fill(config); status(config); loaded = true; byId('save').disabled = stopped;});
+        action.commit(() => {savedConfig = config; fill(config); status(config); loaded = true; byId('save').disabled = stopped;});
       } catch (error) {reportError(error, 'Подключение YouTube'); action.commit(() => {byId('message').textContent = error.message;});}
     },
     status,

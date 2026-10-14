@@ -42,13 +42,14 @@ test('debug toggle shows server traceback and caught browser errors are sent whi
     await expect(r.page.locator('#debug-panel')).toBeHidden();
     await r.page.locator('#collect').click();
     await r.page.waitForFunction(() => readerTransport.requests.some(r => r.url === '/api/debug' && r.method === 'POST' && r.body.message === 'collection failed'));
-    await r.page.locator('#debug-toggle').check();
+    await r.page.locator('#status-toggle').click();
+    await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-panel')).toBeVisible();
     await expect(r.page.locator('#debug-errors')).toContainText('broken source');
     await expect(r.page.locator('#debug-errors')).toContainText('collection failed');
     await r.page.evaluate(() => window.dispatchEvent(new ErrorEvent('error', {message: 'JS exploded', error: new Error('JS exploded')})));
     await expect(r.page.locator('#debug-errors')).toContainText('JS exploded');
-    await r.page.locator('#debug-toggle').uncheck();
+    await r.page.locator('#status-close').click();
     await expect(r.page.locator('#debug-panel')).toBeHidden();
   } finally { await r.close(); }
 });
@@ -100,7 +101,8 @@ test('offline browser errors group, retain material scroll, and retry the same d
       for (let i = 0; i < 3; i++) window.dispatchEvent(new ErrorEvent('error', {error: new Error('offline-js'), message: 'offline-js'}));
     });
     const scroll = await r.page.locator('article').evaluate(node => node.scrollTop);
-    await r.page.locator('#debug-toggle').check();
+    await r.page.locator('#status-toggle').click();
+    await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('offline-js');
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
     await expect(r.page.locator('#debug-errors')).toContainText('не сохранено');
@@ -111,7 +113,7 @@ test('offline browser errors group, retain material scroll, and retry the same d
     await expect(r.page.locator('#debug-errors')).not.toContainText('не сохранено', {timeout: 6000});
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
     expect(await r.page.evaluate(id => readerTransport.requests.filter(r => r.url === '/api/debug' && r.method === 'POST' && r.body.event_id === id).length, event)).toBeGreaterThan(1);
-    await r.page.locator('#debug-toggle').uncheck();
+    await r.page.locator('#status-close').click();
     expect(await r.page.locator('article').evaluate(node => node.scrollTop)).toBe(scroll);
   } finally { await r.close(); }
 });
@@ -125,7 +127,8 @@ test('browser pending diagnostics mask quoted passwords and Basic credentials', 
       const message = 'password="correct horse battery staple" Authorization: Basic dXNlcjpwYXNz';
       window.dispatchEvent(new ErrorEvent('error', {error: new Error(message), message}));
     });
-    await r.page.locator('#debug-toggle').check();
+    await r.page.locator('#status-toggle').click();
+    await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('[hidden]');
     await expect(r.page.locator('#debug-errors')).not.toContainText('horse');
     await expect(r.page.locator('#debug-errors')).not.toContainText('dXNlcjpwYXNz');
@@ -140,10 +143,11 @@ test('switch works with keyboard and clearing history rejects a late journal res
   try {
     await r.start([]);
     await r.page.evaluate(() => window.dispatchEvent(new ErrorEvent('error', {error: new Error('old error')})));
-    await r.page.locator('#debug-toggle').focus();
+    await r.page.locator('#status-toggle').focus();
     await r.page.keyboard.press('Space');
+    await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('old error');
-    const size = await r.page.locator('#debug-toggle').boundingBox();
+    const size = await r.page.locator('#status-toggle').boundingBox();
     expect(size.width).toBeGreaterThan(size.height);
     await r.page.evaluate(() => {
       readerTransport.held.set('/api/debug', true);

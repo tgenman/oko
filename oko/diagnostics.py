@@ -29,6 +29,7 @@ class BrowserError(BaseModel):
     count: int = Field(default=1, ge=1, le=1_000_000)
     stream_id: str = Field(default='', max_length=100)
     sequence: int = Field(default=1, ge=1, le=9_007_199_254_740_991)
+    material_ids: list[str] = Field(default_factory=list, max_length=1000)
 
     @field_validator('occurred_at', 'first_at', mode='before')
     @classmethod
@@ -57,6 +58,7 @@ class Journal:
         self.path = root / 'debug.json'
         self.secret = secret
         self.records: list[dict[str, Any]] = []
+        self.forgotten_materials: set[str] = set()
         self.persistence_error = ''
         try:
             if self.path.exists():
@@ -71,7 +73,8 @@ class Journal:
                     self._add(row['source'], row['message'], row['traceback'], row.get('error_type', 'Error'),
                               row.get('location', ''), timestamp,
                               count=int(row.get('count', 1)), first=row.get('first_time', timestamp),
-                              streams=row.get('streams', {f'delivery:{identity}': 1 for identity in row.get('deliveries', [])}))
+                              streams=row.get('streams', {f'delivery:{identity}': 1 for identity in row.get('deliveries', [])}),
+                              material_ids=row.get('material_ids'))
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.capture(error, 'Загрузка журнала')
 
@@ -84,7 +87,10 @@ class Journal:
 
     def _add(self, source: str, message: str, stack: str, error_type: str, location: str,
              timestamp: str, *, count: int = 1, first: str | None = None,
-             streams: dict[str, int] | None = None, stream_id: str = '', sequence: int = 0) -> str:
+             streams: dict[str, int] | None = None, stream_id: str = '', sequence: int = 0,
+             material_ids: list[str] | None = None) -> str:
+        if self.forgotten_materials.intersection(material_ids or []):
+            return ''
         source, message, stack = self.clean(source), self.clean(message), self.clean(stack)
         stream_id = self.clean(stream_id)
         streams = {self.clean(sender): latest for sender, latest in (streams or {}).items()}
@@ -107,16 +113,21 @@ class Journal:
                                      error_type=error_type, location=location, count=count,
                                      first_time=first or timestamp, last_time=timestamp,
                                      streams={**(streams or {}), **({stream_id: sequence} if stream_id else {})}))
+        if material_ids is not None:
+            entry = next(row for row in self.records if row['id'] == key)
+            entry['material_ids'] = sorted(set(entry.get('material_ids', []) + material_ids))
         self.records.sort(key=lambda row: row['last_time'])
         self.records = self.records[-100:]
         return key
 
     def add(self, source: str, message: str, stack: str, *, error_type: str = 'Error',
             location: str = '', event_id: str | None = None, timestamp: str | None = None,
-            count: int = 1, first: str | None = None, stream_id: str = '', sequence: int = 0) -> str:
+            count: int = 1, first: str | None = None, stream_id: str = '', sequence: int = 0,
+            material_ids: list[str] | None = None) -> str:
         if not stream_id and event_id:
             stream_id, sequence = 'delivery:' + event_id, 1
-        key = self._add(source, message, stack, error_type, location, timestamp or self.now(), count=count, first=first, stream_id=stream_id, sequence=sequence)
+        key = self._add(source, message, stack, error_type, location, timestamp or self.now(), count=count, first=first, stream_id=stream_id, sequence=sequence,
+                        material_ids=material_ids if material_ids is not None else list(diagnostic_materials.get()))
         self.flush()
         return key
 
@@ -138,6 +149,12 @@ class Journal:
             self.records = previous
             return False
         return True
+
+    def forget_materials(self, members: set[str]) -> None:
+        self.forgotten_materials.update(members)
+        # Legacy entries have no scope: retaining them could retain viewed content.
+        self.records = [row for row in self.records if 'material_ids' in row and not members.intersection(row['material_ids'])]
+        self.flush()
 
     def capture(self, error: BaseException, source: str) -> str | None:
         if isinstance(error, (asyncio.CancelledError, SourceDeleted)) or getattr(error, 'diagnostic_skip', False):
@@ -183,6 +200,7 @@ class Journal:
 
 active_journal: ContextVar[Journal | None] = ContextVar('oko_debug_journal', default=None)
 diagnostic_source: ContextVar[str] = ContextVar('oko_debug_source', default='')
+diagnostic_materials: ContextVar[tuple[str, ...]] = ContextVar('oko_debug_materials', default=())
 capture_scope: ContextVar[str] = ContextVar('oko_debug_scope', default='')
 
 

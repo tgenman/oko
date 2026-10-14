@@ -30,7 +30,7 @@ from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCa
 from oko.collection.youtube.history import HistoryClient
 from oko.subscriptions.history import InitialHistory
 from oko.collection.youtube.access import CaptionsBlocked, CaptionsDeferred, proxy_url
-from oko.diagnostics import Journal, active_journal, diagnostic_source, capture_scope, record_caught
+from oko.diagnostics import Journal, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught
 
 T = TypeVar('T')
 
@@ -74,6 +74,8 @@ class Runtime:
         self._idle_since: float | None = None
         self._store: Store | None = None
         self._error: str | None = None
+        self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=self._wall_clock())
+        self._viewed_ids: list[str] = []
         self._active: asyncio.Task[None] | None = None
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()
@@ -186,9 +188,26 @@ class Runtime:
             raise ActionError('unavailable', self._error or 'Хранилище не готово')
         return self._store
 
+    def material_was_viewed(self, identity: str) -> bool:
+        if self._store:
+            row = self._store.db.execute('SELECT viewed FROM items WHERE id=?', (identity,)).fetchone()
+            if identity.startswith(('event-','digest-')):
+                return not (self._store.events.material(identity) if identity.startswith('event-') else self._store.digests.material(identity))
+            return bool(row and row['viewed'])
+        return identity in self._viewed_ids
+
     def status(self) -> dict[str, Any]:
         state: dict[str, Any] = self._store.status() if self._store and not self.stopped else dict(jobs=[], errors=[], deleting=False)
         state['youtube'] = self.youtube_status() if self._store and not self.stopped else None
+        if self._store and not self.stopped:
+            self._last_problems = self._store.problems.snapshot(self._wall_clock())
+            self._viewed_ids = [row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')]
+        state['problems'] = self._last_problems
+        if self._error:
+            state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',section='action',title='Хранилище недоступно',
+                consequence='Сбор и обработка остановлены.',next_step='Проверьте доступность хранилища; состояние не сбрасывается.',
+                objects=[],action=None,created_at=self._wall_clock(),next_at=None,state='current',finished_at=None,outcome=None)],recent=[],count=1,updated_at=self._wall_clock())
+        state['viewed_ids'] = self._viewed_ids
         pending = any(j['status'] in ('pending', 'running') for j in state['jobs'])
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
@@ -221,6 +240,31 @@ class Runtime:
     async def heartbeat(self, tab: str) -> None:
         async with self._actions:
             self._heartbeat(tab)
+
+    async def action_started(self, identity: str, context: dict[str, Any]) -> None:
+        async with self._actions:
+            if self._store and not self.stopped:
+                self._store.problems.action_started(identity, context, self._wall_clock())
+
+    async def action_finished(self, identity: str, succeeded: bool) -> None:
+        async with self._actions:
+            if self._store and not self.stopped:
+                self._store.problems.action_finished(identity, succeeded, self._wall_clock())
+                self._last_problems = self._store.problems.snapshot(self._wall_clock())
+
+    async def report_action(self, identity: str, context: dict[str, Any], result: str) -> str:
+        async with self._actions:
+            if any(obj['kind'] == 'material' and self.material_was_viewed(obj['id']) for obj in context['objects']):
+                return 'abandoned'
+            try:
+                return self.require_store().problems.report_action(identity, context, result, self._wall_clock())
+            except ValueError as error:
+                raise ActionError('invalid', str(error), expected=True) from None
+
+    async def abandon_problem(self, identity: str) -> None:
+        async with self._actions:
+            if not self.require_store().problems.abandon(identity, self._wall_clock()):
+                raise ActionError('invalid', 'Отмена доступна только ошибке соответствующего черновика', expected=True)
 
     async def close_tab(self, tab: str) -> None:
         async with self._actions:
@@ -280,8 +324,11 @@ class Runtime:
     async def viewed(self, item: str) -> None:
         async with self._actions:
             current = self.require_store()
+            members = set(current.reading.members(item)) | {item}
             if not current.viewed(item):
                 raise ActionError('missing', 'Материал не найден')
+            if self.diagnostics:
+                self.diagnostics.forget_materials(members)
             await self._drain_deletions(current)
 
     def _completion_preview(self, folder: str, current: Store) -> dict[str, Any]:
@@ -318,6 +365,8 @@ class Runtime:
                 if latest != contents:
                     raise ActionError('conflict', dict(message='Состав папки изменился. Подтвердите новое количество.', preview=self._completion_preview(folder, current)))
                 current.viewed_set([identity for identity, _ in contents.members])
+                if self.diagnostics:
+                    self.diagnostics.forget_materials({identity for identity, _ in contents.members} | set(contents.cards))
                 self._completions[token] = (folder, None)
             await self._drain_deletions(current)
             if current.status()['deleting']:
@@ -579,6 +628,7 @@ class Runtime:
 
     async def _execute_ai(self, job: Job) -> None:
         capture_scope.set(secrets.token_hex(16))
+        diagnostic_materials.set((job.item,))
         current: Store | None = None
         work: PreparedWork | None = None
         try:
@@ -588,6 +638,7 @@ class Runtime:
                     return
                 diagnostic_source.set('Обработка · ' + job.kind + ' · ' + job.item)
                 work = current.processing.prepare(job)
+                diagnostic_materials.set(tuple(source.id for source in work.request.sources))
                 diagnostic_source.set('Обработка · ' + job.kind + ' · ' + ','.join(sorted({current.item_feed(source.id) for source in work.request.sources})))
                 config = current.processor_config()
                 request = work.request
@@ -599,14 +650,14 @@ class Runtime:
                 elif request.processor in ('llamacpp', 'llamacpp:' + (config.model if config else '')) and config:
                     adapter = LlamaCpp(config, self._ai_transport)
                 else:
-                    raise ProcessingError('Ожидание выбранного обработчика; llama.cpp не настроен или не выбран')
+                    raise ProcessingError('Ожидание выбранного обработчика; llama.cpp не настроен или не выбран', code='processor-config')
             self._ai_stage = 'Проверка обработчика'
             checked = await adapter.check()
             async with self._actions:
                 if self._store is not current or not self._live() or not work.current():
                     return
                 if not checked['local'] and not work.public_ai:
-                    raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
+                    raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель', code='ai-permission')
             self._ai_stage = work.stage
             result = (await adapter.generate(request, self._root / 'staging' / job.item)
                       if isinstance(adapter, Codex) else await adapter.generate(request))
@@ -619,7 +670,8 @@ class Runtime:
             record_caught('runtime._execute_ai')
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
-                    current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка AI-обработки', 30)
+                    current.retry(job, self._clock(), error.label if isinstance(error, ProcessingError) else 'Ошибка AI-обработки', 30,
+                                  code=error.code if isinstance(error, ProcessingError) else 'processing-failed')
         finally:
             if work:
                 work.close()
@@ -697,7 +749,7 @@ class Runtime:
         except Exception:
             record_caught('runtime._delete')
             if current.valid(job):
-                current.retry(job, self._clock(), 'Ошибка удаления')
+                current.retry(job, self._clock(), 'Ошибка удаления', code='delete')
 
     async def _execute_read(self, job: Job, current: Store, source: Source) -> None:
         if not isinstance(source, TelegramSource):
@@ -731,6 +783,7 @@ class Runtime:
                 current.read_sync.completed(job, plan, confirmed, self._clock())
 
     async def _execute(self, job: Job) -> None:
+        diagnostic_materials.set((job.item,) if job.kind in ('fetch','delete') else ())
         capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
         feed = ''
@@ -776,7 +829,7 @@ class Runtime:
                         if caption_attempt and caption_attempt.attempted and not caption_attempt.blocked:
                             current.youtube.completed(job.item, material.captions == 'available')
                         if caption_attempt and caption_attempt.retry:
-                            current.youtube.defer(job, self._clock(), current.youtube.ready_at() - self._wall_clock(), 'Получение субтитров приостановлено: YouTube ограничил запросы')
+                            current.youtube.defer(job, self._clock(), current.youtube.ready_at() - self._wall_clock(), 'Получение субтитров приостановлено: YouTube ограничил запросы', blocked=True)
                         current.read_sync.sync()
                         current.feed_status(feed, error=None, gap=getattr(source, 'gap', None), changes=getattr(source, 'changes', None))
         except CaptionsDeferred:
@@ -794,7 +847,8 @@ class Runtime:
                         current.source_removed(job)
                         return
                     label = error.label if isinstance(error, SourceError) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
-                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1)
+                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,
+                                  code=error.code if isinstance(error, SourceError) and error.code else job.kind + ':' + (getattr(error, 'remote_type', '') or type(error).__name__))
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):
@@ -803,7 +857,10 @@ class Runtime:
     async def run(self) -> None:
         journal_context = active_journal.set(self.diagnostics)
         try:
-            self._store = Store(self._root, self._fault)
+            self._store = Store(self._root, self._fault, wall_clock=self._wall_clock)
+            viewed = {row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')}
+            if viewed and self.diagnostics:
+                self.diagnostics.forget_materials(viewed)
             config = self._store.subscriptions
             if (self._source and self._source_feed == 'demo') or any(c['feed_id'] == 'demo' for c in self._store.cards()):
                 config.ensure_demo()

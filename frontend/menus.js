@@ -101,6 +101,12 @@ export function createMenus({api, onChanged}) {
     status(state) {editor.status(state.initial_histories || []); youtube.status(state.youtube);},
     sources: editor.sources,
     openFeed: (id, trigger) => open('feeds', trigger, 'feed/' + id),
+    async openStatus(target, trigger) {
+      if (target.kind === 'feed-settings') {await open('feeds', trigger, 'feed/' + target.id); if (target.page) navigation.show(target.page, trigger); return;}
+      if (target.kind === 'add') {await open('add',trigger);byId('add-'+target.page+'-tab')?.click();return;}
+      await open(target.scope && target.scope !== 'oko' ? 'feeds' : 'settings', trigger, target.scope && target.scope !== 'oko' ? target.scope+'/'+target.id : undefined);
+      navigation.show(target.page || 'home', trigger);
+    },
     stop() {
       stopped = true; leave(); editor.stop(); models.stop(); youtube.stop(); rss.stop(); telegram.stop(); opml.stop();
       for (const name of ['add', 'feeds', 'settings']) {byId(name + '-dialog').close(); byId(name + '-open').disabled = true;}

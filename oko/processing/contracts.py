@@ -140,6 +140,6 @@ def processing_instruction(request: ProcessingRequest) -> str:
 
 
 class ProcessingError(Exception):
-    def __init__(self, label: str) -> None:
-        self.label = label
+    def __init__(self, label: str, *, code: str = 'processing-failed') -> None:
+        self.label, self.code = label, code
         super().__init__(label)

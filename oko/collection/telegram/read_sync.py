@@ -131,7 +131,7 @@ class ReadSync:
             self.store.db.execute('''UPDATE telegram_read_state SET initial=COALESCE(initial,?),
               confirmed=MAX(confirmed,?),waiting=?,error=NULL WHERE feed=?''', (plan.initial, confirmed, plan.waiting, job.item))
             if plan.waiting:
-                self.store.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=? AND generation=? AND status='running'", (now + (.1 if plan.waiting == 'Продолжение проверки истории Telegram' else 30), plan.waiting, job.id, job.generation))
+                self.store.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=NULL WHERE id=? AND generation=? AND status='running'", (now + (.1 if plan.waiting == 'Продолжение проверки истории Telegram' else 30), plan.waiting, job.id, job.generation))
             else:
                 self.store.finish(job)
 

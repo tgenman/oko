@@ -74,8 +74,9 @@ test('reader shows malformed responses and failed diagnostics retry only the ori
     await r.page.route('**/api/debug', route => route.request().method() === 'POST'
       ? route.fulfill({status:503,contentType:'text/html',body:'<html>offline</html>'}) : route.continue());
     await r.page.locator('#collect').click();
-    await expect(r.page.locator('#progress')).toContainText('Некорректный ответ Око');
-    await r.page.locator('#debug-toggle').check();
+    await expect(r.page.locator('.header-command-error:not([hidden])')).toContainText('Некорректный ответ Око');
+    await r.page.locator('#status-toggle').click();
+    await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('Некорректный ответ Око');
     await expect(r.page.locator('#debug-errors')).toContainText('не сохранено');
     await expect.poll(() => r.page.evaluate(() => readerTransport.requests.filter(request => request.url === '/api/debug' && request.method === 'POST').length)).toBeGreaterThan(1);

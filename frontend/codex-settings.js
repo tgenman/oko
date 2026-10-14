@@ -6,7 +6,16 @@ const kinds = {filter:'Фильтрация',theses:'Тезисы публика
 export function createCodexSettings({api}) {
   const byId = id => document.getElementById(id);
   const operations = createOperations();
-  let draft = null, models = [], loaded = false, revision = 0, saving = false, catalogError = '', catalogSettled = false;
+  let draft = null, savedConfig = null, models = [], loaded = false, revision = 0, saving = false, catalogError = '', catalogSettled = false;
+  const discard = element('button', 'Отменить изменение'); discard.id = 'codex-discard'; byId('codex-save').after(discard);
+  discard.onclick = async () => {
+    if (saving) return;
+    const action = operations.begin('discard');
+    revision++; draft = structuredClone(savedConfig); render();
+    if (!draft) await catalog();
+    try {await api.discardDraft('processors/codex', '', 'PUT');}
+    catch (error) {action.commit(() => {byId('codex-choice-status').textContent = error.message;});}
+  };
   function option(value, label = value) {const node = element('option', label); node.value = value; return node;}
   function error() {
     if (!draft) return 'Загрузите каталог и выберите модель для каждого действия.';
@@ -72,6 +81,7 @@ export function createCodexSettings({api}) {
     const body = structuredClone(draft); saving = true; validate();
     try {
       await api('processors/codex','PUT',body);
+      savedConfig = body;
       action.commit(() => {byId('codex-choice-status').textContent = sentRevision === revision ? 'Настройки сохранены для новой работы.' : 'Настройки сохранены. Новый ввод ещё не сохранён.';});
     } catch(error) {action.commit(() => {byId('codex-choice-status').textContent = error.message;});}
     finally {action.commit(() => {saving = false; byId('codex-save').disabled = !!error();});}
@@ -82,7 +92,7 @@ export function createCodexSettings({api}) {
         const action = operations.begin('load', {abortable:true}), before = revision;
         try {
           const result = await api('processors/codex','GET',undefined,action.signal);
-          action.commit(() => {if (before === revision && !draft) draft = result.config; loaded = true; render();});
+          action.commit(() => {savedConfig = structuredClone(result.config); if (before === revision && !draft) draft = result.config; loaded = true; render();});
         } catch(error) {action.commit(() => {byId('codex-choice-status').textContent = error.message;});}
         if (action.current) await catalog();
       } else {render(); if (!catalogSettled) await catalog();}

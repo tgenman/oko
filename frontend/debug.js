@@ -3,8 +3,10 @@ export function reportError(error, source = 'Браузер', newOccurrence = fa
 
 export function createDebugPanel({token, transport}) {
   const panel = document.getElementById('debug-panel'), list = document.getElementById('debug-errors');
-  const status = document.getElementById('debug-status'), toggle = document.getElementById('debug-toggle');
+  const status = document.getElementById('debug-status');
   const seen = new WeakSet();
+  const deleted = new Set();
+  const retained = entry => !(entry.material_ids || []).some(id=>deleted.has(id));
   const streamId = crypto.randomUUID();
   let sequence = 0;
   let remote = [], pending = [], sending = false, loading = false, revision = 0;
@@ -68,7 +70,7 @@ export function createDebugPanel({token, transport}) {
         const entry = pending[0]; entry.sealed = true;
         const {sealed, ...body} = entry;
         const result = await transport.json('/api/debug', 'POST', body);
-        if (result.entry) {
+        if (result.entry && retained(result.entry)) {
           remote = remote.filter(group => group.id !== result.entry.id); remote.push(result.entry);
           revision++;
         }
@@ -95,6 +97,7 @@ export function createDebugPanel({token, transport}) {
       error_type: clean(error?.name || 'Error').slice(0, 200),
       location: clean((error?.stack || '').split('\n').find(line => /^\s*at /.test(line))?.trim() || source).slice(0, 1000),
       first_at: now, occurred_at: now, count: 1};
+    entry.material_ids = error?.materialIds || [];
     const same = [...pending].reverse().find(item => key(item) === key(entry) && !item.sealed && item.count < 1000000);
     if (same) { same.count++; same.occurred_at = now; }
     else pending.push(entry);
@@ -112,13 +115,12 @@ export function createDebugPanel({token, transport}) {
       const groups = Array.isArray(result) ? result : result.groups;
       if (!Array.isArray(groups)) throw new Error('Некорректный ответ журнала');
       if (stamp === revision) {
-        remote = groups;
+        remote = groups.filter(retained);
         serverCount = groups.length; storageError = result.persistence_error || ''; transportError = ''; render();
       }
     } catch (error) { if (stamp === revision) {transportError = 'Журнал сервера недоступен: ' + clean(error.message); render();} }
     finally { loading = false; }
   }
-  toggle.onchange = () => { panel.hidden = !toggle.checked; void refresh(); };
   clearButton.onclick = async () => {
     if (clearing) return;
     clearing = true; clearButton.disabled = true;
@@ -140,7 +142,12 @@ export function createDebugPanel({token, transport}) {
   render();
   const timer = setInterval(refresh, 2000);
   window.addEventListener('pagehide', () => clearInterval(timer), {once: true});
-  return {refresh, revision: () => revision, updateStatus(count, error, stamp) {
+  return {refresh, forgetMaterials(ids) {
+    ids.forEach(id=>deleted.add(id));
+    if (remote.some(entry=>!retained(entry)) || pending.some(entry=>!retained(entry))) {
+      remote = remote.filter(retained); pending = pending.filter(retained); lastRender = ''; render();
+    }
+  }, show(open) {panel.hidden = !open; if (open) void refresh();}, revision: () => revision, updateStatus(count, error, stamp) {
     if (clearing || stamp !== revision) return;
     if (typeof count === 'number') serverCount = count;
     if (typeof error === 'string') storageError = error;

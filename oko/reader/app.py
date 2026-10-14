@@ -25,12 +25,13 @@ from oko.storage.store import Store
 from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
+from oko.reader.actions import action_context
 from oko.reader.static import install_frontend
 from oko.reader.contracts import Navigation, Card, Material, Version, Status
 from oko.collection.youtube.source import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.subscriptions.history import InitialHistory
-from oko.diagnostics import Journal, BrowserError, active_journal, diagnostic_source, capture_scope, record_caught
+from oko.diagnostics import Journal, BrowserError, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught
 
 
 class HistoryPause(BaseModel):
@@ -39,6 +40,14 @@ class HistoryPause(BaseModel):
 
 class CompletionRequest(BaseModel):
     token: str = Field(min_length=1, max_length=100)
+
+
+class ReportAction(BaseModel):
+    id: str = Field(pattern=r'^[\w-]{1,100}$')
+    method: Literal['POST', 'PUT', 'PATCH', 'DELETE']
+    path: str = Field(max_length=2000)
+    fields: list[str] = Field(default_factory=list, max_length=50)
+    result: Literal['failed', 'unknown']
 
 
 def create_app(root: Path, *, source: Source | None = None, token: str | None = None,
@@ -136,6 +145,22 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         context = active_journal.set(journal)
         source_context = diagnostic_source.set(request.method + ' ' + request.url.path)
         scope_context = capture_scope.set(secrets.token_hex(16))
+        action_id = request.headers.get('X-Oko-Action', '')
+        if not re.fullmatch(r'[\w-]{1,100}', action_id):
+            action_id = secrets.token_hex(16)
+        fields: list[str] = []
+        if request.method in ('PUT', 'POST', 'PATCH', 'DELETE') and request.url.path.startswith('/api/'):
+            try:
+                payload = await request.json()
+                if isinstance(payload, dict):
+                    fields = list(payload)
+            except ValueError:
+                pass
+        action = action_context(request.method, request.url.path, fields)
+        material_path = re.match(r'/api/materials/([\w-]+)(?:/|$)', request.url.path)
+        material_context = diagnostic_materials.set((material_path[1],) if material_path else ())
+        if action:
+            await runtime.action_started(action_id, action)
         try:
             response: Response = await call_next(request)
         except Exception as error:
@@ -143,10 +168,14 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             response = JSONResponse({'detail': 'Ошибка Око; подробности в диагностике'}, status_code=500,
                                     headers={'X-Oko-Error': group} if group else {})
         finally:
+            diagnostic_materials.reset(material_context)
             capture_scope.reset(scope_context)
             diagnostic_source.reset(source_context)
             active_journal.reset(context)
         response.headers['Cache-Control'] = 'no-store'
+        if action:
+            await runtime.action_finished(action_id, response.status_code < 400)
+            response.headers['X-Oko-Action'] = action_id
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
@@ -165,16 +194,31 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.post('/api/debug')
     async def debug_browser(body: BrowserError) -> dict[str, Any]:
+        if body.material_ids and any(runtime.material_was_viewed(identity) for identity in body.material_ids):
+            return dict(ok=True, group=None, entry=None, persistence_error=journal.persistence_error)
         group = journal.add(body.source, body.message, body.traceback, error_type=body.error_type,
                             location=body.location, event_id=body.event_id,
                             timestamp=body.occurred_at.isoformat() if body.occurred_at else None,
                             count=body.count, first=body.first_at.isoformat() if body.first_at else None,
-                            stream_id=body.stream_id, sequence=body.sequence)
+                            stream_id=body.stream_id, sequence=body.sequence, material_ids=body.material_ids)
         return dict(ok=not bool(journal.persistence_error), group=group, entry=next((entry for entry in journal.entries() if entry['id'] == group), None), persistence_error=journal.persistence_error)
 
     @app.get('/api/status', response_model=Status, response_model_exclude_unset=True)
     async def status() -> dict[str, Any]:
         return dict(runtime.status(), debug_count=len(journal.records), debug_persistence_error=journal.persistence_error)
+
+    @app.post('/api/problems/actions')
+    async def report_reader_action(body: ReportAction) -> dict[str, Any]:
+        context = action_context(body.method, body.path, body.fields)
+        if context is None:
+            raise HTTPException(400, 'Неизвестное действие читателя')
+        result = await runtime.report_action(body.id, context, body.result)
+        return dict(ok=True, result=result)
+
+    @app.post('/api/problems/{identity}/abandon')
+    async def abandon_problem(identity: str) -> dict[str, bool]:
+        await runtime.abandon_problem(identity)
+        return dict(ok=True)
 
     @app.post('/api/tabs/{tab}/heartbeat')
     async def heartbeat(tab: str) -> dict[str, bool]:

@@ -169,7 +169,8 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
   await expect(r.page.locator('#list-retry')).toBeHidden();
   await expect(r.page.locator('#list-title')).toHaveText('second');
   await expect(r.page.locator('#cards button')).toHaveCount(1);
-  await r.page.locator('#debug-toggle').check();
+  await r.page.locator('#status-toggle').click();
+    await r.page.locator('#status-journal-open').click();
   await expect(r.page.locator('#debug-errors')).toContainText('Сбой списка');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
@@ -203,7 +204,8 @@ test('incomplete materials and unavailable previews keep usable rows and diagnos
   await expect(r.page.locator('[data-card="broken"] img')).toHaveCount(0);
   await r.page.locator('[data-card="broken"]').click();
   await expect(r.page.locator('#title')).toHaveText('broken');
-  await r.page.locator('#debug-toggle').check();
+  await r.page.locator('#status-toggle').click();
+    await r.page.locator('#status-journal-open').click();
   await expect(r.page.locator('#debug-errors')).toContainText('Не удалось загрузить превью');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}

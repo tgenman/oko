@@ -46,8 +46,9 @@ class Source(Protocol):
 
 
 class SourceError(Exception):
-    def __init__(self, label: str, delay: float = 60, *, remote_traceback: str = '') -> None:
+    def __init__(self, label: str, delay: float = 60, *, remote_traceback: str = '', code: str | None = None) -> None:
         self.label, self.delay = label, delay
+        self.code = code
         self.remote_traceback = remote_traceback
         self.remote_type = self.remote_message = self.remote_location = ''
 

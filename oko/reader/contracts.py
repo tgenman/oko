@@ -260,6 +260,45 @@ class YouTube(Wire):
     reason: str
 
 
+class ProblemObject(Wire):
+    kind: Literal['settings', 'feed', 'material']
+    id: str
+    label: str
+
+
+class ProblemAction(Wire):
+    kind: str
+    page: NotRequired[str]
+    id: NotRequired[str]
+    scope: NotRequired[Literal['oko', 'folder', 'feed']]
+
+
+class Problem(Wire):
+    id: str
+    code: str
+    section: Literal['action', 'wait', 'object']
+    title: str
+    consequence: str
+    next_step: str
+    objects: list[ProblemObject]
+    action: ProblemAction | None
+    created_at: float
+    next_at: float | None
+    state: Literal['current', 'retrying', 'finished']
+    finished_at: float | None
+    outcome: Literal['resolved', 'irrelevant'] | None
+    operation: NotRequired[str]
+    request_id: NotRequired[str]
+    reason: NotRequired[str]
+
+
+class ProblemSnapshot(Wire):
+    current: list[Problem]
+    recent: list[Problem]
+    count: int
+    updated_at: float
+
+
 class Status(Wire):
     stage: str
     errors: list[str]
@@ -277,6 +316,8 @@ class Status(Wire):
     review_restarts: NotRequired[list[ReviewRestart]]
     debug_count: NotRequired[int]
     debug_persistence_error: NotRequired[str]
+    problems: NotRequired[ProblemSnapshot]
+    viewed_ids: NotRequired[list[str]]
 
 
 CONTRACTS: dict[str, TypeAdapter[object]] = {

@@ -4,6 +4,8 @@ import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './debug.js';
 import {createOpenedMaterial} from './opened-material.js';
 import {createTransport} from './transport.js';
+import {createStatusPanel} from './status-panel.js';
+import {createReaderActions} from './reader-actions.js';
 
 'use strict';
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
@@ -19,24 +21,40 @@ let feedId = null;
 let refreshTimer = null;
 let refreshSequence = 0;
 let readingCatalog = {folders:[], feeds:[]};
+let statusPanel;
+const actions = createReaderActions({transport,onChanged:()=>statusPanel?.redraw()});
 async function api(path, method = 'GET', body = undefined, signal = undefined) {
+  const request = actions.begin(path, method, body);
   try {
-    return await transport.json('/api/' + path, method, body, signal);
-  } catch (error) { reportError(error, method + ' /api/' + path, true); throw error; }
+    const result = await transport.json('/api/' + path, method, body, signal, request?.id);
+    actions.succeeded(request); return result;
+  } catch (error) {error.materialIds = path.startsWith('materials/') ? [path.split('/')[1]] : []; actions.failed(request,error); reportError(error, method + ' /api/' + path, true); throw error; }
 }
+api.discardDraft = async(path,field,method)=>{await statusPanel.discardDraft(path,field,method);refresh();};
 
 const opened = createOpenedMaterial({
   api,
   fetchMedia: (path, signal) => transport.media(path, signal, 'no-store'),
-  onViewed: id => { contentEpoch++; opened.viewed(id); list.removed(id); bus.postMessage(id); refresh(); },
+  onViewed: id => { contentEpoch++; debug.forgetMaterials([id]); statusPanel.forgetMaterials([id]); opened.viewed(id); list.removed(id); bus.postMessage(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
 const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
 const menus = createMenus({api, onChanged: () => {contentEpoch++; refresh();}});
-const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => {byId('debug-toggle').checked = true; byId('debug-toggle').dispatchEvent(new Event('change'));}});
+statusPanel = createStatusPanel({debug, actions, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
+  onMaterial:id=>opened.open({id}), onRetry:async(target,problem)=>{
+    const suffix = {retry:'retry','theses-retry':'theses/retry','filter-retry':'filter/retry',regenerate:'regenerate'}[target.kind];
+    if (target.kind === 'collect') await api('collect', 'POST');
+    else if (suffix) {
+      const ids = problem.objects.filter(object=>object.kind==='material').map(object=>object.id);
+      for (const id of ids.length ? ids : [target.id]) await api('materials/' + id + '/' + suffix, 'POST');
+    }
+    refresh();
+  }, onRefresh:()=>refresh()});
+const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
 function stopUi(message) {
   menus.stop();
   stopped = true;
+  statusPanel.stop();
   contentEpoch++;
   opened.clear();
   list.clear();
@@ -61,7 +79,7 @@ bus.onmessage = event => {
     refresh();
   } else {
     contentEpoch++;
-    opened.viewed(event.data); list.removed(event.data); refresh();
+    debug.forgetMaterials([event.data]); statusPanel.forgetMaterials([event.data]); opened.viewed(event.data); list.removed(event.data); refresh();
   }
 };
 async function refresh() {
@@ -78,9 +96,11 @@ async function refresh() {
     debug.updateStatus(state.debug_count, state.debug_persistence_error, debugRevision);
     menus.status(state);
     if (state.stopped) { stopUi('Око остановлено'); return; }
-    const readMessages = (state.telegram_reads || []).filter(r => r.pending || r.waiting || r.error).map(r => r.error || r.waiting || `Telegram: ожидают подтверждения ${r.pending}`);
-    const progressMessages = [...new Set([...state.errors, ...readMessages])];
-    byId('progress').textContent = state.error || `${state.stage} · источники ${state.ready_sources}/${state.total_sources}` + (progressMessages.length ? ' · ' + progressMessages.join(', ') : '');
+    statusPanel.update(state.problems, state);
+    debug.forgetMaterials(state.viewed_ids || []);
+    statusPanel.forgetMaterials(state.viewed_ids || []);
+    void actions.flush();
+    byId('progress').textContent = `${state.stage} · источники ${state.ready_sources}/${state.total_sources}`;
     byId('review-restarts').replaceChildren(...(state.review_restarts || []).map(review => {
       const row = element('p', review.error + ' ');
       const button = element('button', 'Пересоздать обзор');
@@ -108,18 +128,25 @@ async function refresh() {
     opened.reconcile(cards);
     list.update(cards, opened.selection?.id);
 
-  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) opened.clear(); list.error(error.message); byId('progress').textContent = error.message; } }
+  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) {opened.clear();statusPanel.unavailable();} list.error(error.message); byId('progress').textContent = statusAvailable ? 'Чтение временно недоступно' : 'Нет связи с Око'; } }
   finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
-byId('collect').onclick = async () => { try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); byId('progress').textContent = error.message; } };
+function actionFeedback(id) {
+  const button = byId(id), wrapper = document.createElement('span'), message = document.createElement('span');
+  wrapper.className = 'header-command';message.className = 'header-command-error';message.setAttribute('role','status');message.hidden=true;
+  button.before(wrapper);wrapper.append(button,message);return text=>{message.textContent=text;message.hidden=!text;};
+}
+const collectFeedback = actionFeedback('collect'), stopFeedback = actionFeedback('stop');
+byId('collect').onclick = async () => { collectFeedback('');try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); collectFeedback(error.message); } };
 byId('stop').onclick = async () => {
+  stopFeedback('');
   try { await api('stop', 'POST'); bus.postMessage('stop'); stopUi('Око остановлено'); }
-  catch (error) { reportError(error, 'Интерфейс Око'); byId('progress').textContent = error.message; }
+  catch (error) { reportError(error, 'Интерфейс Око'); stopFeedback(error.message); }
 };
 async function heartbeat() {
   if (stopped) return;
   try { await api('tabs/' + tab + '/heartbeat', 'POST'); }
-  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { opened.clear(); list.error(error.message); byId('progress').textContent = error.message; } }
+  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { opened.clear(); statusPanel.unavailable(); list.error(error.message); byId('progress').textContent = 'Нет связи с Око'; } }
   if (!stopped) setTimeout(heartbeat, 2000);
 }
 window.addEventListener('pagehide', () => {

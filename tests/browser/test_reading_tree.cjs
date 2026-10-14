@@ -59,9 +59,9 @@ test('width, focus, source warning and settings help remain separate from select
   });
   await expect(r.page.locator('.tree-warning')).toBeVisible();
   await r.page.locator('.tree-warning').click();
-  await expect(r.page.locator('#debug-panel')).toBeVisible();
+  await expect(r.page.locator('#status-panel')).toBeVisible();
   await expect(r.page.locator('#all-folders')).toHaveAttribute('aria-pressed','true');
-  await r.page.locator('#debug-toggle').uncheck();
+  await r.page.locator('#status-close').click();
   const divider=r.page.locator('#sidebar-resize');
   await divider.focus(); await r.page.keyboard.press('ArrowRight');
   await expect(divider).toHaveAttribute('aria-valuenow','290');

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from oko.storage.versions import Versions
+from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.reader.composition import FolderContents, ReadingComposition
 from oko.collection.telegram.read_sync import ReadSync
@@ -35,8 +36,9 @@ class Job:
 
 class Store:
     """SQLite owns identity/lifecycle; files own all publication content."""
-    def __init__(self, root: Path, fault: Callable[[str], None]) -> None:
+    def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time) -> None:
         self.root, self.fault = root, fault
+        self.wall_clock = wall_clock
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(root / 'state.sqlite')
         self.db.row_factory = sqlite3.Row
@@ -60,6 +62,9 @@ class Store:
         CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY, signature TEXT);
         ''')
         columns = {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}
+        if 'problem_code' not in {row['name'] for row in self.db.execute('PRAGMA table_info(jobs)')}:
+            self.db.execute('ALTER TABLE jobs ADD COLUMN problem_code TEXT')
+            self.db.commit()
         if 'members' not in columns:
             self.db.execute("ALTER TABLE items ADD COLUMN members TEXT DEFAULT '[]'")
             self.db.commit()
@@ -96,6 +101,7 @@ class Store:
         self.reading = ReadingComposition(self)
         self.read_sync = ReadSync(self)
         self.youtube = YouTubeAccess(self)
+        self.problems = Problems(self)
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
@@ -268,7 +274,7 @@ class Store:
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
     def finish(self, job: Job) -> None:
-        self.db.execute("UPDATE jobs SET status='done',error=NULL WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
+        self.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
 
     def valid(self, job: Job) -> bool:
         row = self.db.execute('SELECT status,generation FROM jobs WHERE id=?', (job.id,)).fetchone()
@@ -319,9 +325,14 @@ class Store:
 
     def viewed_set(self, members: list[str]) -> bool:
         members = sorted(set(members))
+        affected = set(members)
+        for card in self.reading.cards():
+            if any(source['id'] in affected for source in card.get('sources', [])):
+                affected.add(card['id'])
         with self.db:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
                 return False
+            self.problems.forget_materials(affected, self.wall_clock())
             for member in members:
                 row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
                 self.read_sync.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
@@ -354,12 +365,12 @@ class Store:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
 
-    def retry(self, job: Job, now: float, error: str, delay: float = 1) -> None:
+    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None) -> None:
         with self.db:
             if job.kind == 'fetch':
                 self.subscriptions.history.failed(job.item)
-            self.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=? AND generation=? AND status='running'",
-                            (now + delay, error, job.id, job.generation))
+            self.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
+                            (now + delay, error, code or job.kind, job.id, job.generation))
 
     def interrupted(self) -> None:
         with self.db:

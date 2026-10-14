@@ -215,10 +215,20 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
       if (path.startsWith('oko/') && !(field in result.overrides)) info.textContent = describeOwner(effective.scope,effective.owner);
       const save = element('button', 'Сохранить'); save.id = 'setting-save-' + field; save.type = 'submit'; save.className = 'settings-action';
       const reset = element('button', 'Сбросить'); reset.id = 'setting-reset-' + field; reset.type = 'button'; reset.className = 'settings-action'; reset.disabled = !(field in result.overrides);
+      const discard = element('button', 'Отменить изменение'); discard.id = 'setting-discard-' + field; discard.type = 'button'; discard.className = 'settings-action';
+      discard.onclick = async () => {
+        const action = operations.begin('discard/' + field);
+        delete values[input.id];
+        if (type === 'boolean') input.checked = Boolean(effective.value); else input.value = String(effective.value);
+        if (enabled) {enabled.checked = effective.value !== 'off';input.disabled = !enabled.checked;}
+        showDraft();
+        try {await api.discardDraft?.('settings/' + path, field);} catch(error) {reportError(error,'Отмена изменения');action.commit(() => editorMessage(error.message));}
+      };
       let saving = false;
       async function update(value) {
         if (saving) return;
         saving = true; save.disabled = reset.disabled = true;
+        editorMessage('Сохранение…');
         const action = operations.begin('field/' + field), submittedDraft = currentValue();
         try {
           await api('settings/' + path,'PATCH',{[field]:value});
@@ -231,7 +241,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
       }
       row.onsubmit = event => {event.preventDefault(); if (row.reportValidity()) void update(type === 'boolean' ? input.checked : type === 'number' ? Number(input.value) : currentValue());};
       reset.onclick = () => update(null);
-      showDraft(); row.append(label, info, saved, save, reset); panel.append(row);
+      showDraft(); row.append(label, info, saved, save, reset, discard); panel.append(row);
       if (field === 'prompt_filters') panel.append(element('p','Пустое поле выключает фильтрацию. Скрытые материалы остаются доступны.'));
       if (field === 'schedule') panel.append(element('p','Расписание действует только при работающем Око.'));
       container.append(panel);

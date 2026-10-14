@@ -331,7 +331,7 @@ class Digests:
     def require_known_execution(self, identity: str, signature: str) -> None:
         progress = self.read(identity, signature)
         if progress and progress.parts:
-            raise ProcessingError(UNKNOWN_REVIEW)
+            raise ProcessingError(UNKNOWN_REVIEW, code='review-restart')
 
     def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
         candidate = self.candidate(job.item)

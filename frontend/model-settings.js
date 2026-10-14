@@ -7,7 +7,15 @@ export function createModelSettings({api}) {
   const byId = id => document.getElementById(id);
   const operations = createOperations();
   const codex = createCodexSettings({api});
-  let stopped = false, dirty = false, loaded = false, revision = 0;
+  let stopped = false, dirty = false, loaded = false, revision = 0, savedConfig = null;
+  const discard = element('button', 'Отменить изменение'); discard.id = 'llamacpp-discard'; byId('llamacpp-save').after(discard);
+  discard.onclick = async () => {
+    const action = operations.begin('discard');
+    revision++; dirty = false;
+    byId('llamacpp-endpoint').value = savedConfig?.endpoint || ''; byId('llamacpp-model').value = savedConfig?.model || ''; byId('llamacpp-local').checked = savedConfig?.local_execution || false;
+    try {await api.discardDraft('processors/llamacpp', '', 'PUT');}
+    catch (error) {action.commit(() => {byId('llamacpp-status').textContent = error.message;});}
+  };
   for (const id of ['llamacpp-endpoint', 'llamacpp-model']) {
     byId(id).oninput = () => {dirty = true; revision++; byId('llamacpp-local').checked = false;};
   }
@@ -15,7 +23,8 @@ export function createModelSettings({api}) {
   byId('llamacpp-save').onclick = async () => {
     const action = operations.begin('llamacpp-save'), sentRevision = revision;
     try {
-      await api('processors/llamacpp', 'PUT', {endpoint:byId('llamacpp-endpoint').value, model:byId('llamacpp-model').value, local_execution:byId('llamacpp-local').checked});
+      const body = {endpoint:byId('llamacpp-endpoint').value, model:byId('llamacpp-model').value, local_execution:byId('llamacpp-local').checked};
+      await api('processors/llamacpp', 'PUT', body); savedConfig = body;
       action.commit(() => {byId('llamacpp-status').textContent = sentRevision === revision ? 'Подключение сохранено. Выберите llama.cpp и включите тезисы для Око, папки или фида.' : 'Подключение сохранено. Новый ввод ещё не сохранён.';});
     } catch(error) {reportError(error, 'Подключения моделей'); action.commit(() => {byId('llamacpp-status').textContent = error.message;});}
   };
@@ -57,6 +66,7 @@ export function createModelSettings({api}) {
       try {
         const config = await api('processors/llamacpp', 'GET', undefined, action.signal);
         action.commit(() => {
+          savedConfig = config;
           if (config && !dirty) {byId('llamacpp-endpoint').value = config.endpoint; byId('llamacpp-model').value = config.model; byId('llamacpp-local').checked = config.local_execution;}
           loaded = true;
         });

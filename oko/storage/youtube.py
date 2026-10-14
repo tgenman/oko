@@ -83,7 +83,7 @@ class YouTubeAccess:
     def reset(self, item: str) -> None:
         self.db.execute('DELETE FROM youtube_attempts WHERE item=?', (item,))
 
-    def defer(self, job: 'Job', now: float, delay: float, reason: str) -> None:
+    def defer(self, job: 'Job', now: float, delay: float, reason: str, *, blocked: bool = False) -> None:
         with self.db:
-            self.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=? AND generation=?",
-                            (now + max(.05, delay), reason, job.id, job.generation))
+            self.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=? WHERE id=? AND generation=?",
+                            (now + max(.05, delay), reason, 'youtube-admission' if blocked else None, job.id, job.generation))

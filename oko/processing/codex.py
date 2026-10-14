@@ -426,7 +426,7 @@ class Codex:
         if sum(len(s.text) + len(s.title) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
         if request.codex_choice is None:
-            raise ProcessingError('Выберите и сохраните модель Codex для каждого действия')
+            raise ProcessingError('Выберите и сохраните модель Codex для каждого действия', code='codex-choice')
         prompt = processing_instruction(request) + ' Не используй инструменты.\n' + request.model_dump_json()
         result = await self.client.complete(prompt, result_type(request).model_json_schema(), directory, request.codex_choice)
         try:

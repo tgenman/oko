@@ -174,7 +174,7 @@ class TelegramSource:
         if self.username:
             info = await self.client.info(self.account, '@' + self.username, **self.scope)
             if info['peer'] != self.peer:
-                raise SourceError('Username Telegram теперь принадлежит другому источнику; переподключите фид')
+                raise SourceError('Username Telegram теперь принадлежит другому источнику; переподключите фид', code='source-reconnect')
 
     def url(self, id: int) -> str:
         topic = f'{self.topic_id}/' if self.topic_id else ''

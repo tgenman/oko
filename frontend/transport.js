@@ -18,6 +18,8 @@ export function createTransport({fetch, token, origin}) {
       const detail = result?.detail;
       const error = new Error(typeof detail === 'string' ? detail : response.status === 422 ? 'Проверьте значения настроек' : 'Связь с Око потеряна');
       error.detail = detail;
+      error.confirmed = true;
+      error.actionId = response.headers.get('X-Oko-Action');
       error.diagnosticId = response.headers.get('X-Oko-Error');
       if (response.headers.get('X-Oko-Expected')) error.name = 'AbortError';
       throw error;
@@ -30,8 +32,8 @@ export function createTransport({fetch, token, origin}) {
     return response;
   }
   return {
-    async json(path, method = 'GET', body = undefined, signal = undefined) {
-      const response = await request(path, {method, signal, cache:'no-store', headers:headers(path, true), body:body === undefined ? undefined : JSON.stringify(body)});
+    async json(path, method = 'GET', body = undefined, signal = undefined, actionId = undefined) {
+      const response = await request(path, {method, signal, cache:'no-store', headers:{...headers(path, true), ...(actionId ? {'X-Oko-Action':actionId} : {})}, body:body === undefined ? undefined : JSON.stringify(body)});
       return decode(response);
     },
     media(path, signal = undefined, cache = undefined) {
