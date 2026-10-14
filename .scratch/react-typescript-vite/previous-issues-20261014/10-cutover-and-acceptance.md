@@ -1,7 +1,7 @@
-# 08. Общий React root и завершение миграции
+# 10. Общий React root и завершение миграции
 
 Status: ready-for-agent
-Blocked by: 07
+Blocked by: 09
 
 Спецификация: [spec.md](../spec.md). Реализация пока не разрешена.
 
@@ -19,7 +19,7 @@ Production-приложение целиком использует React + stri
 ## Приёмка
 
 - [ ] Ни один product route/UI-сценарий не зависит от удалённого legacy; нет второй JS/TS реализации и незавершённых migration flags.
-- [ ] Typecheck, lint/hooks, drift, build, HTTP/security, browser, Python/lifecycle и CLI проходят на подготовленном дереве задачи.
+- [ ] OpenAPI lint/совместимость, codegen обеих библиотек, route/HTTP drift, Swagger, typecheck, lint/hooks, build, HTTP/security, browser, Python/lifecycle и CLI проходят на подготовленном дереве задачи.
 - [ ] Проверен установленный пакет без checkout/Node, свежесть build в checkout и запуск из другого cwd.
 - [ ] Просмотрены финальные desktop/mobile скриншоты основных состояний; текущая вёрстка и содержание сохранены.
 - [ ] Независимое ревью проверило соответствие спецификации, владельцев, поздние ответы, сборку/выдачу и отсутствие необоснованных новых зависимостей.
