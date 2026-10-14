@@ -14,3 +14,5 @@ Checks used temporary storage, synthetic model/catalog adapters, and the existin
 Evidence is in the worktree check runs `20261014T134423Z-5f75de78` (red), `20261014T134613Z-379b76cc` (13/14), and `20261014T134648Z-26bc37b7` (2/2 and screenshot).
 
 Integration limitation: these checks used a temporary menus wiring that removed the legacy model containers and mounted `Models` persistently. That wiring is owned by the settings integration ticket and is intentionally not included in this component commit. Ticket 13 can close after the settings branch mounts this component and removes the old model renderers.
+
+Settings integration completed on 2026-10-14: Models mounted persistently, legacy model renderers removed, all 9 model scenarios passed again in the 32/32 integration batch. See [settings verification](react-settings.md).
