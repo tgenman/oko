@@ -1,7 +1,7 @@
 import {mountSurface} from '../renderer';
 import type {ReaderApi} from '../api/reader';
 import type {Status,SourceStatus} from '../api/generated/types.gen';
-import {createModelSettings} from '../../model-settings.js';
+import {Models} from './models';
 import {YouTubeSettings,YouTubeSummary} from './youtube';
 import {MenusOwner,type DialogName,type Discard} from './owner';
 import {Editor,useOwner} from './editor';
@@ -17,15 +17,13 @@ export function createMenus({readerApi,api,onChanged}:{readerApi:ReaderApi;api:{
  for(const name of ['settings','feeds']as const)mountSurface(document.getElementById(name+'-dialog')!.querySelector('.dialog-header')as HTMLElement,<Header owner={owner} name={name} title={name==='settings'?'Настройки Око':'Фиды и папки'}/>);
  const feeds=document.getElementById('feeds-layout')!;const host=document.createElement('div');feeds.replaceWith(host);mountSurface(host,<FeedLayout owner={owner}/>);
  mountSurface(document.getElementById('add-dialog')!,<Add owner={owner}/>);
- // The remaining connection pages retain exclusive containers until their
- // separately scheduled React owners are integrated.
- const models=createModelSettings({api});
+ for(const page of document.querySelectorAll('#settings-dialog > [data-settings-page]'))if(['models','llamacpp','codex'].includes((page as HTMLElement).dataset.settingsPage||''))page.remove();
+ const modelsHost=document.createElement('div');document.getElementById('settings-dialog')!.append(modelsHost);mountSurface(modelsHost,<Models owner={owner}/>);
  mountSurface(document.getElementById('youtube-short-status')!,<YouTubeSummary owner={owner}/>);
  const oldYoutube=document.querySelector<HTMLElement>('#settings-dialog > [data-settings-page="youtube"]')!;const youtubeHost=document.createElement('div');oldYoutube.replaceWith(youtubeHost);mountSurface(youtubeHost,<YouTubeSettings owner={owner}/>);
  const legacyPages=[...document.getElementById('settings-dialog')!.children].filter(node=>node instanceof HTMLElement&&node.dataset.settingsPage)as HTMLElement[];
  const sync=()=>{for(const page of legacyPages)page.hidden=owner.active!=='settings'||page.dataset.settingsPage!==owner.page;for(const name of ['settings','feeds'])document.getElementById(name+'-dialog')!.dataset.settingsView=owner.page;};owner.subscribe(sync);
- owner.onPageChange.push(page=>{models.deactivate();if(['models','llamacpp','codex'].includes(page))void models.open();});
  for(const button of document.querySelectorAll<HTMLButtonElement>('[data-settings-target]'))if(!button.closest('#settings-editor'))button.onclick=()=>owner.navigate(button.dataset.settingsTarget!,button);
  for(const name of ['add','feeds','settings']as const){document.getElementById(name+'-open')!.onclick=event=>void owner.open(name,event.currentTarget as HTMLElement);const dialog=document.getElementById(name+'-dialog')as HTMLDialogElement;dialog.addEventListener('cancel',()=>owner.close(name));dialog.addEventListener('close',()=>{if(!dialog.open)owner.close(name);});}
- return {status:(state:Status)=>owner.status(state),sources:(sources:SourceStatus[])=>{owner.sources=sources;owner.changed();},openFeed:(id:string,trigger?:HTMLElement)=>owner.open('feeds',trigger,'feed/'+id),async openStatus(target:{kind:string;scope?:string;id?:string;page?:string},trigger?:HTMLElement){if(target.kind==='feed-settings'){await owner.open('feeds',trigger,'feed/'+target.id);if(target.page)owner.navigate(target.page,trigger);return;}if(target.kind==='add'){await owner.open('add',trigger);owner.tab=target.page||'rss';owner.changed();for(const callback of owner.onTabChange)callback(owner.tab);return;}await owner.open(target.scope&&target.scope!=='oko'?'feeds':'settings',trigger,target.scope&&target.scope!=='oko'?target.scope+'/'+target.id:undefined);owner.navigate(target.page||'home',trigger);},stop(){owner.stop();models.stop();}};
+ return {status:(state:Status)=>owner.status(state),sources:(sources:SourceStatus[])=>{owner.sources=sources;owner.changed();},openFeed:(id:string,trigger?:HTMLElement)=>owner.open('feeds',trigger,'feed/'+id),async openStatus(target:{kind:string;scope?:string;id?:string;page?:string},trigger?:HTMLElement){if(target.kind==='feed-settings'){await owner.open('feeds',trigger,'feed/'+target.id);if(target.page)owner.navigate(target.page,trigger);return;}if(target.kind==='add'){await owner.open('add',trigger);owner.tab=target.page||'rss';owner.changed();for(const callback of owner.onTabChange)callback(owner.tab);return;}await owner.open(target.scope&&target.scope!=='oko'?'feeds':'settings',trigger,target.scope&&target.scope!=='oko'?target.scope+'/'+target.id:undefined);owner.navigate(target.page||'home',trigger);},stop(){owner.stop();}};
 }

@@ -495,6 +495,44 @@ test('a completed RSS addition preserves changes typed after submission', async 
     await expect(r.page.locator('#rss-title')).toHaveValue('Draft B');
     await expect(r.page.locator('#rss-history-count')).toHaveValue('13');
     await expect(r.page.locator('#add-dialog')).toBeVisible();
+    const {artifactPath}=require('./artifacts.cjs');
+    for(const [width,height,name]of [[1280,900,'react-rss-desktop.png'],[390,844,'react-rss-mobile.png']]){
+      await r.page.setViewportSize({width,height});
+      expect(await r.page.locator('#add-dialog').evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth)).toBe(true);
+      const screenshot=artifactPath(name);await r.page.screenshot({path:screenshot});console.log('RSS screenshot:',screenshot);
+    }
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
+});
+
+test('OPML preview rejects an older file response and resolves real HTTP folder conflicts', async () => {
+  const r=await reader();let delayed;
+  try {
+    await r.start([]);
+    await r.page.evaluate(() => {
+      for(const route of ['/api/import/preview','/api/import','/api/subscriptions'])readerTransport.native.add(route);
+    });
+    await r.page.route('**/api/import/preview',async route=>{
+      if(route.request().postDataJSON().opml.includes('Old file'))delayed=route;
+      else await route.continue();
+    });
+    await r.page.locator('#add-open').click();
+    await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
+    await r.page.locator('#opml-file').setInputFiles({name:'old.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body><outline text="Old file" xmlUrl="https://source.test/old"/></body></opml>')});
+    await expect.poll(()=>Boolean(delayed)).toBe(true);
+    await r.page.locator('#opml-file').setInputFiles({name:'new.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body><outline text="A"><outline text="New file" xmlUrl="https://source.test/new"/></outline><outline text="B"><outline text="New file" xmlUrl="https://source.test/new"/></outline></body></opml>')});
+    await expect(r.page.locator('#import-plan')).toContainText('Папок: 2; источников: 1');
+    await delayed.fulfill({status:200,contentType:'application/json',body:JSON.stringify({folders:['Old file'],feeds:[]})});delayed=null;
+    await expect(r.page.locator('#import-plan')).toContainText('Папок: 2; источников: 1');
+    await r.page.locator('#import-confirm').click();
+    await expect(r.page.locator('#import-plan')).toContainText('Выберите одну папку для каждого конфликта');
+    await r.page.locator('#import-plan select').selectOption('B');
+    await r.page.locator('#import-confirm').click();
+    await expect(r.page.locator('#feeds-dialog')).toBeVisible();
+    const catalog=await r.api('subscriptions');
+    expect(catalog.feeds).toHaveLength(1);
+    expect(catalog.feeds[0].title).toBe('New file');
+    expect(catalog.folders.find(folder=>folder.id===catalog.feeds[0].folder_id).title).toBe('B');
+    expect(r.errors).toEqual([]);
+  }finally{if(delayed)await delayed.abort();await r.close();}
 });
