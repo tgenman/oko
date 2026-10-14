@@ -466,3 +466,35 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
+
+test('a completed RSS addition preserves changes typed after submission', async () => {
+  const r = await reader();
+  try {
+    await r.start([]); await objects(r);
+    await r.page.evaluate(() => {
+      readerTransport.replies.set('/api/feeds/verify',{body:{url:'https://source.test/new',title:'Sent A',kind:'rss',verification:'verified'}});
+      readerTransport.held.set('/api/feeds',true);
+    });
+    await r.page.locator('#add-open').click();
+    await r.page.locator('#rss-url').fill('https://source.test/new');
+    await r.page.locator('#rss-check').click();
+    await expect(r.page.locator('#rss-title')).toHaveValue('Sent A');
+    await r.page.locator('#rss-add').click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/feeds'));
+    await r.page.locator('#rss-title').fill('Draft B');
+    await r.page.locator('#rss-history-count').fill('13');
+    await r.page.keyboard.press('Escape');
+    await r.page.locator('#add-open').click();
+    const refreshes=await r.page.evaluate(() => readerTransport.requests.filter(request => request.url==='/api/subscriptions').length);
+    await r.page.evaluate(() => {
+      const catalog=readerTransport.replies.get('/api/subscriptions').body;
+      const feed={...catalog.feeds[0],id:'new',title:'Sent A'};
+      catalog.feeds.push(feed);readerTransport.release('/api/feeds',feed);
+    });
+    await r.page.waitForFunction(previous => readerTransport.requests.filter(request => request.url==='/api/subscriptions').length>previous,refreshes);
+    await expect(r.page.locator('#rss-title')).toHaveValue('Draft B');
+    await expect(r.page.locator('#rss-history-count')).toHaveValue('13');
+    await expect(r.page.locator('#add-dialog')).toBeVisible();
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});

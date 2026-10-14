@@ -23,6 +23,7 @@ test('legacy feed shows only known history settings and saving does not change i
     await expect(r.page.locator('#feed-options input[type=number]')).toHaveCount(0);
     await expect(r.page.locator('#feed-options')).not.toContainText('Загружено 0');
     await r.page.locator('#feed-options button').filter({hasText: 'Сохранить фид'}).click();
+    await r.page.waitForFunction(() => readerTransport.requests.some(request => request.url === '/api/feeds/legacy' && request.method === 'PATCH'));
     const patch = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/feeds/legacy' && r.method === 'PATCH'));
     expect(patch.body).not.toHaveProperty('initial_days');
   } finally { await r.close(); }

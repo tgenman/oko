@@ -15,7 +15,7 @@ test('real HTTP settings load 60 YouTube materials and keep viewed IDs on a seco
     await feedOptions(page);
   await page.locator('#youtube-history-count').fill('60');
   await page.locator('#youtube-history-start').click();
-  await expect.poll(async()=>(await api('settings/feed/'+feed.id)).feed.initial_history.loaded,{timeout:20000}).toBe(60);
+  await expect.poll(async()=>(await api('settings/feed/'+feed.id)).feed.initial_history?.loaded,{timeout:20000}).toBe(60);
   await expect(page.locator('#history-progress')).toContainText('Загружено 60 из 60');
   await expect(page.locator('#youtube-history-start')).toBeEnabled();
   await page.locator('#feeds-close').click();

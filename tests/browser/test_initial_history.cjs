@@ -23,6 +23,7 @@ test('RSS connection selects count or inclusive date and displays saved history 
     await expect(r.page.locator('#rss-history-count')).toBeHidden();
     await r.page.locator('#rss-history-date').fill('2025-10-01');
     await r.page.locator('#rss-add').click();
+    await r.page.waitForFunction(() => readerTransport.requests.some(request => request.url === '/api/feeds' && request.method === 'POST'));
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/feeds' && r.method === 'POST'));
     expect(request.body.initial_history).toEqual({mode: 'date', count: null, date: '2025-10-01', timezone: await r.page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)});
     await expect(r.page.locator('#feed-options')).toContainText('Загружено 7 публикаций с 01.10.2025');
