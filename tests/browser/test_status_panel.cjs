@@ -1,5 +1,6 @@
 const {test} = require('node:test');
 const {reader, material, expect} = require('./support.cjs');
+const {artifactPath} = require('./artifacts.cjs');
 
 const modelProblem = {id:'processor:codex-choice',code:'codex-choice',section:'action',title:'Не выбрана модель Codex',
   consequence:'Тезисы и обзоры пока не создаются.',next_step:'Выберите модель.',objects:[{kind:'settings',id:'global',label:'Настройки Око'}],
@@ -24,6 +25,8 @@ test('missing model opens the selected panel without moving reading and navigate
     await expect(r.page.locator('#status-panel')).toContainText('Не выбрана модель Codex');
     await expect(r.page.locator('#title')).toHaveText('one');
     expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(scroll);
+    const desktop = artifactPath('status-panel-desktop.png');
+    await r.page.screenshot({path:desktop}); console.info('Status panel screenshot:',desktop);
     await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
     await expect(r.page.locator('#settings-dialog')).toBeVisible();
     await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','codex');
@@ -123,6 +126,8 @@ test('panel reorders only on reopening and fits a modal phone viewport',async()=
     expect(await r.page.locator('#reader-shell').evaluate(n=>n.inert)).toBe(true);
     const box=await r.page.locator('#status-panel').boundingBox();
     expect(box.x).toBe(0);expect(box.width).toBe(390);
+    const mobile = artifactPath('status-panel-mobile.png');
+    await r.page.screenshot({path:mobile}); console.info('Status panel screenshot:',mobile);
     await r.page.keyboard.press('Escape');
     await expect(r.page.locator('#status-toggle')).toBeFocused();
     expect(await r.page.locator('#reader-shell').evaluate(n=>n.inert)).toBe(false);

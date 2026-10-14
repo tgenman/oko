@@ -231,3 +231,64 @@ def test_snapshot_rejects_intent_to_add_without_turning_it_into_staged_content(t
     assert result.returncode == 1 and 'intent-to-add' in result.stderr
     assert git(root, 'diff', '--cached', '--name-only') == before
     assert 'draft' in git(root, 'diff', '--name-only')
+
+
+def test_checkout_materializes_prepared_tree_with_original_git_base(tmp_path):
+    root = repository(tmp_path)
+    (root / 'old.txt').write_text('base file\n')
+    (root / 'source.txt').write_text('first\nsecond\nthird\nfourth\nfifth\n\n')
+    git(root, 'add', '.')
+    git(root, 'commit', '-qm', 'base with legacy whitespace')
+    base = git(root, 'rev-parse', 'HEAD')
+    (root / 'user.txt').write_text('unrelated staged data')
+    git(root, 'add', 'user.txt')
+    (root / 'source.txt').write_text('user first\nsecond\nthird\nfourth\nfifth\n\n')
+    snapshot = tmp_path / 'snapshot'
+    assert run(root, 'snapshot', snapshot).returncode == 0
+    (root / 'source.txt').write_text('user first\nsecond\nthird\nfourth\ntask fifth\n\n')
+    (root / 'old.txt').rename(root / 'renamed.txt')
+    (root / 'binary').write_bytes(b'\x00\xfftask')
+    (root / 'script').write_text('#!/bin/sh\nexit 0\n')
+    (root / 'script').chmod(0o755)
+    (root / 'link').symlink_to('source.txt')
+    prepared = tmp_path / 'prepared'
+    result = run(root, 'prepare', snapshot, '--output', prepared, '--files',
+                 'source.txt', 'old.txt', 'renamed.txt', 'binary', 'script', 'link')
+    assert result.returncode == 0, result.stderr
+    before = git(root, 'status', '--porcelain')
+    output = tmp_path / 'check copy'
+    result = run(root, 'checkout', prepared, '--output', output)
+    assert result.returncode == 0, result.stderr
+    assert git(output, 'rev-parse', 'HEAD') == base
+    assert git(output, 'write-tree') == json.loads((prepared / 'manifest.json').read_text())['task_tree']
+    assert (output / 'source.txt').read_text() == 'first\nsecond\nthird\nfourth\ntask fifth\n\n'
+    assert not (output / 'user.txt').exists() and not (output / 'old.txt').exists()
+    assert (output / 'renamed.txt').read_text() == 'base file\n'
+    assert (output / 'binary').read_bytes() == b'\x00\xfftask'
+    assert (output / 'script').stat().st_mode & 0o111
+    assert (output / 'link').is_symlink() and os.readlink(output / 'link') == 'source.txt'
+    assert git(output, 'remote') == ''
+    assert subprocess.run(['git', 'diff', '--cached', '--check'], cwd=output).returncode == 0
+    assert git(root, 'status', '--porcelain') == before
+    assert git(root, 'rev-parse', 'HEAD') == base
+    result = run(root, 'checkout', prepared, '--output', output)
+    assert result.returncode == 1 and 'already exists' in result.stderr
+
+
+@pytest.mark.parametrize('drift', ['index', 'payload'])
+def test_checkout_rejects_changed_preparation_before_creating_copy(tmp_path, drift):
+    root = repository(tmp_path)
+    snapshot = tmp_path / 'snapshot'
+    assert run(root, 'snapshot', snapshot).returncode == 0
+    (root / 'source.txt').write_text('first\nsecond\ntask third\n')
+    prepared = tmp_path / 'prepared'
+    assert run(root, 'prepare', snapshot, '--output', prepared, '--files', 'source.txt').returncode == 0
+    if drift == 'payload':
+        (prepared / 'tree/source.txt').write_text('changed prepared preview')
+    else:
+        subprocess.run(['git','read-tree','--empty'],cwd=root,
+                       env=dict(os.environ,GIT_INDEX_FILE=str(prepared / 'index')),check=True)
+    output = tmp_path / 'copy'
+    result = run(root, 'checkout', prepared, '--output', output)
+    assert result.returncode == 1 and 'changed' in result.stderr
+    assert not output.exists()

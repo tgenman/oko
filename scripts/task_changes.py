@@ -286,6 +286,34 @@ def prepare(root, source, output, names):
     print('Prepared:', directory)
 
 
+def prepared_entries(root, directory, plan):
+    env = dict(os.environ, GIT_INDEX_FILE=str(directory / 'index'))
+    if git(root, 'write-tree', env=env).decode().strip() != plan['task_tree']:
+        raise TaskError('Prepared index changed; prepare again')
+    entries = head_entries(root, plan['task_tree'])
+    for name in plan['selected']:
+        shown = read_file(directory / 'tree', name)
+        if ((shown[1], shown[2]) if shown else None) != git_content(root, entries.get(name)):
+            raise TaskError('Prepared file changed: ' + name)
+    return entries
+
+
+def checkout(root, prepared, output):
+    """Materialize the immutable task tree with its real base and an independent index."""
+    plan = load_snapshot(root, prepared)
+    prepared_entries(root, prepared, plan)
+    directory = external_directory(root, output)
+    env = dict(os.environ)
+    env.pop('GIT_INDEX_FILE', None)
+    git(root, 'clone', '--local', '--no-hardlinks', '--no-checkout', '--', str(root), str(directory), env=env)
+    git(directory, 'update-ref', '--no-deref', 'HEAD', plan['head'], env=env)
+    git(directory, 'read-tree', '--reset', '-u', plan['task_tree'], env=env)
+    git(directory, 'remote', 'remove', 'origin', env=env)
+    print('Checkout:', directory)
+    print('Base:', plan['head'])
+    print('Task tree:', plan['task_tree'])
+
+
 def commit(root, directory, message):
     plan = load_snapshot(root, directory)
     if git(root, 'rev-parse', 'HEAD').decode().strip() != plan['head'] or index_entries(root) != plan['original_index']:
@@ -300,13 +328,7 @@ def commit(root, directory, message):
     if restored is None or restored[0] != 'file' or hashlib.sha256(restored[2]).hexdigest() != plan['rebased_index_digest']:
         raise TaskError('Prepared restoration index changed')
     env = dict(os.environ, GIT_INDEX_FILE=str(directory / 'index'))
-    if git(root, 'write-tree', env=env).decode().strip() != plan['task_tree']:
-        raise TaskError('Prepared index changed; prepare again')
-    entries = head_entries(root, plan['task_tree'])
-    for name in plan['selected']:
-        shown = read_file(directory / 'tree', name)
-        if ((shown[1], shown[2]) if shown else None) != git_content(root, entries.get(name)):
-            raise TaskError('Prepared file changed: ' + name)
+    prepared_entries(root, directory, plan)
     git(root, 'diff', '--cached', '--check', env=env)
     sys.stdout.buffer.write(git(root, 'commit', '-m', message, env=env))
     if git(root, 'rev-parse', 'HEAD^{tree}').decode().strip() != plan['task_tree']:
@@ -347,6 +369,9 @@ def main():
     command.add_argument('directory', type=Path)
     command.add_argument('--output', type=Path, required=True)
     command.add_argument('--files', nargs='+', required=True)
+    command = commands.add_parser('checkout')
+    command.add_argument('directory', type=Path)
+    command.add_argument('--output', type=Path, required=True)
     command = commands.add_parser('commit')
     command.add_argument('directory', type=Path)
     command.add_argument('--message', required=True)
@@ -359,6 +384,8 @@ def main():
             task_diff(root, args.directory)
         elif args.command == 'prepare':
             prepare(root, args.directory, args.output, list(dict.fromkeys(args.files)))
+        elif args.command == 'checkout':
+            checkout(root, args.directory, args.output)
         else:
             commit(root, args.directory, args.message)
     except (TaskError, OSError, ValueError, KeyError) as error:

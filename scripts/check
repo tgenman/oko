@@ -169,7 +169,7 @@ def executable(value, name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     groups = {'ui': ['syntax', 'lint', 'http', 'browser', 'diff'],
-              'all': ['contracts', 'syntax', 'lint', 'http', 'browser', 'diff', 'python-tests', 'types', 'entrypoint'],
+              'all': ['contracts', 'syntax', 'lint', 'types', 'http', 'browser', 'diff', 'python-tests', 'entrypoint'],
               'python': ['contracts', 'python-tests']}
     suites = ('contracts', 'syntax', 'lint', 'http', 'browser', 'diff', 'types', 'entrypoint', 'staged')
     parser.add_argument('sets', nargs='+', choices=(*groups, *suites))
@@ -179,6 +179,9 @@ def main():
     env = os.environ.copy()
     started = time.monotonic()
     names = list(dict.fromkeys(name for selected in args.sets for name in groups.get(selected, [selected])))
+    if {'browser', 'python-tests'} & set(names):
+        early = [name for name in ['contracts','syntax','lint','types'] if name in names]
+        names = early + [name for name in names if name not in early]
     selected_files = {'browser': [], 'python-tests': [], 'syntax': [], 'lint': []}
     for value in args.files or []:
         filename, *node_id = value.split('::', 1)
@@ -245,9 +248,16 @@ def main():
         if ('syntax' in names and not commands['syntax']) or ('browser' in names and len(commands['browser'][0]) == 3):
             raise RuntimeError('Required UI modules or browser tests are missing.')
         for current in names:
+            if current in ('browser', 'python-tests') and results.get('types', '').startswith('FAIL'):
+                report.output(f'{current} skipped because types failed.\n')
+                continue
             report.current = current
             report.output(f'\nRUN {current}\n')
             tick = time.monotonic()
+            if current in ('browser', 'python-tests'):
+                artifact_dir = report.directory / 'artifacts' / current
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+                env['OKO_TEST_ARTIFACT_DIR'] = str(artifact_dir)
             for command in commands[current]:
                 if execute(command, env, report=report):
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'

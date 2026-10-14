@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -308,3 +309,19 @@ sys.exit(0)
                 os.kill(int(child_pid.read_text()), signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+@pytest.mark.parametrize('sets', [('all',), ('browser','python','types'), ('python','types')])
+def test_types_run_before_long_checks_and_failure_skips_them(tmp_path, sets):
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(3 if 'mypy' in sys.argv else 0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), *sets],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'FAIL types' in result.stdout
+    assert '\nRUN python-tests\n' not in result.stdout
+    assert 'NOT RUN python-tests' in result.stdout
+    if 'browser' in sets or 'all' in sets:
+        assert '\nRUN browser\n' not in result.stdout
+        assert 'NOT RUN browser' in result.stdout
