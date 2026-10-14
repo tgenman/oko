@@ -59,6 +59,13 @@ export function createOpenedMaterial({api, fetchMedia, onViewed, onChanged}) {
         [origin.processor, origin.model, origin.reasoning_effort, origin.fast === true ? 'Fast включён' : origin.fast === false ? 'Fast выключен' : ''].filter(Boolean).join(' · ');
       for (const source of material.sources || []) current.members.add(source.id);
       byId('title').textContent = material.title;
+      if (material.url && !material.event && !material.digest) {
+        const link = element('a', material.title);
+        link.href = material.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        byId('title').replaceChildren(link);
+      }
       byId('text').textContent = material.text;
       byId('description').textContent = material.description || '';
       byId('description-panel').hidden = !material.description;

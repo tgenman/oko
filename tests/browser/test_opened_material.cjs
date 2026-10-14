@@ -204,3 +204,31 @@ test('digest originals and previous versions retain images, video and circles', 
     assert.deepEqual(r.errors, []);
   } finally {await r.close();}
 });
+
+test('title opens original in a new tab and resets for other cards', async () => {
+  const r = await reader();
+  try {
+    await r.context.route('https://example.org/**', route => route.fulfill({body: '<h1>Original</h1>', contentType: 'text/html'}));
+    await r.start([material('A'), material('B', {url: ''}), material('digest', {sources: [material('source')], digest: {points: []}})]);
+    await r.page.getByRole('button', {name: /^A/}).click();
+    const link = r.page.locator('#title a');
+    await expect(link).toHaveAttribute('href', 'https://example.org/A');
+    await expect(link).toHaveText('A');
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    const popupPromise = r.page.waitForEvent('popup');
+    await link.click();
+    const popup = await popupPromise;
+    await popup.waitForLoadState();
+    assert.equal(popup.url(), 'https://example.org/A');
+    assert.equal(await popup.evaluate(() => window.opener === null), true);
+    await popup.close();
+    await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await r.page.getByRole('button', {name: /^B/}).click();
+    await expect(r.page.locator('#title')).toHaveText('B');
+    await expect(link).toHaveCount(0);
+    await r.page.getByRole('button', {name: /^Обзор/}).click();
+    await expect(r.page.locator('#event-panel')).toBeVisible();
+    await expect(link).toHaveCount(0);
+    assert.deepEqual(r.errors, []);
+  } finally { await r.close(); }
+});
