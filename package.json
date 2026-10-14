@@ -28,6 +28,8 @@
     "build:check": "node scripts/build-frontend.mjs --check",
     "api:generate": "node scripts/generate-api.mjs generate",
     "api:check": "node scripts/generate-api.mjs check",
+    "api:compat": "node scripts/generate-api.mjs compat",
+    "api:baseline": "node scripts/generate-api.mjs baseline",
     "api:lint": "node scripts/generate-api.mjs validate",
     "api:docs": "node scripts/generate-api.mjs docs"
   }
