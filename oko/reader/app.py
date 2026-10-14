@@ -26,6 +26,7 @@ from oko.collection.telegram.source import TelegramClient, ConnectTelegram, Tele
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.actions import action_context
+from oko.reader.docs import install_docs
 from oko.reader.static import install_frontend, validate_frontend
 from oko.reader.generated.operations import RESPONSES
 from oko.collection.youtube.source import CaptionsClient
@@ -471,6 +472,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         await runtime.viewed(item)
         return {'ok': True}
 
+    install_docs(app)
     install_frontend(app)
 
     return app
