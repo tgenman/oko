@@ -39,7 +39,7 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
       const b=e.getBoundingClientRect(),s=getComputedStyle(e);return {tag:e.tagName,id:e.id,x:b.x,y:b.y,w:b.width,h:b.height,padding:s.padding,margin:s.margin,gap:s.gap,font:s.fontSize,weight:s.fontWeight,line:s.lineHeight,spacing:s.letterSpacing,display:s.display,overflow:s.overflow};
     }));
     measurements[key]=await geometry();
-    const sheet=r.page.locator('link[href="/reader-surfaces.css"]');
+    const sheet=r.page.locator('link[data-reader-surfaces]');
     await sheet.evaluate(n=>{n.disabled=true;});
     const original=await geometry();
     await sheet.evaluate(n=>{n.disabled=false;});

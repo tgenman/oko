@@ -10,9 +10,13 @@ def test_reader_serves_entire_browser_module_graph_without_exposing_reader_data(
     with TestClient(create_app(tmp_path, token='test')) as client:
         page = client.get('/')
         assert page.status_code == 200
-        entry = re.search(r'<script src="([^"]+)" type="module">', page.text)
+        entry = re.search(r'<script[^>]*\bsrc="([^"]+)"[^>]*>', page.text)
         assert entry
         pending = [entry.group(1)]
+        for path in re.findall(r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"', page.text):
+            css = client.get(path)
+            assert css.status_code == 200
+            assert css.headers['content-type'].startswith('text/css')
         visited = set()
         while pending:
             path = pending.pop()
@@ -22,7 +26,7 @@ def test_reader_serves_entire_browser_module_graph_without_exposing_reader_data(
             response = client.get(path)
             assert response.status_code == 200, path
             assert response.headers['content-type'].startswith('text/javascript'), path
-            for relative in re.findall(r"from ['\"]([^'\"]+)['\"]", response.text):
+            for relative in re.findall(r"(?:\bfrom\s*|\bimport\s*)['\"]([^'\"]+)['\"]", response.text):
                 pending.append(urljoin(path, relative))
         assert client.get('/api/subscriptions').status_code == 403
         assert client.get('/api/subscriptions', headers={'Authorization':'Bearer test'}).status_code == 200

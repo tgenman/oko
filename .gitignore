@@ -7,6 +7,7 @@ __pycache__/
 data/
 Око.app/
 node_modules/
+oko/frontend_build/
 
 .scratch/check-runs/
 /.idea/inspectionProfiles/profiles_settings.xml

@@ -26,7 +26,7 @@ from oko.collection.telegram.source import TelegramClient, ConnectTelegram, Tele
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.actions import action_context
-from oko.reader.static import install_frontend
+from oko.reader.static import install_frontend, validate_frontend
 from oko.reader.contracts import Navigation, Card, Material, Version, Status
 from oko.collection.youtube.source import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -58,6 +58,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
                telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
                youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> FastAPI:
+    validate_frontend()
     token = token or secrets.token_urlsafe(32)
     runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
     journal = Journal(root, token)
