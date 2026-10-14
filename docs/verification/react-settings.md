@@ -18,6 +18,8 @@
 - Отдельно feed-tree/appearance: все 6 сценариев passed; Playwright снимки дерева настроек mobile/desktop просмотрены. Models mobile и RSS mobile/desktop также просмотрены; формы сохраняют прежние controls, подписи и отсутствие горизонтального overflow.
 - Git staged hooks passed для коммитов реализации и обоих integration merges.
 
+После финального набора добавлена проверка disabled текущей формы во время pending history перед её закрытием: red обнаружил несовпадение ключа в карте pending-операций. Исправление сохраняет блокировку текущего запроса и снимает право прежней операции управлять повторно открытой формой. `typecheck`/`build` passed; ограниченный повтор history/pause/real HTTP YouTube — 7/7 passed (`20261014T140435Z-da51ac9a`). Остальные прошедшие наборы после этого изменения не повторялись.
+
 Снимки текущих RSS-форм сохранены рядом с отчётом: [desktop](react-settings/rss-desktop.png), [mobile](react-settings/rss-mobile.png). Проверки модели до интеграции и их ограничения сохранены в [отдельном отчёте](react-model-settings.md); интеграция здесь проверена без временного harness.
 
 Полный suite и независимое Standards/Spec review всей миграции выполняются главным integration-исполнителем. Этот отчёт относится к настройкам и подключениям и не заменяет общую приёмку.

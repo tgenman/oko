@@ -18,7 +18,7 @@ export class MenusOwner {
   subscriptions:Subscriptions={folders:[],feeds:[]}; sources:SourceStatus[]=[]; histories:Status['initial_histories']=[];
   collapsed=new Set<string>(); values=new Map<string,EffectiveSettings>(); drafts=new Map<string,Draft>();
   historyPending=new Map<string,Operation>();
-  historyBusy(id:string){return this.historyPending.get(id)?.current===true;}
+  historyBusy(id:string){return this.historyPending.get('history/'+id)?.current===true;}
   saving=new Set<string>(); needsRefresh=new Set<string>(); settingsMessage=''; addMessage=''; tab='rss';
   operations=createOperations(); subscriptionOperations=createOperations(); menuOperations=createOperations();
   onPageChange:((page:string)=>void)[]=[]; onTabChange:((tab:string)=>void)[]=[]; onAddOpen:(()=>void)[]=[];

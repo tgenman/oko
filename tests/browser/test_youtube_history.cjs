@@ -106,6 +106,7 @@ test('reopened first history gets progress and resume after a late response', as
     await feedOptions(r.page);
  await r.page.locator('#youtube-history-start').click();
  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/feeds/A/history'));
+ await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
  await r.page.locator('#feeds-close').click(); await r.page.locator('#feeds-open').click();
     await feedOptions(r.page);
  await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
