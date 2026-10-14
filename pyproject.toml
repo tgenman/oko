@@ -14,7 +14,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==9.1.1", "httpx==0.28.1", "mypy==2.4.0"]
+dev = [
+    "pytest==9.1.1",
+    "httpx==0.28.1",
+    "mypy==2.4.0",
+    "datamodel-code-generator==0.83.0",
+    "openapi-spec-validator==0.9.0",
+    "jsonschema==4.26.0",
+    "pyyaml==6.0.3",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -25,7 +33,7 @@ strict = true
 files = ["oko"]
 
 [tool.setuptools.packages.find]
-include = ["oko*", "frontend"]
+include = ["oko*"]
 
 [tool.setuptools.package-data]
-frontend = ["*.html", "*.css", "*.js", "*.mjs", "**/*.html", "**/*.css", "**/*.js", "**/*.mjs"]
+oko = ["frontend_build/**/*", "frontend_build/*.json", "reader/generated/*.json", "reader/generated/*.yaml", "reader/docs/**/*"]
