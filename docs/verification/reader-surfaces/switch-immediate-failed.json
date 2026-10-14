@@ -1,0 +1,106 @@
+{
+  "started_at": "20261014T114332Z",
+  "selected_files": {
+    "browser": [
+      "/private/tmp/oko-surfaces-check-4/tests/browser/test_reader_surfaces.cjs"
+    ],
+    "python-tests": [],
+    "syntax": [
+      "/private/tmp/oko-surfaces-check-4/tests/browser/test_reader_surfaces.cjs"
+    ],
+    "lint": [
+      "/private/tmp/oko-surfaces-check-4/tests/browser/test_reader_surfaces.cjs"
+    ]
+  },
+  "suites": {
+    "syntax": {
+      "status": "PASS (0.04s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-surfaces-check-4/tests/browser/test_reader_surfaces.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "lint": {
+      "status": "PASS (0.22s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-surfaces-check-4/scripts/lint-js.cjs",
+            "/private/tmp/oko-surfaces-check-4/tests/browser/test_reader_surfaces.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "http": {
+      "status": "PASS (1.54s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/reader/test_web_assets.py",
+            "tests/reader/test_frontend_delivery.py",
+            "tests/reader/test_http_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "FAIL (3.17s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-surfaces-check-4/tests/browser/test_reader_surfaces.cjs"
+          ],
+          "exit_code": 1
+        }
+      ],
+      "failures": [
+        "synthetic reader surfaces screenshots and geometry"
+      ]
+    },
+    "diff": {
+      "status": "PASS (0.16s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    }
+  },
+  "exit_code": 1,
+  "duration_seconds": 5.39,
+  "log": "/private/tmp/oko-surfaces-check-4/.scratch/check-runs/20261014T114332Z-2fd4119a/output.log"
+}
