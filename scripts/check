@@ -222,7 +222,7 @@ def main():
         for name in names:
             browser = name == 'browser' and relative.parts[:2] == ('tests', 'browser') and candidate.name.startswith('test_') and candidate.suffix == '.cjs' and not node_id
             python_test = name == 'python-tests' and relative.parts[0] == 'tests' and candidate.suffix == '.py'
-            javascript = name in ('syntax', 'lint') and candidate.suffix in ('.js', '.cjs', '.mjs') and not node_id
+            javascript = ((name in ('syntax', 'lint') and candidate.suffix in ('.js', '.cjs', '.mjs')) or (name == 'syntax' and candidate.suffix in ('.ts', '.tsx'))) and not node_id
             if browser or python_test or javascript:
                 selected_files[name].append(str(candidate) + ('::' + node_id[0] if node_id else ''))
                 matched = True
@@ -264,7 +264,7 @@ def main():
             env['OKO_BROWSER_EXECUTABLE'] = probe_text.strip()
         commands = {
             'build': [[node, str(ROOT / 'node_modules/typescript/bin/tsc'), '--noEmit'], [node, str(ROOT / 'scripts/build-frontend.mjs')], [node, str(ROOT / 'scripts/build-frontend.mjs'), '--check']],
-            'syntax': [[node, '--check', str(path)] for path in (selected_files['syntax'] or sorted(path for path in (ROOT / 'frontend').rglob('*') if path.suffix in ('.js', '.mjs')))],
+            'syntax': [([node, str(ROOT / 'scripts/check-ts.cjs'), str(path)] if Path(path).suffix in ('.ts', '.tsx') else [node, '--check', str(path)]) for path in (selected_files['syntax'] or sorted(path for path in (ROOT / 'frontend').rglob('*') if path.suffix in ('.js', '.mjs', '.ts', '.tsx')))],
             'lint': [[node, str(ROOT / 'scripts/lint-js.cjs'), *dict.fromkeys(selected_files['lint'])]],
             'browser': [[node, '--test', '--test-concurrency=2', *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.cjs'))))]],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],

@@ -5,12 +5,17 @@ import {createRoot, type Root} from 'react-dom/client';
 let root: Root | undefined;
 let shell: ReactNode = null;
 const surfaces = new Map<HTMLElement, ReactNode>();
+const portalKeys = new WeakMap<HTMLElement,string>();
+let surfaceSequence = 0;
 let reportRenderError: (error:Error, source:string) => void = () => {};
 
 class SurfaceBoundary extends Component<{children:ReactNode; name:string}, {failed:boolean}> {
   state = {failed:false};
   static getDerivedStateFromError() {return {failed:true};}
-  componentDidCatch(error:Error, _info:ErrorInfo) {reportRenderError(error,'Показ интерфейса: '+this.props.name);}
+  componentDidCatch(error:Error, _info:ErrorInfo) {
+    const source = 'Показ интерфейса: '+this.props.name;
+    queueMicrotask(() => reportRenderError(error,source));
+  }
   render() {return this.state.failed ? <p role="alert">Не удалось показать интерфейс Око. Подробности в диагностике.</p> : this.props.children;}
 }
 
@@ -20,14 +25,17 @@ function render() {
     if (!host) {host=document.createElement('div');host.id='react-root';document.body.append(host);}
     root = createRoot(host);
   }
-  flushSync(() => root!.render(<>{shell}{[...surfaces].map(([host,node]) => createPortal(<SurfaceBoundary name={host.id}>{node}</SurfaceBoundary>,host,host.id))}</>));
+  flushSync(() => root!.render(<>{shell}{[...surfaces].map(([host,node]) => createPortal(<SurfaceBoundary name={host.id || host.parentElement?.id || 'Область интерфейса'}>{node}</SurfaceBoundary>,host,portalKeys.get(host)))}</>));
 }
 
 // Composition only: each surface keeps its own React state and resources.
 // Portals let untouched owners retain exclusive containers during migration.
 export function mountSurface(host:HTMLElement, node:ReactNode) {
   // Claim this container once; portals do not clear a legacy placeholder.
-  if (!surfaces.has(host)) host.replaceChildren();
+  if (!surfaces.has(host)) {
+    host.replaceChildren();
+    if (!portalKeys.has(host)) portalKeys.set(host,'surface-'+ ++surfaceSequence);
+  }
   surfaces.set(host,node); render();
   return () => {surfaces.delete(host);render();};
 }

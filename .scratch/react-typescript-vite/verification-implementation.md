@@ -39,3 +39,9 @@ SDK подключён к heartbeat/close/collect/stop; один session owner �
 - Дополнительный HTTP red на наивном ISO timestamp выявил изменение генератором прежней нормализации. Выбран datetime вместо AwareDatetime;16debug+generator проверок PASS. Публичные timestamps сохраняют доменную семантику.
 - Полный tests/reader +canonicalcontract —156/156PASS за77.57s после всех inputDTO изменений. Реальные сетевые adapters не использовались.
 - uv.lock обновлён под зависимости packagebuilder/installer из04;70закреплённых пакетов.
+
+## 2026-10-14 — guards и renderer
+
+TS/TSX syntax включён в единый runner и проверку точных staged bytes. Частичный staging проверяет индекс, а не рабочий файл; strict project typecheck остаётся отдельной обязательной частью build.35hook/runner тестов PASS. Пробный запуск hook-тестов без разрешения ps не смог выполнить staged-набор; успешный запуск выполнен с разрешённым процессным доступом.
+
+Единственный React renderer использует стабильный ключ для каждого portal host, включая безымянные контейнеры форм. Ошибки render отправляются в диагностику через microtask, чтобы не вызывать вложенный flushSync из componentDidCatch. Typecheck/build и syntax renderer.tsx PASS.
