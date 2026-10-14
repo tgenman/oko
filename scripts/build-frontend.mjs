@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import {resolve, relative, join} from 'node:path';
 import {execFileSync} from 'node:child_process';
+import ts from 'typescript';
 
 const root = resolve(import.meta.dirname, '..');
 const output = join(root, 'oko/frontend_build');
@@ -36,8 +37,11 @@ async function compile() {
   await fs.mkdir(output,{recursive:true});
   await fs.rm(stage,{recursive:true,force:true});
   try {
-    await build({configFile:join(root,'vite.config.mjs'),build:{outDir:stage,emptyOutDir:true}});
-    await fs.cp(join(root,'frontend/docs'),join(stage,'docs'),{recursive:true});
+    const result = await build({configFile:join(root,'vite.config.mjs'),build:{outDir:stage,emptyOutDir:true}});
+    await fs.mkdir(join(stage,'docs'),{recursive:true});
+    await fs.copyFile(join(root,'frontend/docs/index.html'),join(stage,'docs/index.html'));
+    const initializer=ts.transpileModule(await fs.readFile(join(root,'frontend/docs/initializer.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}});
+    await fs.writeFile(join(stage,'docs/initializer.js'),initializer.outputText);
     for (const name of ['swagger-ui.css','swagger-ui-bundle.js']) {
       await fs.copyFile(join(root,'node_modules/swagger-ui-dist',name),join(stage,'docs',name));
     }
@@ -52,8 +56,10 @@ async function compile() {
     await fs.writeFile(index,(await fs.readFile(index,'utf8')).replace('/reader-surfaces.css','/'+surfaceName));
     // A stable transport entry is retained for its public browser boundary;
     // production reader imports always refer to hashed assets.
-    const transport = (await fs.readdir(join(stage,'assets'))).find(name=>/^transport-.*\.js$/.test(name));
-    await fs.writeFile(join(stage,'transport.js'),'export * from "/assets/'+transport+'";\n');
+    const bundles = Array.isArray(result) ? result : [result];
+    const transport = bundles.flatMap(bundle=>bundle.output || []).find(chunk=>chunk.type==='chunk' && chunk.isEntry && chunk.name==='transport')?.fileName;
+    if (!transport) throw new Error('Transport entry missing from the frontend bundle');
+    await fs.writeFile(join(stage,'transport.js'),'export * from "/'+transport+'";\n');
     if (before !== await sourceDigest()) throw new Error('Sources changed during build; retry');
     const assets = {};
     for (const file of await files(stage)) assets[relative(stage,file).split('\\').join('/')] = digest(await fs.readFile(file));
