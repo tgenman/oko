@@ -1,0 +1,36 @@
+/* Appearance only: preserve form geometry and its existing state owners. */
+#add-dialog{background:#f2f2f7;color:#1c1c1e;border-color:#e5e5ea;border-radius:20px}
+#add-dialog::backdrop{background:#0005}
+#add-dialog .dialog-header h1{color:#1c1c1e}
+#add-dialog [role=tablist]{background:#e5e5ea;border-radius:10px}
+#add-dialog [role=tab]{background:transparent;border-color:transparent;color:#007aff;border-radius:8px}
+#add-dialog [role=tab][aria-selected=true]{background:#fff;border-color:transparent;color:#1c1c1e;box-shadow:0 2px 5px #0002}
+#add-dialog [role=tab]:hover{background:#f2f2f7}
+#add-dialog [role=tab][aria-selected=true]:hover{background:#fff}
+#add-dialog :is(input:not([type=checkbox]),select,textarea){background:#fff;color:#1c1c1e;border-color:#e5e5ea;border-radius:10px;accent-color:#007aff}
+#add-dialog input[type=checkbox]{background:#d1d1d6;accent-color:#34c759}
+#add-dialog input[type=checkbox]:checked{background:#34c759}
+#add-dialog :is(label,legend,p){color:#636366}
+#add-dialog fieldset{border-color:#e5e5ea;border-radius:12px}
+#add-dialog button:not([role=tab]){background:#007aff;color:#fff;border-color:#007aff}
+#add-dialog button:not([role=tab]):not(:disabled):hover{background:#0062cc;border-color:#0062cc}
+#add-dialog #add-close{color:#007aff;background:transparent;border-color:transparent}
+#add-dialog #add-close:hover{background:#e5e5ea}
+#add-dialog button:disabled{color:#636366;background:#e5e5ea;border-color:#e5e5ea;opacity:1}
+#add-dialog :is(button,input,select,textarea):focus-visible{outline-color:#007aff}
+
+/* No new wrappers, spacing, typography or responsive layout. */
+#reader-shell main>article{background:#fff;color:#1c1c1e;border-color:#e5e5ea}
+#material :is(.meta,#date,#ai-status,#filter-status,#processing-provenance,#message),#reader-shell main>article #empty{color:#636366}
+#material :is(h1,h2,h3){color:#1c1c1e}
+#material a{color:#007aff}
+#material #title a{color:inherit}
+#material :is(a,button,summary):focus-visible{outline-color:#007aff}
+#material details{background:#f2f2f7;border-color:#e5e5ea;border-radius:12px}
+#material button{background:#f2f2f7;color:#007aff;border-color:#e5e5ea}
+#material button:not(:disabled):hover{background:#e5e5ea}
+#material #viewed{background:#007aff;color:#fff;border-color:#007aff}
+#material #viewed:not(:disabled):hover{background:#0062cc;border-color:#0062cc}
+#material button:disabled,#material #viewed:disabled{color:#636366;background:#e5e5ea;border-color:#e5e5ea;opacity:1}
+/* Existing retry availability distinguishes an incomplete saved material. */
+#material:has(#retry:not([hidden])) #completeness{color:#895b1f}
