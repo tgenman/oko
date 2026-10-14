@@ -4,7 +4,8 @@
 
 Blocked by: 08 — Меню, переходы и одно поле настроек.
 
-Status: ready-for-agent
+Status: claimed
+Assignee: contract
 
 Parent: [Спецификация](../spec.md). Подготовка тикета не разрешает реализацию.
 

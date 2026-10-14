@@ -4,7 +4,8 @@
 
 Blocked by: 05 — Сессия вкладки, сбор и остановка.
 
-Status: ready-for-agent
+Status: claimed
+Assignee: contract
 
 Parent: [Спецификация](../spec.md). Подготовка тикета не разрешает реализацию.
 

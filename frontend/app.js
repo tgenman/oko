@@ -1,6 +1,6 @@
 import {createMaterialList} from './material-list.js';
 import {createReadingTree} from './reading-tree.js';
-import {createMenus} from './menus.js';
+import {createMenus} from './src/settings/menus.tsx';
 import {createDebugPanel, reportError} from './debug.js';
 import {createOpenedMaterial} from './opened-material.js';
 import {createTransport} from './transport.js';
@@ -42,7 +42,7 @@ const opened = createOpenedMaterial({
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
 const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
-const menus = createMenus({api, onChanged: () => {contentEpoch++; refresh();}});
+const menus = createMenus({api, readerApi, onChanged: () => {contentEpoch++; refresh();}});
 statusPanel = createStatusPanel({debug, actions, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
   onMaterial:id=>opened.open({id}), onRetry:async(target,problem)=>{
     const suffix = {retry:'retry','theses-retry':'theses/retry','filter-retry':'filter/retry',regenerate:'regenerate'}[target.kind];
