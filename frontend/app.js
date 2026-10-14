@@ -1,11 +1,12 @@
-import {createMaterialList} from './material-list.js';
-import {createReadingTree} from './reading-tree.js';
+import {createMaterialList} from './src/reading/list.tsx';
+import {createReadingTree} from './src/reading/tree.tsx';
 import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './src/status/debug.tsx';
-import {createOpenedMaterial} from './opened-material.js';
+import {createOpenedMaterial} from './src/reading/opened.tsx';
 import {createTransport} from './transport.js';
 import {createStatusPanel} from './src/status/panel.tsx';
 import {createReaderActions} from './src/status/actions.ts';
+import {createFolderActions} from './src/reading/folder-actions.tsx';
 import {createReaderApi} from './src/api/reader.ts';
 import {createReaderSession} from './src/reader-session.ts';
 import {setRenderReporter} from './src/renderer.tsx';
@@ -36,12 +37,14 @@ async function api(path, method = 'GET', body = undefined, signal = undefined) {
 api.discardDraft = async(path,field,method)=>{await statusPanel.discardDraft(path,field,method);refresh();};
 
 const opened = createOpenedMaterial({
-  api,
+  readerApi,
   fetchMedia: (path, signal) => transport.media(path, signal, 'no-store'),
   onViewed: id => { contentEpoch++; debug.forgetMaterials([id]); statusPanel.forgetMaterials([id]); opened.viewed(id); list.removed(id); session.post(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
-const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
+const list = createMaterialList({readerApi,onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
+const folderActions = createFolderActions({readerApi,getFolder:()=>folderId,isStopped:()=>stopped,onRefresh:refresh,onCompleted:folder=>{contentEpoch++;opened.folderCompleted(folder);if(folderId===folder)list.clear();session.post({kind:'folder-viewed',folder});}});
+list.bindCommands(folderActions);
 const menus = createMenus({api, onChanged: () => {contentEpoch++; refresh();}});
 statusPanel = createStatusPanel({debug, actions, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
   onMaterial:id=>opened.open({id}), onRetry:async(target,problem)=>{
@@ -53,7 +56,7 @@ statusPanel = createStatusPanel({debug, actions, onSettings:(target,trigger)=>me
     }
     refresh();
   }, onRefresh:()=>refresh()});
-const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
+const tree = createReadingTree({readerApi,onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
 function stopUi(message) {
   session.dispose();
   menus.stop();
@@ -62,7 +65,7 @@ function stopUi(message) {
   contentEpoch++;
   opened.clear();
   list.clear();
-  byId('folders').replaceChildren();
+  tree.clear();
   byId('count').textContent = '0';
   byId('progress').textContent = message;
   byId('review-restarts').replaceChildren();
@@ -70,9 +73,9 @@ function stopUi(message) {
   byId('collect').disabled = true;
   byId('compress').disabled = true;
   byId('folder-viewed').disabled = true;
-  byId('completion-dialog').close();
+  folderActions.stop();
   byId('digest-now').disabled = true;
-  byId('digest-dialog').close();
+
   void debug.refresh();
 }
 function readerMessage(data) {
@@ -117,7 +120,7 @@ async function updateReader() {
       row.append(button); return row;
     }));
     menus.sources(state.sources || []);
-    const navigation = await api('navigation');
+    const navigation = await tree.load();
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     readingCatalog = navigation;
     if (tree.update(navigation, state.sources || [])) return;
@@ -127,7 +130,7 @@ async function updateReader() {
     if (byId('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);
     if (feedId) params.set('feed', feedId);
-    const cards = await api('cards?' + params);
+    const cards = await list.load(params);
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     opened.reconcile(cards);
     list.update(cards, opened.selection?.id);
@@ -158,79 +161,3 @@ session.start();
 
 function element(tag, text = '') { const node = document.createElement(tag); node.textContent = text; return node; }
 byId('show-hidden').onchange = () => { contentEpoch++; opened.clear(); refresh(); };
-let digestPeriod = false;
-function openDigest(period) {
-  if (!folderId || stopped) return;
-  digestPeriod = period;
-  byId('digest-heading').textContent = period ? 'Обновить обзор за период' : 'Сжать историю папки';
-  byId('digest-start').value = ''; byId('digest-end').value = '';
-  byId('digest-message').textContent = period ? 'Без дат используется настроенный период обзора.' : '';
-  byId('digest-dialog').showModal();
-}
-byId('compress').onclick = () => openDigest(false);
-byId('digest-now').onclick = () => openDigest(true);
-byId('digest-close').onclick = () => byId('digest-dialog').close();
-byId('digest-run').onclick = async () => {
-  const button = byId('digest-run'); button.disabled = true;
-  try {
-    const body = {period: digestPeriod};
-    for (const field of ['start', 'end']) {
-      const value = byId('digest-' + field).value;
-      if (value) body[field] = new Date(value).getTime() / 1000;
-    }
-    await api('digests/folder/' + folderId, 'POST', body);
-    byId('digest-dialog').close(); refresh();
-  } catch (error) { reportError(error, 'Интерфейс Око'); byId('digest-message').textContent = error.message; }
-  finally { button.disabled = stopped; }
-};
-
-let completionFolder = null;
-let completionToken = null;
-let completionGeneration = 0;
-function renderCompletion(preview) {
-  completionToken = preview.token;
-  byId('completion-count').textContent = `Карточек: ${preview.cards}. Исходных публикаций: ${preview.originals}.`;
-  byId('completion-confirm').disabled = stopped || preview.originals === 0;
-}
-byId('folder-viewed').onclick = async () => {
-  if (!folderId || stopped) return;
-  const stamp = ++completionGeneration;
-  completionFolder = folderId;
-  completionToken = null;
-  byId('completion-count').textContent = 'Подсчёт…';
-  byId('completion-message').textContent = '';
-  byId('completion-confirm').disabled = true;
-  byId('completion-dialog').showModal();
-  try {
-    const preview = await api('folders/' + completionFolder + '/completion/preview', 'POST');
-    if (stamp === completionGeneration && !stopped && byId('completion-dialog').open) renderCompletion(preview);
-  } catch (error) { reportError(error, 'Интерфейс Око'); if (stamp === completionGeneration) byId('completion-message').textContent = error.message; }
-};
-byId('completion-dialog').addEventListener('close', () => { completionGeneration++; completionToken = null; });
-byId('completion-close').onclick = () => byId('completion-dialog').close();
-byId('completion-confirm').onclick = async () => {
-  if (!completionToken || stopped) return;
-  const stamp = completionGeneration;
-  const confirmedFolder = completionFolder;
-  byId('completion-confirm').disabled = true;
-  try {
-    await api('folders/' + confirmedFolder + '/completion', 'POST', {token: completionToken});
-    contentEpoch++;
-    opened.folderCompleted(confirmedFolder);
-    if (folderId === confirmedFolder) list.clear();
-    session.post({kind: 'folder-viewed', folder: confirmedFolder});
-    byId('completion-dialog').close();
-    refresh();
-  } catch (error) { reportError(error, 'Интерфейс Око');
-    if (!error.detail?.preview) {
-      contentEpoch++;
-      opened.folderCompleted(confirmedFolder);
-      session.post({kind: 'folder-viewed', folder: confirmedFolder});
-    }
-    refresh();
-    if (stamp !== completionGeneration || stopped) return;
-    byId('completion-message').textContent = error.detail?.message || error.message;
-    if (error.detail?.preview) renderCompletion(error.detail.preview);
-    else byId('completion-confirm').disabled = false;
-  }
-};

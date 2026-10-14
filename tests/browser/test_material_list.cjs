@@ -82,8 +82,8 @@ test('opened YouTube material preserves description separately from captions', a
 
 test('current video description and previous captions remain available independently', async () => {
  const r=await reader(); try {
-  await r.page.addInitScript(()=>readerTransport.replies.set('/api/previous-video',{body:{title:'Прежнее видео',text:'Прежние субтитры',full:true,reason:'',images:[],attachments:[]}}));
-  await r.start([material('video',{description:'Текущее описание',text:'Текущие субтитры',previous:[{url:'/api/previous-video'}]})]);
+  await r.page.addInitScript(()=>readerTransport.replies.set('/api/materials/video/versions/1',{body:{title:'Прежнее видео',text:'Прежние субтитры',full:true,reason:'',images:[],attachments:[]}}));
+  await r.start([material('video',{description:'Текущее описание',text:'Текущие субтитры',previous:[{url:'/api/materials/video/versions/1'}]})]);
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#title')).toHaveText('video');
   await expect(r.page.locator('#description')).toHaveText('Текущее описание');

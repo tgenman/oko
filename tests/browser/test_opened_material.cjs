@@ -47,17 +47,17 @@ async function settle(page) {
 test('previous version and media delivered after switching never reach the new card', async () => {
   const r = await reader();
   try {
-    await r.start([material('A', {images: ['/api/image-A'], previous: [{url: '/api/versions/A'}]}), material('B')]);
-    await r.page.evaluate(() => { readerTransport.held.set('/api/image-A', true); readerTransport.held.set('/api/versions/A', true); });
+    await r.start([material('A', {images: ['/api/image-A'], previous: [{url: '/api/materials/A/versions/1'}]}), material('B')]);
+    await r.page.evaluate(() => { readerTransport.held.set('/api/image-A', true); readerTransport.held.set('/api/materials/A/versions/1', true); });
     await r.page.getByRole('button', {name: /^A/}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/image-A'));
     await r.page.locator('#versions summary').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/versions/A'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/A/versions/1'));
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст B');
     await r.page.evaluate(() => {
       readerTransport.release('/api/image-A', 'late image');
-      readerTransport.release('/api/versions/A', {title: 'Прежнее A', text: 'СЕКРЕТ ПРЕЖНЕГО A', full:true, reason:'', images: [], attachments:[]});
+      readerTransport.release('/api/materials/A/versions/1', {title: 'Прежнее A', text: 'СЕКРЕТ ПРЕЖНЕГО A', full:true, reason:'', images: [], attachments:[]});
     });
     await settle(r.page);
     await expect(r.page.locator('#material')).not.toContainText('СЕКРЕТ');
@@ -175,7 +175,7 @@ for (const interruption of ['stop', 'connection loss']) {
 test('digest originals and previous versions retain images, video and circles', async () => {
   const r = await reader();
   try {
-    const source = material('source', {images: ['/api/image'], previous: [{url: '/api/previous'}], attachments: [
+    const source = material('source', {images: ['/api/image'], previous: [{url: '/api/materials/source/versions/1'}], attachments: [
       {url: '/api/video', kind: 'video', mime: 'video/webm'},
       {url: '/api/circle', kind: 'circle', mime: 'video/webm'},
     ]});
@@ -185,7 +185,7 @@ test('digest originals and previous versions retain images, video and circles', 
       readerTransport.replies.set('/api/image', {base64: png, mime: 'image/png'});
       readerTransport.replies.set('/api/video', {base64, mime: 'video/webm'});
       readerTransport.replies.set('/api/circle', {base64, mime: 'video/webm'});
-      readerTransport.replies.set('/api/previous', {body: {title: 'Предыдущий заголовок', text: 'Предыдущий текст', full:true, reason:'', images: ['/api/image'], attachments: []}});
+      readerTransport.replies.set('/api/materials/source/versions/1', {body: {title: 'Предыдущий заголовок', text: 'Предыдущий текст', full:true, reason:'', images: ['/api/image'], attachments: []}});
     }, {base64, png});
     await r.page.getByRole('button', {name: /^Обзор/}).click();
     await expect(r.page.locator('#event-body')).toContainText('Тезис обзора');
