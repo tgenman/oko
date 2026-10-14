@@ -4,7 +4,8 @@
 
 Blocked by: 03 — Первый React-сценарий через сгенерированные библиотеки.
 
-Status: ready-for-agent
+Status: claimed
+Assignee: contract
 
 Parent: [Спецификация](../spec.md). Подготовка тикета не разрешает реализацию.
 
