@@ -1,0 +1,47 @@
+/* Reader chrome: keep commands and their existing state owners. */
+#reader-shell>header{display:block;position:relative;min-height:0;height:auto;padding:0;background:#f2f2f7;border-color:#dcdce2;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1c1c1e}
+.reader-toolbar-scroll{overflow-x:auto;scrollbar-width:thin;padding:18px 28px 14px}
+.reader-toolbar{display:flex;align-items:center;gap:28px;min-width:max-content}
+.reader-toolbar .brand{width:auto;font-size:27px;letter-spacing:-.7px}
+.reader-toolbar .brand-icon{width:34px;height:34px}
+.reader-header-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
+.reader-action-group{display:flex;align-items:center;background:#fff;border-radius:14px}
+.reader-toolbar button{display:flex;align-items:center;gap:9px;white-space:nowrap;height:48px;margin:0;padding:0 15px;border:0;border-radius:10px;background:transparent;font-size:14px;line-height:1;color:inherit}
+.reader-action-group>:first-child:not(:last-child),.reader-action-group>:first-child button{border-radius:14px 0 0 14px}
+.reader-action-group>button:last-child{border-left:1px solid #e5e5ea;border-radius:0 14px 14px 0}
+.reader-toolbar button:hover{background:#e9e9ee}
+.reader-toolbar button:focus-visible{outline:3px solid #007aff;outline-offset:-3px}
+.reader-toolbar button:disabled{cursor:default}
+.reader-action-icon{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:7px;background:#007aff;color:#fff}
+.reader-toolbar #collect .reader-action-icon{background:#34c759}
+.reader-toolbar #feeds-open .reader-action-icon{background:#ff9500}
+.reader-toolbar #settings-open .reader-action-icon{background:#8e8e93}
+.reader-toolbar #stop .reader-action-icon{background:#ff3b30}
+.reader-action-icon svg{width:19px;height:19px}
+.reader-toolbar #stop{color:#ff3b30}
+.reader-toolbar #status-toggle::before{content:"";width:28px;height:28px;flex:none;border-radius:7px;background:#007aff url("/icons/state-check.svg") center/19px no-repeat}
+.reader-toolbar #status-toggle.has-problems{background:#fff5e5;border:1px solid #e5d3b0;color:#895b1f}
+.reader-toolbar #status-toggle.has-problems:hover{background:#ffedce}
+.reader-toolbar #status-toggle.has-problems::before{background-color:#ff9500;background-image:url("/icons/state-attention.svg")}
+.reader-progress{padding:0 28px 14px;color:#636366;font-size:13px;line-height:1.5}
+.reader-progress #progress{display:block;max-width:none;white-space:normal;overflow:visible;overflow-wrap:anywhere;color:inherit;font-size:inherit}
+/* Command feedback sits outside the scrollport so errors remain readable. */
+.reader-toolbar .header-command{position:static}
+.reader-toolbar .header-command-error{left:28px}
+.reader-toolbar .header-command:has(#stop) .header-command-error{left:auto;right:28px}
+@media(max-width:1280px){.reader-toolbar{gap:20px}.reader-header-actions{gap:10px}.reader-toolbar button{font-size:13px;padding:0 11px}.reader-action-icon,.reader-toolbar #status-toggle::before{width:25px;height:25px}}
+@media(max-width:700px){.reader-toolbar-scroll{padding:14px 16px 12px}.reader-progress{padding:0 16px 12px}.reader-toolbar .brand{font-size:25px}.reader-toolbar .header-command-error{left:16px}.reader-toolbar .header-command:has(#stop) .header-command-error{right:16px}}
+
+/* Card geometry, typography and content remain owned by the existing list. */
+#material-list,#material-list .list-heading{background:#fff;border-color:#e5e5ea}
+#material-list .list-heading h2{color:#1c1c1e}
+#material-list .list-heading p{color:#636366}
+#cards .material-row{color:#1c1c1e;border-color:#e5e5ea}
+#cards .material-row:hover{background:#f2f2f7}
+#cards .material-row.active{background:#e7f1ff}
+#cards .material-row:focus-visible{outline-color:#007aff}
+#cards .card-preview{background:#f2f2f7;color:#636366}
+#cards :is(.card-kind,.card-snippet,.card-source,.card-date){color:#636366}
+#cards .date-group{background:#f2f2f7;border-color:#e5e5ea;color:#636366}
+#material-list :is(#list-menu-toggle,#folder-viewed){color:#636366}
+#material-list :is(#list-menu-toggle,#folder-viewed):focus-visible{outline-color:#007aff}

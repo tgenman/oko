@@ -137,6 +137,10 @@ function actionFeedback(id) {
   button.before(wrapper);wrapper.append(button,message);return text=>{message.textContent=text;message.hidden=!text;};
 }
 const collectFeedback = actionFeedback('collect'), stopFeedback = actionFeedback('stop');
+document.querySelector('.reader-toolbar-scroll').addEventListener('focusin', event => {
+  const button = event.target.closest('button');
+  if (button) button.scrollIntoView({block:'nearest',inline:'nearest'});
+});
 byId('collect').onclick = async () => { collectFeedback('');try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); collectFeedback(error.message); } };
 byId('stop').onclick = async () => {
   stopFeedback('');

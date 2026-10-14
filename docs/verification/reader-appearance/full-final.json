@@ -1,0 +1,288 @@
+{
+  "started_at": "20261014T110817Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "syntax": {
+      "status": "PASS (0.86s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/app.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/codex-settings.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/controls.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/debug.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/feed-connection.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/feed-tree-view.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/initial-history.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/material-list.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/menus.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/model-settings.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/opened-material.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/opml-import.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/reader-actions.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/reading-tree.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/settings-editor.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/settings-navigation.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/status-panel.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/telegram-connection.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/transport.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/ui-operations.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/youtube-history.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-reader-appearance-check-3/frontend/youtube-settings.js"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "lint": {
+      "status": "PASS (0.38s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-reader-appearance-check-3/scripts/lint-js.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "http": {
+      "status": "PASS (1.32s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/reader/test_web_assets.py",
+            "tests/reader/test_frontend_delivery.py",
+            "tests/reader/test_http_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (69.36s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_browser_context.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_codex_settings.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_codex_settings_http.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_contracts.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_existing_history.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_feed_debug.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_feed_tree_ios.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_history_outcomes.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_history_pause.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_http_isolation.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_initial_history.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_material_list.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_opened_material.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_reader_appearance.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_reader_http.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_reading_tree.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_separate_menus.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_settings_navigation.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_status_panel.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_telegram_connection.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_transport.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_youtube_history.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_youtube_history_http.cjs",
+            "/private/tmp/oko-reader-appearance-check-3/tests/browser/test_youtube_settings.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "diff": {
+      "status": "PASS (0.36s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 72.49,
+  "log": "/private/tmp/oko-reader-appearance-check-3/.scratch/check-runs/20261014T110817Z-01b37849/output.log"
+}
