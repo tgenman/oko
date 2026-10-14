@@ -22,6 +22,7 @@ test('YouTube settings start N history and waiting resumes manually without chan
     await feedOptions(r.page);
     await r.page.locator('#youtube-history-count').fill('60');
     await r.page.locator('#youtube-history-start').click();
+    await r.page.waitForFunction(() => readerTransport.requests.some(request => request.method==='POST'&&request.url==='/api/feeds/yt/history'));
     const request = await r.page.evaluate(() => readerTransport.requests.find(x=>x.method==='POST'&&x.url==='/api/feeds/yt/history'));
     expect(request.body).toEqual({mode:'count',count:60});
     await r.page.evaluate(() => {
@@ -37,8 +38,10 @@ test('YouTube settings start N history and waiting resumes manually without chan
     await expect(r.page.locator('#history-toggle')).toHaveText('Продолжить историю');
     await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
     await r.page.locator('#history-toggle').click();
+    await r.page.waitForFunction(() => readerTransport.requests.some(request => request.method==='PATCH'&&request.url==='/api/feeds/yt/history'));
     expect(await r.page.evaluate(()=>readerTransport.requests.find(x=>x.method==='PATCH'&&x.url==='/api/feeds/yt/history').body)).toEqual({paused:false});
     await r.page.locator('#youtube-history-stop').click();
+    await r.page.waitForFunction(() => readerTransport.requests.some(request => request.method==='DELETE'&&request.url==='/api/feeds/yt/history'));
     expect(await r.page.evaluate(()=>readerTransport.requests.some(x=>x.method==='DELETE'&&x.url==='/api/feeds/yt/history'))).toBe(true);
   } finally {await r.close();}
 });
@@ -103,6 +106,7 @@ test('reopened first history gets progress and resume after a late response', as
     await feedOptions(r.page);
  await r.page.locator('#youtube-history-start').click();
  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/feeds/A/history'));
+ await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
  await r.page.locator('#feeds-close').click(); await r.page.locator('#feeds-open').click();
     await feedOptions(r.page);
  await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
