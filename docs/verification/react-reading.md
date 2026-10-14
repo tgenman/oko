@@ -16,3 +16,5 @@
 - Снимок folder-completion-conflict.png из report 20261014T134424Z-e006878c просмотрен: текст подтверждения, количество и сообщение конфликта видимы, оформление сохранено.
 
 Полная интеграционная проверка всех owners и независимое ревью выполняются основной задачей миграции.
+
+После интеграции primary tip 9c50b7d: merge fa1652a, единственный конфликт imports разрешён с сохранением React reading/status owners. strict TypeScript и build/codegen drift PASS. Интегрированный browser набор reading/tree/list/opened/folder/status: 37/38 PASS, report 20261014T134908Z-0c88b2dd. Единственное падение — NotSupportedError при play() синтетического MediaRecorder video, до действий просмотра. Без изменения кода отдельный повтор этого сценария: 1/1 PASS, report 20261014T135028Z-a98f56e1. Полный набор целиком не объявляется прошедшим; результат ограниченного повтора относится к playback/cleanup сценарию.
