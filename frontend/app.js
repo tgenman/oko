@@ -1,4 +1,4 @@
-import {createMaterialList} from './material-list.js';
+import {createMaterialList} from './src/reading/list.tsx';
 import {createReadingTree} from './src/reading/tree.tsx';
 import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './debug.js';
@@ -41,7 +41,7 @@ const opened = createOpenedMaterial({
   onViewed: id => { contentEpoch++; debug.forgetMaterials([id]); statusPanel.forgetMaterials([id]); opened.viewed(id); list.removed(id); session.post(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
-const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
+const list = createMaterialList({readerApi,onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
 const menus = createMenus({api, onChanged: () => {contentEpoch++; refresh();}});
 statusPanel = createStatusPanel({debug, actions, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
   onMaterial:id=>opened.open({id}), onRetry:async(target,problem)=>{
@@ -127,7 +127,7 @@ async function updateReader() {
     if (byId('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);
     if (feedId) params.set('feed', feedId);
-    const cards = await api('cards?' + params);
+    const cards = await list.load(params);
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     opened.reconcile(cards);
     list.update(cards, opened.selection?.id);
