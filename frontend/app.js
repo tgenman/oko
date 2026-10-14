@@ -7,37 +7,38 @@ import {createTransport} from './transport.js';
 import {createStatusPanel} from './status-panel.js';
 import {createReaderActions} from './reader-actions.js';
 import {createReaderApi} from './src/api/reader.ts';
+import {createReaderSession} from './src/reader-session.ts';
+import {setRenderReporter} from './src/renderer.tsx';
 
 'use strict';
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
 const transport = createTransport({fetch:window.fetch.bind(window), token, origin:location.origin});
-const readerApi = createReaderApi({fetch:window.fetch.bind(window), token, origin:location.origin});
+const readerApi = createReaderApi({fetch:window.fetch.bind(window), token, origin:location.origin,onError:(error,source)=>reportError(error,source,true)});
 const debug = createDebugPanel({token, transport});
-const tab = crypto.randomUUID();
+setRenderReporter(reportError);
 const byId = id => document.getElementById(id);
-const bus = new BroadcastChannel('oko-reader');
 let contentEpoch = 0;
 let stopped = false;
 let folderId = null;
 let feedId = null;
-let refreshTimer = null;
 let refreshSequence = 0;
 let readingCatalog = {folders:[], feeds:[]};
 let statusPanel;
 const actions = createReaderActions({transport,onChanged:()=>statusPanel?.redraw()});
+readerApi.setActionTracker(actions);
 async function api(path, method = 'GET', body = undefined, signal = undefined) {
   const request = actions.begin(path, method, body);
   try {
-    const result = path === 'status' && method === 'GET' ? await readerApi.status(signal) : await transport.json('/api/' + path, method, body, signal, request?.id);
+    const result = path === 'status' && method === 'GET' ? await readerApi.status(signal) : path === 'collect' && method === 'POST' ? await readerApi.collect(request?.id) : path === 'stop' && method === 'POST' ? await readerApi.stop(request?.id) : await transport.json('/api/' + path, method, body, signal, request?.id);
     actions.succeeded(request); return result;
-  } catch (error) {error.materialIds = path.startsWith('materials/') ? [path.split('/')[1]] : []; actions.failed(request,error); reportError(error, method + ' /api/' + path, true); throw error; }
+  } catch (error) {error.materialIds = path.startsWith('materials/') ? [path.split('/')[1]] : []; actions.failed(request,error); if(!readerApi.wasReported(error))reportError(error, method + ' /api/' + path, true); throw error; }
 }
 api.discardDraft = async(path,field,method)=>{await statusPanel.discardDraft(path,field,method);refresh();};
 
 const opened = createOpenedMaterial({
   api,
   fetchMedia: (path, signal) => transport.media(path, signal, 'no-store'),
-  onViewed: id => { contentEpoch++; debug.forgetMaterials([id]); statusPanel.forgetMaterials([id]); opened.viewed(id); list.removed(id); bus.postMessage(id); refresh(); },
+  onViewed: id => { contentEpoch++; debug.forgetMaterials([id]); statusPanel.forgetMaterials([id]); opened.viewed(id); list.removed(id); session.post(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
 const list = createMaterialList({onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
@@ -54,6 +55,7 @@ statusPanel = createStatusPanel({debug, actions, onSettings:(target,trigger)=>me
   }, onRefresh:()=>refresh()});
 const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
 function stopUi(message) {
+  session.dispose();
   menus.stop();
   stopped = true;
   statusPanel.stop();
@@ -73,19 +75,19 @@ function stopUi(message) {
   byId('digest-dialog').close();
   void debug.refresh();
 }
-bus.onmessage = event => {
-  if (event.data === 'stop') stopUi('Око остановлено');
-  else if (event.data?.kind === 'folder-viewed') {
+function readerMessage(data) {
+  if (data === 'stop') stopUi('Око остановлено');
+  else if (data?.kind === 'folder-viewed') {
     contentEpoch++;
-    opened.folderCompleted(event.data.folder);
+    opened.folderCompleted(data.folder);
     refresh();
   } else {
     contentEpoch++;
-    debug.forgetMaterials([event.data]); statusPanel.forgetMaterials([event.data]); opened.viewed(event.data); list.removed(event.data); refresh();
+    debug.forgetMaterials([data]); statusPanel.forgetMaterials([data]); opened.viewed(data); list.removed(data); refresh();
   }
-};
-async function refresh() {
-  clearTimeout(refreshTimer);
+}
+function refresh() {return session.refresh();}
+async function updateReader() {
   if (stopped) return;
   const epoch = contentEpoch;
   const sequence = ++refreshSequence;
@@ -131,7 +133,6 @@ async function refresh() {
     list.update(cards, opened.selection?.id);
 
   } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) {opened.clear();statusPanel.unavailable();} list.error(error.message); byId('progress').textContent = statusAvailable ? 'Чтение временно недоступно' : 'Нет связи с Око'; } }
-  finally { if (!stopped) { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 500); } }
 }
 function actionFeedback(id) {
   const button = byId(id), wrapper = document.createElement('span'), message = document.createElement('span');
@@ -146,23 +147,14 @@ document.querySelector('.reader-toolbar-scroll').addEventListener('focusin', eve
 byId('collect').onclick = async () => { collectFeedback('');try { await api('collect', 'POST'); refresh(); } catch (error) { reportError(error, 'Интерфейс Око'); collectFeedback(error.message); } };
 byId('stop').onclick = async () => {
   stopFeedback('');
-  try { await api('stop', 'POST'); bus.postMessage('stop'); stopUi('Око остановлено'); }
+  try { await api('stop', 'POST'); session.post('stop'); stopUi('Око остановлено'); }
   catch (error) { reportError(error, 'Интерфейс Око'); stopFeedback(error.message); }
 };
-async function heartbeat() {
-  if (stopped) return;
-  try { await api('tabs/' + tab + '/heartbeat', 'POST'); }
-  catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped) { opened.clear(); statusPanel.unavailable(); list.error(error.message); byId('progress').textContent = 'Нет связи с Око'; } }
-  if (!stopped) setTimeout(heartbeat, 2000);
-}
-window.addEventListener('pagehide', () => {
-  transport.close('/api/tabs/' + tab + '/close').catch(error => reportError(error, 'Закрытие вкладки'));
-  opened.clear(); list.clear();
-});
-window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
-
 byId('sort').onchange = () => { contentEpoch++; refresh(); };
-heartbeat().then(refresh);
+const session = createReaderSession({api:readerApi,onRefresh:updateReader,onMessage:readerMessage,
+  onUnavailable:error=>{reportError(error,'Интерфейс Око');if(!stopped){opened.clear();statusPanel.unavailable();list.error(error.message);byId('progress').textContent='Нет связи с Око';}},
+  onClosed:()=>{opened.clear();list.clear();},onCloseError:error=>reportError(error,'Закрытие вкладки')});
+session.start();
 
 function element(tag, text = '') { const node = document.createElement(tag); node.textContent = text; return node; }
 byId('show-hidden').onchange = () => { contentEpoch++; opened.clear(); refresh(); };
@@ -226,14 +218,14 @@ byId('completion-confirm').onclick = async () => {
     contentEpoch++;
     opened.folderCompleted(confirmedFolder);
     if (folderId === confirmedFolder) list.clear();
-    bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
+    session.post({kind: 'folder-viewed', folder: confirmedFolder});
     byId('completion-dialog').close();
     refresh();
   } catch (error) { reportError(error, 'Интерфейс Око');
     if (!error.detail?.preview) {
       contentEpoch++;
       opened.folderCompleted(confirmedFolder);
-      bus.postMessage({kind: 'folder-viewed', folder: confirmedFolder});
+      session.post({kind: 'folder-viewed', folder: confirmedFolder});
     }
     refresh();
     if (stamp !== completionGeneration || stopped) return;

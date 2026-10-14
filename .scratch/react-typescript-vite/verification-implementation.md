@@ -20,3 +20,12 @@
 - build/generation/typecheck и targeted7Python проверки fresh/missing/damaged/watch/reader/generator — PASS. Дополнительная проверка stalecanonical на build-команде — PASS,1тест. Неподходящие generated RootModel defaults исправляются шаблоном, без изменения canonicalAPI.
 
 Готовы только01–03. Полный React UI, session owner, остальные typed consumers, встроенные docs и installed-package smoke ещё не завершены. Пользовательский экземпляр не запускался; личные источники не использовались.
+
+## 2026-10-14 — 05
+
+SDK подключён к heartbeat/close/collect/stop; один session owner управляет таймерами, каналом и событиями страницы. Dispose не закрывает lease и не вызывает stop; только pagehide отправляет close с keepalive. Setup отложен в microtask, немедленный setup/dispose/setup не запускает первый цикл. Общий fetch adapter передаёт action identity и фиксирует неизвестные/подтверждённые исходы без повторов команд. Reporter не дублирует уже зарегистрированную SDK-ошибку и не сообщает неуспешную доставку diagnostics рекурсивно.
+
+- Проверка18browser сценариев первоначально17/18: захват headers ожидал plainobject. Изменён на нормативный Headers API; transport-повтор4/4PASS.
+- После подключения единственного React renderer:10/18PASS,8ошибок из-за оставшегося начального текста при portal handoff. Контейнер теперь очищается один раз при передаче React; status-повтор8/8PASS. Утверждения о тексте/фокусе/порядке сохранены. Остальные10сценариев не менялись и прошли.
+- Процессные lifecycle сначала8passed/8failed (subprocess exited before readiness, без сетевой эскалации); повтор с разрешённым loopback16/16PASS. Подробный исходный stderr дочерних процессов этот helper не сохраняет.
+- strictTS/build/api drift — PASS. Desktop/mobile панели сохранены в report20261014T131359Z-63f2549c. Root-композиция через portals подготовлена для дальнейших независимых owners; полный UI ещё переносится.

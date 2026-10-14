@@ -94,7 +94,7 @@ test('reader closing sends an authorized keepalive and releases displayed media'
       const fetch = window.fetch;
       window.closingRequests = [];
       window.fetch = (url, options) => {
-        if (String(url).endsWith('/close')) window.closingRequests.push({url:String(url),method:options.method,keepalive:options.keepalive,authorization:options.headers.Authorization});
+        if (String(url).endsWith('/close')) window.closingRequests.push({url:String(url),method:options.method,keepalive:options.keepalive,authorization:new Headers(options.headers).get('Authorization')});
         return fetch(url,options);
       };
     });
