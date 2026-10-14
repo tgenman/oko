@@ -45,3 +45,9 @@ SDK подключён к heartbeat/close/collect/stop; один session owner �
 TS/TSX syntax включён в единый runner и проверку точных staged bytes. Частичный staging проверяет индекс, а не рабочий файл; strict project typecheck остаётся отдельной обязательной частью build.35hook/runner тестов PASS. Пробный запуск hook-тестов без разрешения ps не смог выполнить staged-набор; успешный запуск выполнен с разрешённым процессным доступом.
 
 Единственный React renderer использует стабильный ключ для каждого portal host, включая безымянные контейнеры форм. Ошибки render отправляются в диагностику через microtask, чтобы не вызывать вложенный flushSync из componentDidCatch. Typecheck/build и syntax renderer.tsx PASS.
+
+## 2026-10-14 — общий TS transport и docs initializer
+
+Общие HTTP error/diagnostic правила перенесены в strictTS и используются SDK и transport без дублирования декодера. JStransport временно только реэкспортирует TSфабрику до окончательного entrycutover. Swagger initializer также typecheckedTS; сборка выдаёт его как обычный локальныйJSasset. Transport facade выбирается по фактическому isEntry Viteoutput, а не по совпадению имени sharedchunk. Pydantic2.13.5 явно закреплён какruntime dependency для используемого MISSING API.
+
+Typecheck/build PASS;5transport+installedreader/Swagger browser сценариев PASS (report20261014T140459Z-60ec6611). Проверяется wheeloutsidecheckout/PATHwithoutNode, явнаяSwaggerавторизация и token/session правила.

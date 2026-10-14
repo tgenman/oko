@@ -1,13 +1,8 @@
 import {createClient} from './generated/client';
 import {status, heartbeat, closeTab, collect, stop} from './generated/sdk.gen';
 import type {Status} from './generated/types.gen';
-
-export class ReaderError extends Error {
-  detail: unknown;
-  confirmed = false;
-  actionId: string | null = null;
-  diagnosticId: string | null = null;
-}
+import {ReaderError,decodeJson} from './errors';
+export {ReaderError} from './errors';
 
 export type ActionRecord = {id:string};
 export type ActionTracker = {
@@ -15,26 +10,6 @@ export type ActionTracker = {
   succeeded(record:ActionRecord | null): void;
   failed(record:ActionRecord | null, error:unknown): void;
 };
-
-async function checkResponse(response: Response): Promise<void> {
-  let value: unknown;
-  try {value = await response.clone().json();}
-  catch {
-    const error = new ReaderError('Некорректный ответ Око');
-    error.diagnosticId = response.headers.get('X-Oko-Error');
-    if (response.headers.get('X-Oko-Expected')) error.name = 'AbortError';
-    throw error;
-  }
-  if (response.ok) return;
-  const detail = value && typeof value === 'object' && 'detail' in value ? value.detail : undefined;
-  const error = new ReaderError(typeof detail === 'string' ? detail : response.status === 422 ? 'Проверьте значения настроек' : 'Связь с Око потеряна');
-  error.detail = detail;
-  error.confirmed = true;
-  error.actionId = response.headers.get('X-Oko-Action');
-  error.diagnosticId = response.headers.get('X-Oko-Error');
-  if (response.headers.get('X-Oko-Expected')) error.name = 'AbortError';
-  throw error;
-}
 
 export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch: typeof fetch; token: string | null; origin: string; onError?:(error:unknown, source:string)=>void}) {
   let tracker: ActionTracker | undefined;
@@ -57,7 +32,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         keepalive:request.keepalive,
           ...(body === undefined ? {} : {body}),
         });
-        await checkResponse(response);
+        await decodeJson(response.clone());
         tracker?.succeeded(record);
         return response;
       } catch(error) {

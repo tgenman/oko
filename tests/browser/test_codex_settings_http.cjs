@@ -1,6 +1,7 @@
 const {test} = require('node:test');
 const {expect} = require('playwright/test');
 const {productionReader} = require('./http-reader.cjs');
+const {artifactPath} = require('./artifacts.cjs');
 
 test('production HTTP saves choices, reads provenance and recreates material from the browser', {timeout:30000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
@@ -57,4 +58,7 @@ test('mobile model screens save connection and independent Codex choices through
   expect(config.filter).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
   const width=await page.locator('#settings-dialog').evaluate(dialog=>({scroll:dialog.scrollWidth,client:dialog.clientWidth}));
   expect(width.scroll).toBeLessThanOrEqual(width.client+1);
+  const screenshot=artifactPath('react-models-mobile.png');
+  await page.screenshot({path:screenshot,fullPage:true});
+  console.log('Models screenshot: '+screenshot);
 });
