@@ -1,5 +1,5 @@
 import {createMaterialList} from './material-list.js';
-import {createReadingTree} from './reading-tree.js';
+import {createReadingTree} from './src/reading/tree.tsx';
 import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './debug.js';
 import {createOpenedMaterial} from './opened-material.js';
@@ -53,7 +53,7 @@ statusPanel = createStatusPanel({debug, actions, onSettings:(target,trigger)=>me
     }
     refresh();
   }, onRefresh:()=>refresh()});
-const tree = createReadingTree({onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
+const tree = createReadingTree({readerApi,onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
 function stopUi(message) {
   session.dispose();
   menus.stop();
@@ -62,7 +62,7 @@ function stopUi(message) {
   contentEpoch++;
   opened.clear();
   list.clear();
-  byId('folders').replaceChildren();
+  tree.clear();
   byId('count').textContent = '0';
   byId('progress').textContent = message;
   byId('review-restarts').replaceChildren();
@@ -117,7 +117,7 @@ async function updateReader() {
       row.append(button); return row;
     }));
     menus.sources(state.sources || []);
-    const navigation = await api('navigation');
+    const navigation = await tree.load();
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     readingCatalog = navigation;
     if (tree.update(navigation, state.sources || [])) return;
