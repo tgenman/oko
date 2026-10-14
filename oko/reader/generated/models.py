@@ -3,11 +3,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from oko.reader.wire import WireModel
 from pydantic import (
-    AwareDatetime,
     ConfigDict,
     Field,
     RootModel,
@@ -57,15 +57,13 @@ class BrowserError(WireModel):
     event_id: StrictStr | MISSING = Field(
         default=MISSING, max_length=100, min_length=1, title='Event Id'
     )
-    first_at: AwareDatetime | None | MISSING = Field(default=MISSING, title='First At')
+    first_at: datetime | None | MISSING = Field(default=MISSING, title='First At')
     location: StrictStr = Field(default='', max_length=1000, title='Location')
     material_ids: list[StrictStr] | MISSING = Field(
         default=MISSING, max_length=1000, title='Material Ids'
     )
     message: StrictStr = Field(..., max_length=4000, title='Message')
-    occurred_at: AwareDatetime | None | MISSING = Field(
-        default=MISSING, title='Occurred At'
-    )
+    occurred_at: datetime | None | MISSING = Field(default=MISSING, title='Occurred At')
     sequence: StrictInt = Field(default=1, ge=1, le=9007199254740991, title='Sequence')
     source: StrictStr = Field(..., max_length=500, min_length=1, title='Source')
     stream_id: StrictStr = Field(default='', max_length=100, title='Stream Id')

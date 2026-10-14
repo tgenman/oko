@@ -7,9 +7,9 @@ import secrets
 import time
 
 import httpx
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BeforeValidator, ValidationError
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -29,26 +29,12 @@ from oko.reader.actions import action_context
 from oko.reader.docs import install_docs
 from oko.reader.static import install_frontend, validate_frontend
 from oko.reader.generated.operations import RESPONSES
+from oko.reader.generated import models as wire
+from oko.reader.wire import normalize, to_domain
 from oko.collection.youtube.source import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.subscriptions.history import InitialHistory
 from oko.diagnostics import Journal, BrowserError, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught
-
-
-class HistoryPause(BaseModel):
-    paused: bool = Field(strict=True)
-
-
-class CompletionRequest(BaseModel):
-    token: str = Field(min_length=1, max_length=100)
-
-
-class ReportAction(BaseModel):
-    id: str = Field(pattern=r'^[\w-]{1,100}$')
-    method: Literal['POST', 'PUT', 'PATCH', 'DELETE']
-    path: str = Field(max_length=2000)
-    fields: list[str] = Field(default_factory=list, max_length=50)
-    result: Literal['failed', 'unknown']
 
 
 def create_app(root: Path, *, source: Source | None = None, token: str | None = None,
@@ -195,14 +181,15 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return dict(ok=journal.clear(), persistence_error=journal.persistence_error)
 
     @app.post('/api/debug', response_model=RESPONSES[('POST', '/api/debug')], response_model_exclude_unset=True)
-    async def debug_browser(body: BrowserError) -> dict[str, Any]:
-        if body.material_ids and any(runtime.material_was_viewed(identity) for identity in body.material_ids):
+    async def debug_browser(body: Annotated[wire.BrowserError, BeforeValidator(normalize(BrowserError))]) -> dict[str, Any]:
+        value = to_domain(BrowserError, body)
+        if value.material_ids and any(runtime.material_was_viewed(identity) for identity in value.material_ids):
             return dict(ok=True, group=None, entry=None, persistence_error=journal.persistence_error)
-        group = journal.add(body.source, body.message, body.traceback, error_type=body.error_type,
-                            location=body.location, event_id=body.event_id,
-                            timestamp=body.occurred_at.isoformat() if body.occurred_at else None,
-                            count=body.count, first=body.first_at.isoformat() if body.first_at else None,
-                            stream_id=body.stream_id, sequence=body.sequence, material_ids=body.material_ids)
+        group = journal.add(value.source, value.message, value.traceback, error_type=value.error_type,
+                            location=value.location, event_id=value.event_id,
+                            timestamp=value.occurred_at.isoformat() if value.occurred_at else None,
+                            count=value.count, first=value.first_at.isoformat() if value.first_at else None,
+                            stream_id=value.stream_id, sequence=value.sequence, material_ids=value.material_ids)
         return dict(ok=not bool(journal.persistence_error), group=group, entry=next((entry for entry in journal.entries() if entry['id'] == group), None), persistence_error=journal.persistence_error)
 
     @app.get('/api/status', response_model=RESPONSES[('GET', '/api/status')], response_model_exclude_unset=True)
@@ -210,8 +197,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return dict(runtime.status(), debug_count=len(journal.records), debug_persistence_error=journal.persistence_error)
 
     @app.post('/api/problems/actions', response_model=RESPONSES[('POST', '/api/problems/actions')], response_model_exclude_unset=True)
-    async def report_reader_action(body: ReportAction) -> dict[str, Any]:
-        context = action_context(body.method, body.path, body.fields)
+    async def report_reader_action(body: wire.ReportAction) -> dict[str, Any]:
+        context = action_context(body.method, body.path, body.fields if isinstance(body.fields, list) else [])
         if context is None:
             raise HTTPException(400, 'Неизвестное действие читателя')
         result = await runtime.report_action(body.id, context, body.result)
@@ -251,9 +238,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return dict(models=await runtime.codex_models())
 
     @app.put('/api/processors/codex', response_model=RESPONSES[('PUT', '/api/processors/codex')], response_model_exclude_unset=True)
-    async def codex_save(body: CodexSettings) -> dict[str, Any]:
-        await runtime.configure_codex(body)
-        return body.model_dump()
+    async def codex_save(body: Annotated[wire.CodexSettings, BeforeValidator(normalize(CodexSettings))]) -> dict[str, Any]:
+        value = to_domain(CodexSettings, body)
+        await runtime.configure_codex(value)
+        return value.model_dump()
 
     @app.post('/api/processors/codex/check', response_model=RESPONSES[('POST', '/api/processors/codex/check')], response_model_exclude_unset=True)
     async def codex_check() -> dict[str, Any]:
@@ -265,9 +253,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return config.model_dump() if config else None
 
     @app.put('/api/processors/llamacpp', response_model=RESPONSES[('PUT', '/api/processors/llamacpp')], response_model_exclude_unset=True)
-    async def processor_save(body: ProcessorConfig) -> dict[str, Any]:
-        await runtime.configure_processor(body)
-        return body.model_dump()
+    async def processor_save(body: Annotated[wire.ProcessorConfig, BeforeValidator(normalize(ProcessorConfig))]) -> dict[str, Any]:
+        value = to_domain(ProcessorConfig, body)
+        await runtime.configure_processor(value)
+        return value.model_dump()
 
     @app.post('/api/processors/llamacpp/check', response_model=RESPONSES[('POST', '/api/processors/llamacpp/check')], response_model_exclude_unset=True)
     async def processor_check() -> dict[str, Any]:
@@ -288,12 +277,14 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return await runtime.telegram_accounts()
 
     @app.post('/api/telegram/topics', response_model=RESPONSES[('POST', '/api/telegram/topics')], response_model_exclude_unset=True)
-    async def telegram_topics(body: TelegramPeer) -> list[dict[str, Any]]:
-        return await runtime.telegram_topics(body)
+    async def telegram_topics(body: Annotated[wire.TelegramPeer, BeforeValidator(normalize(TelegramPeer))]) -> list[dict[str, Any]]:
+        value = to_domain(TelegramPeer, body)
+        return await runtime.telegram_topics(value)
 
     @app.post('/api/telegram/connect', response_model=RESPONSES[('POST', '/api/telegram/connect')], response_model_exclude_unset=True)
-    async def telegram_connect(body: ConnectTelegram) -> dict[str, Any]:
-        return await runtime.connect_telegram(body)
+    async def telegram_connect(body: Annotated[wire.ConnectTelegram, BeforeValidator(normalize(ConnectTelegram))]) -> dict[str, Any]:
+        value = to_domain(ConnectTelegram, body)
+        return await runtime.connect_telegram(value)
 
     @app.get('/api/subscriptions', response_model=RESPONSES[('GET', '/api/subscriptions')], response_model_exclude_unset=True)
     async def subscription_list() -> dict[str, Any]:
@@ -301,23 +292,27 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return dict(folders=config.folders(), feeds=config.feeds())
 
     @app.post('/api/import/preview', response_model=RESPONSES[('POST', '/api/import/preview')], response_model_exclude_unset=True)
-    async def import_preview(body: ImportRequest) -> dict[str, Any]:
+    async def import_preview(body: Annotated[wire.ImportRequest, BeforeValidator(normalize(ImportRequest))]) -> dict[str, Any]:
+        value = to_domain(ImportRequest, body)
         try:
-            return preview(body.opml)
+            return preview(value.opml)
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
 
     @app.post('/api/feeds', response_model=RESPONSES[('POST', '/api/feeds')], response_model_exclude_unset=True)
-    async def add_feed(body: AddFeed) -> dict[str, Any]:
-        return await runtime.add_feed(body)
+    async def add_feed(body: Annotated[wire.AddFeed, BeforeValidator(normalize(AddFeed))]) -> dict[str, Any]:
+        value = to_domain(AddFeed, body)
+        return await runtime.add_feed(value)
 
     @app.post('/api/feeds/verify', response_model=RESPONSES[('POST', '/api/feeds/verify')], response_model_exclude_unset=True)
-    async def verify_feed(body: FeedURL) -> dict[str, Any]:
-        return await runtime.verify_feed(body)
+    async def verify_feed(body: Annotated[wire.FeedURL, BeforeValidator(normalize(FeedURL))]) -> dict[str, Any]:
+        value = to_domain(FeedURL, body)
+        return await runtime.verify_feed(value)
 
     @app.post('/api/import', response_model=RESPONSES[('POST', '/api/import')], response_model_exclude_unset=True)
-    async def import_subscriptions(body: ImportRequest) -> dict[str, Any]:
-        return await runtime.import_subscriptions(body)
+    async def import_subscriptions(body: Annotated[wire.ImportRequest, BeforeValidator(normalize(ImportRequest))]) -> dict[str, Any]:
+        value = to_domain(ImportRequest, body)
+        return await runtime.import_subscriptions(value)
 
     @app.get('/api/youtube', response_model=RESPONSES[('GET', '/api/youtube')], response_model_exclude_unset=True)
     async def youtube_settings() -> dict[str, Any]:
@@ -329,7 +324,11 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             body = await request.json()
         except ValueError:
             raise ActionError('invalid', 'Некорректные настройки прокси', expected=True) from None
-        return await runtime.configure_youtube(body)
+        try:
+            value = wire.YouTubeSettings.model_validate(body).model_dump(mode='json', exclude_unset=True)
+        except ValidationError:
+            raise ActionError('invalid', 'Некорректные настройки прокси: нужен HTTP/HTTPS-адрес без учётных данных, пути и параметров', expected=True) from None
+        return await runtime.configure_youtube(value)
 
     @app.get('/api/settings/{scope}/{owner}', response_model=RESPONSES[('GET', '/api/settings/{scope}/{owner}')], response_model_exclude_unset=True)
     async def effective_settings(scope: str, owner: str) -> dict[str, Any]:
@@ -339,24 +338,27 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise HTTPException(404, str(error)) from None
 
     @app.patch('/api/settings/{scope}/{owner}', response_model=RESPONSES[('PATCH', '/api/settings/{scope}/{owner}')], response_model_exclude_unset=True)
-    async def settings_patch(scope: str, owner: str, body: Overrides) -> dict[str, Any]:
-        return await runtime.update_settings(scope, owner, body)
+    async def settings_patch(scope: str, owner: str, body: Annotated[wire.Overrides, BeforeValidator(normalize(Overrides))]) -> dict[str, Any]:
+        value = to_domain(Overrides, body)
+        return await runtime.update_settings(scope, owner, value)
 
     @app.patch('/api/feeds/{identity}/history', response_model=RESPONSES[('PATCH', '/api/feeds/{identity}/history')], response_model_exclude_unset=True)
-    async def history_pause(identity: str, body: HistoryPause) -> dict[str, Any]:
+    async def history_pause(identity: str, body: wire.HistoryPause) -> dict[str, Any]:
         return await runtime.pause_history(identity, body.paused)
 
     @app.post('/api/feeds/{identity}/history', response_model=RESPONSES[('POST', '/api/feeds/{identity}/history')], response_model_exclude_unset=True)
-    async def history_start(identity: str, body: InitialHistory) -> dict[str, Any]:
-        return await runtime.change_youtube_history(identity, body)
+    async def history_start(identity: str, body: Annotated[wire.InitialHistory, BeforeValidator(normalize(InitialHistory))]) -> dict[str, Any]:
+        value = to_domain(InitialHistory, body)
+        return await runtime.change_youtube_history(identity, value)
 
     @app.delete('/api/feeds/{identity}/history', response_model=RESPONSES[('DELETE', '/api/feeds/{identity}/history')], response_model_exclude_unset=True)
     async def history_cancel(identity: str) -> dict[str, Any]:
         return await runtime.change_youtube_history(identity, None)
 
     @app.patch('/api/feeds/{identity}', response_model=RESPONSES[('PATCH', '/api/feeds/{identity}')], response_model_exclude_unset=True)
-    async def feed_patch(identity: str, body: FeedPatch) -> dict[str, Any]:
-        return await runtime.patch_feed(identity, body)
+    async def feed_patch(identity: str, body: Annotated[wire.FeedPatch, BeforeValidator(normalize(FeedPatch))]) -> dict[str, Any]:
+        value = to_domain(FeedPatch, body)
+        return await runtime.patch_feed(identity, value)
 
     @app.get('/api/folders', response_model=RESPONSES[('GET', '/api/folders')], response_model_exclude_unset=True)
     async def folders() -> list[dict[str, Any]]:
@@ -380,7 +382,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return await runtime.preview_completion(folder)
 
     @app.post('/api/folders/{folder}/completion', response_model=RESPONSES[('POST', '/api/folders/{folder}/completion')], response_model_exclude_unset=True)
-    async def complete_folder(folder: str, body: CompletionRequest) -> dict[str, bool]:
+    async def complete_folder(folder: str, body: wire.CompletionRequest) -> dict[str, bool]:
         await runtime.complete_folder(folder, body.token)
         return {'ok': True}
 
@@ -464,8 +466,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         return {'ok': True}
 
     @app.post('/api/digests/{scope}/{owner}', response_model=RESPONSES[('POST', '/api/digests/{scope}/{owner}')], response_model_exclude_unset=True)
-    async def create_digest(scope: str, owner: str, body: DigestRequest) -> dict[str, str]:
-        return {'id': await runtime.create_digest(scope, owner, body)}
+    async def create_digest(scope: str, owner: str, body: Annotated[wire.DigestRequest, BeforeValidator(normalize(DigestRequest))]) -> dict[str, str]:
+        value = to_domain(DigestRequest, body)
+        return {'id': await runtime.create_digest(scope, owner, value)}
 
     @app.post('/api/materials/{item}/viewed', response_model=RESPONSES[('POST', '/api/materials/{item}/viewed')], response_model_exclude_unset=True)
     async def viewed(item: str) -> dict[str, bool]:
