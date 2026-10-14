@@ -59,3 +59,19 @@ Entry перенесён в strictTSX, структура страницы — R
 SDKbinary test сначала4/5 из-за неполного временногоentry реэкспорта; переключён прямойTSentry. Повтор5/5transport PASS. Typecheck/build PASS. ОбщаяUI-проверка13/13PASS, включая34проверенных геометрических состояния; desktop/plain и mobile/RSS снимки просмотрены. Просмотр выявил потерю toolbarSVG при переносе commandcomponent, icons восстановлены по исходной разметке; итоговые снимки ещё проверяются в полном прогоне.
 
 Окончательная приёмка и независимое ревью пока не завершены,20claimed.
+
+## Полная приёмка
+
+Подготовка проверочного дерева на базе8ac07e5; full runner и независимые Standards/Spec review начаты. Результаты будут дописаны после завершения.
+
+## 2026-10-14 — первая полная приёмка и ревью
+
+Подготовленное дерево8ac07e5: contracts/syntax/types/build/http/diff/CLI PASS. Python433passed/1failed за308.81s: старый test_telegram_form_contains_both_initial_history_choices искал поля в статическомHTML. Эти три assertions перенесены в существующий browser initial-history сценарий;3/3browser PASS. Lint не стартовал из-за отсутствующего legacyJS glob, browser NOT RUN. Defaultglob теперь добавляется только при наличии authoredJS; явно переданные ошибочные paths по-прежнему отклоняются. Остальные Python-наборы не изменялись.
+
+Независимые Standards и Spec review от5b7a7e8 до8ac07e5: Standards1finding; Spec2findings. Оба указали BFCache lifecycle; Spec дополнительно нашёл stale status-target navigation. Исправлены:
+
+- cachedpagehide освобождает ресурсы, но оставляет одноразовый pageshow hook для reload; closing UI инвалидирует admissionepoch. Новый браузерный тест RED(timeout reload)→GREEN.
+- owner.open возвращает актуальность всего navigationintent; закрытие/reopen/select/Back/новыйpage лишают старый intent права перехода. Два browser regression сценария подтверждают reopen и переход внутри того же меню; первичныйreopen RED(home→codex)→GREEN.
+- После исправлений20status/transport/lifecycle browser PASS; отдельно2status-target PASS. Основной backend/storage/sources не изменён.
+
+Полный результат: /tmp/oko-final-acceptance-check/.scratch/check-runs/20261014T181333Z-ff9090ad/report.json. Повторные проверки и re-review affectedfindings ещё выполняются.

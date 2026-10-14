@@ -1,6 +1,21 @@
 const {test} = require('node:test');
 const {reader, material, expect} = require('./support.cjs');
 
+test('cached-page restoration reloads the reader after its close event', async()=>{
+  const r=await reader();
+  try {
+    await r.start([material('cached')]);
+    await r.page.locator('#cards button').click();
+    await expect(r.page.locator('#title')).toHaveText('cached');
+    await r.page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true})));
+    const reload=r.page.waitForEvent('framenavigated',{timeout:2000});
+    await r.page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
+    await reload;
+    await expect(r.page.locator('#cards button')).toHaveCount(1);
+    await expect(r.page.locator('#title')).toHaveText('');
+  } finally {await r.close();}
+});
+
 test('generated SDK preserves binary media and its diagnostic HTTP failures', async () => {
   const r=await reader();
   try {

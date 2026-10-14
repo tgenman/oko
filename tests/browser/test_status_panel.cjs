@@ -10,6 +10,47 @@ async function status(r,current,recent=[]) {
     problems:{current,recent,count:current.length,updated_at:1800000000}}}),{current,recent});
 }
 
+test('late status-target opening cannot navigate a reopened settings menu',async()=>{
+  const r=await reader();
+  try {
+    await r.start([]);await status(r,[modelProblem]);
+    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await r.page.locator('#status-toggle').click();
+    await r.page.evaluate(()=>readerTransport.held.set('/api/subscriptions',true));
+    await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
+    await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/subscriptions'))).toBe(true);
+    await r.page.locator('#settings-close').click();
+    await r.page.evaluate(()=>{
+      const resolve=readerTransport.pending.get('/api/subscriptions');
+      window.releaseOldMenu=()=>resolve(new Response(JSON.stringify({folders:[],feeds:[]}),{headers:{'Content-Type':'application/json'}}));
+      readerTransport.pending.delete('/api/subscriptions');readerTransport.held.delete('/api/subscriptions');
+    });
+    await r.page.locator('#status-close').click();
+    await r.page.locator('#settings-open').click();
+    await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','home');
+    await r.page.evaluate(()=>window.releaseOldMenu());
+    await r.page.waitForTimeout(150);
+    await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','home');
+  } finally {await r.close();}
+});
+
+test('status-target continuation respects a newer page in the same menu',async()=>{
+  const r=await reader();
+  try {
+    await r.start([]);await status(r,[modelProblem]);
+    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await r.page.locator('#status-toggle').click();
+    await r.page.evaluate(()=>readerTransport.held.set('/api/subscriptions',true));
+    await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
+    await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/subscriptions'))).toBe(true);
+    await r.page.getByRole('button',{name:'Модели',exact:true}).click();
+    await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','models');
+    await r.page.evaluate(()=>readerTransport.release('/api/subscriptions',{folders:[],feeds:[]}));
+    await r.page.waitForTimeout(150);
+    await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','models');
+  } finally {await r.close();}
+});
+
 test('missing model opens the selected panel without moving reading and navigates to Codex',async()=>{
   const r=await reader();
   try {

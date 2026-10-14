@@ -48,6 +48,9 @@ export function createReaderSession(options: Options) {
     void options.api.close(tab).catch(options.onCloseError);
     options.onClosed();
     dispose();
+    // A cached document still needs its restoration hook after ordinary
+    // resources and the reader lease have been closed.
+    window.addEventListener('pageshow',pageshow,{once:true});
   }
   function pageshow(event: PageTransitionEvent) {if (event.persisted) location.reload();}
   return {

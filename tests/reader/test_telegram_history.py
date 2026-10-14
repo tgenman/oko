@@ -47,13 +47,6 @@ def test_telegram_date_is_inclusive_and_validation_matches_rss(tmp_path):
         assert h['loaded']==2
         assert {c['members'][0] for c in client.get('/api/cards').json()}=={2,3}
 
-def test_telegram_form_contains_both_initial_history_choices(tmp_path):
-    with TestClient(create_app(tmp_path,token='test'),headers=HEADERS) as client:
-        html=client.get('/').text
-        assert 'id="telegram-history-mode"' in html
-        assert 'id="telegram-history-count"' in html
-        assert 'id="telegram-history-date"' in html
-
 def test_snapshot_and_sparse_topic_resume_before_older_pages(tmp_path):
     import asyncio
     class Sparse(Archive):

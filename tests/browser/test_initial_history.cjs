@@ -40,6 +40,9 @@ test('Telegram connection sends default count and can switch to date with user t
     await r.start([]);
     await r.page.locator('#add-open').click();
     await r.page.getByRole('tab', {name: 'Telegram', exact: true}).click();
+    for (const id of ['telegram-history-mode','telegram-history-count','telegram-history-date']) {
+      await expect(r.page.locator('#'+id)).toHaveCount(1);
+    }
     await r.page.locator('#telegram-peer').fill('@channel');
     await expect(r.page.locator('#telegram-history-count')).toHaveValue('20');
     await r.page.locator('#telegram-history-mode').selectOption('date');

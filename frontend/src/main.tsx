@@ -155,7 +155,7 @@ document.querySelector('.reader-toolbar-scroll')!.addEventListener('focusin',eve
 byId('sort').onchange = () => { contentEpoch++; refresh(); };
 const session = createReaderSession({api:readerApi,onRefresh:updateReader,onMessage:readerMessage,
   onUnavailable:error=>{reportError(error,'Интерфейс Око');if(!stopped){opened.clear();statusPanel.unavailable();list.error(errorMessage(error));progress('Нет связи с Око');}},
-  onClosed:()=>{opened.clear();list.clear();},onCloseError:error=>reportError(error,'Закрытие вкладки')});
+  onClosed:()=>{contentEpoch++;opened.clear();list.clear();},onCloseError:error=>reportError(error,'Закрытие вкладки')});
 session.start();
 
 byId('show-hidden').onchange = () => { contentEpoch++; opened.clear(); refresh(); };
