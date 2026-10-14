@@ -1,3 +1,4 @@
+import {treeButton as button, treeTitle as titleRow, treeChevron, folderFeeds, feedIcon} from './feed-tree-view.js';
 export function createReadingTree({onSelect, onFeedSettings, onWarning}) {
   const nav = document.getElementById('reading-nav'), root = document.getElementById('folders');
   const all = document.getElementById('all-folders'), divider = document.getElementById('sidebar-resize');
@@ -17,15 +18,6 @@ export function createReadingTree({onSelect, onFeedSettings, onWarning}) {
   divider.onpointerup = divider.onpointercancel = () => {divider.onpointermove = null;};
   function select(kind, id, folder = null) {selection = {kind,id,folder}; signature=''; render(); onSelect(selection);}
   all.onclick = () => select('all',null);
-  function button(label, cls) {const b=document.createElement('button'); b.type='button'; b.className=cls; b.title=label; b.setAttribute('aria-label',label); return b;}
-  function titleRow(b,title,icon,count) {
-    const i=document.createElement('span'); i.className='source-icon ' + icon; i.setAttribute('aria-hidden','true');
-    if(icon==='folder') i.innerHTML='<svg viewBox="0 0 24 20" width="22" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 17V4h7l2 3h11v10z" fill="#d0e4ed"/></svg>';
-    else if(icon==='rss') i.innerHTML='<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="5" cy="19" r="1.5" fill="currentColor"/><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/></svg>';
-    else i.textContent=icon==='youtube'?'▶':icon==='telegram'?'➤':'◔';
-    const t=document.createElement('span'); t.className='tree-title'; t.textContent=title;
-    const c=document.createElement('span'); c.className='tree-count'; c.textContent=count || ''; b.append(i,t,c);
-  }
   function render() {
     const next=JSON.stringify([catalog,sources,selection,collapsed]); if(next===signature) return; signature=next;
     const focus=document.activeElement?.dataset.treeKey, scroll=nav.scrollTop;
@@ -35,15 +27,15 @@ export function createReadingTree({onSelect, onFeedSettings, onWarning}) {
       const group=document.createElement('div'); group.className='reading-group';
       const row=document.createElement('div'); row.className='tree-row folder-row';
       const toggle=button((collapsed[folder.id]?'Раскрыть ':'Свернуть ') + folder.title,'tree-collapse'); toggle.dataset.collapse=folder.id; toggle.dataset.treeKey='collapse/'+folder.id;
-      toggle.textContent=collapsed[folder.id]?'›':'⌄'; toggle.setAttribute('aria-expanded',String(!collapsed[folder.id]));
+      toggle.append(treeChevron()); toggle.setAttribute('aria-expanded',String(!collapsed[folder.id]));
       const children=document.createElement('div'); children.id='reading-folder-'+folder.id; children.hidden=!!collapsed[folder.id]; toggle.setAttribute('aria-controls',children.id);
       toggle.onclick=()=>{collapsed[folder.id]=!collapsed[folder.id]; save(); render();};
       const b=button(folder.title,'tree-select'); b.dataset.folder=folder.id; b.dataset.treeKey='folder/'+folder.id; titleRow(b,folder.title,'folder',folder.count); b.onclick=()=>select('folder',folder.id);
-      b.classList.toggle('active',selection.kind==='folder'&&selection.id===folder.id); b.setAttribute('aria-pressed',String(selection.kind==='folder'&&selection.id===folder.id)); row.append(toggle,b); group.append(row,children);
-      for(const feed of catalog.feeds.filter(f=>f.folder_id===folder.id).sort((a,b)=>a.title.toLocaleLowerCase().localeCompare(b.title.toLocaleLowerCase()) || a.id.localeCompare(b.id))) {
+      b.classList.toggle('active',selection.kind==='folder'&&selection.id===folder.id); b.setAttribute('aria-pressed',String(selection.kind==='folder'&&selection.id===folder.id)); row.append(b,toggle); group.append(row,children);
+      for(const feed of folderFeeds(catalog,folder.id)) {
         const fr=document.createElement('div'); fr.className='tree-row feed-row';
         const fb=button(feed.title,'tree-select'); fb.dataset.feed=feed.id; fb.dataset.treeKey='feed/'+feed.id;
-        titleRow(fb,feed.title,['youtube','telegram'].includes(feed.kind)?feed.kind:'rss',feed.count);
+        titleRow(fb,feed.title,feedIcon(feed),feed.count);
         fb.classList.toggle('active',selection.kind==='feed'&&selection.id===feed.id); fb.setAttribute('aria-pressed',String(selection.kind==='feed'&&selection.id===feed.id));
         fb.onclick=()=>select('feed',feed.id,folder.id); fb.ondblclick=()=>onFeedSettings(feed.id,fb); fr.append(fb);
         const source=sources.find(s=>s.feed_id===feed.id); const warning=[source?.error,source?.gap].filter(Boolean).join(' · ');

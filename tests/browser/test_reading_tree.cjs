@@ -94,7 +94,7 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('[data-folder="f"] .tree-count')).toHaveText('45');
-  const clipped=await r.page.locator('[data-feed="a"] .tree-title').evaluate(n=>n.scrollWidth>n.clientWidth);
+  const clipped=await r.page.locator('[data-feed="a"] .tree-title').evaluate(n=>n.scrollHeight>n.clientHeight);
   expect(clipped).toBe(true);
   await r.page.screenshot({path:'/private/tmp/oko-feed-sidebar.png'});
   await r.page.locator('[data-feed="a"]').focus();

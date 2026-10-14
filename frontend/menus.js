@@ -86,7 +86,7 @@ export function createMenus({api, onChanged}) {
       if (!byId(name + '-dialog').open) close(name);
     });
   }
-  byId('feeds-back').onclick = () => {editor.viewChanged(); navigation.activate(byId('feeds-dialog')); byId('feeds-layout').classList.remove('show-detail');};
+  byId('feeds-back').onclick = () => {editor.viewChanged(); navigation.activate(byId('feeds-dialog')); byId('feeds-layout').classList.remove('show-detail'); editor.focusOwner();};
   for (const name of ['rss', 'telegram', 'opml']) {
     byId('add-' + name + '-tab').onclick = () => {
       operations.invalidate();

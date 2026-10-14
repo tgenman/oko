@@ -1,3 +1,4 @@
+import {treeButton, treeTitle, treeChevron, folderFeeds, feedIcon} from './feed-tree-view.js';
 import {historyProgress} from './initial-history.js';
 import {reportError} from './debug.js';
 import {createOperations} from './ui-operations.js';
@@ -19,6 +20,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
   const importanceNames = {normal: 'Обычная', elevated: 'Повышенная', high: 'Высокая'};
   let subscriptions = {folders: [], feeds: []};
   let sourceStatus = [];
+  const collapsed = new Set();
   function sourceHelp() {
     const target = document.getElementById('source-help');
     if (target) {target.textContent = sourceStatus.find(s => currentPath === 'feed/' + s.feed_id)?.changes || ''; target.parentElement.hidden = !target.textContent;}
@@ -47,20 +49,43 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
     onFolders(subscriptions.folders);
     const options = [...subscriptions.folders.map(f => ['folder/' + f.id, 'Папка: ' + f.title]), ...subscriptions.feeds.map(f => ['feed/' + f.id, 'Фид: ' + f.title])];
     if (!options.some(([id]) => id === selectedOwner)) selectedOwner = null;
-    const tree = byId('feed-tree'); tree.replaceChildren();
-    for (const folder of subscriptions.folders) {
-      const group = element('div'); group.className = 'feed-group';
-      const button = element('button', folder.title); button.dataset.owner = 'folder/' + folder.id;
-      button.onclick = () => selectOwner(button.dataset.owner); group.append(button);
-      for (const feed of subscriptions.feeds.filter(f => f.folder_id === folder.id)) {
-        const child = element('button', feed.title); child.className = 'feed-child'; child.dataset.owner = 'feed/' + feed.id;
-        child.onclick = () => selectOwner(child.dataset.owner); group.append(child);
-      }
-      tree.append(group);
-    }
-    if (!options.length) tree.append(element('p', 'Фидов пока нет. Добавьте источник.'));
+    renderSubscriptions();
     byId('feed-detail').hidden = !selectedOwner;
 
+  }
+  function renderSubscriptions() {
+    const tree = byId('feed-tree');
+    const focus = document.activeElement?.dataset.treeKey, scroll = byId('feed-list').scrollTop;
+    const groups = [];
+    for (const folder of subscriptions.folders) {
+      const group = element('div'); group.className = 'feed-group';
+      const row = element('div'); row.className = 'tree-row folder-row';
+      const button = treeButton(folder.title, 'tree-select'); button.dataset.owner = 'folder/' + folder.id;
+      button.dataset.treeKey = button.dataset.owner; treeTitle(button, folder.title, 'folder');
+      button.onclick = () => selectOwner(button.dataset.owner);
+      const children = element('div'); children.id = 'settings-folder-' + folder.id; children.hidden = collapsed.has(folder.id);
+      const toggle = treeButton((children.hidden ? 'Раскрыть ' : 'Свернуть ') + folder.title, 'tree-collapse');
+      toggle.dataset.treeKey = 'collapse/' + folder.id;
+      toggle.setAttribute('aria-expanded', String(!children.hidden)); toggle.setAttribute('aria-controls', children.id);
+      toggle.append(treeChevron());
+      toggle.onclick = () => {if (collapsed.has(folder.id)) collapsed.delete(folder.id); else collapsed.add(folder.id); renderSubscriptions();};
+      row.append(button, toggle); group.append(row, children);
+      for (const feed of folderFeeds(subscriptions, folder.id)) {
+        const childRow = element('div'); childRow.className = 'tree-row feed-row';
+        const child = treeButton(feed.title, 'tree-select feed-child'); child.dataset.owner = 'feed/' + feed.id;
+        child.dataset.treeKey = child.dataset.owner; treeTitle(child, feed.title, feedIcon(feed)); child.append(treeChevron());
+        child.onclick = () => selectOwner(child.dataset.owner); childRow.append(child); children.append(childRow);
+      }
+      groups.push(group);
+    }
+    tree.replaceChildren(...groups);
+    if (!groups.length) tree.append(element('p', 'Фидов пока нет. Добавьте источник.'));
+    for (const button of tree.querySelectorAll('[data-owner]')) button.setAttribute('aria-pressed', String(button.dataset.owner === selectedOwner));
+    byId('feed-list').scrollTop = scroll;
+    if (focus) [...tree.querySelectorAll('[data-tree-key]')].find(node => node.dataset.treeKey === focus)?.focus({preventScroll:true});
+  }
+  function focusOwner() {
+    [...byId('feed-tree').querySelectorAll('[data-owner]')].find(node => node.dataset.owner === selectedOwner && !node.closest('[hidden]'))?.focus({preventScroll:true});
   }
   async function selectOwner(path) {
     operations.invalidate();
@@ -70,6 +95,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
     byId('settings-editor').hidden = true;
     byId('reconnect-connection').hidden = true;
     if (!selectedOwner) return;
+    renderSubscriptions();
     onDetail();
     await loadSettings();
   }
@@ -320,6 +346,7 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
       await action.commit(loadSettings);
     },
     deactivate,
+    focusOwner,
     viewChanged() {operations.invalidate(); reconnect.deactivate(); editorMessage('');},
     refreshView() {if (needsRefresh.has(scopePath())) return loadSettings();},
     refresh: loadSubscriptions,
