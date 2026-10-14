@@ -1,5 +1,20 @@
 # Фронтенд и бэкенд Око
 
+## Действующая архитектура — 2026-10-14
+
+React + strict TypeScript находятся в frontend/src; Vite собирает готовые assets. frontend/src/main.tsx собирает владельцев чтения, настроек и состояния; shell.tsx задаёт структуру, renderer.tsx держит один React root и его именованные portals. Владельцы хранят локальное состояние и управляют своими ресурсами; универсальный application store/router не вводился. reader-session.ts единолично владеет heartbeat/polling/BroadcastChannel/page events; cleanup не отправляет stop/close.
+
+Редактируемый HTTP-контракт — [OpenAPI](../../api/openapi.yaml). Generated Python DTO используются в входных и выходных handlers; доменная валидация и Runtime/Store сохраняют прежние обязанности. Generated TypeScript SDK задаёт операции. APIreader настраивает отдельный Fetch client и учитывает исходы команд; общие errors/transport сохраняют diagnostic headers, unknown network outcomes и bearer только своего origin. Binary operations выводятся из canonical metadata и читаются как Blob, а media links используют авторизованный raw fetch.
+
+[API-first policy](../../api/README.md) задаёт проверку drift, совместимости и reviewed baseline. Browser snapshots получают schema2020-12 из canonical bundle и используют Ajv8; ручных wire-схем нет. Standalone Swagger не создаёт Runtime. Встроенные docs поставляются локально, требуют явного Authorize для Try и не создают reader lease.
+
+Python static delivery проверяет content hashes, ревизию контракта и freshness checkout до Runtime. Assets находятся в immutable generations с atomic pointer; старые chunks остаются доступны открытым вкладкам при watch rebuild. [Package builder](../development/package.md) проверяет libs/assets и включает только текущую generation; installed smoke выполняется вне checkout без Node.
+
+Спецификация: [миграция](../../.scratch/react-typescript-vite/spec.md). Фактические проверки: [отчёт](../../.scratch/react-typescript-vite/verification-implementation.md). Прежние решения и доказательства сохраняются ниже как история предыдущей версии.
+
+## История до React-переноса
+
+
 Око состоит из браузерного фронтенда в `frontend/` и серверного Python-пакета `oko/` в одном репозитории. Существующий запуск `python -m oko` обслуживает оба на одном локальном origin. Пользовательскому запуску не требуются Node, сборка или отдельный frontend-процесс.
 
 Спецификация и критерии приёмки: [явное разделение](../../.scratch/frontend-backend-separation/spec.md). Фактические проверки: [отчёт](../verification/frontend-backend-separation.md).

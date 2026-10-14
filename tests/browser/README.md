@@ -141,3 +141,7 @@ node --test --test-name-pattern='missing model opens|panel reorders only' tests/
 Перед запуском из checkout выполните `npm ci` и `npm run build`. `npm run typecheck` отдельно проверяет TypeScript в strict-режиме; JavaScript сохраняется как временный этап миграции без второй копии реализации. `npm run dev` следит за исходниками и публикует новые production assets; читатель продолжает работать на Python origin, без отдельного Vite server и ослабления CSP.
 
 `check ui`, `check lifecycle` и `check all` включают набор `build`: typecheck, сборку и проверку актуальности. Сборка пишет только в игнорируемый `oko/frontend_build/`. HTML и JS/CSS получают согласованные адреса с хешами; watch атомарно меняет указатель поколения и сохраняет старые assets для уже открытых вкладок. Неудачная сборка не публикуется. Обычный `python -m oko` не запускает npm или генераторы: отсутствующая, устаревшая или повреждённая сборка останавливает запуск до создания Runtime и хранилища. В установленной поставке используются подготовленные assets и проверяется их целостность, без доступа к source checkout.
+
+## React / API-first
+
+Полный контракт: api/openapi.yaml. Команды api:lint, api:generate, api:check, api:compat и standalone api:docs описаны в [API README](../../api/README.md). Generated libs проверяются без записи в checkout. Swagger и installed-wheel проверки находятся в test_api_docs.cjs / test_installed_docs.cjs; источники и модели только синтетические. Историческое описание TypedDict wire export выше относится к версии до React-переноса.

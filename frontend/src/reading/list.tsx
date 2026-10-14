@@ -3,7 +3,7 @@ import {cards as readCards} from '../api/generated/sdk.gen';
 import type {Card,Navigation} from '../api/generated/types.gen';
 import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
-import {reportError} from '../../debug.js';
+import {reportError} from '../status/debug';
 import type {Selection} from './tree';
 import {createStore,useStore,saved,save,host} from './store';
 

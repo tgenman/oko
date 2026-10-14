@@ -3,7 +3,7 @@ import {material as readMaterial,previousVersion,regenerate,retryMaterial,retryT
 import type {Card,Material,Version,Previous,Point,Attachment} from '../api/generated/types.gen';
 import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
-import {reportError} from '../../debug.js';
+import {reportError} from '../status/debug';
 import {createStore,useStore,host,errorMessage} from './store';
 
 type MediaFetch=(path:string,signal?:AbortSignal,cache?:RequestCache)=>Promise<Response>;

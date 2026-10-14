@@ -3,7 +3,7 @@ import {createDigest,previewCompletion,completeFolder} from '../api/generated/sd
 import type {CompletionPreview,DigestRequest,CompletionConflict} from '../api/generated/types.gen';
 import {ReaderError,type ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
-import {reportError} from '../../debug.js';
+import {reportError} from '../status/debug';
 import {createStore,useStore,host,errorMessage} from './store';
 
 type DigestState={open:boolean;folder:string|null;period:boolean;start:string;end:string;message:string;busy:boolean;generation:number};

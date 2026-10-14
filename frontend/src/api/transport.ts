@@ -1,4 +1,6 @@
 import {decodeJson} from './errors';
+export {createReaderApi} from './reader';
+export * as operations from './generated/sdk.gen';
 
 // Generic HTTP rules, without a second list of reader operations or wire types.
 export function createTransport({fetch:adapter,token,origin}:{fetch:typeof fetch;token:string|null;origin:string}) {

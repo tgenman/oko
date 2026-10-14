@@ -1,6 +1,32 @@
 const {test} = require('node:test');
 const {reader, material, expect} = require('./support.cjs');
 
+test('generated SDK preserves binary media and its diagnostic HTTP failures', async () => {
+  const r=await reader();
+  try {
+    await r.start([]);
+    const reply=await r.page.evaluate(async()=>{
+      const {createReaderApi,operations}=await import('/transport.js');
+      const requests=[];
+      const api=createReaderApi({token:'binary-session',origin:location.origin,fetch:async(path,options)=>{
+        requests.push({path,authorization:new Headers(options.headers).get('Authorization')});
+        if(path.endsWith('missing.txt'))return new Response('{"detail":"Медиа недоступно"}',{status:404,headers:{'Content-Type':'application/json','X-Oko-Error':'binary-diagnostic'}});
+        return new Response(new Uint8Array([0,255,10]),{headers:{'Content-Type':'text/plain','Content-Disposition':'inline'}});
+      }});
+      const result=await operations.attachment({client:api.client,path:{item:'synthetic',name:'media-0.txt'}});
+      let failure;
+      try {await operations.attachment({client:api.client,path:{item:'synthetic',name:'missing.txt'}});}
+      catch(error){failure={message:error.message,confirmed:error.confirmed,diagnosticId:error.diagnosticId};}
+      return {bytes:Array.from(new Uint8Array(await result.data.arrayBuffer())),disposition:result.response.headers.get('Content-Disposition'),requests,failure};
+    });
+    expect(reply.bytes).toEqual([0,255,10]);
+    expect(reply.disposition).toBe('inline');
+    expect(reply.requests).toHaveLength(2);
+    expect(reply.requests.every(request=>request.authorization==='Bearer binary-session')).toBe(true);
+    expect(reply.failure).toEqual({message:'Медиа недоступно',confirmed:true,diagnosticId:'binary-diagnostic'});
+  } finally {await r.close();}
+});
+
 test('reader transport shares authorization and preserves JSON, media and closing request rules', async () => {
   const r = await reader();
   try {

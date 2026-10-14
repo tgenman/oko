@@ -12,6 +12,7 @@ type Options = {
     onMaterial(id: string): void;
     onRetry(target: ProblemAction, problem: Problem): Promise<void>;
     onRefresh(): void;
+    onAvailability?(available:boolean):void;
 };
 const names: Record<string, string> = { settings: 'Настроить модель', 'feed-settings': 'Настройки фида', retry: 'Повторить', 'theses-retry': 'Повторить обработку', 'filter-retry': 'Повторить фильтрацию', regenerate: 'Пересоздать обзор', material: 'Показать материал', objects: 'Показать материалы', collect: 'Обновить источники' };
 const sections = [['action', 'Нужно действие'], ['wait', 'Ожидание и работа'], ['object', 'Проблемы материалов и фидов']] as const;
@@ -54,7 +55,7 @@ function Recent({count,children}: {count:number;children:ReactNode}) {
         <summary>Недавно завершённые · {count}</summary><div>{children}</div>
     </details>;
 }
-export function createStatusPanel({ debug, actions, onSettings, onMaterial, onRetry, onRefresh }: Options) {
+export function createStatusPanel({ debug, actions, onSettings, onMaterial, onRetry, onRefresh,onAvailability }: Options) {
     const panel = byId('status-panel'), toggle = byId('status-toggle'), body = byId('status-body');
     const deleted = new Set<string>(), disclosed = new Set<string>(), owners = new Map<string, string>();
     let snapshot = emptySnapshot, online: boolean | null = null, stopped = false, opener: HTMLElement | null = null, work = '';
@@ -104,11 +105,10 @@ export function createStatusPanel({ debug, actions, onSettings, onMaterial, onRe
         const grouped = (key: string) => [...owners.keys()].flatMap(id => { const p = all.find(p => p.id === id); return owners.get(id) === key && p ? [p] : []; });
         mountSurface(toggle, <>{stopped ? 'Око остановлено' : !online ? 'Нет связи с Око' : shown.count ? `Проблемы · ${shown.count}` : 'Состояние'}</>);
         toggle.classList.toggle('has-problems', shown.count > 0 || !online);
-        byId('status-summary').textContent = stopped ? 'Око остановлено' : !online ? 'Последние известные сведения' : shown.count ? `Требуют внимания: ${shown.count}` : 'Проблем нет · можно читать';
+        mountSurface(byId('status-summary'),<>{stopped ? 'Око остановлено' : !online ? 'Последние известные сведения' : shown.count ? `Требуют внимания: ${shown.count}` : 'Проблем нет · можно читать'}</>);
         byId('status-connection').hidden = Boolean(online) || stopped;
         mountSurface(byId('status-connection'), <><p>{snapshot.updated_at ? 'Нет связи с Око · Состояние может быть устаревшим. Последнее обновление: ' + new Date(snapshot.updated_at * 1000).toLocaleTimeString() : 'Состояние Око пока неизвестно. Ожидаем первого ответа.'}</p><button id="status-check-connection" onClick={onRefresh}>Проверить связь</button></>);
-        (byId('collect') as HTMLButtonElement).disabled = stopped || !online;
-        (byId('stop') as HTMLButtonElement).disabled = stopped || !online;
+        onAvailability?.(!stopped && Boolean(online));
         const cards = (key: string) => grouped(key).map(problem => <Card key={problem.id} problem={problem} disabled={stopped || !online} onMaterial={material} onAction={(target, trigger) => { void act(target, problem, trigger); }} onDisclosure={open => { if (open)
             disclosed.add(problem.id);
         else {

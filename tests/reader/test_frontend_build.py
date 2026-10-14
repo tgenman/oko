@@ -5,6 +5,7 @@ import subprocess
 import time
 import sys
 import os
+import re
 
 import pytest
 
@@ -54,18 +55,21 @@ def test_failed_build_preserves_previous_complete_generation(tmp_path: Path):
     assert first.returncode == 0, first.stdout + first.stderr
     current = checkout / 'oko/frontend_build/current.json'
     before = current.read_bytes()
-    (checkout / 'frontend/app.js').write_text('import "./missing.js";')
+    entry = re.search(r'<script[^>]+src="([^"]+)"', (checkout / 'frontend/index.html').read_text())
+    assert entry is not None
+    source_entry = Path('frontend') / entry[1].lstrip('/')
+    (checkout / source_entry).write_text('import "./missing.js";')
     failed = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
     assert failed.returncode != 0
     assert current.read_bytes() == before
     manifest = json.loads(before)
     page = checkout / 'oko/frontend_build/generations' / manifest['generation'] / 'index.html'
     assert page.is_file()
-    shutil.copy(root / 'frontend/app.js', checkout / 'frontend/app.js')
+    shutil.copy(root / source_entry, checkout / source_entry)
     schema = checkout / 'api/openapi.yaml'
-    schema.write_text(schema.read_text().replace('version: 0.1.0', 'version: 0.2.0'))
-    # Change canonical bytes without silently refreshing either saved library.
-    schema.write_text(schema.read_text() + '\nx-drift-test: true\n')
+    # A documentation-only edit passes compatibility but changes canonical
+    # bytes, so unchanged generated libraries must still fail the build.
+    schema.write_text(schema.read_text().replace('title: Око Reader API', 'title: Synthetic drift title', 1))
     stale = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
     assert stale.returncode != 0
     assert 'Stale Python API library' in stale.stderr

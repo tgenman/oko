@@ -44,6 +44,16 @@ try {
     {name:'@hey-api/client-fetch',throwOnError:true},
     {name:'@hey-api/sdk',auth:false},
   ]});
+  const document=JSON.parse(bundle.toString('utf8'));
+  const binary=[];
+  for(const [route,methods] of Object.entries(document.paths))for(const [method,operation] of Object.entries(methods)) {
+    const media=operation.responses?.['200']?.content || {};
+    if(Object.values(media).some(reply=>reply.schema?.format==='binary')) {
+      const pattern='^'+route.split(/(\{[^}]+\})/).map(part=>part.startsWith('{')?'[^/]+':part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('')+'$';
+      binary.push(`{method:${JSON.stringify(method.toUpperCase())},path:new RegExp(${JSON.stringify(pattern)})}`);
+    }
+  }
+  await writeFile(path.join(output,'media.gen.ts'),`// Generated from canonical responses; do not edit.\nconst routes=[${binary.join(',')}];\nexport const isBinaryOperation=(path:string,method:string)=>routes.some(route=>route.method===method&&route.path.test(path));\n`);
   await writeFile(path.join(output,'revision.ts'),`// Generated; do not edit.\nexport const CONTRACT_DIGEST = '${digest}';\n`);
   const expected = await files(output);
   if (command==='generate') {

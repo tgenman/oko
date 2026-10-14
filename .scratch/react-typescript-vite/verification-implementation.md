@@ -51,3 +51,11 @@ TS/TSX syntax включён в единый runner и проверку точн
 Общие HTTP error/diagnostic правила перенесены в strictTS и используются SDK и transport без дублирования декодера. JStransport временно только реэкспортирует TSфабрику до окончательного entrycutover. Swagger initializer также typecheckedTS; сборка выдаёт его как обычный локальныйJSasset. Transport facade выбирается по фактическому isEntry Viteoutput, а не по совпадению имени sharedchunk. Pydantic2.13.5 явно закреплён какruntime dependency для используемого MISSING API.
 
 Typecheck/build PASS;5transport+installedreader/Swagger browser сценариев PASS (report20261014T140459Z-60ec6611). Проверяется wheeloutsidecheckout/PATHwithoutNode, явнаяSwaggerавторизация и token/session правила.
+
+## 2026-10-14 — общий entry/root cutover перед приёмкой
+
+Entry перенесён в strictTSX, структура страницы — ReaderShell. Все owners и shell используют один React root с portals; production JS renderers/reexports и allowJs удалены. Общий JSON-декодер сохраняет ошибки, media операции классифицируются из canonical generated metadata, SDK binary ответы читаются как Blob (включая text/plain файлы), headers/rawResponse сохранены. Preview/media URL ресурсы остаются у их владельцев.
+
+SDKbinary test сначала4/5 из-за неполного временногоentry реэкспорта; переключён прямойTSentry. Повтор5/5transport PASS. Typecheck/build PASS. ОбщаяUI-проверка13/13PASS, включая34проверенных геометрических состояния; desktop/plain и mobile/RSS снимки просмотрены. Просмотр выявил потерю toolbarSVG при переносе commandcomponent, icons восстановлены по исходной разметке; итоговые снимки ещё проверяются в полном прогоне.
+
+Окончательная приёмка и независимое ревью пока не завершены,20claimed.

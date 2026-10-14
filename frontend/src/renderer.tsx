@@ -21,17 +21,17 @@ class SurfaceBoundary extends Component<{children:ReactNode; name:string}, {fail
 
 function render() {
   if (!root) {
-    let host = document.getElementById('react-root');
-    if (!host) {host=document.createElement('div');host.id='react-root';document.body.append(host);}
+    const host = document.getElementById('react-root');
+    if (!host) throw new Error('Reader React root is missing');
     root = createRoot(host);
   }
   flushSync(() => root!.render(<>{shell}{[...surfaces].map(([host,node]) => createPortal(<SurfaceBoundary name={host.id || host.parentElement?.id || 'Область интерфейса'}>{node}</SurfaceBoundary>,host,portalKeys.get(host)))}</>));
 }
 
 // Composition only: each surface keeps its own React state and resources.
-// Portals let untouched owners retain exclusive containers during migration.
+// The shell and all named surfaces share this one React tree.
 export function mountSurface(host:HTMLElement, node:ReactNode) {
-  // Claim this container once; portals do not clear a legacy placeholder.
+  // Claim the shell slot once; portals do not clear its initial placeholder.
   if (!surfaces.has(host)) {
     host.replaceChildren();
     if (!portalKeys.has(host)) portalKeys.set(host,'surface-'+ ++surfaceSequence);

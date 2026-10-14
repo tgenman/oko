@@ -2,6 +2,7 @@ import {createClient} from './generated/client';
 import {status, heartbeat, closeTab, collect, stop} from './generated/sdk.gen';
 import type {Status} from './generated/types.gen';
 import {ReaderError,decodeJson} from './errors';
+import {isBinaryOperation} from './generated/media.gen';
 export {ReaderError} from './errors';
 
 export type ActionRecord = {id:string};
@@ -32,7 +33,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         keepalive:request.keepalive,
           ...(body === undefined ? {} : {body}),
         });
-        await decodeJson(response.clone());
+        if(!response.ok || !isBinaryOperation(url.pathname,request.method))await decodeJson(response.clone());
         tracker?.succeeded(record);
         return response;
       } catch(error) {
@@ -47,6 +48,10 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         throw error;
       }
     },
+  });
+  client.interceptors.request.use((request,options)=>{
+    if(options.parseAs === 'auto' || options.parseAs === undefined)options.parseAs=isBinaryOperation(new URL(request.url).pathname,request.method)?'blob':'json';
+    return request;
   });
   return {
     client,
