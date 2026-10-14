@@ -15,3 +15,5 @@
 - Prepared exact index проверен через scripts/check staged: PASS, 16.44s, report 20261014T140915Z-e1da2205. Включены canonical/baseline gate и regeneration обеих библиотек из index inputs.
 
 Ограничения: автоматический diff консервативен и не доказывает semantic compatibility. Семантическая оценка и качество review text остаются ответственностью independent reviewer; потенциально совместимые additions также требуют explicit baseline transition. Реальная package/full UI проверка и общий code-review выполняются основной задачей миграции.
+
+Интеграция: scoped governance commit ebddd8e; primary f70ee6e incorporated без конфликтов в merge 2831721. После изменения build/config повторён npm run build: PASS (baseline gate, обе generated-библиотеки, strict TypeScript, production reader и local Swagger initializer). Неизменные CLI/index/HTTP suites не повторялись.
