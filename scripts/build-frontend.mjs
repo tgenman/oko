@@ -37,6 +37,10 @@ async function compile() {
   await fs.rm(stage,{recursive:true,force:true});
   try {
     await build({configFile:join(root,'vite.config.mjs'),build:{outDir:stage,emptyOutDir:true}});
+    await fs.cp(join(root,'frontend/docs'),join(stage,'docs'),{recursive:true});
+    for (const name of ['swagger-ui.css','swagger-ui-bundle.js']) {
+      await fs.copyFile(join(root,'node_modules/swagger-ui-dist',name),join(stage,'docs',name));
+    }
     // These resources use runtime URLs in the unchanged reader.
     for (const name of ['icons','licenses']) await fs.cp(join(root,'frontend',name),join(stage,name),{recursive:true});
     // The paint-only layer remains independently toggleable in browser checks,

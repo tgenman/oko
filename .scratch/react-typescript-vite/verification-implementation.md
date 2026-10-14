@@ -29,3 +29,13 @@ SDK подключён к heartbeat/close/collect/stop; один session owner �
 - После подключения единственного React renderer:10/18PASS,8ошибок из-за оставшегося начального текста при portal handoff. Контейнер теперь очищается один раз при передаче React; status-повтор8/8PASS. Утверждения о тексте/фокусе/порядке сохранены. Остальные10сценариев не менялись и прошли.
 - Процессные lifecycle сначала8passed/8failed (subprocess exited before readiness, без сетевой эскалации); повтор с разрешённым loopback16/16PASS. Подробный исходный stderr дочерних процессов этот helper не сохраняет.
 - strictTS/build/api drift — PASS. Desktop/mobile панели сохранены в report20261014T131359Z-63f2549c. Root-композиция через portals подготовлена для дальнейших независимых owners; полный UI ещё переносится.
+
+## 2026-10-14 — входные wire DTO
+
+Все JSON body handlers используют generated входные DTO; прежние доменные нормализаторы и ограничения выполняются до создания DTO, Runtime получает доменные объекты через явное преобразование. Ручные транспортные HistoryPause/CompletionRequest/ReportAction удалены. YouTube сохраняет прежний400, остальные body-ошибки422. Отсутствующие поля и null остаются отдельными исходами.
+
+- mypy всех52sourcefiles — PASS.
+-50затронутых HTTP-тестов настроек/подписок/начальной истории/diagnostics/YouTube/contracts — PASS.
+- Дополнительный HTTP red на наивном ISO timestamp выявил изменение генератором прежней нормализации. Выбран datetime вместо AwareDatetime;16debug+generator проверок PASS. Публичные timestamps сохраняют доменную семантику.
+- Полный tests/reader +canonicalcontract —156/156PASS за77.57s после всех inputDTO изменений. Реальные сетевые adapters не использовались.
+- uv.lock обновлён под зависимости packagebuilder/installer из04;70закреплённых пакетов.

@@ -5,6 +5,14 @@ from tests.support.app import create_app
 HEADERS = {'Authorization': 'Bearer test-secret'}
 
 
+def test_generated_debug_input_retains_iso_timestamp_normalization(tmp_path):
+    with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
+        for stamp in ['2026-10-14T12:00:00', '2026-10-14T12:00:00Z']:
+            response = client.post('/api/debug', json={'source':'synthetic', 'message':stamp, 'occurred_at':stamp})
+            assert response.status_code == 200
+            assert response.json()['entry']['last_time'].startswith('2026-10-14T12:00:00')
+
+
 def test_clear_debug_is_authorized_persistent_and_accepts_new_errors(tmp_path):
     with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
         client.post('/api/debug', json={'source': 'browser', 'message': 'old error'})
