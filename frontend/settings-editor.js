@@ -85,7 +85,11 @@ export function createSettingsEditor({api, onChanged, onDetail, onFolders, onNav
     if (focus) [...tree.querySelectorAll('[data-tree-key]')].find(node => node.dataset.treeKey === focus)?.focus({preventScroll:true});
   }
   function focusOwner() {
-    [...byId('feed-tree').querySelectorAll('[data-owner]')].find(node => node.dataset.owner === selectedOwner && !node.closest('[hidden]'))?.focus({preventScroll:true});
+    const buttons = [...byId('feed-tree').querySelectorAll('[data-owner]')];
+    const visible = owner => buttons.find(node => node.dataset.owner === owner && !node.closest('[hidden]'));
+    const feed = subscriptions.feeds.find(item => 'feed/' + item.id === selectedOwner);
+    const target = visible(selectedOwner) || (feed && visible('folder/' + feed.folder_id)) || buttons[0];
+    target?.focus({preventScroll:true});
   }
   async function selectOwner(path) {
     operations.invalidate();

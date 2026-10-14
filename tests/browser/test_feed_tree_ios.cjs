@@ -98,3 +98,28 @@ test('empty feed settings offer addition and catalog refresh reveals newly impor
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
+
+test('Back focuses the destination folder after moving the selected feed into a collapsed folder', async () => {
+  const r = await reader();
+  try {
+    await r.page.setViewportSize({width:390,height:844});
+    const data = await r.api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Источник" xmlUrl="https://source.test/move"/></outline><outline text="Физика"/></body></opml>'});
+    const destination = data.folders.find(folder=>folder.title==='Физика');
+    await r.start([]);
+    await r.page.evaluate(()=>readerTransport.native.add('/api/subscriptions'));
+    await r.page.locator('#feeds-open').click();
+    const tree = r.page.locator('#feed-tree');
+    await tree.getByRole('button',{name:'Свернуть Физика',exact:true}).click();
+    await tree.getByRole('button',{name:'Источник',exact:true}).click();
+    await r.page.getByRole('button',{name:'Подключение и параметры',exact:true}).click();
+    await r.page.locator('#feed-folder').selectOption(destination.id);
+    await r.page.getByRole('button',{name:'Сохранить фид',exact:true}).click();
+    await expect(r.page.locator('#settings-message')).toHaveText('Фид сохранён');
+    await r.page.locator('#feeds-back').click();
+    await expect(tree.getByRole('button',{name:'Источник',exact:true})).toBeHidden();
+    await expect(tree.getByRole('button',{name:'Раскрыть Физика',exact:true})).toHaveAttribute('aria-expanded','false');
+    await expect(tree.getByRole('button',{name:'Физика',exact:true})).toBeFocused();
+    expect((await r.api('subscriptions')).feeds[0].folder_id).toBe(destination.id);
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});
