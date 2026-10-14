@@ -3,6 +3,8 @@ import json
 import shutil
 import subprocess
 import time
+import sys
+import os
 
 import pytest
 
@@ -39,35 +41,45 @@ def test_failed_build_preserves_previous_complete_generation(tmp_path: Path):
     root = Path(__file__).resolve().parents[2]
     checkout = tmp_path / 'checkout'
     checkout.mkdir()
-    for name in ('frontend', 'scripts', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs'):
+    for name in ('frontend', 'scripts', 'api', 'oko', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs'):
         source = root / name
         if source.is_dir():
-            shutil.copytree(source, checkout / name)
+            shutil.copytree(source, checkout / name, ignore=shutil.ignore_patterns('__pycache__', 'frontend_build'))
         else:
             shutil.copy(source, checkout / name)
     (checkout / 'node_modules').symlink_to(root / 'node_modules', target_is_directory=True)
     command = ['node', str(checkout / 'scripts/build-frontend.mjs')]
-    first = subprocess.run(command, cwd=checkout, capture_output=True, text=True)
+    environment = dict(os.environ, OKO_PYTHON=sys.executable)
+    first = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
     assert first.returncode == 0, first.stdout + first.stderr
     current = checkout / 'oko/frontend_build/current.json'
     before = current.read_bytes()
     (checkout / 'frontend/app.js').write_text('import "./missing.js";')
-    failed = subprocess.run(command, cwd=checkout, capture_output=True, text=True)
+    failed = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
     assert failed.returncode != 0
     assert current.read_bytes() == before
     manifest = json.loads(before)
     page = checkout / 'oko/frontend_build/generations' / manifest['generation'] / 'index.html'
     assert page.is_file()
+    shutil.copy(root / 'frontend/app.js', checkout / 'frontend/app.js')
+    schema = checkout / 'api/openapi.yaml'
+    schema.write_text(schema.read_text().replace('version: 0.1.0', 'version: 0.2.0'))
+    # Change canonical bytes without silently refreshing either saved library.
+    schema.write_text(schema.read_text() + '\nx-drift-test: true\n')
+    stale = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
+    assert stale.returncode != 0
+    assert 'Stale Python API library' in stale.stderr
+    assert current.read_bytes() == before
 
 
 def test_watch_publishes_complete_generations_and_retains_open_tab_assets(tmp_path: Path):
     root = Path(__file__).resolve().parents[2]
     checkout = tmp_path / 'checkout'
     checkout.mkdir()
-    for name in ('frontend', 'scripts', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs'):
+    for name in ('frontend', 'scripts', 'api', 'oko', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs'):
         source = root / name
         if source.is_dir():
-            shutil.copytree(source, checkout / name)
+            shutil.copytree(source, checkout / name, ignore=shutil.ignore_patterns('__pycache__', 'frontend_build'))
         else:
             shutil.copy(source, checkout / name)
     (checkout / 'node_modules').symlink_to(root / 'node_modules', target_is_directory=True)
@@ -75,7 +87,7 @@ def test_watch_publishes_complete_generations_and_retains_open_tab_assets(tmp_pa
     current = build / 'current.json'
     log = tmp_path / 'watch.log'
     with log.open('w') as output:
-        process = subprocess.Popen(['node', str(checkout / 'scripts/build-frontend.mjs'), '--watch'], cwd=checkout, stdout=output, stderr=output)
+        process = subprocess.Popen(['node', str(checkout / 'scripts/build-frontend.mjs'), '--watch'], cwd=checkout, env=dict(os.environ, OKO_PYTHON=sys.executable), stdout=output, stderr=output)
         try:
             deadline = time.monotonic() + 15
             while 'Watching frontend' not in log.read_text() and time.monotonic() < deadline:

@@ -27,7 +27,7 @@ from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, Imp
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.actions import action_context
 from oko.reader.static import install_frontend, validate_frontend
-from oko.reader.contracts import Navigation, Card, Material, Version, Status
+from oko.reader.generated.operations import RESPONSES
 from oko.collection.youtube.source import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.subscriptions.history import InitialHistory
@@ -185,15 +185,15 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     def store() -> Store:
         return runtime.require_store()
 
-    @app.get('/api/debug')
+    @app.get('/api/debug', response_model=RESPONSES[('GET', '/api/debug')], response_model_exclude_unset=True)
     async def debug_entries() -> dict[str, Any]:
         return dict(groups=journal.entries(), persistence_error=journal.persistence_error)
 
-    @app.delete('/api/debug')
+    @app.delete('/api/debug', response_model=RESPONSES[('DELETE', '/api/debug')], response_model_exclude_unset=True)
     async def clear_debug() -> dict[str, Any]:
         return dict(ok=journal.clear(), persistence_error=journal.persistence_error)
 
-    @app.post('/api/debug')
+    @app.post('/api/debug', response_model=RESPONSES[('POST', '/api/debug')], response_model_exclude_unset=True)
     async def debug_browser(body: BrowserError) -> dict[str, Any]:
         if body.material_ids and any(runtime.material_was_viewed(identity) for identity in body.material_ids):
             return dict(ok=True, group=None, entry=None, persistence_error=journal.persistence_error)
@@ -204,11 +204,11 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                             stream_id=body.stream_id, sequence=body.sequence, material_ids=body.material_ids)
         return dict(ok=not bool(journal.persistence_error), group=group, entry=next((entry for entry in journal.entries() if entry['id'] == group), None), persistence_error=journal.persistence_error)
 
-    @app.get('/api/status', response_model=Status, response_model_exclude_unset=True)
+    @app.get('/api/status', response_model=RESPONSES[('GET', '/api/status')], response_model_exclude_unset=True)
     async def status() -> dict[str, Any]:
         return dict(runtime.status(), debug_count=len(journal.records), debug_persistence_error=journal.persistence_error)
 
-    @app.post('/api/problems/actions')
+    @app.post('/api/problems/actions', response_model=RESPONSES[('POST', '/api/problems/actions')], response_model_exclude_unset=True)
     async def report_reader_action(body: ReportAction) -> dict[str, Any]:
         context = action_context(body.method, body.path, body.fields)
         if context is None:
@@ -216,24 +216,24 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         result = await runtime.report_action(body.id, context, body.result)
         return dict(ok=True, result=result)
 
-    @app.post('/api/problems/{identity}/abandon')
+    @app.post('/api/problems/{identity}/abandon', response_model=RESPONSES[('POST', '/api/problems/{identity}/abandon')], response_model_exclude_unset=True)
     async def abandon_problem(identity: str) -> dict[str, bool]:
         await runtime.abandon_problem(identity)
         return dict(ok=True)
 
-    @app.post('/api/tabs/{tab}/heartbeat')
+    @app.post('/api/tabs/{tab}/heartbeat', response_model=RESPONSES[('POST', '/api/tabs/{tab}/heartbeat')], response_model_exclude_unset=True)
     async def heartbeat(tab: str) -> dict[str, bool]:
         if not re.fullmatch(r'[\w-]{1,80}', tab):
             raise HTTPException(400, 'Неверная вкладка')
         await runtime.heartbeat(tab)
         return {'ok': True}
 
-    @app.post('/api/tabs/{tab}/close')
+    @app.post('/api/tabs/{tab}/close', response_model=RESPONSES[('POST', '/api/tabs/{tab}/close')], response_model_exclude_unset=True)
     async def close_tab(tab: str) -> dict[str, bool]:
         await runtime.close_tab(tab)
         return {'ok': True}
 
-    @app.post('/api/stop')
+    @app.post('/api/stop', response_model=RESPONSES[('POST', '/api/stop')], response_model_exclude_unset=True)
     async def stop() -> dict[str, bool]:
         await runtime.stop()
         return {'ok': True}
@@ -241,88 +241,88 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     def subscriptions() -> Subscriptions:
         return store().subscriptions
 
-    @app.get('/api/processors/codex')
+    @app.get('/api/processors/codex', response_model=RESPONSES[('GET', '/api/processors/codex')], response_model_exclude_unset=True)
     async def codex_state() -> dict[str, Any]:
         return runtime.codex_status()
 
-    @app.get('/api/processors/codex/models')
+    @app.get('/api/processors/codex/models', response_model=RESPONSES[('GET', '/api/processors/codex/models')], response_model_exclude_unset=True)
     async def codex_models() -> dict[str, Any]:
         return dict(models=await runtime.codex_models())
 
-    @app.put('/api/processors/codex')
+    @app.put('/api/processors/codex', response_model=RESPONSES[('PUT', '/api/processors/codex')], response_model_exclude_unset=True)
     async def codex_save(body: CodexSettings) -> dict[str, Any]:
         await runtime.configure_codex(body)
         return body.model_dump()
 
-    @app.post('/api/processors/codex/check')
+    @app.post('/api/processors/codex/check', response_model=RESPONSES[('POST', '/api/processors/codex/check')], response_model_exclude_unset=True)
     async def codex_check() -> dict[str, Any]:
         return await runtime.check_codex()
 
-    @app.get('/api/processors/llamacpp')
+    @app.get('/api/processors/llamacpp', response_model=RESPONSES[('GET', '/api/processors/llamacpp')], response_model_exclude_unset=True)
     async def processor_config() -> dict[str, Any] | None:
         config = store().processor_config()
         return config.model_dump() if config else None
 
-    @app.put('/api/processors/llamacpp')
+    @app.put('/api/processors/llamacpp', response_model=RESPONSES[('PUT', '/api/processors/llamacpp')], response_model_exclude_unset=True)
     async def processor_save(body: ProcessorConfig) -> dict[str, Any]:
         await runtime.configure_processor(body)
         return body.model_dump()
 
-    @app.post('/api/processors/llamacpp/check')
+    @app.post('/api/processors/llamacpp/check', response_model=RESPONSES[('POST', '/api/processors/llamacpp/check')], response_model_exclude_unset=True)
     async def processor_check() -> dict[str, Any]:
         return await runtime.check_processor()
 
-    @app.post('/api/materials/{item}/regenerate')
+    @app.post('/api/materials/{item}/regenerate', response_model=RESPONSES[('POST', '/api/materials/{item}/regenerate')], response_model_exclude_unset=True)
     async def regenerate(item: str) -> dict[str, bool]:
         await runtime.regenerate(item)
         return {'ok': True}
 
-    @app.post('/api/materials/{item}/theses/retry')
+    @app.post('/api/materials/{item}/theses/retry', response_model=RESPONSES[('POST', '/api/materials/{item}/theses/retry')], response_model_exclude_unset=True)
     async def retry_theses(item: str) -> dict[str, bool]:
         await runtime.retry_theses(item)
         return {'ok': True}
 
-    @app.get('/api/telegram/accounts')
+    @app.get('/api/telegram/accounts', response_model=RESPONSES[('GET', '/api/telegram/accounts')], response_model_exclude_unset=True)
     async def telegram_accounts() -> list[str]:
         return await runtime.telegram_accounts()
 
-    @app.post('/api/telegram/topics')
+    @app.post('/api/telegram/topics', response_model=RESPONSES[('POST', '/api/telegram/topics')], response_model_exclude_unset=True)
     async def telegram_topics(body: TelegramPeer) -> list[dict[str, Any]]:
         return await runtime.telegram_topics(body)
 
-    @app.post('/api/telegram/connect')
+    @app.post('/api/telegram/connect', response_model=RESPONSES[('POST', '/api/telegram/connect')], response_model_exclude_unset=True)
     async def telegram_connect(body: ConnectTelegram) -> dict[str, Any]:
         return await runtime.connect_telegram(body)
 
-    @app.get('/api/subscriptions')
+    @app.get('/api/subscriptions', response_model=RESPONSES[('GET', '/api/subscriptions')], response_model_exclude_unset=True)
     async def subscription_list() -> dict[str, Any]:
         config = subscriptions()
         return dict(folders=config.folders(), feeds=config.feeds())
 
-    @app.post('/api/import/preview')
+    @app.post('/api/import/preview', response_model=RESPONSES[('POST', '/api/import/preview')], response_model_exclude_unset=True)
     async def import_preview(body: ImportRequest) -> dict[str, Any]:
         try:
             return preview(body.opml)
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
 
-    @app.post('/api/feeds')
+    @app.post('/api/feeds', response_model=RESPONSES[('POST', '/api/feeds')], response_model_exclude_unset=True)
     async def add_feed(body: AddFeed) -> dict[str, Any]:
         return await runtime.add_feed(body)
 
-    @app.post('/api/feeds/verify')
+    @app.post('/api/feeds/verify', response_model=RESPONSES[('POST', '/api/feeds/verify')], response_model_exclude_unset=True)
     async def verify_feed(body: FeedURL) -> dict[str, Any]:
         return await runtime.verify_feed(body)
 
-    @app.post('/api/import')
+    @app.post('/api/import', response_model=RESPONSES[('POST', '/api/import')], response_model_exclude_unset=True)
     async def import_subscriptions(body: ImportRequest) -> dict[str, Any]:
         return await runtime.import_subscriptions(body)
 
-    @app.get('/api/youtube')
+    @app.get('/api/youtube', response_model=RESPONSES[('GET', '/api/youtube')], response_model_exclude_unset=True)
     async def youtube_settings() -> dict[str, Any]:
         return runtime.youtube_status()
 
-    @app.put('/api/youtube')
+    @app.put('/api/youtube', response_model=RESPONSES[('PUT', '/api/youtube')], response_model_exclude_unset=True)
     async def youtube_configure(request: Request) -> dict[str, Any]:
         try:
             body = await request.json()
@@ -330,42 +330,42 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise ActionError('invalid', 'Некорректные настройки прокси', expected=True) from None
         return await runtime.configure_youtube(body)
 
-    @app.get('/api/settings/{scope}/{owner}')
+    @app.get('/api/settings/{scope}/{owner}', response_model=RESPONSES[('GET', '/api/settings/{scope}/{owner}')], response_model_exclude_unset=True)
     async def effective_settings(scope: str, owner: str) -> dict[str, Any]:
         try:
             return subscriptions().effective(scope, owner)
         except LookupError as error:
             raise HTTPException(404, str(error)) from None
 
-    @app.patch('/api/settings/{scope}/{owner}')
+    @app.patch('/api/settings/{scope}/{owner}', response_model=RESPONSES[('PATCH', '/api/settings/{scope}/{owner}')], response_model_exclude_unset=True)
     async def settings_patch(scope: str, owner: str, body: Overrides) -> dict[str, Any]:
         return await runtime.update_settings(scope, owner, body)
 
-    @app.patch('/api/feeds/{identity}/history')
+    @app.patch('/api/feeds/{identity}/history', response_model=RESPONSES[('PATCH', '/api/feeds/{identity}/history')], response_model_exclude_unset=True)
     async def history_pause(identity: str, body: HistoryPause) -> dict[str, Any]:
         return await runtime.pause_history(identity, body.paused)
 
-    @app.post('/api/feeds/{identity}/history')
+    @app.post('/api/feeds/{identity}/history', response_model=RESPONSES[('POST', '/api/feeds/{identity}/history')], response_model_exclude_unset=True)
     async def history_start(identity: str, body: InitialHistory) -> dict[str, Any]:
         return await runtime.change_youtube_history(identity, body)
 
-    @app.delete('/api/feeds/{identity}/history')
+    @app.delete('/api/feeds/{identity}/history', response_model=RESPONSES[('DELETE', '/api/feeds/{identity}/history')], response_model_exclude_unset=True)
     async def history_cancel(identity: str) -> dict[str, Any]:
         return await runtime.change_youtube_history(identity, None)
 
-    @app.patch('/api/feeds/{identity}')
+    @app.patch('/api/feeds/{identity}', response_model=RESPONSES[('PATCH', '/api/feeds/{identity}')], response_model_exclude_unset=True)
     async def feed_patch(identity: str, body: FeedPatch) -> dict[str, Any]:
         return await runtime.patch_feed(identity, body)
 
-    @app.get('/api/folders')
+    @app.get('/api/folders', response_model=RESPONSES[('GET', '/api/folders')], response_model_exclude_unset=True)
     async def folders() -> list[dict[str, Any]]:
         return store().reading.navigation()['folders']
 
-    @app.get('/api/navigation', response_model=Navigation, response_model_exclude_unset=True)
+    @app.get('/api/navigation', response_model=RESPONSES[('GET', '/api/navigation')], response_model_exclude_unset=True)
     async def navigation() -> dict[str, Any]:
         return dict(store().reading.navigation())
 
-    @app.get('/api/cards', response_model=list[Card], response_model_exclude_unset=True)
+    @app.get('/api/cards', response_model=RESPONSES[('GET', '/api/cards')], response_model_exclude_unset=True)
     async def cards(folder: str | None = None, feed: str | None = None, sort: Literal['newest', 'oldest', 'importance'] = 'newest', show_hidden: bool = False) -> list[dict[str, Any]]:
         result = store().reading.cards(show_hidden, folder, feed)
         if sort == 'importance':
@@ -374,21 +374,21 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             result.sort(key=lambda c: (not c.get('published_known', True), c['published'] if c.get('published_known', True) and sort == 'oldest' else -c['published'] if c.get('published_known', True) else 0, c['feed_id'], -(c.get('source_order') or 0) if sort == 'oldest' else (c.get('source_order') or 0), c['id']))
         return result
 
-    @app.post('/api/folders/{folder}/completion/preview')
+    @app.post('/api/folders/{folder}/completion/preview', response_model=RESPONSES[('POST', '/api/folders/{folder}/completion/preview')], response_model_exclude_unset=True)
     async def preview_completion(folder: str) -> dict[str, Any]:
         return await runtime.preview_completion(folder)
 
-    @app.post('/api/folders/{folder}/completion')
+    @app.post('/api/folders/{folder}/completion', response_model=RESPONSES[('POST', '/api/folders/{folder}/completion')], response_model_exclude_unset=True)
     async def complete_folder(folder: str, body: CompletionRequest) -> dict[str, bool]:
         await runtime.complete_folder(folder, body.token)
         return {'ok': True}
 
-    @app.post('/api/collect')
+    @app.post('/api/collect', response_model=RESPONSES[('POST', '/api/collect')], response_model_exclude_unset=True)
     async def collect() -> dict[str, bool]:
         await runtime.collect()
         return {'ok': True}
 
-    @app.post('/api/materials/{item}/retry')
+    @app.post('/api/materials/{item}/retry', response_model=RESPONSES[('POST', '/api/materials/{item}/retry')], response_model_exclude_unset=True)
     async def retry_material(item: str) -> dict[str, bool]:
         await runtime.retry_material(item)
         return {'ok': True}
@@ -418,7 +418,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise HTTPException(404, 'Вложение недоступно')
         return Response(path.read_bytes(), media_type=media['mime'], headers={'Content-Disposition': 'inline'})
 
-    @app.get('/api/materials/{item}/versions/{number}', response_model=Version, response_model_exclude_unset=True)
+    @app.get('/api/materials/{item}/versions/{number}', response_model=RESPONSES[('GET', '/api/materials/{item}/versions/{number}')], response_model_exclude_unset=True)
     async def previous_version(item: str, number: int) -> dict[str, Any]:
         result = store().versions.read(item, number)
         if result is None:
@@ -445,28 +445,28 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise HTTPException(404, 'Вложение недоступно')
         return Response(path.read_bytes(), media_type=mime)
 
-    @app.get('/api/materials/{item}', response_model=Material, response_model_exclude_unset=True)
+    @app.get('/api/materials/{item}', response_model=RESPONSES[('GET', '/api/materials/{item}')], response_model_exclude_unset=True)
     async def material(item: str) -> dict[str, Any]:
         result = store().reading.material(item)
         if not result:
             raise HTTPException(404, 'Материал недоступен')
         return result
 
-    @app.post('/api/materials/{item}/filter/restore')
+    @app.post('/api/materials/{item}/filter/restore', response_model=RESPONSES[('POST', '/api/materials/{item}/filter/restore')], response_model_exclude_unset=True)
     async def restore_filter(item: str) -> dict[str, bool]:
         await runtime.restore_filter(item)
         return {'ok': True}
 
-    @app.post('/api/materials/{item}/filter/retry')
+    @app.post('/api/materials/{item}/filter/retry', response_model=RESPONSES[('POST', '/api/materials/{item}/filter/retry')], response_model_exclude_unset=True)
     async def retry_filter(item: str) -> dict[str, bool]:
         await runtime.retry_filter(item)
         return {'ok': True}
 
-    @app.post('/api/digests/{scope}/{owner}')
+    @app.post('/api/digests/{scope}/{owner}', response_model=RESPONSES[('POST', '/api/digests/{scope}/{owner}')], response_model_exclude_unset=True)
     async def create_digest(scope: str, owner: str, body: DigestRequest) -> dict[str, str]:
         return {'id': await runtime.create_digest(scope, owner, body)}
 
-    @app.post('/api/materials/{item}/viewed')
+    @app.post('/api/materials/{item}/viewed', response_model=RESPONSES[('POST', '/api/materials/{item}/viewed')], response_model_exclude_unset=True)
     async def viewed(item: str) -> dict[str, bool]:
         await runtime.viewed(item)
         return {'ok': True}

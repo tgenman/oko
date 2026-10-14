@@ -2,10 +2,11 @@ import {build} from 'vite';
 import {createHash} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import {resolve, relative, join} from 'node:path';
+import {execFileSync} from 'node:child_process';
 
 const root = resolve(import.meta.dirname, '..');
 const output = join(root, 'oko/frontend_build');
-const inputs = ['frontend', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs', 'scripts/build-frontend.mjs'];
+const inputs = ['frontend', 'api/openapi.yaml', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs', 'scripts/build-frontend.mjs'];
 async function files(directory) {
   const found = [];
   for (const entry of (await fs.readdir(directory, {withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
@@ -28,6 +29,8 @@ async function sourceDigest() {
   return hash.digest('hex');
 }
 async function compile() {
+  execFileSync(process.execPath,[join(root,'scripts/generate-api.mjs'),'check'],{stdio:'inherit'});
+  execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'--noEmit'],{cwd:root,stdio:'inherit'});
   const before = await sourceDigest();
   const stage = join(output, '.stage-' + process.pid);
   await fs.mkdir(output,{recursive:true});
@@ -58,7 +61,8 @@ async function compile() {
       await fs.rm(stage,{recursive:true,force:true});
     }
     const temporary = join(output,'.current-' + process.pid);
-    await fs.writeFile(temporary,JSON.stringify({version:1,source:before,generation,assets},null,2)+'\n');
+    const contract = digest(await fs.readFile(join(root,'oko/reader/generated/openapi.json')));
+    await fs.writeFile(temporary,JSON.stringify({version:1,source:before,generation,contract,assets},null,2)+'\n');
     await fs.rename(temporary,join(output,'current.json'));
   } finally {await fs.rm(stage,{recursive:true,force:true});}
 }

@@ -25,8 +25,24 @@ def test_generated_library_preserves_wire_values_and_check_rejects_drift(tmp_pat
                 'enabled': {'type': 'boolean'}, 'quantity': {'type': 'integer'},
                 'choice': {'enum': ['first', 'second'], 'type': 'string'},
                 'external-name': {'type': 'string'},
+                'when': {'type': 'string', 'format': 'date-time'},
+                'count': {'default': 20, 'anyOf': [
+                    {'type': 'integer', 'minimum': 1},
+                    {'type': 'string', 'pattern': '^[0-9]+$'},
+                ]},
+                'variant': {'oneOf': [
+                    {'$ref': '#/components/schemas/TextVariant'},
+                    {'$ref': '#/components/schemas/CountVariant'},
+                ], 'discriminator': {'propertyName': 'kind'}},
             },
-        }}}}))
+        }, 'TextVariant': {'type': 'object', 'additionalProperties': False,
+            'required': ['kind', 'text'], 'properties': {
+                'kind': {'type': 'string', 'const': 'text'}, 'text': {'type': 'string'},
+            }},
+        'CountVariant': {'type': 'object', 'additionalProperties': False,
+            'required': ['kind', 'quantity'], 'properties': {
+                'kind': {'type': 'string', 'const': 'count'}, 'quantity': {'type': 'integer'},
+            }}}}}))
     output = tmp_path / 'library'
     command = [sys.executable, str(ROOT / 'scripts/generate_api.py')]
     arguments = ['--schema', str(schema), '--output', str(output)]
@@ -39,7 +55,10 @@ def test_generated_library_preserves_wire_values_and_check_rejects_drift(tmp_pat
     model = module.Patch
     assert model.model_validate({'required_nullable': None}).model_dump(by_alias=True, exclude_unset=True) == {'required_nullable': None}
     assert model.model_validate({'required_nullable': 'value', 'reset': None, 'external-name': 'alias'}).model_dump(by_alias=True, exclude_unset=True) == {'required_nullable': 'value', 'reset': None, 'external-name': 'alias'}
-    for invalid in [{}, {'optional_value': None}, {'enabled': 'false'}, {'quantity': True}, {'choice': 'third'}, {'unknown': 1}]:
+    assert model.model_validate({'required_nullable': None, 'when': '2026-10-14T12:00:00Z'}).model_dump(mode='json', exclude_unset=True)['when'] == '2026-10-14T12:00:00Z'
+    assert model.model_validate({'required_nullable': None, 'count': '9007199254740993', 'variant': {'kind': 'text', 'text': 'synthetic'}}).model_dump(mode='json', exclude_unset=True)['count'] == '9007199254740993'
+    assert model.model_validate({'required_nullable': None}).model_dump(mode='json')['count'] == 20
+    for invalid in [{}, {'optional_value': None}, {'enabled': 'false'}, {'quantity': True}, {'choice': 'third'}, {'unknown': 1}, {'variant': {'kind': 'text', 'quantity': 3}}, {'count': 0}, {'count': '1.5'}]:
         with pytest.raises(ValidationError):
             model.model_validate({'required_nullable': None, **invalid} if invalid else invalid)
     before = {p.name: p.read_bytes() for p in output.glob('*') if p.is_file()}

@@ -18,9 +18,9 @@ def test_exported_reading_contract_rejects_missing_fields_and_wrong_types(tmp_pa
         setup_reader(client, theses=False)
         from oko.reader.contracts import CONTRACTS
         navigation = client.get('/api/navigation').json()
-        assert CONTRACTS['navigation'].validate_python(navigation) == navigation
+        assert CONTRACTS['navigation'].dump_python(CONTRACTS['navigation'].validate_python(navigation), mode='json', by_alias=True, exclude_unset=True) == navigation
         cards = client.get('/api/cards').json()
-        assert CONTRACTS['cards'].validate_python(cards) == cards
+        assert CONTRACTS['cards'].dump_python(CONTRACTS['cards'].validate_python(cards), mode='json', by_alias=True, exclude_unset=True) == cards
         import pytest
         from pydantic import ValidationError
         with pytest.raises(ValidationError):
@@ -34,16 +34,16 @@ def test_material_and_stopped_status_preserve_wire_fields(tmp_path):
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test'), headers=HEADERS) as client:
         identity = setup_reader(client, theses=False)
         body = client.get('/api/materials/' + identity).json()
-        assert CONTRACTS['material'].validate_python(body) == body
+        assert CONTRACTS['material'].dump_python(CONTRACTS['material'].validate_python(body), mode='json', by_alias=True, exclude_unset=True) == body
         assert body['ai'] is None
         assert body['provenance'] is None
         assert body['previous'] == []
         status = client.get('/api/status').json()
-        assert CONTRACTS['status'].validate_python(status) == status
+        assert CONTRACTS['status'].dump_python(CONTRACTS['status'].validate_python(status), mode='json', by_alias=True, exclude_unset=True) == status
         assert not status['stopped']
         client.post('/api/stop')
         stopped = client.get('/api/status').json()
-        assert CONTRACTS['status'].validate_python(stopped) == stopped
+        assert CONTRACTS['status'].dump_python(CONTRACTS['status'].validate_python(stopped), mode='json', by_alias=True, exclude_unset=True) == stopped
         assert stopped['stopped']
         assert stopped['youtube'] is None
         assert 'review_restarts' not in stopped

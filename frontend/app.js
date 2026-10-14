@@ -6,10 +6,12 @@ import {createOpenedMaterial} from './opened-material.js';
 import {createTransport} from './transport.js';
 import {createStatusPanel} from './status-panel.js';
 import {createReaderActions} from './reader-actions.js';
+import {createReaderApi} from './src/api/reader.ts';
 
 'use strict';
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
 const transport = createTransport({fetch:window.fetch.bind(window), token, origin:location.origin});
+const readerApi = createReaderApi({fetch:window.fetch.bind(window), token, origin:location.origin});
 const debug = createDebugPanel({token, transport});
 const tab = crypto.randomUUID();
 const byId = id => document.getElementById(id);
@@ -26,7 +28,7 @@ const actions = createReaderActions({transport,onChanged:()=>statusPanel?.redraw
 async function api(path, method = 'GET', body = undefined, signal = undefined) {
   const request = actions.begin(path, method, body);
   try {
-    const result = await transport.json('/api/' + path, method, body, signal, request?.id);
+    const result = path === 'status' && method === 'GET' ? await readerApi.status(signal) : await transport.json('/api/' + path, method, body, signal, request?.id);
     actions.succeeded(request); return result;
   } catch (error) {error.materialIds = path.startsWith('materials/') ? [path.split('/')[1]] : []; actions.failed(request,error); reportError(error, method + ' /api/' + path, true); throw error; }
 }

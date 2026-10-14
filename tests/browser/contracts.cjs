@@ -2,11 +2,13 @@
 const {execFileSync} = require('node:child_process');
 const {existsSync} = require('node:fs');
 const path = require('node:path');
-const Ajv = require('ajv');
+const Ajv = require('ajv/dist/2020');
+const addFormats = require('ajv-formats');
 const root = path.resolve(__dirname, '../..');
 const venv = path.join(root, '.venv/bin/python');
 const schemas = JSON.parse(execFileSync(process.env.OKO_PYTHON || (existsSync(venv) ? venv : 'python3'), ['-m', 'oko.reader.contracts'], {cwd:root, encoding:'utf8'}));
-const ajv = new Ajv({allErrors:true});
+const ajv = new Ajv({allErrors:true,strict:false});
+addFormats(ajv);
 const validators = Object.fromEntries(Object.entries(schemas).map(([name,schema]) => [name, ajv.compile(schema)]));
 function contractFor(url, method = 'GET') {
   if (method !== 'GET') return null;

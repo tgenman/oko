@@ -3,4 +3,6 @@ from pydantic import BaseModel, ConfigDict
 
 
 class WireModel(BaseModel):
-    model_config = ConfigDict(strict=True, regex_engine='python-re')
+    # Primitive fields are generated as Strict* types. Formats such as a JSON
+    # date-time must still parse from strings before domain validation.
+    model_config = ConfigDict(regex_engine='python-re')

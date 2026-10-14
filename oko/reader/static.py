@@ -10,6 +10,7 @@ from fastapi.routing import APIRoute
 from starlette.routing import Match
 from starlette.types import Scope
 from fastapi.responses import FileResponse
+from oko.reader.generated.revision import CONTRACT_DIGEST
 
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[1] / 'frontend_build'
@@ -19,6 +20,9 @@ def validate_frontend() -> Path:
     """Check the packaged generation, plus freshness when running a checkout."""
     try:
         manifest = json.loads((FRONTEND_ROOT / 'current.json').read_text())
+        canonical = Path(__file__).parent / 'generated/openapi.json'
+        if manifest.get('contract') != CONTRACT_DIGEST or hashlib.sha256(canonical.read_bytes()).hexdigest() != CONTRACT_DIGEST:
+            raise ValueError('mixed contract revisions')
         generation = str(manifest['generation'])
         if not re.fullmatch(r'[a-f0-9]{64}', generation):
             raise ValueError('invalid generation')
@@ -33,9 +37,9 @@ def validate_frontend() -> Path:
         checkout = Path(__file__).resolve().parents[2]
         if (checkout / 'frontend/index.html').is_file() and (checkout / 'package.json').is_file():
             source = hashlib.sha256()
-            for name in ('frontend', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs', 'scripts/build-frontend.mjs'):
+            for name in ('frontend', 'api/openapi.yaml', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs', 'scripts/build-frontend.mjs'):
                 path = checkout / name
-                for file in sorted(p for p in path.rglob('*') if p.is_file()) if path.is_dir() else [path]:
+                for file in sorted((p for p in path.rglob('*') if p.is_file()), key=lambda p: p.relative_to(checkout).as_posix()) if path.is_dir() else [path]:
                     source.update(file.relative_to(checkout).as_posix().encode())
                     source.update(b'\0')
                     source.update(file.read_bytes())

@@ -1,7 +1,9 @@
 // Owns presentation/focus of reader state, never source execution or settings drafts.
+import {createStatusIndicator} from './src/status-indicator.tsx';
 export function createStatusPanel({debug, actions, onSettings, onMaterial, onRetry, onRefresh}) {
   const byId = id => document.getElementById(id);
   const panel = byId('status-panel'), body = byId('status-body'), toggle = byId('status-toggle');
+  const indicator = createStatusIndicator(toggle);
   const groups = new Map(), cards = new Map();
   const deleted = new Set();
   let snapshot = {current:[], recent:[], count:0}, online = null, stopped = false, opener = null;
@@ -119,7 +121,7 @@ export function createStatusPanel({debug, actions, onSettings, onMaterial, onRet
   }
   function render() {
     const shown = actions.merge(snapshot);
-    toggle.textContent = stopped ? 'Око остановлено' : !online ? 'Нет связи с Око' : shown.count ? `Проблемы · ${shown.count}` : 'Состояние';
+    indicator({stopped,online,count:shown.count});
     toggle.classList.toggle('has-problems', shown.count > 0 || !online);
     byId('status-summary').textContent = stopped ? 'Око остановлено' : !online ? 'Последние известные сведения' : shown.count ? `Требуют внимания: ${shown.count}` : 'Проблем нет · можно читать';
     connection.hidden = Boolean(online) || stopped;

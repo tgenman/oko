@@ -8,8 +8,12 @@ def test_reader_keeps_opened_original_then_deletes_explicitly(tmp_path: Path):
     app = create_app(tmp_path, source=DemoSource(), token="test-token")
     headers = {"Authorization": "Bearer test-token"}
     with TestClient(app, headers=headers) as client:
-        assert 'type="module"' in client.get('/').text
-        module = client.get('/opened-material.js')
+        import re
+        html = client.get('/').text
+        assert 'type="module"' in html
+        entry = re.search(r'<script[^>]+src="([^"]+)"', html)
+        assert entry is not None
+        module = client.get(entry[1])
         assert module.status_code == 200
         assert module.headers['content-type'].startswith('text/javascript')
         assert client.post('/api/tabs/reader/heartbeat').status_code == 200
