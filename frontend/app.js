@@ -2,7 +2,7 @@ import {createMaterialList} from './src/reading/list.tsx';
 import {createReadingTree} from './src/reading/tree.tsx';
 import {createMenus} from './menus.js';
 import {createDebugPanel, reportError} from './debug.js';
-import {createOpenedMaterial} from './opened-material.js';
+import {createOpenedMaterial} from './src/reading/opened.tsx';
 import {createTransport} from './transport.js';
 import {createStatusPanel} from './status-panel.js';
 import {createReaderActions} from './reader-actions.js';
@@ -36,7 +36,7 @@ async function api(path, method = 'GET', body = undefined, signal = undefined) {
 api.discardDraft = async(path,field,method)=>{await statusPanel.discardDraft(path,field,method);refresh();};
 
 const opened = createOpenedMaterial({
-  api,
+  readerApi,
   fetchMedia: (path, signal) => transport.media(path, signal, 'no-store'),
   onViewed: id => { contentEpoch++; debug.forgetMaterials([id]); statusPanel.forgetMaterials([id]); opened.viewed(id); list.removed(id); session.post(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
