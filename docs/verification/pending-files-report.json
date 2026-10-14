@@ -1,0 +1,325 @@
+{
+  "started_at": "20261014T115538Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [
+      "/private/tmp/oko-pending-check/tests/development/test_check_runner.py"
+    ],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.31s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "/private/tmp/oko-pending-check/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "syntax": {
+      "status": "PASS (0.96s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/app.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/codex-settings.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/controls.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/debug.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/feed-connection.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/feed-tree-view.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/initial-history.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/material-list.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/menus.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/model-settings.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/opened-material.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/opml-import.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/reader-actions.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/reading-tree.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/settings-editor.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/settings-navigation.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/status-panel.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/telegram-connection.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/transport.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/ui-operations.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/youtube-history.js"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--check",
+            "/private/tmp/oko-pending-check/frontend/youtube-settings.js"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "lint": {
+      "status": "PASS (0.41s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-pending-check/scripts/lint-js.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "http": {
+      "status": "PASS (1.41s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/reader/test_web_assets.py",
+            "tests/reader/test_frontend_delivery.py",
+            "tests/reader/test_http_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (78.44s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-pending-check/tests/browser/test_browser_context.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_codex_settings.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_codex_settings_http.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_contracts.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_existing_history.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_feed_debug.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_feed_tree_ios.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_history_outcomes.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_history_pause.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_http_isolation.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_initial_history.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_material_list.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_opened_material.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_reader_appearance.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_reader_http.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_reader_surfaces.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_reading_tree.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_separate_menus.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_settings_navigation.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_status_panel.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_telegram_connection.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_transport.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_ui_lifecycle.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_youtube_history.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_youtube_history_http.cjs",
+            "/private/tmp/oko-pending-check/tests/browser/test_youtube_settings.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 111,
+      "checkout_changes": []
+    },
+    "diff": {
+      "status": "PASS (0.17s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "python-tests": {
+      "status": "PASS (18.66s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-pending-check/tests/development/test_check_runner.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "exit_code": 0,
+  "duration_seconds": 100.81,
+  "log": "/private/tmp/oko-pending-check/.scratch/check-runs/20261014T115538Z-6a41c542/output.log"
+}

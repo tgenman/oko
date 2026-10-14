@@ -1,0 +1,31 @@
+{
+  "started_at": "20261014T071730Z",
+  "selected_files": {
+    "browser": [
+      "/private/tmp/oko-feed-tree-clean/tests/browser/test_feed_tree_ios.cjs"
+    ],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "browser": {
+      "status": "PASS (5.53s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-feed-tree-clean/tests/browser/test_feed_tree_ios.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 5.74,
+  "log": "/private/tmp/oko-feed-tree-clean/.scratch/check-runs/20261014T071730Z-c53a2ddd/output.log"
+}

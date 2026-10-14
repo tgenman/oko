@@ -1,0 +1,38 @@
+{
+  "started_at": "20261014T071625Z",
+  "selected_files": {
+    "browser": [
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_feed_tree_ios.cjs",
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_separate_menus.cjs",
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_settings_navigation.cjs"
+    ],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "browser": {
+      "status": "PASS (18.14s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_feed_tree_ios.cjs",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_separate_menus.cjs",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_settings_navigation.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 20,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "exit_code": 0,
+  "duration_seconds": 18.87,
+  "log": "/Users/dabondarev/repo_personal/oko/.scratch/check-runs/20261014T071625Z-8a388193/output.log"
+}
