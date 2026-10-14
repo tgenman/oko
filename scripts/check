@@ -2,6 +2,8 @@
 """Run checkout checks without installing dependencies or contacting real sources."""
 import argparse
 import codecs
+import hashlib
+import stat
 import json
 import re
 import shlex
@@ -45,6 +47,9 @@ class Report:
 
     def failure(self, line):
         if self.current:
+            passed = re.match(r'^# pass (\d+)$', line)
+            if self.current == 'browser' and passed:
+                self.data['suites']['browser']['passed_scenarios'] = int(passed.group(1))
             match = re.match(r'^(?:FAILED|ERROR) (\S+)', line)
             tap = re.match(r'^\s*not ok \d+ - (.+)', line)
             failure = match.group(1) if match else tap.group(1).strip() if tap else None
@@ -166,13 +171,35 @@ def executable(value, name):
     return found
 
 
+def checkout_state(excluded):
+    inventory = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=ROOT)
+    result = {}
+    for raw in inventory.split(b'\0'):
+        if not raw:
+            continue
+        name = os.fsdecode(raw)
+        path = ROOT / name
+        if path.is_relative_to(excluded):
+            continue
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            result[name] = None
+            continue
+        payload = os.fsencode(os.readlink(path)) if stat.S_ISLNK(metadata.st_mode) else path.read_bytes() if stat.S_ISREG(metadata.st_mode) else b''
+        result[name] = (metadata.st_mode, hashlib.sha256(payload).hexdigest())
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     groups = {'ui': ['syntax', 'lint', 'http', 'browser', 'diff'],
               'all': ['contracts', 'syntax', 'lint', 'types', 'http', 'browser', 'diff', 'python-tests', 'entrypoint'],
-              'python': ['contracts', 'python-tests']}
+              'python': ['contracts', 'python-tests'],
+              'lifecycle': ['syntax', 'lint', 'browser', 'diff']}
     suites = ('contracts', 'syntax', 'lint', 'http', 'browser', 'diff', 'types', 'entrypoint', 'staged')
     parser.add_argument('sets', nargs='+', choices=(*groups, *suites))
+    parser.add_argument('--match', help='Regex selecting browser scenarios by name (requires browser checks)')
     parser.add_argument('--files', nargs='+', help='Explicit browser/Python test files or JavaScript files for lint/syntax; put check sets before this option')
     parser.add_argument('--report-dir', type=Path, default=ROOT / '.scratch/check-runs', help='Parent directory for separate full logs and JSON reports for each run')
     args = parser.parse_args()
@@ -182,6 +209,8 @@ def main():
     if {'browser', 'python-tests'} & set(names):
         early = [name for name in ['contracts','syntax','lint','types'] if name in names]
         names = early + [name for name in names if name not in early]
+    if args.match is not None and 'browser' not in names:
+        parser.error('--match requires browser checks')
     selected_files = {'browser': [], 'python-tests': [], 'syntax': [], 'lint': []}
     for value in args.files or []:
         filename, *node_id = value.split('::', 1)
@@ -199,7 +228,10 @@ def main():
                 matched = True
         if not matched:
             parser.error(f'File does not match selected checks: {value}')
+    if 'lifecycle' in args.sets and not {'ui','all','browser'} & set(args.sets) and not selected_files['browser']:
+        selected_files['browser'] = [str(ROOT / 'tests/browser/test_ui_lifecycle.cjs')]
     report = Report(args.report_dir.resolve(), names, selected_files)
+    report.data['browser_name_pattern'] = args.match
     results = dict.fromkeys(names, 'NOT RUN')
     current = None
     exit_code = 1
@@ -233,7 +265,7 @@ def main():
         commands = {
             'syntax': [[node, '--check', str(path)] for path in (selected_files['syntax'] or sorted(path for path in (ROOT / 'frontend').rglob('*') if path.suffix in ('.js', '.mjs')))],
             'lint': [[node, str(ROOT / 'scripts/lint-js.cjs'), *dict.fromkeys(selected_files['lint'])]],
-            'browser': [[node, '--test', '--test-concurrency=2', *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.cjs'))))]],
+            'browser': [[node, '--test', '--test-concurrency=2', *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.cjs'))))]],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
         if {'contracts', 'http', 'python-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):
@@ -251,19 +283,35 @@ def main():
             if current in ('browser', 'python-tests') and results.get('types', '').startswith('FAIL'):
                 report.output(f'{current} skipped because types failed.\n')
                 continue
+            if current == 'browser' and any(results.get(name, '').startswith('FAIL') for name in ['syntax','lint']):
+                report.output('Browser skipped because syntax or lint failed.\n')
+                continue
             report.current = current
             report.output(f'\nRUN {current}\n')
             tick = time.monotonic()
-            if current in ('browser', 'python-tests'):
+            baseline = None
+            if current in ['browser','python-tests']:
                 artifact_dir = report.directory / 'artifacts' / current
                 artifact_dir.mkdir(parents=True, exist_ok=True)
                 env['OKO_TEST_ARTIFACT_DIR'] = str(artifact_dir)
+                baseline = checkout_state(report.directory)
             for command in commands[current]:
                 if execute(command, env, report=report):
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
                     break
             else:
-                results[current] = f'PASS ({time.monotonic() - tick:.2f}s)'
+                if current == 'browser' and args.match is not None and not report.data['suites']['browser'].get('passed_scenarios'):
+                    report.output('No browser scenarios matched the requested filter.\n')
+                    results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
+                else:
+                    results[current] = f'PASS ({time.monotonic() - tick:.2f}s)'
+            if baseline is not None:
+                after = checkout_state(report.directory)
+                changed = sorted(name for name in baseline.keys() | after.keys() if baseline.get(name) != after.get(name))
+                report.data['suites'][current]['checkout_changes'] = changed
+                if changed:
+                    report.output('Tests changed checkout files:\n' + ''.join('  ' + name + '\n' for name in changed))
+                    results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
         exit_code = int(any(not value.startswith('PASS') for value in results.values()))
     except KeyboardInterrupt:
         if current:

@@ -1,3 +1,4 @@
+const {artifactPath} = require('./artifacts.cjs');
 const {test} = require('node:test');
 const {reader, expect} = require('./support.cjs');
 
@@ -168,7 +169,7 @@ test('switch works with keyboard and clearing history rejects a late journal res
     await expect(r.page.locator('#debug-status')).toHaveText('');
     await r.page.evaluate(() => window.dispatchEvent(new ErrorEvent('error', {error: new Error('new error')})));
     await expect(r.page.locator('#debug-errors')).toContainText('new error');
-    await r.page.screenshot({path: '/private/tmp/oko-debug-switches.png'});
+    await r.page.screenshot({path: artifactPath('debug-switches.png')});
   } finally { await r.close(); }
 });
 

@@ -1,10 +1,7 @@
 const {test} = require('node:test');
 const {reader, expect} = require('./support.cjs');
 
-const models = [
-  {model:'small',display_name:'Small',default:true,reasoning_efforts:['low','high'],default_reasoning_effort:'low',fast_supported:true},
-  {model:'large',display_name:'Large',default:false,reasoning_efforts:['high'],default_reasoning_effort:'high',fast_supported:false},
-];
+const {models} = require('./settings-fixtures.cjs');
 
 test('Codex has four explicit choices; Fast starts off and unsupported effort is preserved visibly', async () => {
   const r = await reader();
@@ -209,34 +206,6 @@ test('Codex catalog error preserves configured choices and refresh recovers with
     await r.page.locator('#codex-models-refresh').click();
     await expect(r.page.locator('#codex-save')).toBeEnabled();
     await expect(r.page.locator('#codex-theses-model')).toHaveValue('large');
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
-});
-
-test('returning to Codex retries a catalog load interrupted by section navigation', async () => {
-  const r = await reader();
-  try {
-    await r.start([]);
-    await r.page.evaluate(models => {
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
-      readerTransport.replies.set('/api/processors/llamacpp',{body:null});
-      readerTransport.replies.set('/api/processors/codex/models',{body:{models}});
-      readerTransport.held.set('/api/processors/codex/models',true);
-    }, models);
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('[data-settings-target="models"]').click();
-    await r.page.locator('[data-settings-target="codex"]').click();
-    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/processors/codex/models'));
-    await r.page.locator('#settings-dialog .settings-back').click();
-    await r.page.evaluate(()=>{
-      window.interruptedCatalogReply = readerTransport.pending.get('/api/processors/codex/models');
-      readerTransport.pending.delete('/api/processors/codex/models');
-      readerTransport.held.delete('/api/processors/codex/models');
-    });
-    await r.page.locator('[data-settings-target="codex"]').click();
-    await expect(r.page.locator('#codex-theses-model')).toHaveValue('small');
-    await r.page.evaluate(()=>window.interruptedCatalogReply(new Response(JSON.stringify({models:[]}),{headers:{'Content-Type':'application/json'}})));
-    await expect(r.page.locator('#codex-theses-model')).toHaveValue('small');
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });

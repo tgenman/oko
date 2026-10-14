@@ -7,7 +7,10 @@ let browser;
 exports.newContext = async function() {
   browser ??= chromium.launch({headless: true,
     executablePath: process.env.OKO_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
-  return (await browser).newContext();
+  const context = await (await browser).newContext();
+  context.setDefaultTimeout(5000);
+  context.setDefaultNavigationTimeout(10000);
+  return context;
 };
 
 after(async () => {

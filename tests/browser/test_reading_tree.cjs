@@ -1,3 +1,4 @@
+const {artifactPath} = require('./artifacts.cjs');
 const {feedOptions} = require('./settings-actions.cjs');
 const {test} = require('node:test');
 const {reader, material, expect} = require('./support.cjs');
@@ -96,7 +97,7 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   await expect(r.page.locator('[data-folder="f"] .tree-count')).toHaveText('45');
   const clipped=await r.page.locator('[data-feed="a"] .tree-title').evaluate(n=>n.scrollHeight>n.clientHeight);
   expect(clipped).toBe(true);
-  await r.page.screenshot({path:'/private/tmp/oko-feed-sidebar.png'});
+  await r.page.screenshot({path:artifactPath('feed-sidebar.png')});
   await r.page.locator('[data-feed="a"]').focus();
   await r.page.waitForTimeout(600);
   await expect(r.page.locator('[data-feed="a"]')).toBeFocused();

@@ -1,4 +1,5 @@
 const {test} = require('node:test');
+const {objects} = require('./settings-fixtures.cjs');
 const {reader, material, expect} = require('./support.cjs');
 const {editSetting, settingsHome, modelPage, feedOptions} = require('./settings-actions.cjs');
 
@@ -44,15 +45,6 @@ test('three menus keep reading position and addition tabs, Escape restores openi
   } finally { await r.close(); }
 });
 
-async function objects(r) {
-  await r.page.evaluate(() => {
-    const t = readerTransport;
-    const feeds = ['one', 'two'].map(id => ({id, title: id, kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/' + id], importance: 'normal', public_ai: false}));
-    t.replies.set('/api/subscriptions', {body: {folders: [{id:'f',title:'Учёба'}], feeds}});
-    for (const path of ['folder/f', 'feed/one', 'feed/two']) t.replies.set('/api/settings/' + path, t.replies.get('/api/settings/oko/global'));
-    t.replies.set('/api/processors/llamacpp', {body:{endpoint:'http://127.0.0.1:8080',model:'local',local_execution:true}});
-  });
-}
 
 test('completed OPML import does not reopen a menu closed while import was pending', async () => {
   const r = await reader();
@@ -473,26 +465,4 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     await expect(r.page.locator('#add-dialog')).toBeVisible();
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
-});
-
-test('Back closes Telegram reconnection and rejects delayed accounts from the previous section', async () => {
-  const r=await reader();try{
-    await r.start([]);await objects(r);
-    await r.page.evaluate(()=>{
-      const feed=readerTransport.replies.get('/api/subscriptions').body.feeds[0];
-      Object.assign(feed,{kind:'telegram',identity:'telegram:onechannel',transport:'telegram',telegram_peer:'@onechannel',telegram_account:'personal',auto_read:false});
-      readerTransport.replies.set('/api/telegram/accounts',{body:['personal']});
-      readerTransport.held.set('/api/telegram/accounts',true);
-    });
-    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/one"]').click();await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/telegram/accounts'));
-    await r.page.locator('#feeds-dialog .settings-back').click();
-    await r.page.evaluate(()=>readerTransport.release('/api/telegram/accounts',['personal']));
-    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
-    await settingsHome(r.page);await editSetting(r.page,'prompt_theses');
-    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
-    await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
-    expect(r.errors).toEqual([]);
-  }finally{await r.close();}
 });

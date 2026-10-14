@@ -18,6 +18,8 @@
 
 ```sh
 ./scripts/check ui
+./scripts/check lifecycle
+./scripts/check lifecycle --match 'a completed field write'
 ./scripts/check all
 ./scripts/check python types
 ./scripts/check http

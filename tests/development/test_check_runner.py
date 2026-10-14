@@ -311,6 +311,124 @@ sys.exit(0)
                 pass
 
 
+def test_browser_name_filter_is_passed_and_reported(tmp_path):
+    import json
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nif '--test' in sys.argv: print('# pass 1')\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'late.*draft', '--files', 'tests/browser/test_settings_navigation.cjs', '--report-dir', str(tmp_path / 'reports')], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '--test-name-pattern=late.*draft' in record.read_text()
+    report = json.loads((next((tmp_path / 'reports').iterdir()) / 'report.json').read_text())
+    assert report['browser_name_pattern'] == 'late.*draft'
+
+
+def test_failed_lint_skips_browser_but_keeps_other_results(tmp_path):
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cjs' in value for value in sys.argv) else 0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert 'FAIL lint' in result.stdout and 'NOT RUN browser' in result.stdout
+    assert '\nRUN browser\n' not in result.stdout
+    assert 'PASS diff' in result.stdout
+
+
+def test_browser_filter_matching_nothing_is_not_success(tmp_path):
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "if '--test' in sys.argv: print('# pass 0')\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'missing scenario'], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert 'No browser scenarios matched' in result.stdout
+
+
+def test_browser_artifacts_are_scoped_to_run_and_checkout_mutation_fails(tmp_path):
+    import json
+    import shutil
+    checkout = tmp_path / 'checkout'
+    (checkout / 'scripts').mkdir(parents=True)
+    (checkout / 'tests/browser').mkdir(parents=True)
+    shutil.copy(ROOT / 'scripts/check', checkout / 'scripts/check')
+    tracked = checkout / 'tests/browser/test_example.cjs'
+    tracked.write_text('original\n')
+    subprocess.run(['git','init','-q',str(checkout)],check=True)
+    subprocess.run(['git','-C',str(checkout),'add','tests/browser/test_example.cjs'],check=True)
+    env = runtimes(tmp_path)
+    env['PATH'] = os.environ['PATH']  # This scenario inspects a real temporary Git inventory.
+    env['MUTATE'] = str(tracked)
+    env['ARTIFACT_RECORD'] = str(tmp_path / 'artifact-directory')
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', '''
+if '--test' in sys.argv:
+    from pathlib import Path
+    Path(os.environ['MUTATE']).write_text('changed by test\\n')
+    Path(os.environ['ARTIFACT_RECORD']).write_text(os.environ.get('OKO_TEST_ARTIFACT_DIR','missing'))
+    print('# pass 1')
+sys.exit(0)
+'''))
+    result = subprocess.run([sys.executable,str(checkout/'scripts/check'),'browser','--report-dir',str(tmp_path/'reports')],env=env,capture_output=True,text=True)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert 'Tests changed checkout files' in result.stdout
+    assert 'tests/browser/test_example.cjs' in result.stdout
+    assert tracked.read_text() == 'changed by test\n'  # The guard reports, it never resets user files.
+    directory = next((tmp_path/'reports').iterdir())
+    assert Path((tmp_path/'artifact-directory').read_text()) == directory/'artifacts/browser'
+    report=json.loads((directory/'report.json').read_text())
+    assert report['suites']['browser']['checkout_changes'] == ['tests/browser/test_example.cjs']
+
+
+def test_python_guard_allows_dirty_baseline_and_owned_artifacts_but_rejects_new_files(tmp_path):
+    import shutil
+    checkout=tmp_path/'checkout'
+    (checkout/'scripts').mkdir(parents=True)
+    shutil.copy(ROOT/'scripts/check',checkout/'scripts/check')
+    tracked=checkout/'source.txt';tracked.write_text('original\n')
+    subprocess.run(['git','init','-q',str(checkout)],check=True)
+    subprocess.run(['git','-C',str(checkout),'add','source.txt'],check=True)
+    tracked.write_text('preexisting draft\n')
+    env=runtimes(tmp_path);env['PATH']=os.environ['PATH']
+    runtime=Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', '''
+if 'pytest' in sys.argv:
+    from pathlib import Path
+    Path(os.environ['OKO_TEST_ARTIFACT_DIR'],'capture.png').write_bytes(b'synthetic artifact')
+    if os.environ.get('CREATE_NEW'): Path('generated.txt').write_text('unexpected output')
+sys.exit(0)
+'''))
+    command=[sys.executable,str(checkout/'scripts/check'),'python','--report-dir',str(checkout/'reports')]
+    first=subprocess.run(command,env=env,capture_output=True,text=True)
+    assert first.returncode==0,first.stdout+first.stderr
+    assert tracked.read_text()=='preexisting draft\n'
+    assert list((checkout/'reports').glob('*/artifacts/python-tests/capture.png'))
+    second=subprocess.run(command,env={**env,'CREATE_NEW':'1'},capture_output=True,text=True)
+    assert second.returncode==1,second.stdout+second.stderr
+    assert 'Tests changed checkout files:\n  generated.txt' in second.stdout
+    assert tracked.read_text()=='preexisting draft\n'
+
+
+def test_lifecycle_profile_selects_dedicated_scenarios(tmp_path):
+    env=runtimes(tmp_path);record=tmp_path/'commands';env['RECORD']=str(record)
+    runtime=Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'lifecycle'],env=env,capture_output=True,text=True)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert 'test_ui_lifecycle.cjs' in record.read_text()
+    assert 'test_material_list.cjs' not in record.read_text()
+
+
+def test_explicit_suite_order_cannot_run_browser_before_selected_lint(tmp_path):
+    env=runtimes(tmp_path)
+    runtime=Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cjs' in value for value in sys.argv) else 0)"))
+    result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'browser','syntax','lint'],env=env,capture_output=True,text=True)
+    assert result.returncode==1,result.stdout+result.stderr
+    assert '\nRUN browser\n' not in result.stdout
+    assert 'PASS syntax' in result.stdout and 'FAIL lint' in result.stdout and 'NOT RUN browser' in result.stdout
+
+
 @pytest.mark.parametrize('sets', [('all',), ('browser','python','types'), ('python','types')])
 def test_types_run_before_long_checks_and_failure_skips_them(tmp_path, sets):
     env = runtimes(tmp_path)

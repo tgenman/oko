@@ -1,3 +1,4 @@
+const {artifactPath} = require('./artifacts.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {spawn} = require('node:child_process');
@@ -35,6 +36,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await api('settings/oko/global', 'PATCH', {theses:false, events:false, digests:false});
     browser = await chromium.launch({headless:true, executablePath:process.env.OKO_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
     const page = await browser.newPage(), errors = [];
+    page.setDefaultTimeout(5000); page.setDefaultNavigationTimeout(10000);
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin + '/#token=' + token);
     await page.locator('#settings-open').click();
@@ -89,12 +91,12 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await page.locator('#youtube-mode').selectOption('proxy');
     await expect(page.locator('#youtube-save')).toBeVisible();
     assert.equal(await page.locator('#settings-dialog').evaluate(el => el.scrollWidth <= el.clientWidth), true);
-    await page.screenshot({path:'/private/tmp/oko-settings-youtube-mobile.png'});
+    await page.screenshot({path:artifactPath('youtube-mobile.png')});
     await page.locator('#youtube-save').scrollIntoViewIfNeeded();
     await expect(page.locator('#youtube-save')).toBeInViewport();
     await expect(page.locator('#settings-close')).toBeInViewport();
     await page.setViewportSize({width:1200, height:940});
-    await page.screenshot({path:'/private/tmp/oko-settings-youtube-desktop.png'});
+    await page.screenshot({path:artifactPath('youtube-desktop.png')});
     assert.deepEqual(errors, []);
   } finally {
     t.signal.removeEventListener('abort', abort);
@@ -108,36 +110,6 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
   }
 });
 
-test('late settings replies do not overwrite a newer draft or reopen a closed form', async () => {
-  const r = await reader();
-  try {
-    await r.start([]);
-    await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
-      readerTransport.replies.set('/api/processors/llamacpp', {body:null});
-    });
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('[data-settings-target="youtube"]').click();
-    await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
-    await r.page.locator('#youtube-mode').selectOption('proxy');
-    await r.page.locator('#youtube-address').fill('http://first.test:8000');
-    await r.page.locator('#youtube-password').fill('first-password');
-    await r.page.evaluate(() => readerTransport.held.set('/api/youtube', true));
-    await r.page.locator('#youtube-save').click();
-    await expect.poll(() => r.page.evaluate(() => readerTransport.pending.has('/api/youtube'))).toBe(true);
-    await r.page.locator('#youtube-address').fill('http://second.test:8000');
-    await r.page.locator('#youtube-password').fill('second-password');
-    await r.page.locator('#settings-close').click();
-    await r.page.evaluate(() => readerTransport.release('/api/youtube', {mode:'proxy', address:'http://first.test:8000', has_password:true, has_username:false, paused:false, next_at:0, strikes:0, reason:''}));
-    await expect(r.page.locator('#settings-dialog')).not.toBeVisible();
-    await r.page.locator('#settings-open').click();
-    await r.page.locator('[data-settings-target="youtube"]').click();
-    await expect(r.page.locator('#youtube-address')).toHaveValue('http://second.test:8000');
-    await expect(r.page.locator('#youtube-password')).toHaveValue('second-password');
-    await expect(r.page.locator('#youtube-message')).toHaveText('');
-    assert.deepEqual(r.errors, []);
-  } finally {await r.close();}
-});
 
 test('YouTube connection errors preserve input and late loads cannot replace a reopened draft', async () => {
   const r = await reader();
