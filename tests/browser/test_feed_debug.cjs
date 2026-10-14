@@ -217,3 +217,29 @@ test('adding a feed selects existing folders or keeps a new folder draft across 
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
+
+test('journal polling updates a group without losing its disclosure or keyboard focus', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.api('debug', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
+    await r.page.locator('#status-toggle').click();
+    await r.page.locator('#status-journal-open').click();
+    const details = r.page.locator('#debug-errors details').filter({hasText:'same group'});
+    const summary = details.locator('summary');
+    await summary.click();
+    await expect(details).toHaveAttribute('open','');
+    await expect(summary).toBeFocused();
+    await r.api('debug', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
+    await expect(summary).toContainText('×2',{timeout:6000});
+    await expect(details).toHaveAttribute('open','');
+    await expect(summary).toBeFocused();
+    const journal=artifactPath('react-journal-desktop.png');
+    await r.page.screenshot({path:journal});console.info('Journal screenshot:',journal);
+    await r.page.setViewportSize({width:390,height:844});
+    const phone=artifactPath('react-journal-mobile.png');
+    await r.page.screenshot({path:phone});console.info('Journal screenshot:',phone);
+    await r.page.locator('#status-journal-back').click();
+    await expect(r.page.locator('#status-journal-open')).toBeFocused();
+  } finally {await r.close();}
+});

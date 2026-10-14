@@ -68,6 +68,7 @@ def generate(schema: Path, output: Path) -> None:
             '--input', str(source), '--input-file-type', 'openapi',
             '--output', str(output / 'models.py'),
             '--output-model-type', 'pydantic_v2.BaseModel',
+            '--output-datetime-class', 'datetime',
             '--base-class', 'oko.reader.wire.WireModel',
             '--disable-timestamp', '--use-standard-collections',
             '--use-union-operator', '--use-missing-sentinel', '--strict-nullable',
