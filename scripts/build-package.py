@@ -36,7 +36,7 @@ def main() -> None:
         shutil.copytree(generation, built / 'generations' / generation.name)
         shutil.copy2(ROOT / 'oko/frontend_build/current.json', built / 'current.json')
         environment = dict(os.environ, PYTHONPATH=str(stage))
-        subprocess.run([sys.executable, '-c', 'from setuptools.build_meta import build_wheel; import sys; print(build_wheel(sys.argv[1]))', str(output)], cwd=stage, env=environment, check=True)
+        subprocess.run([sys.executable, '-c', 'from poetry.core.masonry.api import build_wheel; import sys; print(build_wheel(sys.argv[1]))', str(output)], cwd=stage, env=environment, check=True)
     print(f'Complete Oko wheel built in {output}')
 
 

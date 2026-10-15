@@ -12,7 +12,7 @@ import tomllib
 
 INPUTS = ('api/', 'scripts/api', 'scripts/generate', 'scripts/check-api-staged.py',
           'frontend/src/api/generated/', 'oko/reader/generated/', 'package.json', 'package-lock.json',
-          'pyproject.toml', 'uv.lock')
+          'pyproject.toml', 'poetry.lock')
 
 
 def digest(document):
@@ -51,9 +51,9 @@ def pinned_tools(stage, python):
         if installed != expected or lock['packages']['node_modules/' + name]['version'] != expected:
             raise ValueError(f'API index checks require the staged pinned npm tool: {name} {expected}')
     project = tomllib.loads((stage / 'pyproject.toml').read_text())
-    pins = project['project']['optional-dependencies']['dev']
+    pins = project['dependency-groups']['dev']
     for name in ('datamodel-code-generator', 'openapi-spec-validator', 'pyyaml'):
-        expected = next(pin.split('==')[1] for pin in pins if pin.startswith(name + '=='))
+        expected = next(pin.split('==')[1].split(';')[0].strip() for pin in pins if pin.startswith(name + '=='))
         installed = subprocess.check_output([python, '-c',
                                             'import importlib.metadata; print(importlib.metadata.version("' + name + '"))'], text=True).strip()
         if installed != expected:

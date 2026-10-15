@@ -16,16 +16,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        id: python
         with:
           python-version: '3.11'
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - run: python -m pip install -e '.[dev]'
+      - name: Install pinned Poetry outside the project environment
+        run: |
+          python -m venv "$RUNNER_TEMP/oko-poetry"
+          "$RUNNER_TEMP/oko-poetry/bin/python" -m pip install 'poetry==2.5.1'
+          echo "$RUNNER_TEMP/oko-poetry/bin" >> "$GITHUB_PATH"
+      - run: poetry env use '${{ steps.python.outputs.python-path }}'
+      - run: poetry check --lock --strict
+      - run: poetry sync --no-interaction
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: ./scripts/check all
+      - run: poetry run ./scripts/check all
       - uses: actions/upload-artifact@v4
         if: always()
         with:
