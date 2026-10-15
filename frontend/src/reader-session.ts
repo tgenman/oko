@@ -14,16 +14,19 @@ type Options = {
 // subscription never means closing the reader lease or stopping server work.
 export function createReaderSession(options: Options) {
   const tab = crypto.randomUUID();
-  let active = false, generation = 0;
+  let active = false, generation = 0, refreshSequence = 0;
   let heartbeatTimer: number | undefined, refreshTimer: number | undefined;
   let bus: BroadcastChannel | undefined;
   async function refresh(): Promise<void> {
     if (!active) return;
     window.clearTimeout(refreshTimer);
     const stamp = generation;
+    const sequence = ++refreshSequence;
     try {await options.onRefresh();}
     finally {
-      if (active && stamp === generation) {
+      // Only the latest refresh owns the next poll. An older request may
+      // finish after a selection change, while its replacement is still loading.
+      if (active && stamp === generation && sequence === refreshSequence) {
         window.clearTimeout(refreshTimer);
         refreshTimer = window.setTimeout(() => void refresh(),500);
       }
