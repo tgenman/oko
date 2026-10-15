@@ -1,6 +1,6 @@
 # Фильтрация и возврат скрытого — тикет 09
 
-2026-10-09. Основание: `.scratch/oko-implementation/issues/09-content-filters.md`, A08/A17/A18/A19/A26/A28.
+2026-10-09. Основание: `https://github.com/tgenman/oko/blob/365e2b38f86d6e2bedccbb40b14c615b6f069455/.scratch/oko-implementation/issues/09-content-filters.md`, A08/A17/A18/A19/A26/A28.
 
 ## Поведение
 
