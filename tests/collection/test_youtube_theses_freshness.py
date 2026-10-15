@@ -70,7 +70,7 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
         return sum(r.url.path == '/v1/chat/completions' for r in calls)
 
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'digests': False,
+        client.patch('/api/settings/oko/global', json={
                      'processor': 'llamacpp', 'prompt_filters': prompt_filters})
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
@@ -117,7 +117,7 @@ def test_changed_caption_text_requires_new_theses(tmp_path):
     source, calls = SavedCaptions(), []
     with TestClient(create_app(tmp_path, token='test', source=source, source_feed=feed,
                                ai_transport=model_transport(calls)), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'digests': False, 'processor': 'llamacpp'})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
         client.post('/api/tabs/reader/heartbeat')
@@ -137,7 +137,7 @@ def test_previous_caption_signature_is_upgraded_without_model_call(tmp_path, int
     options = dict(token='test', rss_enabled=True, rss_transport=transport(),
                    youtube_captions=captions, ai_transport=model_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'digests': False, 'processor': 'llamacpp'})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
         subscribe(client)

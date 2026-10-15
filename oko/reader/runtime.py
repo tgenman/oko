@@ -20,7 +20,6 @@ from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
-from oko.reviews.digests import DigestRequest
 from oko.reviews.coordination import PreparedWork
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
@@ -191,8 +190,6 @@ class Runtime:
     def material_was_viewed(self, identity: str) -> bool:
         if self._store:
             row = self._store.db.execute('SELECT viewed FROM items WHERE id=?', (identity,)).fetchone()
-            if identity.startswith(('event-','digest-')):
-                return not (self._store.events.material(identity) if identity.startswith('event-') else self._store.digests.material(identity))
             return bool(row and row['viewed'])
         return identity in self._viewed_ids
 
@@ -218,9 +215,9 @@ class Runtime:
             stage = 'Ошибка хранилища'
         elif state['deleting']:
             stage = 'Удаление'
-        elif any(j['kind'] in ('theses', 'filter', 'events', 'digest') and j['status'] == 'running' for j in state['jobs']):
+        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'running' for j in state['jobs']):
             stage = self._ai_stage
-        elif any(j['kind'] in ('theses', 'filter', 'events', 'digest') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
+        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
             stage = 'Ожидание обработчика' if state['errors'] else 'Подготовка тезисов'
         elif pending and self._sources and all(j['kind'] == 'read' for j in state['jobs'] if j['status'] in ('pending', 'running')):
             stage = 'Ожидание синхронизации Telegram'
@@ -307,19 +304,6 @@ class Runtime:
             await self._cancel()
             return self.youtube_status()
 
-    async def create_digest(self, scope: str, owner: str, body: DigestRequest) -> str:
-        async with self._actions:
-            current = self.require_store()
-            if not self._live():
-                raise ActionError('conflict', 'Откройте читатель')
-            try:
-                return current.digests.create(scope, owner, body, time.time())
-            except LookupError as error:
-                record_caught('runtime.create_digest')
-                raise ActionError('missing', str(error)) from None
-            except ValueError as error:
-                record_caught('runtime.create_digest')
-                raise ActionError('invalid', str(error)) from None
 
     async def viewed(self, item: str) -> None:
         async with self._actions:
@@ -617,12 +601,7 @@ class Runtime:
     async def regenerate(self, item: str) -> None:
         async with self._actions:
             current = self.require_store()
-            if item.startswith('digest-'):
-                accepted = current.digests.retry(item)
-            elif item.startswith('event-'):
-                accepted = current.events.retry(item)
-            else:
-                accepted = current.processing.retry_theses(item)
+            accepted = current.processing.retry_theses(item)
             if not accepted:
                 raise ActionError('missing', 'Результат недоступен для пересоздания')
 
@@ -642,8 +621,6 @@ class Runtime:
                 diagnostic_source.set('Обработка · ' + job.kind + ' · ' + ','.join(sorted({current.item_feed(source.id) for source in work.request.sources})))
                 config = current.processor_config()
                 request = work.request
-                if work.finish_without_model():
-                    return
                 adapter: Codex | LlamaCpp
                 if request.processor == 'codex':
                     adapter = Codex(self._codex_client)
@@ -890,7 +867,6 @@ class Runtime:
                         if now - self._ai_sync >= .5:
                             self._store.read_sync.sync()
                             self._store.processing.sync()
-                            self._store.digests.schedule(wall)
                             self._ai_sync = now
                         if self._ai and self._ai.done():
                             await self._ai

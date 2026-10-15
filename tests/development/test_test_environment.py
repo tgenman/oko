@@ -50,7 +50,7 @@ def test_factory_collects_youtube_without_starting_a_real_caption_worker(tmp_pat
             return httpx.Response(200, text=feed_xml())
         return httpx.Response(200, content=PNG, headers={'Content-Type':'image/png'})
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events':False,'theses':True,'digests':False})
+        client.patch('/api/settings/oko/global', json={'theses':True})
         subscribe(client)
         client.post('/api/tabs/reader/heartbeat')
         card = wait_for(client, lambda: (c[0] if len(c:=client.get('/api/cards').json())==1 and c[0]['complete'] and not c[0].get('loading') else None))
@@ -161,7 +161,7 @@ def test_factory_default_empty_history_completes_without_a_real_history_worker(t
     from tests.support.youtube import subscribe
     transport=httpx.MockTransport(lambda request: httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom"/>'))
     with TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=transport),headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global',json={'events':False,'theses':False,'digests':False})
+        client.patch('/api/settings/oko/global',json={'theses':False})
         feed=subscribe(client)
         client.post('/api/tabs/reader/heartbeat')
         assert client.post('/api/feeds/'+feed+'/history',json={'count':3}).status_code==200

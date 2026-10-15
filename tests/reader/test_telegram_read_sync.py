@@ -161,7 +161,7 @@ def test_folder_completion_confirms_unique_message_set(tmp_path):
     network = ReadTelegram()
     with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
         client.post('/api/tabs/test/heartbeat')
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         feed = connect(client)
         settled(client, 2)
         preview = client.post('/api/folders/' + feed['folder_id'] + '/completion/preview').json()

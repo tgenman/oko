@@ -1,5 +1,5 @@
 #reader-shell{display:flex;flex-direction:column;flex:1;min-height:0}#reader-shell>header{flex:none}
-#progress{max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#review-restarts{display:none}
+#progress{max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #status-toggle{white-space:nowrap}#status-toggle.has-problems{background:#fff5e5;border-color:#e5d3b0;color:#895b1f}
 .header-command{position:relative;display:inline-flex}.header-command-error{position:absolute;top:100%;left:0;width:240px;padding:10px;background:#fff5e5;color:#805a27;border-radius:8px;z-index:120;font-size:13px;overflow-wrap:anywhere}
 #status-panel{position:fixed;top:var(--reader-header-height,70px);bottom:0;right:0;width:min(470px,100vw);z-index:110;display:flex;flex-direction:column;background:#f2f2f7;color:#1c1c1e;border-left:1px solid #e5e5ea;box-shadow:-12px 0 40px #0000000a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden}

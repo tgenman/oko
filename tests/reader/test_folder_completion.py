@@ -9,7 +9,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 
 def test_folder_confirmation_deletes_all_originals_and_is_repeatable(tmp_path: Path):
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/a/heartbeat')
         originals = wait_cards(client, 3)
         response = client.post('/api/folders/demo/completion/preview')
@@ -73,36 +73,6 @@ def test_other_folder_and_wrong_folder_confirmation_are_untouched(tmp_path):
         assert len(client.get('/api/cards?folder=' + other).json()) == 1
 
 
-def test_hidden_cards_and_digest_members_count_once_and_are_deleted(tmp_path):
-    import httpx
-    import json
-    from tests.support.filters import FilterSource, transport
-    from tests.support.digests import configure, digest_transport
-    from tests.support.reader import wait_for
-    filters, summaries = transport([]), digest_transport([])
-    def response(request):
-        if request.url.path == '/v1/chat/completions':
-            task = json.loads(json.loads(request.content)['messages'][1]['content'])
-            if task['operation'] == 'digest':
-                return summaries.handler(request)
-        return filters.handler(request)
-    with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=httpx.MockTransport(response)), headers={'Authorization': 'Bearer test'}) as client:
-        configure(client)
-        client.patch('/api/settings/oko/global', json={'prompt_filters': 'Убери рекламу'})
-        wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 2 and all(x['filter']['status'] == 'done' for x in c))
-        preview = client.post('/api/folders/demo/completion/preview').json()
-        assert preview['cards'] == 3 and preview['originals'] == 3
-        digest = client.post('/api/digests/folder/demo', json={}).json()['id']
-        wait_for(client, lambda: client.get('/api/materials/' + digest).json().get('digest'))
-        stale = client.post('/api/folders/demo/completion', json={'token': preview['token']})
-        assert stale.status_code == 409
-        latest = stale.json()['detail']['preview']
-        assert latest['cards'] == 1 and latest['originals'] == 3
-        assert client.post('/api/folders/demo/completion', json={'token': latest['token']}).status_code == 200
-        assert client.get('/api/cards?show_hidden=true').json() == []
-        assert client.get('/api/materials/' + digest).status_code == 404
-        assert not list((tmp_path / 'digests').glob('*'))
-        assert not list((tmp_path / 'content').iterdir())
 
 
 def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
@@ -113,7 +83,7 @@ def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
             raise OSError('disk error')
     options = dict(source=DemoSource(), token='test-token', fault=fault)
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/a/heartbeat')
         wait_cards(client, 3)
         preview = client.post('/api/folders/demo/completion/preview').json()
@@ -140,7 +110,7 @@ def test_folder_deletion_cancels_late_fetch(tmp_path):
     from tests.support.sources import LateSource
     from tests.support.reader import wait_for
     with TestClient(create_app(tmp_path, source=LateSource(), token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/a/heartbeat')
         wait_for(client, lambda: len(client.get('/api/cards').json()) == 3)
         preview = client.post('/api/folders/demo/completion/preview').json()
@@ -150,26 +120,12 @@ def test_folder_deletion_cancels_late_fetch(tmp_path):
         assert all(b'Late secret' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
 
 
-def test_event_members_and_hidden_originals_are_not_double_counted(tmp_path):
-    from tests.support.sources import EventSource
-    from tests.support.events import configure, event_transport
-    from tests.support.reader import wait_for
-    with TestClient(create_app(tmp_path, source=EventSource(), token='test', ai_transport=event_transport([])), headers={'Authorization': 'Bearer test'}) as client:
-        configure(client)
-        wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 2 and any(x.get('event') for x in c))
-        preview = client.post('/api/folders/demo/completion/preview').json()
-        assert preview['cards'] == 2 and preview['originals'] == 3
-        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == 'demo') == 3
-        assert client.post('/api/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/cards').json() == []
-        assert not list((tmp_path / 'events').glob('*'))
-        assert not list((tmp_path / 'content').iterdir())
 
 
 def test_removed_member_requires_recount_and_restart_requires_fresh_preview(tmp_path):
     options = dict(source=DemoSource(), token='test-token')
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/a/heartbeat')
         cards = wait_cards(client, 3)
         preview = client.post('/api/folders/demo/completion/preview').json()
@@ -185,86 +141,13 @@ def test_removed_member_requires_recount_and_restart_requires_fresh_preview(tmp_
         assert client.post('/api/folders/missing/completion/preview').status_code == 404
 
 
-def test_late_digest_answer_cannot_restore_completed_folder(tmp_path):
-    import asyncio
-    import threading
-    import time
-    import httpx
-    from tests.support.sources import EventSource
-    from tests.support.digests import configure, digest_transport
-    from tests.support.reader import wait_for
-    base = digest_transport([])
-    class Held(httpx.AsyncBaseTransport):
-        started = threading.Event()
-        release = threading.Event()
-        async def handle_async_request(self, request):
-            if request.url.path == '/v1/chat/completions':
-                self.started.set()
-                while not self.release.is_set():
-                    try:
-                        await asyncio.sleep(.01)
-                    except asyncio.CancelledError:
-                        continue
-            return base.handler(request)
-    held = Held()
-    try:
-        with TestClient(create_app(tmp_path, source=EventSource(), token='test', ai_transport=held), headers={'Authorization': 'Bearer test'}) as client:
-            configure(client)
-            digest = client.post('/api/digests/folder/demo', json={}).json()['id']
-            wait_for(client, held.started.is_set)
-            preview = client.post('/api/folders/demo/completion/preview').json()
-            assert client.post('/api/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-            held.release.set()
-            time.sleep(.15)
-            assert client.get('/api/cards').json() == []
-            assert client.get('/api/materials/' + digest).status_code == 404
-            assert not list((tmp_path / 'digests').glob('*'))
-    finally:
-        held.release.set()
 
 
-def test_completion_respects_folder_of_frozen_digest_when_feed_moves(tmp_path):
-    import httpx
-    from tests.support.rss import rss
-    from tests.support.digests import digest_transport
-    from tests.support.reader import wait_for
-    def response(request):
-        return httpx.Response(200, text=rss('https://' + request.url.host + '/article') if request.url.path == '/feed' else '<article>Текст</article>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(response), ai_transport=digest_transport([])), headers={'Authorization': 'Bearer test'}) as client:
-        plan = client.post('/api/import', json={'opml': '<opml><body><outline text="Новости"><outline text="a" xmlUrl="https://a.test/feed"/><outline text="b" xmlUrl="https://b.test/feed"/></outline><outline text="Другая"/></body></opml>'}).json()
-        folder = next(f['id'] for f in plan['folders'] if f['title'] == 'Новости')
-        other = next(f['id'] for f in plan['folders'] if f['title'] == 'Другая')
-        client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp'})
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.post('/api/tabs/a/heartbeat')
-        wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 2 and all(x['complete'] and not x.get('loading') for x in c))
-        digest = client.post('/api/digests/folder/' + folder, json={}).json()['id']
-        wait_for(client, lambda: client.get('/api/materials/' + digest).json().get('digest'))
-        client.patch('/api/feeds/' + plan['feeds'][0]['id'], json={'folder_id': other})
-        wait_for(client, lambda: client.get('/api/materials/' + digest).json().get('digest'))
-        preview = client.post(f'/api/folders/{other}/completion/preview').json()
-        assert preview['cards'] == 0 and preview['originals'] == 0
-        assert client.get('/api/cards?folder=' + other).json() == []
-        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == other) == 0
-        navigation = client.get('/api/navigation').json()
-        assert navigation['count'] == 2
-        assert next(f['count'] for f in navigation['feeds'] if f['id'] == plan['feeds'][0]['id']) == 1
-        assert [c['id'] for c in client.get('/api/cards?feed=' + plan['feeds'][0]['id']).json()] == [digest]
-        assert client.get('/api/cards', params={'feed': plan['feeds'][0]['id'], 'folder': other}).json() == []
-        assert [c['id'] for c in client.get('/api/cards', params={'feed': plan['feeds'][0]['id'], 'folder': folder}).json()] == [digest]
-        assert client.post(f'/api/folders/{other}/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/materials/' + digest).status_code == 200
-        preview = client.post(f'/api/folders/{folder}/completion/preview').json()
-        assert preview['cards'] == 1 and preview['originals'] == 2
-        assert [c['id'] for c in client.get('/api/cards?folder=' + folder).json()] == [digest]
-        assert next(f['count'] for f in client.get('/api/folders').json() if f['id'] == folder) == 2
-        assert client.post(f'/api/folders/{folder}/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/cards').json() == []
 
 
 def test_unreadable_original_still_belongs_to_folder_completion(tmp_path):
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/a/heartbeat')
         originals = wait_cards(client, 3)
         broken = originals[0]['id']

@@ -27,6 +27,6 @@ class CodexService(CodexClient):
 def configure_codex(client: TestClient) -> None:
     client.post('/api/tabs/reader/heartbeat')
     config = {kind: dict(model='synthetic', reasoning_effort='low', fast=False)
-              for kind in ('filter', 'theses', 'events', 'digest')}
+              for kind in ('filter', 'theses')}
     response = client.put('/api/processors/codex', json=config)
     assert response.status_code == 200, response.text

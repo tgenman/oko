@@ -49,27 +49,14 @@ def snippet(text: str) -> str:
     return ' '.join(''.join(parser.parts).split())[:500]
 
 
-def represented_originals(views: list[dict[str, Any]]) -> set[str]:
-    """Shared ownership rule for composition and selection of event inputs."""
-    return {member for view in views for member in
-            ([source['id'] for source in view['sources']] if view.get('sources') else [view['id']])}
-
-
 class ReadingComposition:
     def __init__(self, store: 'Store') -> None:
         self._store = store
 
-    def _views(self) -> list[dict[str, Any]]:
-        return self._store.events.views() + self._store.digests.views()
-
     def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
         feeds = {feed['id']: feed for feed in self._store.subscriptions.feeds()}
-        views = self._views()
-        covered = represented_originals(views)
         cards = []
         for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall():
-            if row['id'] in covered:
-                continue
             owner = feeds.get(row['feed_id'])
             if owner is None or (folder is not None and owner['folder_id'] != folder) or (feed is not None and row['feed_id'] != feed):
                 continue
@@ -86,40 +73,17 @@ class ReadingComposition:
                 card.pop('display_text', None)
                 del card['text']
                 cards.append(card)
-        for view in views:
-            card = dict(view)
-            summary = view.get('event', view.get('digest', {}))
-            card['snippet'] = snippet(' '.join(point['text'] for point in summary.get('points', [])))
-            card['published_known'] = any(source.get('published_known', True) for source in view['sources'])
-            card.pop('text')
-            card['sources'] = []
-            for source in view['sources']:
-                source_feed = feeds.get(source['feed_id'])
-                card['sources'].append(dict(id=source['id'], url=source['url'],
-                                            feed_id=source['feed_id'],
-                                            title=source_feed['title'] if source_feed else ''))
-            cards.append(card)
-        return [dict(card, feed_title=feeds[card['feed_id']]['title'], folder_id=card.get('folder_id', feeds[card['feed_id']]['folder_id']),
-                     importance=card.get('importance', feeds[card['feed_id']]['importance']))
-                for card in cards if card['feed_id'] in feeds
-                and (folder is None or card.get('folder_id', feeds[card['feed_id']]['folder_id']) == folder)
-                and (feed is None or (any(source['feed_id'] == feed for source in card['sources'])
-                                     if card.get('sources') else card['feed_id'] == feed))]
+        return [dict(card, feed_title=feeds[card['feed_id']]['title'],
+                     folder_id=feeds[card['feed_id']]['folder_id'],
+                     importance=feeds[card['feed_id']]['importance']) for card in cards]
 
     def navigation(self) -> Navigation:
-        """Count original publications, retaining frozen view folder ownership."""
+        """Count visible original publications in their current feeds and folders."""
         folders = self._store.subscriptions.folders()
         feeds = self._store.subscriptions.feeds()
         by_feed = {feed['id']: feed for feed in feeds}
         folder_members: dict[str, set[str]] = {folder['id']: set() for folder in folders}
         feed_members: dict[str, set[str]] = {feed['id']: set() for feed in feeds}
-        represented: dict[str, set[str]] = {}
-        for view in self._views():
-            owner = by_feed.get(view['feed_id'])
-            if owner:
-                folder = view.get('folder_id', owner['folder_id'])
-                for identity in represented_originals([view]):
-                    represented.setdefault(identity, set()).add(folder)
         visible = set()
         for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0'):
             if row['feed_id'] not in by_feed or self._store.filters.read(row['id'])['hidden']:
@@ -127,9 +91,7 @@ class ReadingComposition:
             identity = row['id']
             visible.add(identity)
             feed_members[row['feed_id']].add(identity)
-            for folder in represented.get(identity, {by_feed[row['feed_id']]['folder_id']}):
-                if folder in folder_members:
-                    folder_members[folder].add(identity)
+            folder_members[by_feed[row['feed_id']]['folder_id']].add(identity)
         return dict(folders=[dict(folder, count=len(folder_members[folder['id']])) for folder in folders],
                     feeds=[dict(feed, count=len(feed_members[feed['id']])) for feed in feeds],
                     count=len(visible))
@@ -139,22 +101,13 @@ class ReadingComposition:
         feeds = {feed['id']: feed['folder_id'] for feed in self._store.subscriptions.feeds()}
         cards = self.cards(True)
         owned = [card for card in cards if card['folder_id'] == folder]
-        covered = represented_originals([card for card in cards if card.get('sources')])
-        selected = represented_originals(owned)
         rows = self._store.db.execute('SELECT id,feed_id,members FROM items WHERE viewed=0 ORDER BY id').fetchall()
-        # Frozen folder reviews keep their originals when a feed moves. Include
-        # hidden/unreadable/loading originals unless another folder represents them.
-        members = tuple((row['id'], row['members']) for row in rows if row['id'] in selected
-                        or (feeds.get(row['feed_id']) == folder and row['id'] not in covered))
+        # Folder completion also includes hidden, unreadable and loading items.
+        members = tuple((row['id'], row['members']) for row in rows if feeds.get(row['feed_id']) == folder)
         return FolderContents(members, tuple(sorted(card['id'] for card in owned)))
 
     def material(self, identity: str) -> dict[str, Any] | None:
-        if identity.startswith('digest-'):
-            return self._store.digests.material(identity)
-        if identity.startswith('event-'):
-            return self._store.events.material(identity)
         return self._store.material(identity)
 
     def members(self, identity: str) -> list[str]:
-        material = self.material(identity)
-        return sorted(represented_originals([material])) if material else [identity]
+        return [identity]

@@ -36,7 +36,7 @@ def test_contract_build_covers_real_reader_and_validates_baseline(tmp_path):
         response = client.get('/api/status')
         assert response.status_code == 403
         validate_reply(spec, '/api/status', 'get', response)
-        response = client.patch('/api/settings/oko/global',json={'event_hours':'wrong'},headers={'Authorization':'Bearer synthetic'})
+        response = client.patch('/api/settings/oko/global',json={'theses':'wrong'},headers={'Authorization':'Bearer synthetic'})
         assert response.status_code == 422
         validate_reply(spec, '/api/settings/{scope}/{owner}', 'patch', response)
 

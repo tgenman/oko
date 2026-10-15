@@ -13,7 +13,7 @@ test('HTTP scenarios isolate storage, settings, authentication and journals whil
   assert.notEqual(a.token,b.token);
   assert.equal((await fetch(b.origin+'/api/cards',{headers:{Authorization:'Bearer '+a.token}})).status,403);
   const originalSettings=await b.api('settings/oko/global');
-  await a.api('settings/oko/global','PATCH',{events:false,theses:false,digests:false,prompt_filters:'scenario A'});
+  await a.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'scenario A'});
   await a.api('debug','POST',{source:'browser',message:'only A'});
   await a.api('import','POST',{opml:'<opml><body><outline text="A" xmlUrl="https://a.test/feed"/></body></opml>'});
   assert.deepEqual(await b.api('settings/oko/global'),originalSettings);

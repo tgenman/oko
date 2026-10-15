@@ -15,7 +15,6 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     material('video',{title:'Видео с недоступными субтитрами',captions:'unavailable',full:false,reason:'YouTube ограничил получение субтитров',description:'Описание видео\n\n'+('Текст и длинная ссылка https://example.org/'+'example/'.repeat(12)+'\n').repeat(3),text:''}),
     material('theses',{theses:points,provenance:{processor:'codex',model:'synthetic',reasoning_effort:'high',fast:false}}),
     material('hidden',{filter:{status:'done',hidden:true,restored:false,reason:'Синтетический фильтр',removed:[]}}),
-    material('digest',{sources:[source],digest:points}),
     material('media',{images:['/api/image'],previous:[{url:'/api/materials/source/versions/1'}]}),
     material('pending'),material('failed')
    ]);
@@ -74,10 +73,9 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await shot('telegram','#add-dialog');
    await r.page.locator('#add-opml-tab').click();await r.page.locator('#opml-file').setInputFiles({name:'sample.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body/></opml>')});await expect(r.page.locator('#import-confirm')).toBeVisible();await shot('opml','#add-dialog');
    await r.page.locator('#add-close').click();await expect(r.page.locator('#add-open')).toBeFocused();
-   for(const id of ['plain','video','theses','hidden','digest','media']){
+   for(const id of ['plain','video','theses','hidden','media']){
     await r.page.locator('[data-card="'+id+'"]').click();await expect(r.page.locator('#material')).toBeVisible();
     if(id==='media'){await expect(r.page.locator('#images img')).toBeVisible();await r.page.locator('#versions summary').click();await expect(r.page.locator('#versions')).toContainText('Ранее сохранённый текст');}
-    if(id==='digest'){await r.page.locator('#event-sources summary').filter({hasText:'Оригинал'}).click();}
     expect(await r.page.locator('main>article').evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(255, 255, 255)');
     if(id==='video')expect(await r.page.locator('#completeness').evaluate(n=>getComputedStyle(n).color)).toBe('rgb(137, 91, 31)');
     if(id==='plain')expect(await r.page.locator('#completeness').evaluate(n=>getComputedStyle(n).color)).toBe('rgb(99, 99, 102)');

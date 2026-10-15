@@ -48,32 +48,6 @@ def test_rss_edit_keeps_previous_media_and_viewed_identity_never_returns(tmp_pat
         assert client.get('/api/cards').json() == []
 
 
-def test_edit_regenerates_same_digest_members_and_current_theses(tmp_path):
-    from oko.collection.contracts import Material, Publication
-    from tests.support.digests import digest_transport
-    class Editable:
-        text = 'Старое утверждение'
-        async def discover(self, cursor):
-            return [Publication('one', 'https://source.test/one', time.time())], 'one'
-        async def fetch(self, publication):
-            return Material('Новость', self.text)
-    source = Editable()
-    calls = []
-    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=digest_transport(calls, theses=True)), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp', 'theses': True})
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.post('/api/tabs/test/heartbeat')
-        item = wait_cards(client)[0]['id']
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
-        identity = client.post('/api/digests/folder/demo', json={}).json()['id']
-        wait_for(client, lambda: client.get('/api/materials/' + identity).json().get('digest'))
-        source.text = 'Новое утверждение'
-        client.post('/api/collect')
-        updated = wait_for(client, lambda: m if (m := client.get('/api/materials/' + identity).json()).get('digest') and m['sources'][0]['text'] == source.text else None)
-        assert [s['id'] for s in updated['sources']] == [item]
-        assert client.get('/api/materials/' + item).json()['theses']
-        assert any(c['operation'] == 'digest' and c['sources'][0]['text'] == 'Новое утверждение' for c in calls)
-        assert any(c['operation'] == 'theses' and c['sources'][0]['text'] == 'Новое утверждение' for c in calls)
 
 
 def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(tmp_path):
@@ -113,7 +87,7 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
             raise OSError('interrupted')
     options = dict(source=source, token='test-token')
     with TestClient(create_app(tmp_path, fault=fault, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/test/heartbeat')
         item = wait_cards(client)[0]['id']
         source.text = 'Вторая версия'
@@ -149,7 +123,7 @@ def test_telegram_rechecks_known_ids_including_media_only_edits_and_deletions(tm
             return self.data
     source = Editable()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/test/heartbeat')
         connect(client)
         item = settled(client)[0]['id']
@@ -206,7 +180,7 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
             return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(result)}}]})
     source, held = Editable(), Held()
     with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=held), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp', 'theses': True})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.post('/api/tabs/test/heartbeat')
         item = wait_cards(client)[0]['id']
@@ -232,7 +206,7 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
             return httpx.Response(200, text=xml)
         return httpx.Response(200, content=PREVIEW, headers={'Content-Type': 'image/png'})
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=NoCaptions()), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         subscribe(client)
         client.post('/api/tabs/test/heartbeat')
         item = wait_cards(client)[0]['id']
@@ -248,40 +222,11 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
         assert 'не определяются' in client.get('/api/status').json()['sources'][0]['changes']
 
 
-def test_revision_invalidates_events_without_deleting_other_originals(tmp_path):
-    from tests.support.sources import EventSource
-    from tests.support.events import event_transport
-    from oko.collection.contracts import Material, Publication
-    class Editable(EventSource):
-        edited = False
-        async def discover(self, cursor):
-            return [Publication(str(i), f'https://example.org/event/{i}', 1800000000+i*60) for i in range(3)], '3'
-        async def fetch(self, publication):
-            if self.edited and publication.id == '0':
-                return Material('Открытие', 'Библиотека увеличила число мест до 40.')
-            return await super().fetch(publication)
-    source, calls = Editable(), []
-    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=event_transport(calls)), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'events': True, 'processor': 'llamacpp'})
-        client.post('/api/tabs/test/heartbeat')
-        event = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('event')), None))
-        members = [s['id'] for s in event['sources']]
-        source.edited = True
-        client.post('/api/collect')
-        updated = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('event') and any(s['text'] == 'Библиотека увеличила число мест до 40.' for s in client.get('/api/materials/' + c['id']).json().get('sources', []))), None))
-        assert {s['id'] for s in updated['sources']} == set(members)
-        changed = next(s for s in client.get('/api/materials/' + updated['id']).json()['sources'] if s['changed'])
-        assert client.get(changed['previous'][0]['url']).json()['text'] == 'Открылась библиотека на 24 места.'
-        client.post('/api/materials/' + changed['id'] + '/viewed')
-        assert client.get(changed['previous'][0]['url']).status_code == 404
-        for member in set(members) - {changed['id']}:
-            assert client.get('/api/materials/' + member).status_code == 200
 
 
 def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(tmp_path):
     from oko.collection.contracts import Material, Publication
-    from tests.support.digests import digest_transport
+    from tests.support.models import model_transport
     class Editable:
         text = 'Первая версия'
         async def discover(self, cursor):
@@ -289,22 +234,22 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
         async def fetch(self, publication):
             return Material('Новость', self.text)
     source, calls = Editable(), []
-    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=digest_transport(calls, theses=True)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         client.put('/api/processors/llamacpp', json={'endpoint': 'https://remote.test', 'model': 'local:latest', 'local_execution': False})
-        client.patch('/api/settings/oko/global', json={'events': False, 'processor': 'llamacpp', 'theses': True})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         feed = 'demo'
         client.patch('/api/feeds/' + feed, json={'public_ai': True})
         client.post('/api/tabs/test/heartbeat')
         item = wait_cards(client)[0]['id']
         wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
         client.patch('/api/feeds/' + feed, json={'public_ai': False})
-        count = len(calls)
+        count = sum(r.url.path == '/v1/chat/completions' for r in calls)
         source.text = 'Правка с закрытым доступом AI'
         client.post('/api/collect')
         material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == source.text else None)
         assert material['theses'] is None
         time.sleep(.1)
-        assert len(calls) == count
+        assert sum(r.url.path == '/v1/chat/completions' for r in calls) == count
         assert client.get('/api/materials/' + item).json()['ai']['error']
 
 
@@ -324,7 +269,7 @@ def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_med
     source = Editable()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'theses': False})
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/test/heartbeat')
         connect(client)
         original = settled(client)[0]
@@ -364,7 +309,7 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
             return httpx.Response(200, text=feed_xml())
         return httpx.Response(200, content=PREVIEW, headers={'Content-Type': 'image/png'})
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=captions), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         feed = subscribe(client)
         client.patch('/api/settings/feed/' + feed, json={'theses': True})
         client.post('/api/tabs/test/heartbeat')

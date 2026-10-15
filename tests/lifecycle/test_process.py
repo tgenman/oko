@@ -116,7 +116,7 @@ def test_folder_completion_survives_death_during_atomic_set_or_physical_delete(t
     process = launch(tmp_path, fault)
     try:
         with connect(tmp_path, process) as client:
-            client.patch('/api/settings/oko/global', json={'events': False})
+            client.patch('/api/settings/oko/global', json={})
             client.post('/api/tabs/a/heartbeat')
             originals = wait_cards(client, 3)
             preview = client.post('/api/folders/demo/completion/preview').json()

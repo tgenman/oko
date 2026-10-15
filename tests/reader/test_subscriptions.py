@@ -41,21 +41,21 @@ def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: P
         folder = feed['folder_id']
         url = '/api/settings/feed/' + feed['id']
         assert client.patch('/api/settings/oko/global', json={'theses': True, 'processor': 'llamacpp:local'}).status_code == 200
-        assert client.patch('/api/settings/folder/' + folder, json={'prompt_theses': 'Только темы', 'schedule': '18:30'}).status_code == 200
-        result = client.patch(url, json={'digest_days': 7}).json()
+        assert client.patch('/api/settings/folder/' + folder, json={'prompt_theses': 'Только темы', 'originals': False}).status_code == 200
+        result = client.patch(url, json={'prompt_filters': 'Без рекламы'}).json()
         assert result['effective']['theses'] == {'value': True, 'scope': 'oko', 'owner': 'global'}
         assert result['effective']['prompt_theses']['value'] == 'Только темы'
-        assert result['effective']['schedule']['scope'] == 'folder'
-        assert result['effective']['digest_days']['value'] == 7
+        assert result['effective']['originals']['scope'] == 'folder'
+        assert result['effective']['prompt_filters']['value'] == 'Без рекламы'
         assert client.patch(url, json={'prompt_theses': 'Коротко'}).json()['effective']['prompt_theses']['scope'] == 'feed'
         reset = client.patch(url, json={'prompt_theses': None}).json()
         assert reset['effective']['prompt_theses']['value'] == 'Только темы'
-        assert reset['overrides'] == {'digest_days': 7}
+        assert reset['overrides'] == {'prompt_filters': 'Без рекламы'}
         patch = {'importance': 'high', 'initial_days': 7, 'auto_read': False, 'public_ai': True, 'read_history': False, 'transport': 'telegram'}
         assert client.patch('/api/feeds/' + feed['id'], json=patch).status_code == 200
         assert client.patch(url, json={'importance': 'high'}).status_code == 422
         assert client.patch(url, json={'theses': 'yes'}).status_code == 422
-        assert client.patch(url, json={'schedule': '25:30'}).status_code == 422
+        assert client.patch(url, json={'originals': 'wrong'}).status_code == 422
         assert client.patch('/api/feeds/' + feed['id'], json={'folder_id': 'missing'}).status_code == 404
         # Reimport cannot reset explicit choices or permissions.
         client.post('/api/import', json={'opml': OPML, 'choices': {tg['identity']: '3 Политика'}})
@@ -64,8 +64,8 @@ def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: P
         for field, value in patch.items():
             assert restored[field] == value
         assert client.get(url).json()['effective']['processor']['value'] == 'llamacpp:local'
-        assert client.get(url).json()['effective']['digest_days']['value'] == 7
-        assert client.get('/api/settings/folder/' + folder).json()['effective']['digest_days']['value'] == 1
+        assert client.get(url).json()['effective']['prompt_filters']['value'] == 'Без рекламы'
+        assert client.get('/api/settings/folder/' + folder).json()['effective']['prompt_filters']['value'] == ''
 
 
 def test_folders_and_sorting_use_feed_importance_not_folder_prefix(tmp_path: Path):

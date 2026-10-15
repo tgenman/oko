@@ -45,9 +45,6 @@ def action_context(method: str, path: str, fields: list[str]) -> dict[str, Any] 
     elif path.startswith(('/api/feeds', '/api/telegram', '/api/import')):
         action = dict(kind='add', page='opml' if '/import' in path else 'telegram' if '/telegram' in path else 'rss')
         title = 'Не удалось подключить источник'
-    elif path.startswith('/api/digests/'):
-        action = dict(kind='settings', page='digests')
-        title = 'Не удалось создать обзор'
     elif path.startswith('/api/folders/'):
         title = 'Не удалось выполнить действие с папкой'
     elif path == '/api/stop':

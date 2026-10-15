@@ -1,0 +1,181 @@
+{
+  "base": "e8affc8c028782b87bc6fe94c56601818c4c4156",
+  "sql": "BEGIN TRANSACTION;\nCREATE TABLE content_current (item TEXT PRIMARY KEY, number INTEGER);\nINSERT INTO \"content_current\" VALUES('2913c693cc5ec9518ea1e50cc034b0b8',1);\nINSERT INTO \"content_current\" VALUES('ad2e09ba8cdab6ef0bc88942733ffe27',1);\nINSERT INTO \"content_current\" VALUES('2f13cec703a2be5a1c28cee364ca8c95',1);\nCREATE TABLE content_versions (\n          item TEXT, number INTEGER, fingerprint TEXT, visible INTEGER,\n          PRIMARY KEY(item,number));\nINSERT INTO \"content_versions\" VALUES('2913c693cc5ec9518ea1e50cc034b0b8',1,'c5d091866560d4bd0f73b5c78aaf93c996ce4fc5c23007f58db559a5814450c0',1);\nINSERT INTO \"content_versions\" VALUES('ad2e09ba8cdab6ef0bc88942733ffe27',1,'d0d87747d8f07f3cdb0b1bb5eb9c0818507b66a4d6527f734975b9305fbf17ed',1);\nINSERT INTO \"content_versions\" VALUES('2f13cec703a2be5a1c28cee364ca8c95',1,'0d7600cbf0b2e0c7a724cfe1fab8217092e037792fdaff495af64d4104fdd798',1);\nCREATE TABLE digest_sets (\n          id TEXT PRIMARY KEY, scope TEXT, owner TEXT, members TEXT, signature TEXT);\nINSERT INTO \"digest_sets\" VALUES('digest-legacy','folder','demo','[\"2913c693cc5ec9518ea1e50cc034b0b8\", \"ad2e09ba8cdab6ef0bc88942733ffe27\", \"2f13cec703a2be5a1c28cee364ca8c95\"]','old');\nCREATE TABLE event_inputs (item TEXT PRIMARY KEY, signature TEXT);\nINSERT INTO \"event_inputs\" VALUES('event-legacy','old');\nCREATE TABLE execution_settings (\n          job INTEGER PRIMARY KEY, generation INTEGER, signature TEXT, parameters TEXT);\nINSERT INTO \"execution_settings\" VALUES(5,5,'eae623c62d31655236dcaa6b78e84c0fb49ddd1b9be961b64b735bb23651a7ba','{\"processor\": \"llamacpp\", \"model\": \"local:latest\"}');\nINSERT INTO \"execution_settings\" VALUES(6,5,'5914d932bd37498a42ee64295ac683f2e960c7e142fa6b69a32e0046c862a7a7','{\"processor\": \"llamacpp\", \"model\": \"local:latest\"}');\nINSERT INTO \"execution_settings\" VALUES(7,5,'c94b3c21adcb5c53fb75f37aa98c233452f9b1084d3a0b7195a997a81bd453d8','{\"processor\": \"llamacpp\", \"model\": \"local:latest\"}');\nINSERT INTO \"execution_settings\" VALUES(8,1,'8029a1783b709ebf0d3a1def028210c697794c05800f2915e13b2ab58980e64d','{\"processor\": \"llamacpp\", \"model\": \"local:latest\"}');\nINSERT INTO \"execution_settings\" VALUES(9,1,'fb9e5485c5c021cf234a2155ee30aba3a27e79fd0f895e019d2336f9f4be685e','{\"processor\": \"llamacpp\", \"model\": \"local:latest\"}');\nINSERT INTO \"execution_settings\" VALUES(10,1,'de6fa68aa02f72850435ad2a67916120ce949969272d2a0647f28dd54baac9d8','{\"processor\": \"llamacpp\", \"model\": \"local:latest\"}');\nCREATE TABLE feeds (\n          id TEXT PRIMARY KEY, identity TEXT UNIQUE, title TEXT, kind TEXT, folder_id TEXT,\n          original_urls TEXT, connection TEXT, transport TEXT,\n          importance TEXT DEFAULT 'normal', initial_days INTEGER DEFAULT 1,\n          public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER, telegram_peer INTEGER, telegram_account TEXT, telegram_username TEXT, telegram_topic INTEGER);\nINSERT INTO \"feeds\" VALUES('demo','demo','Тестовый источник','demo','demo','[]','connected','demo','normal',1,0,0,NULL,NULL,NULL,NULL,NULL);\nCREATE TABLE filter_inputs (item TEXT PRIMARY KEY, signature TEXT);\nINSERT INTO \"filter_inputs\" VALUES('2913c693cc5ec9518ea1e50cc034b0b8','8029a1783b709ebf0d3a1def028210c697794c05800f2915e13b2ab58980e64d');\nINSERT INTO \"filter_inputs\" VALUES('ad2e09ba8cdab6ef0bc88942733ffe27','fb9e5485c5c021cf234a2155ee30aba3a27e79fd0f895e019d2336f9f4be685e');\nINSERT INTO \"filter_inputs\" VALUES('2f13cec703a2be5a1c28cee364ca8c95','de6fa68aa02f72850435ad2a67916120ce949969272d2a0647f28dd54baac9d8');\nCREATE TABLE filter_restores (item TEXT PRIMARY KEY, version TEXT);\nCREATE TABLE folders (id TEXT PRIMARY KEY, title TEXT UNIQUE, position INTEGER);\nINSERT INTO \"folders\" VALUES('demo','Тестовый источник',-1);\nCREATE TABLE history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));\nCREATE TABLE initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0, scan_complete INTEGER DEFAULT 1);\nCREATE TABLE items (\n          id TEXT PRIMARY KEY, source_id TEXT UNIQUE, url TEXT,\n          published REAL, viewed INTEGER DEFAULT 0, complete INTEGER DEFAULT 0,\n          feed_id TEXT DEFAULT 'demo', members TEXT DEFAULT '[]', published_known INTEGER DEFAULT 1, source_order INTEGER, UNIQUE(feed_id,url));\nINSERT INTO \"items\" VALUES('2913c693cc5ec9518ea1e50cc034b0b8','1','https://example.org/oko/1',1799999999.0,0,1,'demo','[]',1,NULL);\nINSERT INTO \"items\" VALUES('ad2e09ba8cdab6ef0bc88942733ffe27','2','https://example.org/oko/2',1799999998.0,0,1,'demo','[]',1,NULL);\nINSERT INTO \"items\" VALUES('2f13cec703a2be5a1c28cee364ca8c95','3','https://example.org/oko/3',1799999997.0,0,1,'demo','[]',1,NULL);\nCREATE TABLE jobs (\n          id INTEGER PRIMARY KEY, kind TEXT, item TEXT DEFAULT '',\n          status TEXT DEFAULT 'pending', attempt INTEGER DEFAULT 0,\n          next REAL DEFAULT 0, generation INTEGER DEFAULT 0, error TEXT, problem_code TEXT,\n          UNIQUE(kind,item));\nINSERT INTO \"jobs\" VALUES(1,'discover','','done',1,0.0,1,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(2,'fetch','2913c693cc5ec9518ea1e50cc034b0b8','done',1,0.0,1,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(3,'fetch','ad2e09ba8cdab6ef0bc88942733ffe27','done',1,0.0,1,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(4,'fetch','2f13cec703a2be5a1c28cee364ca8c95','done',1,0.0,1,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(5,'theses','2913c693cc5ec9518ea1e50cc034b0b8','done',2,0.0,5,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(6,'theses','ad2e09ba8cdab6ef0bc88942733ffe27','done',2,0.0,5,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(7,'theses','2f13cec703a2be5a1c28cee364ca8c95','done',2,0.0,5,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(8,'filter','2913c693cc5ec9518ea1e50cc034b0b8','done',1,0.0,1,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(9,'filter','ad2e09ba8cdab6ef0bc88942733ffe27','done',1,0.0,1,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(10,'filter','2f13cec703a2be5a1c28cee364ca8c95','done',1,0.0,1,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(11,'events','event-legacy','running',0,0.0,0,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(12,'digest','digest-legacy','pending',0,0.0,0,NULL,NULL);\nINSERT INTO \"jobs\" VALUES(13,'delete','event-old','pending',0,0.0,0,NULL,NULL);\nCREATE TABLE reader_action_results (\n              sequence INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, identity TEXT NOT NULL,\n              body TEXT NOT NULL, started REAL NOT NULL, completed REAL, result TEXT NOT NULL);\nINSERT INTO \"reader_action_results\" VALUES(1,'53d5cb3cbe50408b3071cd571cf73828','PUT:/api/processors/llamacpp:','{\"identity\": \"PUT:/api/processors/llamacpp:\", \"title\": \"\\u041d\\u0435 \\u0443\\u0434\\u0430\\u043b\\u043e\\u0441\\u044c \\u0441\\u043e\\u0445\\u0440\\u0430\\u043d\\u0438\\u0442\\u044c \\u043d\\u0430\\u0441\\u0442\\u0440\\u043e\\u0439\\u043a\\u0438 \\u043e\\u0431\\u0440\\u0430\\u0431\\u043e\\u0442\\u0447\\u0438\\u043a\\u0430\", \"objects\": [{\"kind\": \"settings\", \"id\": \"global\"}], \"action\": {\"kind\": \"settings\", \"page\": \"llamacpp\"}, \"discardable\": true}',1792046929.1791639,1792046929.182286,'succeeded');\nINSERT INTO \"reader_action_results\" VALUES(2,'ce7681ccd83a925c293df937a87b1f0e','PATCH:/api/settings/oko/global:','{\"identity\": \"PATCH:/api/settings/oko/global:\", \"title\": \"\\u041d\\u0435 \\u0443\\u0434\\u0430\\u043b\\u043e\\u0441\\u044c \\u0441\\u043e\\u0445\\u0440\\u0430\\u043d\\u0438\\u0442\\u044c \\u043d\\u0430\\u0441\\u0442\\u0440\\u043e\\u0439\\u043a\\u0443\", \"objects\": [{\"kind\": \"settings\", \"id\": \"global\"}], \"action\": {\"kind\": \"settings\", \"page\": \"home\"}, \"discardable\": true}',1792046929.184016,1792046929.186589,'succeeded');\nINSERT INTO \"reader_action_results\" VALUES(3,'98e6727b5a80612b0a0a0e9e9d8aa44d','PATCH:/api/settings/oko/global:','{\"identity\": \"PATCH:/api/settings/oko/global:\", \"title\": \"\\u041d\\u0435 \\u0443\\u0434\\u0430\\u043b\\u043e\\u0441\\u044c \\u0441\\u043e\\u0445\\u0440\\u0430\\u043d\\u0438\\u0442\\u044c \\u043d\\u0430\\u0441\\u0442\\u0440\\u043e\\u0439\\u043a\\u0443\", \"objects\": [{\"kind\": \"settings\", \"id\": \"global\"}], \"action\": {\"kind\": \"settings\", \"page\": \"home\"}, \"discardable\": true}',1792046929.1890261,1792046929.1913359,'succeeded');\nINSERT INTO \"reader_action_results\" VALUES(4,'ce55c0414db9403fb4035c311a89e629','PATCH:/api/settings/oko/global:prompt_filters','{\"identity\": \"PATCH:/api/settings/oko/global:prompt_filters\", \"title\": \"\\u041d\\u0435 \\u0443\\u0434\\u0430\\u043b\\u043e\\u0441\\u044c \\u0441\\u043e\\u0445\\u0440\\u0430\\u043d\\u0438\\u0442\\u044c \\u043d\\u0430\\u0441\\u0442\\u0440\\u043e\\u0439\\u043a\\u0443\", \"objects\": [{\"kind\": \"settings\", \"id\": \"global\"}], \"action\": {\"kind\": \"settings\", \"page\": \"field/prompt_filters\"}, \"discardable\": true}',1792046929.2962639,1792046929.3144341,'succeeded');\nCREATE TABLE reader_problems (\n              id TEXT PRIMARY KEY, identity TEXT NOT NULL, origin TEXT NOT NULL,\n              body TEXT NOT NULL, created REAL NOT NULL, finished REAL, outcome TEXT);\nINSERT INTO \"reader_problems\" VALUES('88858a55eed24cafbf9a1ddf6e7684c8','processor:codex-choice','background','{\"code\": \"codex-choice\", \"section\": \"action\", \"title\": \"\\u041d\\u0435 \\u0432\\u044b\\u0431\\u0440\\u0430\\u043d\\u0430 \\u043c\\u043e\\u0434\\u0435\\u043b\\u044c Codex\", \"consequence\": \"\\u0422\\u0435\\u0437\\u0438\\u0441\\u044b \\u0438 \\u043e\\u0431\\u0437\\u043e\\u0440\\u044b \\u043f\\u043e\\u043a\\u0430 \\u043d\\u0435 \\u0441\\u043e\\u0437\\u0434\\u0430\\u044e\\u0442\\u0441\\u044f.\", \"next_step\": \"\\u0412\\u044b\\u0431\\u0435\\u0440\\u0438\\u0442\\u0435 \\u0438 \\u0441\\u043e\\u0445\\u0440\\u0430\\u043d\\u0438\\u0442\\u0435 \\u043c\\u043e\\u0434\\u0435\\u043b\\u044c \\u0434\\u043b\\u044f \\u043a\\u0430\\u0436\\u0434\\u043e\\u0433\\u043e \\u0434\\u0435\\u0439\\u0441\\u0442\\u0432\\u0438\\u044f.\", \"objects\": [{\"kind\": \"settings\", \"id\": \"global\"}], \"action\": {\"kind\": \"settings\", \"page\": \"codex\"}, \"state\": \"current\", \"next_at\": null}',1792046929.1826298,1792046929.187243,'irrelevant');\nCREATE TABLE settings (scope TEXT, owner TEXT, field TEXT, value TEXT,\n          PRIMARY KEY(scope,owner,field));\nINSERT INTO \"settings\" VALUES('oko','global','events','false');\nINSERT INTO \"settings\" VALUES('oko','global','prompt_filters','\"\\u0423\\u0431\\u0435\\u0440\\u0438 \\u0440\\u0435\\u043a\\u043b\\u0430\\u043c\\u0443\"');\nINSERT INTO \"settings\" VALUES('oko','global','processor','\"llamacpp\"');\nINSERT INTO \"settings\" VALUES('oko','global','theses','true');\nINSERT INTO \"settings\" VALUES('oko','global','digests','false');\nCREATE TABLE source_deleted (item TEXT PRIMARY KEY);\nCREATE TABLE state (key TEXT PRIMARY KEY, value TEXT);\nINSERT INTO \"state\" VALUES('processor:llamacpp','{\"endpoint\":\"http://localhost:9931\",\"model\":\"local:latest\",\"local_execution\":true}');\nINSERT INTO \"state\" VALUES('settings-version','4');\nINSERT INTO \"state\" VALUES('cursor','3');\nINSERT INTO \"state\" VALUES('feed-status:demo','{\"error\": null, \"gap\": null, \"changes\": null}');\nINSERT INTO \"state\" VALUES('digest-tick:folder:demo','old');\nINSERT INTO \"state\" VALUES('processor:codex','{\"filter\": {\"model\": \"synthetic\", \"reasoning_effort\": \"low\", \"fast\": false}, \"theses\": {\"model\": \"synthetic\", \"reasoning_effort\": \"low\", \"fast\": false}, \"events\": {\"model\": \"synthetic\", \"reasoning_effort\": \"low\", \"fast\": false}, \"digest\": {\"model\": \"synthetic\", \"reasoning_effort\": \"low\", \"fast\": false}}');\nCREATE TABLE telegram_read_members (\n          feed TEXT, member INTEGER, eligible INTEGER DEFAULT 0, reason TEXT, missing INTEGER DEFAULT 0,\n          PRIMARY KEY(feed,member));\nCREATE TABLE telegram_read_state (\n          feed TEXT PRIMARY KEY, since REAL, initial INTEGER,\n          confirmed INTEGER DEFAULT 0, signature TEXT, waiting TEXT, error TEXT);\nCREATE TABLE thesis_inputs (item TEXT PRIMARY KEY, signature TEXT);\nINSERT INTO \"thesis_inputs\" VALUES('2913c693cc5ec9518ea1e50cc034b0b8','eae623c62d31655236dcaa6b78e84c0fb49ddd1b9be961b64b735bb23651a7ba');\nINSERT INTO \"thesis_inputs\" VALUES('ad2e09ba8cdab6ef0bc88942733ffe27','5914d932bd37498a42ee64295ac683f2e960c7e142fa6b69a32e0046c862a7a7');\nINSERT INTO \"thesis_inputs\" VALUES('2f13cec703a2be5a1c28cee364ca8c95','c94b3c21adcb5c53fb75f37aa98c233452f9b1084d3a0b7195a997a81bd453d8');\nCREATE TABLE youtube_access (\n              id INTEGER PRIMARY KEY CHECK(id=1), next_at REAL DEFAULT 0,\n              blocked_until REAL DEFAULT 0, strikes INTEGER DEFAULT 0);\nINSERT INTO \"youtube_access\" VALUES(1,0.0,0.0,0);\nCREATE TABLE youtube_attempts (\n              item TEXT PRIMARY KEY, attempts INTEGER DEFAULT 0, terminal INTEGER DEFAULT 0);\nCREATE UNIQUE INDEX reader_problems_current\n              ON reader_problems(identity) WHERE finished IS NULL;\nCOMMIT;",
+  "files": {
+    "content/2f13cec703a2be5a1c28cee364ca8c95/1/original.md": "7b227469746c65223a2022d09bd0bed0bad0b0d0bbd18cd0bdd0bed0b520d185d180d0b0d0bdd0b5d0bdd0b8d0b5222c202266756c6c223a20747275652c2022726561736f6e223a2022222c20226d656d62657273223a205b5d2c202263617074696f6e73223a206e756c6c2c20226174746163686d656e7473223a205b5d7d0a0ad0add182d0be20d182d0b5d181d182d0bed0b2d0b0d18f20d0bfd183d0b1d0bbd0b8d0bad0b0d186d0b8d18f2e20d09ed182d0bad180d18bd182d0b8d0b520d0b820d0bad0bed0bfd0b8d180d0bed0b2d0b0d0bdd0b8d0b520d181d181d18bd0bbd0bad0b820d181d0bed185d180d0b0d0bdd18fd18ed18220d0b5d1912e0a0ad09ad0bdd0bed0bfd0bad0b020c2abd09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0bec2bb20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d18220d0b8d0b720d09ed0bad0be2e20d0add182d0be20d0b4d0b5d0bcd0bed0bdd181d182d180d0b0d186d0b8d0bed0bdd0bdd18bd0b920d0b8d181d182d0bed187d0bdd0b8d0ba2c20d0bfd180d0bed188d0b5d0b4d188d0b8d0b920d0bdd0b0d181d182d0bed18fd189d183d18e20d0bed187d0b5d180d0b5d0b4d18c20d0b820d181d0bed185d180d0b0d0bdd191d0bdd0bdd18bd0b920d0b2204d61726b646f776e2e",
+    "content/2f13cec703a2be5a1c28cee364ca8c95/1/filter.md": "7b227369676e6174757265223a202264653666613638616130326637323835303433356164326136373931363132306365393439393639323732643261303634376632386464353462616163396438222c2022726573756c74223a207b2268696464656e223a2066616c73652c2022726561736f6e223a2022222c202272656d6f766564223a205b5d7d2c202270726f76656e616e6365223a207b2270726f636573736f72223a20226c6c616d61637070222c20226d6f64656c223a20226c6f63616c3a6c6174657374227d2c20226576656e745f6f726967696e73223a207b7d7d0a0a",
+    "content/2f13cec703a2be5a1c28cee364ca8c95/1/theses.md": "7b227369676e6174757265223a202263393462336332316164636235633533666237356633376161393863323333343532663962313038346433613062373139356139393761383162643435336438222c2022726573756c74223a207b22706f696e7473223a205b7b2274657874223a2022d09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0be20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d1822e222c2022736f7572636573223a205b7b226964223a20223266313363656337303361326265356131633238636565333634636138633935222c202275726c223a202268747470733a2f2f6578616d706c652e6f72672f6f6b6f2f33227d5d7d5d7d2c202270726f76656e616e6365223a207b2270726f636573736f72223a20226c6c616d61637070222c20226d6f64656c223a20226c6f63616c3a6c6174657374227d2c20226576656e745f6f726967696e73223a207b7d7d0a0a2d20d09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0be20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d1822e",
+    "content/ad2e09ba8cdab6ef0bc88942733ffe27/1/original.md": "7b227469746c65223a2022d0a7d182d0b5d0bdd0b8d0b520d0b1d0b5d0b720d0bed182d0b2d0bbd0b5d187d0b5d0bdd0b8d0b9222c202266756c6c223a20747275652c2022726561736f6e223a2022222c20226d656d62657273223a205b5d2c202263617074696f6e73223a206e756c6c2c20226174746163686d656e7473223a205b5d7d0a0ad0add182d0be20d182d0b5d181d182d0bed0b2d0b0d18f20d0bfd183d0b1d0bbd0b8d0bad0b0d186d0b8d18f2e20d09ed182d0bad180d18bd182d0b8d0b520d0b820d0bad0bed0bfd0b8d180d0bed0b2d0b0d0bdd0b8d0b520d181d181d18bd0bbd0bad0b820d181d0bed185d180d0b0d0bdd18fd18ed18220d0b5d1912e0a0ad09ad0bdd0bed0bfd0bad0b020c2abd09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0bec2bb20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d18220d0b8d0b720d09ed0bad0be2e20d0add182d0be20d0b4d0b5d0bcd0bed0bdd181d182d180d0b0d186d0b8d0bed0bdd0bdd18bd0b920d0b8d181d182d0bed187d0bdd0b8d0ba2c20d0bfd180d0bed188d0b5d0b4d188d0b8d0b920d0bdd0b0d181d182d0bed18fd189d183d18e20d0bed187d0b5d180d0b5d0b4d18c20d0b820d181d0bed185d180d0b0d0bdd191d0bdd0bdd18bd0b920d0b2204d61726b646f776e2e",
+    "content/ad2e09ba8cdab6ef0bc88942733ffe27/1/filter.md": "7b227369676e6174757265223a202266623965353438356335633032316366323334613231353565653330616261336132376537396664306638393565303139643233333666396634626536383565222c2022726573756c74223a207b2268696464656e223a2066616c73652c2022726561736f6e223a2022222c202272656d6f766564223a205b5d7d2c202270726f76656e616e6365223a207b2270726f636573736f72223a20226c6c616d61637070222c20226d6f64656c223a20226c6f63616c3a6c6174657374227d2c20226576656e745f6f726967696e73223a207b7d7d0a0a",
+    "content/ad2e09ba8cdab6ef0bc88942733ffe27/1/theses.md": "7b227369676e6174757265223a202235393134643933326264333734393861343265653634323935616336383366326539363063376531343266613662363961333265303034366338363261376137222c2022726573756c74223a207b22706f696e7473223a205b7b2274657874223a2022d09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0be20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d1822e222c2022736f7572636573223a205b7b226964223a20226164326530396261386364616236656630626338383934323733336666653237222c202275726c223a202268747470733a2f2f6578616d706c652e6f72672f6f6b6f2f32227d5d7d5d7d2c202270726f76656e616e6365223a207b2270726f636573736f72223a20226c6c616d61637070222c20226d6f64656c223a20226c6f63616c3a6c6174657374227d2c20226576656e745f6f726967696e73223a207b7d7d0a0a2d20d09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0be20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d1822e",
+    "content/2913c693cc5ec9518ea1e50cc034b0b8/1/original.md": "7b227469746c65223a2022d09ed0bad0be3a20d0bfd0b5d180d0b2d18bd0b920d0bcd0b0d182d0b5d180d0b8d0b0d0bb222c202266756c6c223a20747275652c2022726561736f6e223a2022222c20226d656d62657273223a205b5d2c202263617074696f6e73223a206e756c6c2c20226174746163686d656e7473223a205b5d7d0a0ad0add182d0be20d182d0b5d181d182d0bed0b2d0b0d18f20d0bfd183d0b1d0bbd0b8d0bad0b0d186d0b8d18f2e20d09ed182d0bad180d18bd182d0b8d0b520d0b820d0bad0bed0bfd0b8d180d0bed0b2d0b0d0bdd0b8d0b520d181d181d18bd0bbd0bad0b820d181d0bed185d180d0b0d0bdd18fd18ed18220d0b5d1912e0a0ad09ad0bdd0bed0bfd0bad0b020c2abd09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0bec2bb20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d18220d0b8d0b720d09ed0bad0be2e20d0add182d0be20d0b4d0b5d0bcd0bed0bdd181d182d180d0b0d186d0b8d0bed0bdd0bdd18bd0b920d0b8d181d182d0bed187d0bdd0b8d0ba2c20d0bfd180d0bed188d0b5d0b4d188d0b8d0b920d0bdd0b0d181d182d0bed18fd189d183d18e20d0bed187d0b5d180d0b5d0b4d18c20d0b820d181d0bed185d180d0b0d0bdd191d0bdd0bdd18bd0b920d0b2204d61726b646f776e2e",
+    "content/2913c693cc5ec9518ea1e50cc034b0b8/1/filter.md": "7b227369676e6174757265223a202238303239613137383362373039656266306433613164656630323832313063363937373934633035383030663239313565313362326162353839383065363464222c2022726573756c74223a207b2268696464656e223a2066616c73652c2022726561736f6e223a2022222c202272656d6f766564223a205b5d7d2c202270726f76656e616e6365223a207b2270726f636573736f72223a20226c6c616d61637070222c20226d6f64656c223a20226c6f63616c3a6c6174657374227d2c20226576656e745f6f726967696e73223a207b7d7d0a0a",
+    "content/2913c693cc5ec9518ea1e50cc034b0b8/1/theses.md": "7b227369676e6174757265223a202265616536323363363264333136353532333664636161366237386538346330666234396464643162396265393631623634623733356262323336353161376261222c2022726573756c74223a207b22706f696e7473223a205b7b2274657874223a2022d09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0be20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d1822e222c2022736f7572636573223a205b7b226964223a20223239313363363933636335656339353138656131653530636330333462306238222c202275726c223a202268747470733a2f2f6578616d706c652e6f72672f6f6b6f2f31227d5d7d5d7d2c202270726f76656e616e6365223a207b2270726f636573736f72223a20226c6c616d61637070222c20226d6f64656c223a20226c6f63616c3a6c6174657374227d2c20226576656e745f6f726967696e73223a207b7d7d0a0a2d20d09fd180d0bed181d0bcd0bed182d180d0b5d0bdd0be20d183d0b4d0b0d0bbd18fd0b5d18220d182d0b5d0bad181d1822e",
+    "digests/digest-legacy.tmp": "6f6c642070726f6772657373",
+    "events/event-legacy.md": "6f6c64206576656e74"
+  },
+  "expected": [
+    {
+      "ai": {
+        "error": null,
+        "status": "done"
+      },
+      "attachments": [],
+      "captions": null,
+      "changed": false,
+      "complete": true,
+      "description": "",
+      "display_text": "Это тестовая публикация. Открытие и копирование ссылки сохраняют её.\n\nКнопка «Просмотрено» удаляет текст из Око. Это демонстрационный источник, прошедший настоящую очередь и сохранённый в Markdown.",
+      "feed_id": "demo",
+      "filter": {
+        "error": null,
+        "hidden": false,
+        "reason": "",
+        "removed": [],
+        "restored": false,
+        "status": "done"
+      },
+      "full": true,
+      "id": "2913c693cc5ec9518ea1e50cc034b0b8",
+      "images": [],
+      "loading": false,
+      "members": [],
+      "originals": true,
+      "previous": [],
+      "provenance": {
+        "model": "local:latest",
+        "processor": "llamacpp"
+      },
+      "published": 1799999999.0,
+      "published_known": true,
+      "reason": "",
+      "source_deleted": false,
+      "source_order": null,
+      "text": "Это тестовая публикация. Открытие и копирование ссылки сохраняют её.\n\nКнопка «Просмотрено» удаляет текст из Око. Это демонстрационный источник, прошедший настоящую очередь и сохранённый в Markdown.",
+      "theses": {
+        "points": [
+          {
+            "sources": [
+              {
+                "id": "2913c693cc5ec9518ea1e50cc034b0b8",
+                "url": "https://example.org/oko/1"
+              }
+            ],
+            "text": "Просмотрено удаляет текст."
+          }
+        ]
+      },
+      "title": "Око: первый материал",
+      "url": "https://example.org/oko/1",
+      "version": "c5d091866560d4bd0f73b5c78aaf93c996ce4fc5c23007f58db559a5814450c0"
+    },
+    {
+      "ai": {
+        "error": null,
+        "status": "done"
+      },
+      "attachments": [],
+      "captions": null,
+      "changed": false,
+      "complete": true,
+      "description": "",
+      "display_text": "Это тестовая публикация. Открытие и копирование ссылки сохраняют её.\n\nКнопка «Просмотрено» удаляет текст из Око. Это демонстрационный источник, прошедший настоящую очередь и сохранённый в Markdown.",
+      "feed_id": "demo",
+      "filter": {
+        "error": null,
+        "hidden": false,
+        "reason": "",
+        "removed": [],
+        "restored": false,
+        "status": "done"
+      },
+      "full": true,
+      "id": "ad2e09ba8cdab6ef0bc88942733ffe27",
+      "images": [],
+      "loading": false,
+      "members": [],
+      "originals": true,
+      "previous": [],
+      "provenance": {
+        "model": "local:latest",
+        "processor": "llamacpp"
+      },
+      "published": 1799999998.0,
+      "published_known": true,
+      "reason": "",
+      "source_deleted": false,
+      "source_order": null,
+      "text": "Это тестовая публикация. Открытие и копирование ссылки сохраняют её.\n\nКнопка «Просмотрено» удаляет текст из Око. Это демонстрационный источник, прошедший настоящую очередь и сохранённый в Markdown.",
+      "theses": {
+        "points": [
+          {
+            "sources": [
+              {
+                "id": "ad2e09ba8cdab6ef0bc88942733ffe27",
+                "url": "https://example.org/oko/2"
+              }
+            ],
+            "text": "Просмотрено удаляет текст."
+          }
+        ]
+      },
+      "title": "Чтение без отвлечений",
+      "url": "https://example.org/oko/2",
+      "version": "d0d87747d8f07f3cdb0b1bb5eb9c0818507b66a4d6527f734975b9305fbf17ed"
+    },
+    {
+      "ai": {
+        "error": null,
+        "status": "done"
+      },
+      "attachments": [],
+      "captions": null,
+      "changed": false,
+      "complete": true,
+      "description": "",
+      "display_text": "Это тестовая публикация. Открытие и копирование ссылки сохраняют её.\n\nКнопка «Просмотрено» удаляет текст из Око. Это демонстрационный источник, прошедший настоящую очередь и сохранённый в Markdown.",
+      "feed_id": "demo",
+      "filter": {
+        "error": null,
+        "hidden": false,
+        "reason": "",
+        "removed": [],
+        "restored": false,
+        "status": "done"
+      },
+      "full": true,
+      "id": "2f13cec703a2be5a1c28cee364ca8c95",
+      "images": [],
+      "loading": false,
+      "members": [],
+      "originals": true,
+      "previous": [],
+      "provenance": {
+        "model": "local:latest",
+        "processor": "llamacpp"
+      },
+      "published": 1799999997.0,
+      "published_known": true,
+      "reason": "",
+      "source_deleted": false,
+      "source_order": null,
+      "text": "Это тестовая публикация. Открытие и копирование ссылки сохраняют её.\n\nКнопка «Просмотрено» удаляет текст из Око. Это демонстрационный источник, прошедший настоящую очередь и сохранённый в Markdown.",
+      "theses": {
+        "points": [
+          {
+            "sources": [
+              {
+                "id": "2f13cec703a2be5a1c28cee364ca8c95",
+                "url": "https://example.org/oko/3"
+              }
+            ],
+            "text": "Просмотрено удаляет текст."
+          }
+        ]
+      },
+      "title": "Локальное хранение",
+      "url": "https://example.org/oko/3",
+      "version": "0d7600cbf0b2e0c7a724cfe1fab8217092e037792fdaff495af64d4104fdd798"
+    }
+  ]
+}

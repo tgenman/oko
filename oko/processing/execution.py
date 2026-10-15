@@ -3,9 +3,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-UNKNOWN_REVIEW = 'Модель начатого обзора неизвестна; пересоздайте обзор'
-
-
 class CodexChoice(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
     model: str = Field(min_length=1, max_length=200, pattern=r'^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$')
@@ -17,8 +14,6 @@ class CodexSettings(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
     filter: CodexChoice
     theses: CodexChoice
-    events: CodexChoice
-    digest: CodexChoice
 
     def validate_catalog(self, models: list[dict[str, Any]]) -> None:
         from oko.processing.contracts import ProcessingError
@@ -33,5 +28,4 @@ class CodexSettings(BaseModel):
                 raise ProcessingError(f'{kind}: модель не поддерживает Fast')
 
     def choice(self, operation: str) -> CodexChoice:
-        kind = 'digest' if operation.startswith('digest') else operation
-        return CodexChoice.model_validate(self.model_dump()[kind])
+        return CodexChoice.model_validate(self.model_dump()[operation])

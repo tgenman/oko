@@ -10,7 +10,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 
 def test_viewed_during_fetch_never_publishes_late_result(tmp_path: Path):
     with TestClient(create_app(tmp_path, source=LateSource(), token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         for _ in range(100):
             cards = client.get('/api/cards').json()
@@ -33,7 +33,7 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         if point == 'before_delete' and fail:
             raise OSError('secret content in provider exception')
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         for _ in range(100):
             cards = client.get('/api/cards').json()
@@ -72,7 +72,7 @@ def test_repeated_discovery_does_not_download_viewed_identity(tmp_path: Path):
             return await super().fetch(publication)
     source = RepeatingSource()
     with TestClient(create_app(tmp_path, source=source, token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         for _ in range(100):
             cards = client.get('/api/cards').json()
@@ -84,7 +84,7 @@ def test_repeated_discovery_does_not_download_viewed_identity(tmp_path: Path):
         client.post(f'/api/materials/{item}/viewed')
     source.downloaded.clear()
     with TestClient(create_app(tmp_path, source=source, token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         time.sleep(.2)
         assert viewed_source not in source.downloaded
@@ -105,7 +105,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         if point == 'before_delete' and fail:
             raise OSError('temporary disk error')
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         for _ in range(100):
             cards = client.get('/api/cards').json()
@@ -117,7 +117,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         client.post(f'/api/materials/{item}/viewed')
     source = CountingSource()
     with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False})
+        client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         time.sleep(.1)
         status = client.get('/api/status').json()

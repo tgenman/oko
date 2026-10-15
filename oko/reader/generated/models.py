@@ -70,16 +70,6 @@ class BrowserError(WireModel):
     traceback: StrictStr = Field(default='', title='Traceback')
 
 
-class CardSource(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    feed_id: StrictStr = Field(..., title='Feed Id')
-    id: StrictStr = Field(..., title='Id')
-    title: StrictStr = Field(..., title='Title')
-    url: StrictStr = Field(..., title='Url')
-
-
 class CodexChoice(WireModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -130,8 +120,6 @@ class CodexSettings(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    digest: CodexChoice
-    events: CodexChoice
     filter: CodexChoice
     theses: CodexChoice
 
@@ -196,66 +184,6 @@ class DiagnosticReceipt(WireModel):
     persistence_error: StrictStr
 
 
-class DigestCreated(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    id: StrictStr
-
-
-class End(RootModel[StrictFloat]):
-    root: StrictFloat = Field(..., ge=0.0, title='End')
-
-
-class Start(RootModel[StrictFloat]):
-    root: StrictFloat = Field(..., ge=0.0, title='Start')
-
-
-class DigestRequest(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    end: End | None | MISSING = Field(default=MISSING, title='End')
-    period: StrictBool = Field(default=False, title='Period')
-    start: Start | None | MISSING = Field(default=MISSING, title='Start')
-
-
-class DigestDays(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    owner: StrictStr | None
-    scope: Literal['default', 'oko', 'folder', 'feed']
-    value: StrictInt
-
-
-class Digests(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    owner: StrictStr | None
-    scope: Literal['default', 'oko', 'folder', 'feed']
-    value: StrictBool
-
-
-class EventHours(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    owner: StrictStr | None
-    scope: Literal['default', 'oko', 'folder', 'feed']
-    value: StrictInt
-
-
-class Events(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    owner: StrictStr | None
-    scope: Literal['default', 'oko', 'folder', 'feed']
-    value: StrictBool
-
-
 class Originals(WireModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -266,15 +194,6 @@ class Originals(WireModel):
 
 
 class Processor(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    owner: StrictStr | None
-    scope: Literal['default', 'oko', 'folder', 'feed']
-    value: StrictStr
-
-
-class PromptDigest(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -301,15 +220,6 @@ class PromptTheses(WireModel):
     value: StrictStr
 
 
-class Schedule(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    owner: StrictStr | None
-    scope: Literal['default', 'oko', 'folder', 'feed']
-    value: StrictStr
-
-
 class Theses(WireModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -323,16 +233,10 @@ class EffectiveValues(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    digest_days: DigestDays
-    digests: Digests
-    event_hours: EventHours
-    events: Events
     originals: Originals
     processor: Processor
-    prompt_digest: PromptDigest
     prompt_filters: PromptFilters
     prompt_theses: PromptTheses
-    schedule: Schedule
     theses: Theses
 
 
@@ -521,9 +425,9 @@ class Job(WireModel):
     )
     count: StrictInt = Field(..., title='Count')
     error: StrictStr | None = Field(..., title='Error')
-    kind: Literal[
-        'discover', 'fetch', 'theses', 'filter', 'events', 'digest', 'delete', 'read'
-    ] = Field(..., title='Kind')
+    kind: Literal['discover', 'fetch', 'theses', 'filter', 'delete', 'read'] = Field(
+        ..., title='Kind'
+    )
     status: Literal['pending', 'running', 'done', 'cancelled'] = Field(
         ..., title='Status'
     )
@@ -545,20 +449,8 @@ class Ok(WireModel):
     ok: StrictBool
 
 
-class DigestDays1(RootModel[StrictInt]):
-    root: StrictInt = Field(..., ge=1, le=3650, title='Digest Days')
-
-
-class EventHours1(RootModel[StrictInt]):
-    root: StrictInt = Field(..., ge=1, le=87600, title='Event Hours')
-
-
 class Processor1(RootModel[StrictStr]):
     root: StrictStr = Field(..., max_length=200, min_length=1, title='Processor')
-
-
-class PromptDigest1(RootModel[StrictStr]):
-    root: StrictStr = Field(..., max_length=20000, title='Prompt Digest')
 
 
 class PromptFilters1(RootModel[StrictStr]):
@@ -569,36 +461,18 @@ class PromptTheses1(RootModel[StrictStr]):
     root: StrictStr = Field(..., max_length=20000, title='Prompt Theses')
 
 
-class Schedule1(RootModel[StrictStr]):
-    root: StrictStr = Field(
-        ..., pattern='^(off|([01][0-9]|2[0-3]):[0-5][0-9])$', title='Schedule'
-    )
-
-
 class Overrides(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    digest_days: DigestDays1 | None | MISSING = Field(
-        default=MISSING, title='Digest Days'
-    )
-    digests: StrictBool | None | MISSING = Field(default=MISSING, title='Digests')
-    event_hours: EventHours1 | None | MISSING = Field(
-        default=MISSING, title='Event Hours'
-    )
-    events: StrictBool | None | MISSING = Field(default=MISSING, title='Events')
     originals: StrictBool | None | MISSING = Field(default=MISSING, title='Originals')
     processor: Processor1 | None | MISSING = Field(default=MISSING, title='Processor')
-    prompt_digest: PromptDigest1 | None | MISSING = Field(
-        default=MISSING, title='Prompt Digest'
-    )
     prompt_filters: PromptFilters1 | None | MISSING = Field(
         default=MISSING, title='Prompt Filters'
     )
     prompt_theses: PromptTheses1 | None | MISSING = Field(
         default=MISSING, title='Prompt Theses'
     )
-    schedule: Schedule1 | None | MISSING = Field(default=MISSING, title='Schedule')
     theses: StrictBool | None | MISSING = Field(default=MISSING, title='Theses')
 
 
@@ -677,28 +551,14 @@ class ReportAction(WireModel):
     result: Literal['failed', 'unknown'] = Field(..., title='Result')
 
 
-class ReviewRestart(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    error: StrictStr = Field(..., title='Error')
-    id: StrictStr = Field(..., title='Id')
-
-
 class SettingOverrides(WireModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    digest_days: StrictInt | MISSING = MISSING
-    digests: StrictBool | MISSING = MISSING
-    event_hours: StrictInt | MISSING = MISSING
-    events: StrictBool | MISSING = MISSING
     originals: StrictBool | MISSING = MISSING
     processor: StrictStr | MISSING = MISSING
-    prompt_digest: StrictStr | MISSING = MISSING
     prompt_filters: StrictStr | MISSING = MISSING
     prompt_theses: StrictStr | MISSING = MISSING
-    schedule: StrictStr | MISSING = MISSING
     theses: StrictBool | MISSING = MISSING
 
 
@@ -988,9 +848,6 @@ class Status(WireModel):
     live_tabs: StrictInt | MISSING = Field(default=MISSING, title='Live Tabs')
     problems: ProblemSnapshot | MISSING = MISSING
     ready_sources: StrictInt = Field(..., title='Ready Sources')
-    review_restarts: list[ReviewRestart] | MISSING = Field(
-        default=MISSING, title='Review Restarts'
-    )
     sources: list[SourceStatus] = Field(..., title='Sources')
     stage: StrictStr = Field(..., title='Stage')
     stopped: StrictBool | MISSING = Field(default=MISSING, title='Stopped')
@@ -1062,6 +919,50 @@ class Summary(WireModel):
     points: list[Point] = Field(..., title='Points')
 
 
+class Card(WireModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    ai: AI | None | MISSING = MISSING
+    attachments: list[Attachment] | MISSING = Field(
+        default=MISSING, title='Attachments'
+    )
+    captions: (
+        Literal['available', 'not_requested', 'unavailable', 'error'] | None | MISSING
+    ) = Field(default=MISSING, title='Captions')
+    changed: StrictBool | MISSING = Field(default=MISSING, title='Changed')
+    complete: StrictBool = Field(..., title='Complete')
+    feed_id: StrictStr = Field(..., title='Feed Id')
+    feed_title: StrictStr = Field(..., title='Feed Title')
+    filter: Filter | MISSING = MISSING
+    folder_id: StrictStr = Field(..., title='Folder Id')
+    full: StrictBool | MISSING = Field(default=MISSING, title='Full')
+    id: StrictStr = Field(..., title='Id')
+    images: list[StrictStr] | MISSING = Field(default=MISSING, title='Images')
+    importance: Literal['normal', 'elevated', 'high'] = Field(..., title='Importance')
+    loading: StrictBool | MISSING = Field(default=MISSING, title='Loading')
+    members: list[StrictInt] | MISSING = Field(default=MISSING, title='Members')
+    originals: StrictBool | MISSING = Field(default=MISSING, title='Originals')
+    previous: list[Previous] | MISSING = Field(default=MISSING, title='Previous')
+    provenance: (
+        UnknownProvenance | CodexProvenance | LocalProvenance | None | MISSING
+    ) = Field(default=MISSING, title='Provenance')
+    published: StrictFloat = Field(..., title='Published')
+    published_known: StrictBool = Field(..., title='Published Known')
+    reason: StrictStr | MISSING = Field(default=MISSING, title='Reason')
+    snippet: StrictStr = Field(..., title='Snippet')
+    source_deleted: StrictBool | MISSING = Field(
+        default=MISSING, title='Source Deleted'
+    )
+    source_order: StrictInt | None | MISSING = Field(
+        default=MISSING, title='Source Order'
+    )
+    theses: Summary | None | MISSING = MISSING
+    title: StrictStr = Field(..., title='Title')
+    url: StrictStr = Field(..., title='Url')
+    version: StrictStr | MISSING = Field(default=MISSING, title='Version')
+
+
 class EffectiveSettings(WireModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -1069,17 +970,6 @@ class EffectiveSettings(WireModel):
     effective: EffectiveValues
     feed: SubscriptionFeed | MISSING = MISSING
     overrides: SettingOverrides
-
-
-class Event(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    conflicts: list[Point] = Field(..., title='Conflicts')
-    members: list[StrictStr] = Field(..., title='Members')
-    points: list[Point] = Field(..., title='Points')
-    title: StrictStr = Field(..., title='Title')
-    updates: list[Point] = Field(..., title='Updates')
 
 
 class Feed(WireModel):
@@ -1147,16 +1037,13 @@ class Material(WireModel):
     attachments: list[Attachment] | MISSING = Field(
         default=MISSING, title='Attachments'
     )
-    batch: StrictStr | MISSING = Field(default=MISSING, title='Batch')
     captions: (
         Literal['available', 'not_requested', 'unavailable', 'error'] | None | MISSING
     ) = Field(default=MISSING, title='Captions')
     changed: StrictBool | MISSING = Field(default=MISSING, title='Changed')
     complete: StrictBool = Field(..., title='Complete')
     description: StrictStr | MISSING = Field(default=MISSING, title='Description')
-    digest: Summary | MISSING = MISSING
     display_text: StrictStr | MISSING = Field(default=MISSING, title='Display Text')
-    event: Event | MISSING = MISSING
     feed_id: StrictStr = Field(..., title='Feed Id')
     filter: Filter | MISSING = MISSING
     folder_id: StrictStr | MISSING = Field(default=MISSING, title='Folder Id')
@@ -1184,7 +1071,6 @@ class Material(WireModel):
     source_order: StrictInt | None | MISSING = Field(
         default=MISSING, title='Source Order'
     )
-    sources: list[Material] | MISSING = Field(default=MISSING, title='Sources')
     text: StrictStr = Field(..., title='Text')
     theses: Summary | None | MISSING = MISSING
     title: StrictStr = Field(..., title='Title')
@@ -1199,54 +1085,3 @@ class Navigation(WireModel):
     count: StrictInt = Field(..., title='Count')
     feeds: list[Feed] = Field(..., title='Feeds')
     folders: list[Folder] = Field(..., title='Folders')
-
-
-class Card(WireModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    ai: AI | None | MISSING = MISSING
-    attachments: list[Attachment] | MISSING = Field(
-        default=MISSING, title='Attachments'
-    )
-    batch: StrictStr | MISSING = Field(default=MISSING, title='Batch')
-    captions: (
-        Literal['available', 'not_requested', 'unavailable', 'error'] | None | MISSING
-    ) = Field(default=MISSING, title='Captions')
-    changed: StrictBool | MISSING = Field(default=MISSING, title='Changed')
-    complete: StrictBool = Field(..., title='Complete')
-    digest: Summary | MISSING = MISSING
-    event: Event | MISSING = MISSING
-    feed_id: StrictStr = Field(..., title='Feed Id')
-    feed_title: StrictStr = Field(..., title='Feed Title')
-    filter: Filter | MISSING = MISSING
-    folder_id: StrictStr = Field(..., title='Folder Id')
-    full: StrictBool | MISSING = Field(default=MISSING, title='Full')
-    id: StrictStr = Field(..., title='Id')
-    images: list[StrictStr] | MISSING = Field(default=MISSING, title='Images')
-    importance: Literal['normal', 'elevated', 'high'] = Field(..., title='Importance')
-    loading: StrictBool | MISSING = Field(default=MISSING, title='Loading')
-    members: list[StrictInt] | MISSING = Field(default=MISSING, title='Members')
-    originals: StrictBool | MISSING = Field(default=MISSING, title='Originals')
-    previous: list[Previous] | MISSING = Field(default=MISSING, title='Previous')
-    provenance: (
-        UnknownProvenance | CodexProvenance | LocalProvenance | None | MISSING
-    ) = Field(default=MISSING, title='Provenance')
-    published: StrictFloat = Field(..., title='Published')
-    published_known: StrictBool = Field(..., title='Published Known')
-    reason: StrictStr | MISSING = Field(default=MISSING, title='Reason')
-    snippet: StrictStr = Field(..., title='Snippet')
-    source_deleted: StrictBool | MISSING = Field(
-        default=MISSING, title='Source Deleted'
-    )
-    source_order: StrictInt | None | MISSING = Field(
-        default=MISSING, title='Source Order'
-    )
-    sources: list[CardSource] | MISSING = Field(default=MISSING, title='Sources')
-    theses: Summary | None | MISSING = MISSING
-    title: StrictStr = Field(..., title='Title')
-    url: StrictStr = Field(..., title='Url')
-    version: StrictStr | MISSING = Field(default=MISSING, title='Version')
-
-
-Material.model_rebuild()

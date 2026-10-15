@@ -15,7 +15,7 @@ import {useState} from 'react';
 import {ReaderShell} from './shell';
 import {errorMessage} from './api/errors';
 import {regenerate,retryMaterial,retryTheses,retryFilter} from './api/generated/sdk.gen';
-import type {Navigation,ReviewRestart} from './api/generated/types.gen';
+import type {Navigation} from './api/generated/types.gen';
 import type {ReaderMessage} from './reader-session';
 initializeReaderShell(<ReaderShell/>);
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
@@ -75,13 +75,10 @@ function stopUi(message:string) {
   list.clear();
   tree.clear();
   progress(message);
-  mountSurface(byId('review-restarts'),null);
   button('stop').disabled = true;
   button('collect').disabled = true;
-  button('compress').disabled = true;
   button('folder-viewed').disabled = true;
   folderActions.stop();
-  button('digest-now').disabled = true;
 
   void debug.refresh();
 }
@@ -115,7 +112,6 @@ async function updateReader() {
     statusPanel.forgetMaterials(state.viewed_ids || []);
     void actions.flush();
     progress(`${state.stage} · источники ${state.ready_sources}/${state.total_sources}`);
-    mountSurface(byId('review-restarts'),<>{(state.review_restarts||[]).map(review=><Review key={review.id} review={review}/>)}</>);
     menus.sources(state.sources || []);
     const navigation = await tree.load();
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
@@ -134,10 +130,7 @@ async function updateReader() {
 
   } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) {opened.clear();statusPanel.unavailable();} list.error(errorMessage(error)); progress(statusAvailable?'Чтение временно недоступно':'Нет связи с Око'); } }
 }
-function Review({review}:{review:ReviewRestart}) {
-  const [busy,setBusy]=useState(false);
-  return <p>{review.error+' '}<button disabled={busy||stopped} onClick={async()=>{setBusy(true);try{await regenerate({client:readerApi.client,path:{item:review.id}});await refresh();}catch(error){if(!stopped)progress(errorMessage(error));}finally{setBusy(false);}}}>Пересоздать обзор</button></p>;
-}
+
 function Command({id,label,run,disabled}:{id:string;label:string;run:()=>Promise<unknown>;disabled:boolean}) {
   const [message,setMessage]=useState('');
   return <><button id={id} type="button" disabled={disabled} onClick={async()=>{setMessage('');try{await run();}catch(error){reportError(error,'Интерфейс Око');setMessage(errorMessage(error));}}}><span className="reader-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{id==='collect'?<path d="M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5L4 10m16 4-3 3a7 7 0 0 1-12-5"/>:<rect x="6" y="6" width="12" height="12" rx="2"/>}</svg></span>{label}</button><span className="header-command-error" role="status" hidden={!message}>{message}</span></>;

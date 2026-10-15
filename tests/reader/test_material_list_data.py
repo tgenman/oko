@@ -30,7 +30,7 @@ def test_youtube_description_survives_restart_without_requesting_captions(tmp_pa
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         feed = subscribe(client)
         client.patch('/api/settings/feed/' + feed, json={'theses': False})
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/reader/heartbeat')
         card = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('captions') == 'not_requested' and not c.get('loading')), None))
         assert card['snippet'] == 'Описание из Atom & детали.'
@@ -70,7 +70,7 @@ def test_cards_have_plain_bounded_text_and_unknown_dates_are_last(tmp_path):
             return Material(publication.id, '<p>Краткий <b>текст</b> &amp; подробности.</p><script>secret()</script><style>secret-style</style>' + 'x' * 700)
 
     with TestClient(create_app(tmp_path, source=Source(), token='test'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.post('/api/tabs/reader/heartbeat')
         wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 3 and all(card['complete'] for card in c))
         newest = client.get('/api/cards?sort=newest').json()
@@ -98,7 +98,7 @@ def test_old_video_uses_captions_until_atom_supplies_description(tmp_path):
 
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=captions), headers=HEADERS) as client:
         feed = subscribe(client)
-        client.patch('/api/settings/oko/global', json={'events': False})
+        client.patch('/api/settings/oko/global', json={})
         client.patch('/api/feeds/' + feed, json={'importance': 'high'})
         client.post('/api/tabs/reader/heartbeat')
         card = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('captions') == 'available' and not c.get('loading')), None))
@@ -116,30 +116,9 @@ def test_snippet_does_not_restore_filtered_fragments(tmp_path):
 
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport([])), headers=HEADERS) as client:
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False, 'digests': False, 'processor': 'llamacpp', 'prompt_filters': 'Убери рекламу'})
+        client.patch('/api/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Убери рекламу'})
         client.post('/api/tabs/reader/heartbeat')
         cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards').json()) == 2 and all(card.get('filter', {}).get('status') == 'done' for card in c) else None))
         card = next(c for c in cards if c['title'] == 'Материал 1')
         assert card['snippet'] == 'Открылась библиотека.'
         assert 'Реклама' in client.get('/api/materials/' + card['id']).json()['text']
-
-
-def test_event_without_dated_originals_keeps_unknown_date(tmp_path):
-    from oko.collection.contracts import Material, Publication
-    from tests.support.events import event_transport
-
-    class Source:
-        async def discover(self, cursor):
-            return ([] if cursor else [Publication(str(i), f'https://example.org/{i}', 0, published_known=False) for i in range(2)]), 'done'
-
-        async def fetch(self, publication):
-            return Material('О библиотеке', 'Открылась библиотека.')
-
-    with TestClient(create_app(tmp_path, source=Source(), token='test', ai_transport=event_transport([])), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
-        client.post('/api/tabs/reader/heartbeat')
-        card = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('event')), None))
-        assert card['published_known'] is False and card['published'] == 0
-        assert card['snippet'] == 'Открылась библиотека.'
-        assert len(card['sources']) == 2

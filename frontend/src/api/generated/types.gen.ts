@@ -128,10 +128,6 @@ export type Card = {
      */
     attachments?: Array<Attachment>;
     /**
-     * Batch
-     */
-    batch?: string;
-    /**
      * Captions
      */
     captions?: 'available' | 'not_requested' | 'unavailable' | 'error' | null;
@@ -143,8 +139,6 @@ export type Card = {
      * Complete
      */
     complete: boolean;
-    digest?: Summary;
-    event?: Event;
     /**
      * Feed Id
      */
@@ -218,10 +212,6 @@ export type Card = {
      * Source Order
      */
     source_order?: number | null;
-    /**
-     * Sources
-     */
-    sources?: Array<CardSource>;
     theses?: Summary | null;
     /**
      * Title
@@ -235,28 +225,6 @@ export type Card = {
      * Version
      */
     version?: string;
-};
-
-/**
- * CardSource
- */
-export type CardSource = {
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Title
-     */
-    title: string;
-    /**
-     * Url
-     */
-    url: string;
 };
 
 export type CodexCheck = {
@@ -326,8 +294,6 @@ export type CodexProvenance = {
  * CodexSettings
  */
 export type CodexSettings = {
-    digest: CodexChoice;
-    events: CodexChoice;
     filter: CodexChoice;
     theses: CodexChoice;
 };
@@ -428,28 +394,6 @@ export type DiagnosticReceipt = {
     persistence_error: string;
 };
 
-export type DigestCreated = {
-    id: string;
-};
-
-/**
- * DigestRequest
- */
-export type DigestRequest = {
-    /**
-     * End
-     */
-    end?: number | null;
-    /**
-     * Period
-     */
-    period?: boolean;
-    /**
-     * Start
-     */
-    start?: number | null;
-};
-
 export type EffectiveSettings = {
     effective: EffectiveValues;
     feed?: SubscriptionFeed;
@@ -457,37 +401,12 @@ export type EffectiveSettings = {
 };
 
 export type EffectiveValues = {
-    digest_days: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: number;
-    };
-    digests: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: boolean;
-    };
-    event_hours: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: number;
-    };
-    events: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: boolean;
-    };
     originals: {
         owner: string | null;
         scope: 'default' | 'oko' | 'folder' | 'feed';
         value: boolean;
     };
     processor: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: string;
-    };
-    prompt_digest: {
         owner: string | null;
         scope: 'default' | 'oko' | 'folder' | 'feed';
         value: string;
@@ -502,11 +421,6 @@ export type EffectiveValues = {
         scope: 'default' | 'oko' | 'folder' | 'feed';
         value: string;
     };
-    schedule: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: string;
-    };
     theses: {
         owner: string | null;
         scope: 'default' | 'oko' | 'folder' | 'feed';
@@ -516,32 +430,6 @@ export type EffectiveValues = {
 
 export type Error = {
     detail: string | CompletionConflict | ImportConflict;
-};
-
-/**
- * Event
- */
-export type Event = {
-    /**
-     * Conflicts
-     */
-    conflicts: Array<Point>;
-    /**
-     * Members
-     */
-    members: Array<string>;
-    /**
-     * Points
-     */
-    points: Array<Point>;
-    /**
-     * Title
-     */
-    title: string;
-    /**
-     * Updates
-     */
-    updates: Array<Point>;
 };
 
 /**
@@ -1057,7 +945,7 @@ export type Job = {
     /**
      * Kind
      */
-    kind: 'discover' | 'fetch' | 'theses' | 'filter' | 'events' | 'digest' | 'delete' | 'read';
+    kind: 'discover' | 'fetch' | 'theses' | 'filter' | 'delete' | 'read';
     /**
      * Status
      */
@@ -1088,10 +976,6 @@ export type Material = {
      */
     attachments?: Array<Attachment>;
     /**
-     * Batch
-     */
-    batch?: string;
-    /**
      * Captions
      */
     captions?: 'available' | 'not_requested' | 'unavailable' | 'error' | null;
@@ -1107,12 +991,10 @@ export type Material = {
      * Description
      */
     description?: string;
-    digest?: Summary;
     /**
      * Display Text
      */
     display_text?: string;
-    event?: Event;
     /**
      * Feed Id
      */
@@ -1179,10 +1061,6 @@ export type Material = {
      */
     source_order?: number | null;
     /**
-     * Sources
-     */
-    sources?: Array<Material>;
-    /**
      * Text
      */
     text: string;
@@ -1230,22 +1108,6 @@ export type Ok = {
  */
 export type Overrides = {
     /**
-     * Digest Days
-     */
-    digest_days?: number | null;
-    /**
-     * Digests
-     */
-    digests?: boolean | null;
-    /**
-     * Event Hours
-     */
-    event_hours?: number | null;
-    /**
-     * Events
-     */
-    events?: boolean | null;
-    /**
      * Originals
      */
     originals?: boolean | null;
@@ -1254,10 +1116,6 @@ export type Overrides = {
      */
     processor?: string | null;
     /**
-     * Prompt Digest
-     */
-    prompt_digest?: string | null;
-    /**
      * Prompt Filters
      */
     prompt_filters?: string | null;
@@ -1265,10 +1123,6 @@ export type Overrides = {
      * Prompt Theses
      */
     prompt_theses?: string | null;
-    /**
-     * Schedule
-     */
-    schedule?: string | null;
     /**
      * Theses
      */
@@ -1506,31 +1360,11 @@ export type ReportAction = {
     result: 'failed' | 'unknown';
 };
 
-/**
- * ReviewRestart
- */
-export type ReviewRestart = {
-    /**
-     * Error
-     */
-    error: string;
-    /**
-     * Id
-     */
-    id: string;
-};
-
 export type SettingOverrides = {
-    digest_days?: number;
-    digests?: boolean;
-    event_hours?: number;
-    events?: boolean;
     originals?: boolean;
     processor?: string;
-    prompt_digest?: string;
     prompt_filters?: string;
     prompt_theses?: string;
-    schedule?: string;
     theses?: boolean;
 };
 
@@ -1601,10 +1435,6 @@ export type Status = {
      * Ready Sources
      */
     ready_sources: number;
-    /**
-     * Review Restarts
-     */
-    review_restarts?: Array<ReviewRestart>;
     /**
      * Sources
      */
@@ -2098,70 +1928,6 @@ export type DebugBrowserResponses = {
 };
 
 export type DebugBrowserResponse = DebugBrowserResponses[keyof DebugBrowserResponses];
-
-export type CreateDigestData = {
-    body: DigestRequest;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path: {
-        /**
-         * Scope
-         */
-        scope: string;
-        /**
-         * Owner
-         */
-        owner: string;
-    };
-    query?: never;
-    url: '/api/digests/{scope}/{owner}';
-};
-
-export type CreateDigestErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Requested object is unavailable
-     */
-    404: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type CreateDigestError = CreateDigestErrors[keyof CreateDigestErrors];
-
-export type CreateDigestResponses = {
-    /**
-     * Successful operation
-     */
-    200: DigestCreated;
-};
-
-export type CreateDigestResponse = CreateDigestResponses[keyof CreateDigestResponses];
 
 export type AddFeedData = {
     body: AddFeed;

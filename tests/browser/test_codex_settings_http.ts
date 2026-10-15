@@ -6,7 +6,7 @@ import {artifactPath} from './artifacts.ts';
 test('production HTTP saves choices, reads provenance and recreates material from the browser', {timeout:30000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
-  await api('settings/oko/global','PATCH',{events:false,theses:false,prompt_filters:''});
+  await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
   const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Статьи" xmlUrl="https://a.test/feed"/></outline></body></opml>'});
   const feed=plan.feeds[0];
   await page.goto(origin+'/#token='+token);
@@ -47,14 +47,14 @@ test('mobile model screens save connection and independent Codex choices through
   expect(await api('processors/llamacpp')).toMatchObject({endpoint:'http://127.0.0.1:18080',model:'synthetic-local',local_execution:true});
   await page.locator('#settings-dialog .settings-back').click();
   await page.getByRole('button',{name:'Codex',exact:true}).click();
-  await expect(page.locator('#codex-choices fieldset')).toHaveCount(4);
+  await expect(page.locator('#codex-choices fieldset')).toHaveCount(2);
   await expect(page.locator('#codex-theses-effort')).toHaveValue('low');
   await expect(page.locator('#codex-theses-fast')).not.toBeChecked();
   await page.locator('#codex-save').click();
   await expect(page.locator('#codex-choice-status')).toContainText('сохранены');
   const config=(await api('processors/codex')).config;
   expect(config!.theses).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
-  expect(Object.keys(config!).sort()).toEqual(['digest','events','filter','theses']);
+  expect(Object.keys(config!).sort()).toEqual(['filter','theses']);
   expect(config!.filter).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
   const width=await page.locator('#settings-dialog').evaluate(dialog=>({scroll:dialog.scrollWidth,client:dialog.clientWidth}));
   expect(width.scroll).toBeLessThanOrEqual(width.client+1);

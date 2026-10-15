@@ -81,7 +81,7 @@ test('width, focus, source warning and settings help remain separate from select
 
 test('tree uses publication counts, alphabetical feeds and compact local icons', async () => {
  const r=await reader(); try {
-  await r.start([material('group',{event:{members:['one','two'],title:'Событие',points:[],updates:[],conflicts:[]},sources:[material('one',{feed_id:'a',title:'Альфа'}),material('two',{feed_id:'b',title:'Бета'})]})]);
+  await r.start([material('one',{feed_id:'a',title:'Альфа'}),material('two',{feed_id:'b',title:'Бета'})]);
   await r.page.evaluate(()=>{
    readerTransport.replies.set('/api/navigation',{body:{count:45,folders:[{id:'f',title:'Наука',count:45},{id:'empty',title:'Пустая',count:0}],feeds:[{id:'b',title:'Бета',kind:'telegram',folder_id:'f',count:20},{id:'a',title:'Альфа — очень длинное название синтетического YouTube-канала',kind:'youtube',folder_id:'f',count:25},{id:'c',title:'Вести',kind:'rss',folder_id:'f',count:0}]}});
   });
@@ -90,8 +90,8 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   await expect(r.page.locator('[data-feed]')).toHaveCount(3);
   expect(await r.page.locator('[data-feed]').evaluateAll(ns=>ns.map(n=>n.dataset.feed))).toEqual(['a','b','c']);
   await r.page.locator('[data-folder="f"]').click();
-  await expect(r.page.locator('#count')).toHaveText('1');
-  await expect(r.page.locator('#cards')).toContainText('Альфа, Бета');
+  await expect(r.page.locator('#count')).toHaveText('2');
+  await expect(r.page.locator('#cards')).toContainText('Альфа');
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('[data-folder="f"] .tree-count')).toHaveText('45');

@@ -1,23 +1,23 @@
 import {test} from 'node:test';
 import {reader, material, expect} from './support.ts';
 
-test('compact rows show excerpts, group types and current area with actions in menu', async () => {
+test('compact rows show excerpts and current area with actions in menu', async () => {
  const r=await reader(); try {
-  await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('event',{event:{members:['source'],title:'Событие',points:[],updates:[],conflicts:[]},snippet:'Сводка события',sources:[material('source',{title:'Канал'})]})]);
+  await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('article',{title:'Статья',snippet:'Текст статьи'})]);
   await expect(r.page.locator('#list-title')).toHaveText('Все материалы');
   await expect(r.page.locator('#count-label')).toHaveText('2 карточки');
   await expect(r.page.locator('#cards .card-snippet').first()).toHaveText('Описание сохранённого видео');
-  await expect(r.page.locator('#cards .card-kind').last()).toHaveText('Событие');
+  await expect(r.page.locator('#cards .card-kind')).toHaveCount(0);
   await expect(r.page.locator('#cards .card-preview')).toHaveCount(2);
   await r.page.locator('[data-folder="f"]').click();
   await expect(r.page.locator('#list-title')).toHaveText('Тема');
   await expect(r.page.locator('#folder-viewed')).toBeVisible();
   await r.page.locator('#list-menu-toggle').click();
-  await expect(r.page.locator('#compress')).toBeVisible();
+  await expect(r.page.locator('#compress,#digest-now')).toHaveCount(0);
   await r.page.keyboard.press('Escape');
   await r.page.locator('[data-feed="feed"]').click();
   await r.page.locator('#list-menu-toggle').click();
-  await expect(r.page.locator('#compress')).toBeHidden();
+  await expect(r.page.locator('#compress,#digest-now')).toHaveCount(0);
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });

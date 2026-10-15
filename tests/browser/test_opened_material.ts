@@ -133,25 +133,24 @@ test('viewing during media loading stops playback, releases URLs and rejects lat
   } finally {await r.close();}
 });
 
-test('viewing a source in another tab closes its pending digest but preserves unrelated folder', async () => {
+test('viewing a publication in another tab closes its pending opening but preserves unrelated folder', async () => {
   const r = await reader();
   try {
     const source = material('source');
-    const digest = material('digest', {sources: [source], digest: {points: []}});
     const unrelated = material('other', {folder_id: 'other-folder'});
-    await r.start([digest, unrelated]);
+    await r.start([source, unrelated]);
     const otherTab = await r.context.newPage(); await r.start([source], otherTab);
-    await r.page.evaluate(() => readerTransport.held.set('/api/materials/digest', true));
-    await r.page.getByRole('button', {name: /^Обзор/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/digest'));
+    await r.page.evaluate(() => readerTransport.held.set('/api/materials/source', true));
+    await r.page.getByRole('button', {name: /^source/}).click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/source'));
     await otherTab.getByRole('button', {name: /^source/}).click();
     await expect(otherTab.locator('#text')).toHaveText('Текст source');
     await otherTab.evaluate(() => readerTransport.replies.set('POST /api/materials/source/viewed', {body:{ok:true},next:[['/api/cards',{body:[]}]]}));
     await otherTab.getByRole('button', {name: 'Просмотрено', exact: true}).click();
     await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
-    await r.page.evaluate(body => readerTransport.release('/api/materials/digest', body), digest);
+    await r.page.evaluate(body => readerTransport.release('/api/materials/source', body), source);
     await settle(r.page);
-    await expect(r.page.locator('#event-sources')).toBeEmpty();
+    await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
     await r.page.getByRole('button', {name: /^other/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст other');
     await otherTab.evaluate(() => { const channel = new BroadcastChannel('oko-reader'); channel.postMessage({kind: 'folder-viewed', folder: 'f'}); channel.close(); });
@@ -183,44 +182,11 @@ for (const interruption of ['stop', 'connection loss']) {
   });
 }
 
-test('digest originals and previous versions retain images, video and circles', async () => {
-  const r = await reader();
-  try {
-    const source = material('source', {images: ['/api/image'], previous: [{url: '/api/materials/source/versions/1'}], attachments: [
-      {url: '/api/video', kind: 'video', mime: 'video/webm'},
-      {url: '/api/circle', kind: 'circle', mime: 'video/webm'},
-    ]});
-    await r.start([material('digest', {sources: [source], digest: {points: [{text: 'Тезис обзора', sources: [{id: 'source', url: source.url}]}]}})]);
-    const base64 = await videoFixture(r.page);
-    await r.page.evaluate(({base64, png}) => {
-      readerTransport.replies.set('/api/image', {base64: png, mime: 'image/png'});
-      readerTransport.replies.set('/api/video', {base64, mime: 'video/webm'});
-      readerTransport.replies.set('/api/circle', {base64, mime: 'video/webm'});
-      readerTransport.replies.set('/api/materials/source/versions/1', {body: {title: 'Предыдущий заголовок', text: 'Предыдущий текст', full:true, reason:'', images: ['/api/image'], attachments: []}});
-    }, {base64, png});
-    await r.page.getByRole('button', {name: /^Обзор/}).click();
-    await expect(r.page.locator('#event-body')).toContainText('Тезис обзора');
-    await r.page.locator('#event-sources summary').filter({hasText: 'Оригинал'}).click();
-    await expect(r.page.locator('#source-media-source img')).toBeVisible();
-    await expect(r.page.locator('#source-media-source video')).toHaveCount(2);
-    await expect(r.page.locator('#source-media-source .circle')).toBeVisible();
-    await r.page.locator('#event-sources summary').filter({hasText: 'Предыдущая версия'}).click();
-    await expect(r.page.locator('#event-sources')).toContainText('Предыдущий текст');
-    await expect(r.page.locator('#event-sources img')).toHaveCount(2);
-    await r.page.evaluate(() => readerTransport.replies.set('POST /api/materials/digest/viewed', {body:{ok:true},next:[['/api/cards',{body:[]}]]}));
-    await r.page.getByRole('button', {name: 'Просмотрено', exact: true}).click();
-    await expect(r.page.locator('#event-sources')).toBeEmpty();
-    assert.equal(await r.page.evaluate(() => browserResources.created.length), 4);
-    assert.deepEqual(await r.page.evaluate(() => browserResources.revoked), await r.page.evaluate(() => browserResources.created));
-    assert.deepEqual(r.errors, []);
-  } finally {await r.close();}
-});
-
 test('title opens original in a new tab and resets for other cards', async () => {
   const r = await reader();
   try {
     await r.context.route('https://example.org/**', route => route.fulfill({body: '<h1>Original</h1>', contentType: 'text/html'}));
-    await r.start([material('A'), material('B', {url: ''}), material('digest', {sources: [material('source')], digest: {points: []}})]);
+    await r.start([material('A'), material('B', {url: ''})]);
     await r.page.getByRole('button', {name: /^A/}).click();
     const link = r.page.locator('#title a');
     await expect(link).toHaveAttribute('href', 'https://example.org/A');
@@ -236,9 +202,6 @@ test('title opens original in a new tab and resets for other cards', async () =>
     await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#title')).toHaveText('B');
-    await expect(link).toHaveCount(0);
-    await r.page.getByRole('button', {name: /^Обзор/}).click();
-    await expect(r.page.locator('#event-panel')).toBeVisible();
     await expect(link).toHaveCount(0);
     assert.deepEqual(r.errors, []);
   } finally { await r.close(); }

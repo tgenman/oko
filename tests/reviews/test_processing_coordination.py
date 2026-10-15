@@ -26,10 +26,6 @@ def coordinated_transport(calls):
             text = sources[0]['text']
             result = dict(hidden=text.startswith('Реклама:'), reason='Реклама' if 'Реклама:' in text else '',
                           removed=['Реклама: купите курс.'] if text.startswith('Открылась') else [])
-        elif task['operation'] == 'events':
-            result = dict(groups=[dict(members=[s['id'] for s in sources], title='Два сообщения',
-                                      points=[dict(text='Сводка двух сообщений', sources=[dict(id=s['id'], url=s['url']) for s in sources])],
-                                      updates=[], conflicts=[])])
         else:
             result = dict(points=[dict(text=sources[0]['text'], sources=[dict(id=sources[0]['id'], url=sources[0]['url'])])])
         return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(result)}}]})
@@ -42,24 +38,20 @@ def test_finished_views_do_not_repeat_processing_on_unchanged_passes(tmp_path):
     options = dict(source=FilterSource(), token='test', ai_transport=coordinated_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'events': True, 'prompt_filters': 'Убери рекламу.'})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Убери рекламу.'})
         client.post('/api/tabs/reader/heartbeat')
-        events = wait_for(client, lambda: cards if (cards := client.get('/api/cards').json()) and all(c.get('event') for c in cards) else None)
-        original = events[0]['sources'][0]['id']
-        wait_for(client, lambda: client.get('/api/materials/' + original).json().get('theses'))
-        identity = client.post('/api/digests/folder/demo', json={}).json()['id']
-        result = wait_for(client, lambda: m if (m := client.get('/api/materials/' + identity).json()).get('digest') else None)
+        result = wait_for(client, lambda: cards if len(cards := client.get('/api/cards').json()) == 2 and all(c.get('theses') for c in cards) else None)
         wait_for(client, lambda: client.get('/api/status').json()['stage'] == 'Готово')
-        assert {'filter', 'theses', 'events', 'digest'} <= {c['operation'] for c in calls}
-        assert all('Реклама:' not in s['display_text'] for s in result['sources'] if not s['filter']['hidden'])
+        assert {'filter', 'theses'} <= {c['operation'] for c in calls}
+        assert all('Реклама:' not in c['snippet'] for c in result)
         count = len(calls)
         time.sleep(1.2)  # More than two periodic reconciliation passes.
         assert len(calls) == count
-        assert client.get('/api/materials/' + identity).json()['digest'] == result['digest']
+        assert [c['theses'] for c in client.get('/api/cards').json()] == [c['theses'] for c in result]
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         client.post('/api/tabs/reader/heartbeat')
         wait_for(client, lambda: client.get('/api/status').json()['stage'] == 'Готово')
-        assert client.get('/api/materials/' + identity).json()['digest'] == result['digest']
+        assert [c['theses'] for c in client.get('/api/cards').json()] == [c['theses'] for c in result]
         assert len(calls) == count
 
 
@@ -85,7 +77,7 @@ def test_permission_revoked_during_processor_check_prevents_source_transfer(tmp_
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport), headers=HEADERS) as client:
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': False})
         client.patch('/api/feeds/demo', json={'public_ai': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'events': False})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         client.post('/api/tabs/reader/heartbeat')
         try:
             assert transport.started.wait(2)
@@ -97,27 +89,41 @@ def test_permission_revoked_during_processor_check_prevents_source_transfer(tmp_
         assert all(c.get('theses') is None for c in client.get('/api/cards').json())
 
 
-def test_restore_hidden_original_rebuilds_review_and_theses_with_same_members(tmp_path):
+def test_restore_hidden_original_creates_its_theses(tmp_path):
     calls = []
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport(calls)), headers=HEADERS) as client:
         client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'events': True, 'prompt_filters': 'Убери рекламу.'})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Убери рекламу.'})
         client.post('/api/tabs/reader/heartbeat')
         hidden = wait_for(client, lambda: next((c for c in client.get('/api/cards?show_hidden=true').json() if c.get('filter', {}).get('hidden')), None))
-        # A filtered first publication does not mean the entire source has loaded.
-        def all_loaded():
-            cards = client.get('/api/cards?show_hidden=true').json()
-            originals = {source['id'] for card in cards for source in card.get('sources', [card])}
-            return len(originals) == 3 and all(card['complete'] and not card.get('loading') for card in cards)
-        wait_for(client, all_loaded)
-        created = client.post('/api/digests/folder/demo', json={})
-        assert created.status_code == 200, created.json()
-        identity = created.json()['id']
-        before = wait_for(client, lambda: m if (m := client.get('/api/materials/' + identity).json()).get('digest') else None)
-        count = len(calls)
+        assert hidden.get('theses') is None
         assert client.post('/api/materials/' + hidden['id'] + '/filter/restore').status_code == 200
-        after = wait_for(client, lambda: m if (m := client.get('/api/materials/' + identity).json()).get('digest') and any(s['id'] == hidden['id'] and s['filter']['restored'] for s in m['sources']) else None)
-        assert {s['id'] for s in before['sources']} == {s['id'] for s in after['sources']}
-        wait_for(client, lambda: client.get('/api/materials/' + hidden['id']).json().get('theses'))
-        assert any(c['operation'].startswith('digest') and any(s['id'] == hidden['id'] and s['text'] == 'Реклама: купите курс.' for s in c['sources']) for c in calls[count:])
-        assert any(c['operation'] == 'theses' and c['sources'][0]['id'] == hidden['id'] for c in calls[count:])
+        material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + hidden['id']).json()).get('theses') else None)
+        assert material['filter']['restored']
+        assert any(c['operation'] == 'theses' and c['sources'][0]['id'] == hidden['id'] for c in calls)
+
+
+def test_original_presentation_inherits_independently_of_theses(tmp_path):
+    with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport([])), headers=HEADERS) as client:
+        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'originals': False, 'theses': True})
+        client.post('/api/tabs/reader/heartbeat')
+        material = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('theses')), None))
+        current = client.get('/api/materials/' + material['id']).json()
+        assert current['originals'] is False and current['text']
+        client.patch('/api/settings/feed/demo', json={'originals': True})
+        assert client.get('/api/materials/' + material['id']).json()['originals'] is True
+        assert client.get('/api/settings/feed/demo').json()['effective']['theses']['value'] is True
+
+
+def test_folder_completion_includes_hidden_publications(tmp_path):
+    with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport([])), headers=HEADERS) as client:
+        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': False, 'prompt_filters': 'Убери рекламу.'})
+        client.post('/api/tabs/reader/heartbeat')
+        wait_for(client, lambda: len(c := client.get('/api/cards?show_hidden=true').json()) == 3 and all(x.get('filter', {}).get('status') == 'done' for x in c))
+        assert len(client.get('/api/cards').json()) == 2
+        preview = client.post('/api/folders/demo/completion/preview').json()
+        assert preview['cards'] == preview['originals'] == 3
+        assert client.post('/api/folders/demo/completion', json={'token': preview['token']}).status_code == 200
+        assert client.get('/api/cards?show_hidden=true').json() == []

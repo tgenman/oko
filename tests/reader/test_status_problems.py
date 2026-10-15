@@ -23,7 +23,7 @@ class FailedDownloads:
 def test_source_failures_group_objects_and_retry_is_not_completion(tmp_path):
     source = FailedDownloads()
     with TestClient(create_app(tmp_path, token='test', source=source), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'events': False, 'theses': False, 'digests': False, 'prompt_filters': ''})
+        client.patch('/api/settings/oko/global', json={'theses': False, 'prompt_filters': ''})
         client.post('/api/tabs/reader/heartbeat')
         state = wait_for(client, lambda: (state if len((state := client.get('/api/status').json())['errors']) and
                                          len(state['problems']['current']) == 1 and len(state['problems']['current'][0]['objects']) == 2 else None))
@@ -176,7 +176,7 @@ def test_partial_material_is_visible_with_available_text(tmp_path):
         async def fetch(self, publication):
             return Material('Частичный материал', 'Доступный текст', full=False, reason='Вложение недоступно')
     with TestClient(create_app(tmp_path, token='test', source=Partial()), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global',json={'theses':False,'events':False,'digests':False,'prompt_filters':''})
+        client.patch('/api/settings/oko/global',json={'theses':False,'prompt_filters':''})
         client.post('/api/tabs/reader/heartbeat')
         wait_for(client,lambda:len(cards:=client.get('/api/cards').json())==2 and all(c['complete'] for c in cards))
         problems=client.get('/api/status').json()['problems']
@@ -242,21 +242,6 @@ def test_late_server_failure_keeps_viewed_action_irrelevant_and_forgets_diagnost
         assert private not in (tmp_path/'debug.json').read_text()
 
 
-def test_first_failed_event_exposes_available_sources_without_a_dead_retry(tmp_path):
-    import httpx
-    from tests.support.sources import EventSource
-    from tests.support.events import configure
-    from tests.support.models import model_transport
-    native=model_transport([])
-    def reply(request):
-        return httpx.Response(500,json={'error':'synthetic model failure'}) if request.url.path=='/v1/chat/completions' else native.handler(request)
-    with TestClient(create_app(tmp_path,token='test',source=EventSource(),ai_transport=httpx.MockTransport(reply)),headers=HEADERS) as client:
-        configure(client)
-        problem=wait_for(client,lambda:next((p for p in client.get('/api/status').json()['problems']['current'] if p['code']=='processing-failed'),None))
-        assert problem['action']=={'kind':'objects'}
-        assert len(problem['objects'])==3
-        for obj in problem['objects']:
-            assert client.get('/api/materials/'+obj['id']).status_code==200
 
 
 def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
@@ -276,7 +261,7 @@ def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
     options=dict(token='test',rss_enabled=True,rss_transport=httpx.MockTransport(reply),youtube_captions=captions,
                  clock=lambda:100,wall_clock=lambda:1900000000,lease=1000000,grace=1000000)
     with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global',json={'theses':False,'events':False,'digests':False,'prompt_filters':''})
+        client.patch('/api/settings/oko/global',json={'theses':False,'prompt_filters':''})
         for channel in (CHANNEL,'UC'+'b'*22):
             response=client.post('/api/import',json={'opml':f'<opml><body><outline text="Topic"><outline text="Source" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id={channel}"/></outline></body></opml>'})
             assert response.status_code==200

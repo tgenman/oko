@@ -7,7 +7,7 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .contracts import ProcessingError, ProcessingRequest, Theses, FilterResult, EventsResult, result_type, processing_instruction
+from .contracts import ProcessingError, ProcessingRequest, Theses, FilterResult, result_type, processing_instruction
 
 class ProcessorConfig(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
@@ -99,7 +99,7 @@ class LlamaCpp:
                         models=[m['id'] for m in models if isinstance(m, dict) and isinstance(m.get('id'), str)],
                         mode='Локальная модель' if local else 'Удалённая или непроверенная обработка: требуется разрешение публичного AI')
 
-    async def generate(self, request: ProcessingRequest) -> Theses | FilterResult | EventsResult:
+    async def generate(self, request: ProcessingRequest) -> Theses | FilterResult:
         if sum(len(s.text) + len(s.title) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
         body = dict(model=self.config.model, stream=False, response_format={'type': 'json_object', 'schema': result_type(request).model_json_schema()},

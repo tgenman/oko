@@ -14,7 +14,7 @@ type Options = {
     onRefresh(): void;
     onAvailability?(available:boolean):void;
 };
-const names: Record<string, string> = { settings: 'Настроить модель', 'feed-settings': 'Настройки фида', retry: 'Повторить', 'theses-retry': 'Повторить обработку', 'filter-retry': 'Повторить фильтрацию', regenerate: 'Пересоздать обзор', material: 'Показать материал', objects: 'Показать материалы', collect: 'Обновить источники' };
+const names: Record<string, string> = { settings: 'Настроить модель', 'feed-settings': 'Настройки фида', retry: 'Повторить', 'theses-retry': 'Повторить обработку', 'filter-retry': 'Повторить фильтрацию', regenerate: 'Пересоздать тезисы', material: 'Показать материал', objects: 'Показать материалы', collect: 'Обновить источники' };
 const sections = [['action', 'Нужно действие'], ['wait', 'Ожидание и работа'], ['object', 'Проблемы материалов и фидов']] as const;
 const emptySnapshot: ProblemSnapshot = { current: [], recent: [], count: 0, updated_at: 0 };
 function byId(id: string) { return document.getElementById(id)!; }

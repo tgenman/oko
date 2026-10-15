@@ -1,6 +1,6 @@
 import type {Page} from 'playwright';
-const sections = {events:'Объединение событий',event_hours:'Объединение событий',originals:'Чтение',theses:'Чтение',digests:'Обзоры за период',schedule:'Обзоры за период',digest_days:'Обзоры за период',prompt_theses:'Промпты',prompt_digest:'Промпты',prompt_filters:'Фильтрация',processor:'Обработчик'};
-const titles = {events:'Объединять события',event_hours:'Окно события, часов',originals:'Показывать исходную публикацию',theses:'Тезисы публикаций',digests:'Обзоры за период',schedule:'Расписание обзора',digest_days:'Период обзора, дней',prompt_theses:'Промпт тезисов',prompt_digest:'Промпт обзора',prompt_filters:'Правила фильтрации',processor:'Обработчик'};
+const sections = {originals:'Чтение',theses:'Чтение',prompt_theses:'Промпты',prompt_filters:'Фильтрация',processor:'Обработчик'};
+const titles = {originals:'Показывать исходную публикацию',theses:'Тезисы публикаций',prompt_theses:'Промпт тезисов',prompt_filters:'Правила фильтрации',processor:'Обработчик'};
 async function settingsHome(page: Page) {
   const dialog = page.locator('dialog[open]');
   while (await dialog.locator('.settings-back').isVisible()) await dialog.locator('.settings-back').click();

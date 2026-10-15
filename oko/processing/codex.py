@@ -15,7 +15,7 @@ import sys
 import tempfile
 from typing import Any, Protocol
 
-from oko.processing.contracts import ProcessingError, ProcessingRequest, Theses, EventsResult, FilterResult, result_type, processing_instruction
+from oko.processing.contracts import ProcessingError, ProcessingRequest, Theses, FilterResult, result_type, processing_instruction
 
 from oko.processing.execution import CodexChoice
 
@@ -422,7 +422,7 @@ class Codex:
             raise ProcessingError('Лимиты Codex не проверены; материалы не отправлены')
         return dict(result, local=False)
 
-    async def generate(self, request: ProcessingRequest, directory: Path) -> Theses | FilterResult | EventsResult:
+    async def generate(self, request: ProcessingRequest, directory: Path) -> Theses | FilterResult:
         if sum(len(s.text) + len(s.title) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
         if request.codex_choice is None:

@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {models} from './settings-fixtures.ts';
 
 
-test('Codex has four explicit choices; Fast starts off and unsupported effort is preserved visibly', async () => {
+test('Codex has two explicit choices; Fast starts off and unsupported effort is preserved visibly', async () => {
   const r = await reader();
   try {
     await r.start([]);
@@ -16,7 +16,7 @@ test('Codex has four explicit choices; Fast starts off and unsupported effort is
     await r.page.locator('#settings-open').click();
     await r.page.locator('[data-settings-target="models"]').click();
     await r.page.locator('[data-settings-target="codex"]').click();
-    await expect(r.page.locator('#codex-choices fieldset')).toHaveCount(4);
+    await expect(r.page.locator('#codex-choices fieldset')).toHaveCount(2);
     await expect(r.page.locator('#codex-theses-model')).toHaveValue('small');
     await expect(r.page.locator('#codex-theses-fast')).not.toBeChecked();
     await r.page.locator('#codex-theses-fast').check();
@@ -30,7 +30,7 @@ test('Codex has four explicit choices; Fast starts off and unsupported effort is
     await expect(r.page.locator('#codex-choice-status')).toContainText('сохранены');
     const saved = await r.page.evaluate(() => readerTransport.requests.find(c=>c.url==='/api/processors/codex'&&c.method==='PUT'));
     expect(saved!.body!.theses).toEqual({model:'large',reasoning_effort:'high',fast:false});
-    expect(saved!.body!.events).toEqual({model:'small',reasoning_effort:'low',fast:false});
+    expect(saved!.body!.filter).toEqual({model:'small',reasoning_effort:'low',fast:false});
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
@@ -94,7 +94,7 @@ test('catalog refresh before initial config response never replaces saved choice
   const r=await reader();
   try {
     await r.start([]);
-    const saved=Object.fromEntries(['filter','theses','events','digest'].map(kind=>[kind,{model:'large',reasoning_effort:'high',fast:false}]));
+    const saved=Object.fromEntries(['filter','theses'].map(kind=>[kind,{model:'large',reasoning_effort:'high',fast:false}]));
     await r.page.evaluate(models=>{
       readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/processors/llamacpp',{body:null});
@@ -192,7 +192,7 @@ test('Codex catalog error preserves configured choices and refresh recovers with
     await r.page.evaluate(()=>{
       readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/processors/llamacpp',{body:null});
-      readerTransport.replies.set('/api/processors/codex',{body:{config:Object.fromEntries(['filter','theses','events','digest'].map(kind=>[kind,{model:'large',reasoning_effort:'high',fast:false}]))}});
+      readerTransport.replies.set('/api/processors/codex',{body:{config:Object.fromEntries(['filter','theses'].map(kind=>[kind,{model:'large',reasoning_effort:'high',fast:false}]))}});
       readerTransport.replies.set('/api/processors/codex/models',{status:503,body:{detail:'Каталог временно недоступен'}});
     });
     await r.page.locator('#settings-open').click();

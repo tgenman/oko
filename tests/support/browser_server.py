@@ -10,7 +10,7 @@ import httpx
 import uvicorn
 
 from tests.support.app import create_app
-from tests.support.events import event_transport
+from tests.support.models import model_transport
 from tests.support.codex import CodexService
 from tests.support.youtube import PNG, History, NoCaptions
 
@@ -34,7 +34,7 @@ def response(request):
 
 def build_app(root, token):
     return create_app(root, token=token, rss_enabled=True,
-                     rss_transport=httpx.MockTransport(response), ai_transport=event_transport([]), codex_client=CodexService(),
+                     rss_transport=httpx.MockTransport(response), ai_transport=model_transport([]), codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
                      lease=60, grace=60)
 

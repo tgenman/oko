@@ -64,13 +64,13 @@ async function reader() {
         t.replies.set('/api/processors/codex', {body:{config:null}});
         t.replies.set('/api/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
         t.replies.set('/api/processors/codex/models', {body:{models:[]}});
-        const settings = {events: true, event_hours: 24, originals: true, theses: true, digests: false, prompt_theses: 'Тезисы', prompt_digest: 'Темы', prompt_filters: '', schedule: 'off', digest_days: 1, processor: 'codex'};
+        const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', processor: 'codex'};
         t.replies.set('/api/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
-        t.replies.set('/api/cards', {body: materials.map(({text, description, display_text, sources, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card, ...(sources ? {sources:sources.map(({id,url,feed_id,title})=>({id,url,feed_id,title}))} : {})}))});
+        t.replies.set('/api/cards', {body: materials.map(({text, description, display_text, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
         for (const material of materials) {
           const {snippet, feed_title, ...opened} = material;
           t.replies.set('/api/materials/' + material.id, {body: opened});
-          for (const version of [...(material.previous || []), ...(material.sources || []).flatMap(source => source.previous || [])]) t.aliases.set(version.url, 'version');
+          for (const version of material.previous || []) t.aliases.set(version.url, 'version');
         }
       }, materials);
       await target.goto(origin + '/#token=' + token);

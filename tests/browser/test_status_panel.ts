@@ -5,7 +5,7 @@ import {reader, material, expect} from './support.ts';
 import {artifactPath} from './artifacts.ts';
 
 const modelProblem: Problem = {id:'processor:codex-choice',code:'codex-choice',section:'action',title:'Не выбрана модель Codex',
-  consequence:'Тезисы и обзоры пока не создаются.',next_step:'Выберите модель.',objects:[{kind:'settings',id:'global',label:'Настройки Око'}],
+  consequence:'Тезисы пока не создаются.',next_step:'Выберите модель.',objects:[{kind:'settings',id:'global',label:'Настройки Око'}],
   action:{kind:'settings',page:'codex'},created_at:1800000000,next_at:null,state:'current',finished_at:null,outcome:null};
 async function status(r: ReaderFixture,current: Problem[],recent: Problem[]=[]) {
   await r.page.evaluate(({current,recent})=>readerTransport.replies.set('/api/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,
@@ -183,7 +183,7 @@ test('discarding a failed processor draft restores its saved values',async()=>{
     await r.start([]);
     await r.page.evaluate(()=>{
       const choice={model:'small',reasoning_effort:'low',fast:false};
-      readerTransport.replies.set('/api/processors/codex',{body:{config:Object.fromEntries(['filter','theses','events','digest'].map(k=>[k,choice]))}});
+      readerTransport.replies.set('/api/processors/codex',{body:{config:Object.fromEntries(['filter','theses'].map(k=>[k,choice]))}});
       readerTransport.replies.set('/api/processors/codex/models',{body:{models:[{model:'small',display_name:'Small',reasoning_efforts:['low','high'],default_reasoning_effort:'low',fast_supported:false,default:true}]}});
     });
     await r.page.locator('#settings-open').click();await r.page.locator('[data-settings-target="models"]').click();await r.page.locator('[data-settings-target="codex"]').click();

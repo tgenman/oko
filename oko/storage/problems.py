@@ -26,10 +26,10 @@ class Problems:
         current: list[dict[str, Any]] = []
         scopes = [('oko','global')] + [('feed', feed['id']) for feed in self.store.subscriptions.feeds()]
         needs_codex = any((values := self.store.subscriptions.effective(scope, owner)['effective'])['processor']['value'] == 'codex' and
-                         any(values[key]['value'] for key in ('theses', 'events', 'digests', 'prompt_filters')) for scope, owner in scopes)
+                         any(values[key]['value'] for key in ('theses', 'prompt_filters')) for scope, owner in scopes)
         if needs_codex and self.store.codex_config() is None:
             current.append(dict(id='processor:codex-choice', code='codex-choice', section='action',
-                                title='Не выбрана модель Codex', consequence='Тезисы и обзоры пока не создаются.',
+                                title='Не выбрана модель Codex', consequence='Тезисы пока не создаются.',
                                 next_step='Выберите и сохраните модель для каждого действия.',
                                 objects=[dict(kind='settings', id='global', label='Настройки Око')],
                                 action=dict(kind='settings', page='codex'), created_at=now,
@@ -62,12 +62,10 @@ class Problems:
                 kind = job['kind']
                 title = {'fetch':'Не удалось загрузить материал', 'discover':'Не удалось обновить источник',
                          'read':'Не удалось подтвердить чтение в Telegram', 'delete':'Удаление не завершено'}.get(kind, 'Не удалось обработать материал')
-                if code == 'review-restart':
-                    title = 'Модель начатого обзора неизвестна'
                 if settings_action:
                     title = 'Требуется настройка обработчика'
-                action = dict(kind='settings', page='llamacpp' if code == 'processor-config' else 'models') if settings_action else dict(kind='regenerate' if code == 'review-restart' or kind in ('events','digest') else 'collect' if kind == 'discover' else 'feed-settings' if kind == 'read' else 'theses-retry' if kind == 'theses' else 'filter-retry' if kind == 'filter' else 'retry', id=obj['id'])
-                groups[identity] = dict(id=identity,code=code,section='action' if settings_action or code == 'review-restart' else 'object',title=title,
+                action = dict(kind='settings', page='llamacpp' if code == 'processor-config' else 'models') if settings_action else dict(kind='collect' if kind == 'discover' else 'feed-settings' if kind == 'read' else 'theses-retry' if kind == 'theses' else 'filter-retry' if kind == 'filter' else 'retry', id=obj['id'])
+                groups[identity] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
                     consequence='Сохранённое содержимое остаётся доступным.' if kind != 'delete' else 'Око продолжает попытки удаления.',
                     next_step='Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
                     objects=[],action=None if kind == 'delete' else action,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
@@ -75,12 +73,6 @@ class Problems:
                     groups[identity]['reason'] = job['error']
                 if code == 'source-reconnect':
                     groups[identity].update(section='action', next_step='Переподключите источник.', action=dict(kind='feed-settings', id=feed, page='reconnect'))
-            if job['kind'] == 'events':
-                candidate = self.store.events.candidates().get(job['item'])
-                groups[identity]['objects'] = [dict(kind='material', id=material['id']) for material in candidate['materials']] if candidate else []
-                if not settings_action:
-                    groups[identity]['action'] = dict(kind='objects') if candidate else None
-                continue
             if job['kind'] != 'delete' and obj not in groups[identity]['objects']:
                 groups[identity]['objects'].append(obj)
         if youtube['paused']:

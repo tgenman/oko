@@ -34,16 +34,10 @@ class AddFeed(FeedURL):
 
 class Overrides(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    events: bool | None = None
-    event_hours: int | None = Field(default=None, ge=1, le=87600)
     originals: bool | None = None
     theses: bool | None = None
-    digests: bool | None = None
     prompt_theses: str | None = Field(default=None, max_length=20000)
-    prompt_digest: str | None = Field(default=None, max_length=20000)
     prompt_filters: str | None = Field(default=None, max_length=20000)
-    schedule: str | None = Field(default=None, pattern=r'^(off|([01][0-9]|2[0-3]):[0-5][0-9])$')
-    digest_days: int | None = Field(default=None, ge=1, le=3650)
     processor: str | None = Field(default=None, min_length=1, max_length=200)
 
 
@@ -59,9 +53,8 @@ class FeedPatch(BaseModel):
 
 
 DEFAULTS: dict[str, Any] = dict(
-    events=True, event_hours=24, originals=True, theses=True, digests=False, prompt_theses='Выдели основные тезисы публикации.',
-    prompt_digest='Собери темы и основные тезисы за период.', prompt_filters='',
-    schedule='off', digest_days=1, processor='codex')
+    originals=True, theses=True, prompt_theses='Выдели основные тезисы публикации.',
+    prompt_filters='', processor='codex')
 
 
 def key(value: str) -> str:
@@ -309,6 +302,8 @@ class Subscriptions:
         overrides = {}
         for level, identity in chain:
             for row in self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (level, identity)):
+                if row['field'] not in DEFAULTS:
+                    continue
                 value = json.loads(row['value'])
                 values[row['field']] = dict(value=value, scope=level, owner=identity)
                 if (level, identity) == (scope, owner):
@@ -320,8 +315,6 @@ class Subscriptions:
 
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> dict[str, Any]:
         self.check_owner(scope, owner)
-        if scope == 'feed' and {'events', 'event_hours'} & patch.model_fields_set:
-            raise ValueError('Объединение событий настраивается для Око или папки')
         with self.db:
             for field, value in patch.model_dump(exclude_unset=True).items():
                 if value is None:

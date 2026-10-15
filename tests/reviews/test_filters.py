@@ -9,7 +9,7 @@ from tests.support.reader import HEADERS, wait_for
 
 
 def setup_filters(client):
-    client.patch('/api/settings/oko/global', json={'events': False, 'theses': False, 'digests': False, 'prompt_filters': '', 'processor': 'llamacpp'})
+    client.patch('/api/settings/oko/global', json={'theses': False, 'prompt_filters': '', 'processor': 'llamacpp'})
     client.post('/api/tabs/reader/heartbeat')
     wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 3 and all(x['complete'] for x in c))
     client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})

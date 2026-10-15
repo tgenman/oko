@@ -6,7 +6,7 @@ import {productionReader} from './http-reader.ts';
 test('real HTTP settings load 60 YouTube materials and keep viewed IDs on a second selection', {timeout:45000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
-  await api('settings/oko/global','PATCH',{events:false,theses:false});
+  await api('settings/oko/global','PATCH',{theses:false});
   const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Видео" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa"/></outline></body></opml>'});
   const feed=plan.feeds[0];
   await page.goto(origin+'/#token='+token);

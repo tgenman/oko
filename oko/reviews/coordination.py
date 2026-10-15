@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from oko.processing.contracts import EventsResult, FilterResult, ProcessingError, ProcessingRequest, Theses
+from oko.processing.contracts import FilterResult, ProcessingError, ProcessingRequest, Theses
 from oko.reviews.theses import PublicationTheses
 from oko.processing.execution import CodexChoice
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from oko.storage.store import Job, Store
 
 
-Result = Theses | FilterResult | EventsResult
+Result = Theses | FilterResult
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,6 @@ class _Operation:
     signature: Callable[[str], str | None]
     save: Callable[['Job', str, Result | None], None]
     stage: str
-    release: Callable[['Job'], None] | None = None
     reconcile: bool = False
 
 
@@ -44,12 +43,6 @@ class PreparedWork:
         return (not self._closed and self._owner.store.valid(self._job)
                 and self._signature == self._operation.signature(self._job.item))
 
-    def finish_without_model(self) -> bool:
-        if self._job.kind != 'digest' or self.request.sources:
-            return False
-        self.accept(None)
-        return True
-
     def accept(self, result: Result | None) -> None:
         if not self.current():
             return
@@ -60,8 +53,6 @@ class PreparedWork:
     def close(self) -> None:
         if not self._closed:
             self._closed = True
-            if self._operation.release:
-                self._operation.release(self._job)
 
 
 class ProcessingCoordination:
@@ -72,15 +63,11 @@ class ProcessingCoordination:
         self._operations = {
             'filter': _Operation(store.filters.request, store.filters.signature, self._save_filter, 'Фильтрация', reconcile=True),
             'theses': _Operation(self.theses.request, self.theses.signature, self._save_theses, 'Подготовка тезисов'),
-            'events': _Operation(store.events.request, store.events.signature, self._save_events, 'Объединение событий'),
-            'digest': _Operation(store.digests.request, store.digests.signature, self._save_digest, 'Подготовка обзора', store.digests.release, True),
         }
 
     def sync(self) -> None:
         """One owner of dependency order, also used after accepting a result."""
         self.store.filters.sync()
-        self.store.digests.sync()
-        self.store.events.sync()
         self.theses.sync()
 
     def prepare(self, job: 'Job') -> PreparedWork:
@@ -97,14 +84,11 @@ class ProcessingCoordination:
                 raise ProcessingError('Исходник недоступен для обработки')
             request, signature, public_ai = prepared
             if request.processor == 'codex' and not public_ai:
-                raise ProcessingError('Запрещена публичная AI-обработка набора; разрешение требуется от всех фидов')
+                raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
             request = self._execution_choice(job, signature, request)
             return PreparedWork(self, operation, job, signature, request, public_ai)
         except BaseException:
             record_caught('coordination.prepare')
-            # Request preparation can allocate a digest plan before failing.
-            if operation.release:
-                operation.release(job)
             raise
 
     def _execution_choice(self, job: 'Job', signature: str, request: ProcessingRequest) -> ProcessingRequest:
@@ -114,8 +98,6 @@ class ProcessingCoordination:
                 config = self.store.codex_config()
                 if config is None:
                     return request  # Adapter checks auth/quota before missing choice.
-                if job.kind == 'digest':
-                    self.store.digests.require_known_execution(job.item, signature)
                 origin = dict(processor='codex', **config.choice(request.operation).model_dump())
             else:
                 local = self.store.processor_config()
@@ -136,11 +118,3 @@ class ProcessingCoordination:
         if result is None:
             raise ValueError('Theses result required')
         self.theses.save(job, signature, Theses.model_validate(result.model_dump()))
-
-    def _save_events(self, job: 'Job', signature: str, result: Result | None) -> None:
-        if result is None:
-            raise ValueError('Events result required')
-        self.store.events.save(job, signature, EventsResult.model_validate(result.model_dump()))
-
-    def _save_digest(self, job: 'Job', signature: str, result: Result | None) -> None:
-        self.store.digests.save(job, signature, Theses.model_validate(result.model_dump()) if result is not None else None)

@@ -10,20 +10,19 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from oko.storage.aggregate_upgrade import remove_aggregates
 from oko.storage.versions import Versions
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.reader.composition import FolderContents, ReadingComposition
 from oko.collection.telegram.read_sync import ReadSync
-from oko.reviews.events import Events
-from oko.reviews.digests import Digests
 from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
 from oko.collection.contracts import SourceDeleted, Attachment, Image, Material, Publication
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
-from oko.processing.execution import CodexSettings, UNKNOWN_REVIEW
+from oko.processing.execution import CodexSettings
 
 
 @dataclass(frozen=True)
@@ -95,8 +94,6 @@ class Store:
             self.db.commit()
         self.subscriptions = Subscriptions(self.db, self.fault)
         self.filters = Filters(self)
-        self.events = Events(self)
-        self.digests = Digests(self)
         self.processing = ProcessingCoordination(self)
         self.reading = ReadingComposition(self)
         self.read_sync = ReadSync(self)
@@ -110,6 +107,7 @@ class Store:
             self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
         self.versions = Versions(self)
         self.versions.recover()
+        remove_aggregates(self)
         self.recover_files()
 
     def recover_files(self) -> None:
@@ -254,7 +252,7 @@ class Store:
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if ai_only:
-            query += " AND kind IN ('filter','theses','events','digest')"
+            query += " AND kind IN ('filter','theses')"
         elif deleting_only:
             query += " AND kind='delete'"
         else:
@@ -326,9 +324,6 @@ class Store:
     def viewed_set(self, members: list[str]) -> bool:
         members = sorted(set(members))
         affected = set(members)
-        for card in self.reading.cards():
-            if any(source['id'] in affected for source in card.get('sources', [])):
-                affected.add(card['id'])
         with self.db:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
                 return False
@@ -351,12 +346,6 @@ class Store:
 
     def delete(self, job: Job) -> None:
         self.fault('before_delete')
-        if job.item.startswith('event-'):
-            self.events.path(job.item).unlink(missing_ok=True)
-            self.events.path(job.item).with_suffix('.tmp').unlink(missing_ok=True)
-        if job.item.startswith('digest-'):
-            self.digests.path(job.item).unlink(missing_ok=True)
-            self.digests.path(job.item).with_suffix('.tmp').unlink(missing_ok=True)
         for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item):
             if path.exists():
                 shutil.rmtree(path)
@@ -403,7 +392,7 @@ class Store:
         jobs = [dict(r) for r in rows]
         errors = sorted({r['error'] for r in rows if r['error']})
         pending_deletes = any(r['kind'] == 'delete' and r['status'] != 'done' for r in rows)
-        return dict(jobs=jobs, errors=errors, deleting=pending_deletes, review_restarts=[dict(id=r['item'], error=r['error']) for r in self.db.execute("SELECT item,error FROM jobs WHERE kind='digest' AND status='pending' AND error=?", (UNKNOWN_REVIEW,))])
+        return dict(jobs=jobs, errors=errors, deleting=pending_deletes)
 
 
     def saved_execution(self, job: Job, signature: str) -> dict[str, Any] | None:
@@ -424,13 +413,13 @@ class Store:
         row = self.db.execute('SELECT parameters FROM execution_settings WHERE job=? AND generation=?', (job.id, job.generation)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def derivative_provenance(self, path: Path, signature: str | None, group: str | None = None) -> dict[str, Any] | None:
+    def derivative_provenance(self, path: Path, signature: str | None) -> dict[str, Any] | None:
         if signature is None:
             return None
         try:
             header = json.loads(path.read_text().split('\n\n', 1)[0])
             if header['signature'] == signature:
-                return (header.get('event_origins', {}).get(group) if group else None) or header.get('provenance') or dict(model=None)
+                return header.get('provenance') or dict(model=None)
         except (OSError, ValueError, KeyError):
             record_caught('store.derivative_provenance')
         return None
@@ -482,13 +471,10 @@ class Store:
             if header.get('captions') == 'not_requested':
                 self.retry_material(row['id'])
 
-    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True, event_origins: dict[str, Any] | None = None) -> None:
+    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True) -> None:
         """Commit a validated AI result; callers own admission and input signature."""
         stage = None
-        if job.kind in ('events', 'digest'):
-            destination = (self.events if job.kind == 'events' else self.digests).path(job.item)
-            pending = destination.with_suffix('.tmp')
-        elif job.kind in ('filter', 'theses'):
+        if job.kind in ('filter', 'theses'):
             stage = self.root / 'staging' / job.item
             stage.mkdir(exist_ok=True)
             filename = job.kind + '.md'
@@ -498,7 +484,7 @@ class Store:
             raise ValueError('Unknown derivative')
         provenance = self.execution_provenance(job)
         with pending.open('w', encoding='utf-8') as output:
-            output.write(json.dumps(dict(signature=signature, result=result, provenance=provenance, event_origins=event_origins or {}), ensure_ascii=False) + '\n\n' + text)
+            output.write(json.dumps(dict(signature=signature, result=result, provenance=provenance), ensure_ascii=False) + '\n\n' + text)
             output.flush()
             os.fsync(output.fileno())
         os.replace(pending, destination)

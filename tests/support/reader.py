@@ -21,8 +21,7 @@ def wait_for(client, predicate):
 
 
 def setup_reader(client, *, theses):
-    # This fixture exercises single-publication theses independently of events.
-    response = client.patch('/api/settings/oko/global', json={'events': False, 'theses': theses, 'digests': False, 'prompt_filters': ''})
+    response = client.patch('/api/settings/oko/global', json={'theses': theses, 'prompt_filters': ''})
     assert response.status_code == 200, response.text
     client.post('/api/tabs/reader/heartbeat')
     cards = wait_for(client, lambda: (cards if len(cards := client.get('/api/cards').json()) == 3 and all(c['complete'] for c in cards) else None))

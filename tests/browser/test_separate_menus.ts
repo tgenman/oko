@@ -128,8 +128,8 @@ test('object and global drafts are independent, field save preserves other unsav
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Черновик первого');
-    await editSetting(r.page, 'prompt_digest');
-    await r.page.locator('#setting-prompt_digest').fill('Обзор первого');
+    await editSetting(r.page, 'prompt_filters');
+    await r.page.locator('#setting-prompt_filters').fill('Фильтр первого');
     await feedOptions(r.page);
     await r.page.locator('#feed-importance').selectOption('high');
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
@@ -150,7 +150,7 @@ test('object and global drafts are independent, field save preserves other unsav
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить',exact:true}).click();
     await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
-    await expect(r.page.locator('#setting-prompt_digest')).toHaveValue('Обзор первого');
+    await expect(r.page.locator('#setting-prompt_filters')).toHaveValue('Фильтр первого');
     await expect(r.page.locator('#feed-importance')).toHaveValue('high');
     await r.page.keyboard.press('Escape');
     await r.page.locator('#settings-open').click();
@@ -286,7 +286,7 @@ test('feed inherited fields show their owner and resetting only one override pre
     await r.page.evaluate(() => {
       const result = structuredClone(readerTransport.replies.get('/api/settings/oko/global')!.body);
       result!.effective.prompt_theses = {value:'Свой промпт',scope:'feed',owner:'one'};
-      result!.effective.prompt_digest = {value:'Обзор папки',scope:'folder',owner:'f'};
+      result!.effective.prompt_filters = {value:'Фильтр папки',scope:'folder',owner:'f'};
       result!.overrides = {prompt_theses:'Свой промпт'};
       readerTransport.replies.set('/api/settings/feed/one',{body:result});
       readerTransport.replies.set('PATCH /api/settings/feed/one',{body:{}});
@@ -294,11 +294,11 @@ test('feed inherited fields show their owner and resetting only one override pre
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     const theses = r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')});
-    const digest = r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_digest')});
+    const filter = r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_filters')});
     await expect(theses).toContainText('Фид: one');
-    await expect(digest).toContainText('Папка: Учёба');
-    await editSetting(r.page, 'prompt_digest');
-    await r.page.locator('#setting-prompt_digest').fill('Несохранённый обзор');
+    await expect(filter).toContainText('Папка: Учёба');
+    await editSetting(r.page, 'prompt_filters');
+    await r.page.locator('#setting-prompt_filters').fill('Несохранённый фильтр');
     await r.page.evaluate(() => {
       const result=readerTransport.replies.get('/api/settings/feed/one')!.body;
       result!.effective.prompt_theses={value:'Промпт папки',scope:'folder',owner:'f'};result!.overrides={};
@@ -308,7 +308,7 @@ test('feed inherited fields show their owner and resetting only one override pre
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Промпт папки');
     await expect(theses).toContainText('Папка: Учёба');
     await expect(theses.getByRole('button',{name:'Сбросить',exact:true})).toBeDisabled();
-    await expect(r.page.locator('#setting-prompt_digest')).toHaveValue('Несохранённый обзор');
+    await expect(r.page.locator('#setting-prompt_filters')).toHaveValue('Несохранённый фильтр');
     const patch=await r.page.evaluate(()=>readerTransport.requests.find(q=>q.method==='PATCH')!.body);
     expect(patch).toEqual({prompt_theses:null});
     expect(r.errors).toEqual([]);

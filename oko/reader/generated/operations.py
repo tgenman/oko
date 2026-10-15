@@ -8,7 +8,6 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('DELETE', '/api/debug'): models.DiagnosticClear,
     ('GET', '/api/debug'): models.DiagnosticJournal,
     ('POST', '/api/debug'): models.DiagnosticReceipt,
-    ('POST', '/api/digests/{scope}/{owner}'): models.DigestCreated,
     ('POST', '/api/feeds'): models.SubscriptionFeed,
     ('POST', '/api/feeds/verify'): models.FeedVerification,
     ('PATCH', '/api/feeds/{identity}'): models.SubscriptionFeed,
@@ -54,7 +53,6 @@ RESPONSES: dict[tuple[str, str], Any] = {
 
 REQUESTS: dict[tuple[str, str], Any] = {
     ('POST', '/api/debug'): models.BrowserError,
-    ('POST', '/api/digests/{scope}/{owner}'): models.DigestRequest,
     ('POST', '/api/feeds'): models.AddFeed,
     ('POST', '/api/feeds/verify'): models.FeedURL,
     ('PATCH', '/api/feeds/{identity}'): models.FeedPatch,

@@ -20,7 +20,6 @@ from oko.collection.contracts import Source
 from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.codex import CodexClient
 from oko.processing.execution import CodexSettings
-from oko.reviews.digests import DigestRequest
 from oko.storage.store import Store
 from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
@@ -464,11 +463,6 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def retry_filter(item: str) -> dict[str, bool]:
         await runtime.retry_filter(item)
         return {'ok': True}
-
-    @app.post('/api/digests/{scope}/{owner}', response_model=RESPONSES[('POST', '/api/digests/{scope}/{owner}')], response_model_exclude_unset=True)
-    async def create_digest(scope: str, owner: str, body: Annotated[wire.DigestRequest, BeforeValidator(normalize(DigestRequest))]) -> dict[str, str]:
-        value = to_domain(DigestRequest, body)
-        return {'id': await runtime.create_digest(scope, owner, value)}
 
     @app.post('/api/materials/{item}/viewed', response_model=RESPONSES[('POST', '/api/materials/{item}/viewed')], response_model_exclude_unset=True)
     async def viewed(item: str) -> dict[str, bool]:
