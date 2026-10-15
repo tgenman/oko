@@ -48,7 +48,7 @@ async function compile() {
       await fs.copyFile(join(root,'node_modules/swagger-ui-dist',name),join(stage,'docs',name));
     }
     // These resources use runtime URLs in the unchanged reader.
-    for (const name of ['icons','licenses']) await fs.cp(join(root,'frontend',name),join(stage,name),{recursive:true});
+    await fs.cp(join(root,'frontend/icons'),join(stage,'icons'),{recursive:true});
     // The paint-only layer remains independently toggleable in browser checks,
     // while its URL belongs to the same immutable generation as the reader.
     const surface = await fs.readFile(join(stage,'reader-surfaces.css'));
