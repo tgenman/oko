@@ -438,7 +438,8 @@ class Store:
 
     def status(self) -> dict[str, Any]:
         rows = self.db.execute('SELECT kind,status,error,count(*) AS count FROM jobs GROUP BY kind,status,error').fetchall()
-        jobs = [dict(r) for r in rows]
+        # The durable feed sweep is deletion work, not a new public job kind.
+        jobs = [dict(r, kind='delete' if r['kind'] == 'feed-delete' else r['kind']) for r in rows]
         errors = sorted({r['error'] for r in rows if r['error']})
         pending_deletes = any(r['kind'] in ('delete', 'feed-delete') and r['status'] != 'done' for r in rows)
         return dict(jobs=jobs, errors=errors, deleting=pending_deletes)
