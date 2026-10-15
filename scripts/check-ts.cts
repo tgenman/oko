@@ -1,8 +1,9 @@
 // Parse exact TypeScript/TSX bytes; strict project types are checked separately.
-const fs = require('node:fs');
-const ts = require('typescript');
+import fs = require('node:fs');
+import ts = require('typescript');
 const stdin = process.argv[2] === '--stdin';
 const name = process.argv[stdin ? 3 : 2];
+if (!name) throw new Error('Expected a TypeScript filename');
 const source = fs.readFileSync(stdin ? 0 : name,'utf8');
 const result = ts.transpileModule(source, {fileName:name,reportDiagnostics:true,
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.ReactJSX}});

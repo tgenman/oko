@@ -19,7 +19,7 @@ def main() -> None:
     output = args.output.resolve()
     # Check derived libraries without altering the checkout; runtime/package
     # freshness validation also checks canonical/backend/frontend digests.
-    subprocess.run(['node', str(ROOT / 'scripts/generate-api.mjs'), 'check'], cwd=ROOT, check=True)
+    subprocess.run(['node', '--import', 'tsx', str(ROOT / 'scripts/generate-api.mts'), 'check'], cwd=ROOT, check=True)
     sys.path.insert(0, str(ROOT))
     from oko.reader.static import validate_frontend
     generation = validate_frontend()

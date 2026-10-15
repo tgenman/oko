@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def repo(tmp_path):
     for directory in ('scripts', '.githooks'):
         shutil.copytree(ROOT / directory, tmp_path / directory)
-    shutil.copy(ROOT / 'eslint.config.cjs', tmp_path / 'eslint.config.cjs')
+    shutil.copy(ROOT / 'eslint.config.ts', tmp_path / 'eslint.config.ts')
     if (ROOT / 'node_modules').exists():
         (tmp_path / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
     env = {**os.environ, 'OKO_PYTHON': sys.executable}
@@ -69,6 +69,26 @@ def test_precommit_checks_browser_types_from_index_across_imports(tmp_path):
     assert 'TS2345' in failed.stdout + failed.stderr
     assert run('git', 'add', 'tests/browser/test_fixture.ts').returncode == 0
     source.write_text("import {fixture} from './fixture'; fixture(42);\n")
+    passed = run('git', 'hook', 'run', 'pre-commit')
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+
+
+@pytest.mark.parametrize('extension', ['cts', 'mts'])
+def test_precommit_checks_tooling_types_from_exact_index(tmp_path, extension):
+    run = repo(tmp_path)
+    name = f'scripts/example.{extension}'
+    (tmp_path / 'tsconfig.tooling.json').write_text(
+        '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":true,"module":"NodeNext"},'
+        '"files":["' + name + '"]}')
+    source = tmp_path / name
+    source.write_text("export const count: number = 'invalid';\n")
+    assert run('git', 'add', name, 'tsconfig.tooling.json').returncode == 0
+    source.write_text('export const count: number = 1;\n')
+    failed = run('git', 'hook', 'run', 'pre-commit')
+    assert failed.returncode != 0
+    assert 'TS2322' in failed.stdout + failed.stderr
+    assert run('git', 'add', name).returncode == 0
+    source.write_text("export const count: number = 'invalid';\n")
     passed = run('git', 'hook', 'run', 'pre-commit')
     assert passed.returncode == 0, passed.stdout + passed.stderr
 

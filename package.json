@@ -13,8 +13,10 @@
     "ajv-formats": "3.0.1",
     "eslint": "10.12.0",
     "globals": "17.13.0",
+    "jiti": "2.7.0",
     "playwright": "1.62.1",
     "swagger-ui-dist": "5.33.2",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vite": "8.3.4"
   },
@@ -23,16 +25,17 @@
     "react-dom": "19.3.0"
   },
   "scripts": {
-    "build": "node scripts/build-frontend.mjs",
-    "dev": "node scripts/build-frontend.mjs --watch",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.browser-tests.json",
-    "build:check": "node scripts/build-frontend.mjs --check",
-    "api:generate": "node scripts/generate-api.mjs generate",
-    "api:check": "node scripts/generate-api.mjs check",
-    "api:compat": "node scripts/generate-api.mjs compat",
-    "api:baseline": "node scripts/generate-api.mjs baseline",
-    "api:lint": "node scripts/generate-api.mjs validate",
-    "api:docs": "node scripts/generate-api.mjs docs",
-    "typecheck:browser": "tsc -p tsconfig.browser-tests.json"
+    "build": "node --import tsx scripts/build-frontend.mts",
+    "dev": "node --import tsx scripts/build-frontend.mts --watch",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.browser-tests.json && tsc -p tsconfig.tooling.json",
+    "build:check": "node --import tsx scripts/build-frontend.mts --check",
+    "api:generate": "node --import tsx scripts/generate-api.mts generate",
+    "api:check": "node --import tsx scripts/generate-api.mts check",
+    "api:compat": "node --import tsx scripts/generate-api.mts compat",
+    "api:baseline": "node --import tsx scripts/generate-api.mts baseline",
+    "api:lint": "node --import tsx scripts/generate-api.mts validate",
+    "api:docs": "node --import tsx scripts/generate-api.mts docs",
+    "typecheck:browser": "tsc -p tsconfig.browser-tests.json",
+    "typecheck:tooling": "tsc -p tsconfig.tooling.json"
   }
 }

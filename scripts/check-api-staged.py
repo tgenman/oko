@@ -45,7 +45,7 @@ def reviewed_baseline(stage):
 def pinned_tools(stage, python):
     package = json.loads((stage / 'package.json').read_text())
     lock = json.loads((stage / 'package-lock.json').read_text())
-    for name in ('@hey-api/openapi-ts', 'typescript'):
+    for name in ('@hey-api/openapi-ts', 'typescript', 'tsx'):
         expected = package['devDependencies'][name]
         installed = json.loads((stage / 'node_modules' / name / 'package.json').read_text())['version']
         if installed != expected or lock['packages']['node_modules/' + name]['version'] != expected:
@@ -100,7 +100,7 @@ def main():
         if not node:
             raise ValueError('API index checks require Node')
         print('CHECK exact staged API contract and generated libraries', flush=True)
-        return subprocess.run([node, str(stage / 'scripts/generate-api.mjs'), 'check'], cwd=stage,
+        return subprocess.run([node, '--import', 'tsx', str(stage / 'scripts/generate-api.mts'), 'check'], cwd=stage,
                               env={**os.environ, 'OKO_PYTHON': python}).returncode
 
 
