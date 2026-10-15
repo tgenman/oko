@@ -133,7 +133,7 @@ def test_type_receipt_rechecks_extended_config_and_source_errors(tmp_path):
     source = tmp_path / 'frontend/main.ts'
     source.write_text('export function value(input) { return input; }\n')
     base = tmp_path / 'tsconfig.base.json'
-    base.write_text(json.dumps({'compilerOptions': {'noEmit': True, 'types': [], 'skipLibCheck': True, 'strict': False}}))
+    base.write_text(json.dumps({'compilerOptions': {'noEmit': True, 'types': [], 'lib': ['ES2022'], 'skipLibCheck': True, 'strict': False}}))
     (tmp_path / 'tsconfig.json').write_text(json.dumps({'extends': './tsconfig.base.json', 'files': ['frontend/main.ts']}))
     command = ('node', '--import', 'tsx', 'scripts/check-types.mts', 'tsconfig.json')
     first = run(tmp_path, *command)

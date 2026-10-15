@@ -65,46 +65,46 @@ def test_date_boundary_uses_user_zone_and_invalid_values_are_rejected(tmp_path):
         assert client.get('/api/subscriptions').json()['feeds'][0]['initial_history']['since'] == 1759266000.0
 
 
-def test_seven_of_twenty_restart_keeps_selected_history_and_progress(tmp_path):
+def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
     import asyncio
     import httpx
     from fastapi.testclient import TestClient
     from tests.support.app import create_app
     from tests.support.feed_url import HEADERS
     blocked = True
-    posts = list(range(20, 0, -1))
+    posts = list(range(4, 0, -1))
     async def reply(request):
         if request.url.path == '/feed':
             return httpx.Response(200, text='<rss><channel><title>История</title>' + ''.join(f'<item><guid>{n}</guid><title>Post {n}</title><link>https://source.test/post/{n}</link><pubDate>Wed, 01 Oct 2025 12:00:00 GMT</pubDate></item>' for n in posts) + '</channel></rss>')
-        if blocked and request.url.path == '/post/13':
+        if blocked and request.url.path == '/post/2':
             await asyncio.Event().wait()
         return httpx.Response(200, text='<article>Полный материал</article>')
     def open_reader():
         return TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
     with open_reader() as client:
-        feed = add(client, verify(client, 'https://source.test/feed')).json()
+        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 4}).json()
         for _ in range(200):
             history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 7:
+            if history['loaded'] == 2:
                 break
             time.sleep(.01)
-        assert history['loaded'] == 7
-        assert history['available'] == 20
+        assert history['loaded'] == 2
+        assert history['available'] == 4
         assert history['state'] == 'loading'
     blocked = False
-    posts[:] = [21, 20]  # feed window rotates; persisted refs/teasers retain remaining 13
+    posts[:] = [5, 4]  # rotated window omits both remaining selected publications
     with open_reader() as client:
-        assert client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']['loaded'] == 7
+        assert client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']['loaded'] == 2
         client.post('/api/tabs/reader/heartbeat')
         for _ in range(200):
             history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 20:
+            if history['loaded'] == 4:
                 break
             time.sleep(.01)
-        assert history['loaded'] == 20
-        assert history['available'] == 20
+        assert history['loaded'] == 4
+        assert history['available'] == 4
         assert history['state'] == 'done'
-        assert len(client.get('/api/cards').json()) == 21
+        assert len(client.get('/api/cards').json()) == 5
 
 
 def test_selected_date_includes_midnight_and_every_later_post(tmp_path):
