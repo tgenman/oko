@@ -11,7 +11,7 @@ test('three menus keep reading position and addition tabs, Escape restores openi
     await r.start([material('one', {text: 'Читать дальше. '.repeat(3000)})]);
     await r.page.evaluate(() => {
       readerTransport.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      readerTransport.replies.set('/api/processors/llamacpp', {body: null});
+      readerTransport.replies.set('/api/v3/processors/llamacpp', {body: null});
       readerTransport.replies.set('/api/telegram/accounts', {body: ['personal']});
     });
     await r.page.locator('#cards button').click();
@@ -144,8 +144,8 @@ test('object and global drafts are independent, field save preserves other unsav
     await expect(r.page.locator('#feed-importance')).toHaveValue('high');
     await r.page.evaluate(() => {
       const t = readerTransport;
-      t.replies.set('PATCH /api/settings/feed/one', {body:{}});
-      t.replies.get('/api/settings/feed/one')!.body!.effective.prompt_theses.value = 'Черновик первого';
+      t.replies.set('PATCH /api/v3/settings/feed/one', {body:{}});
+      t.replies.get('/api/v3/settings/feed/one')!.body!.effective.prompt_theses.value = 'Черновик первого';
     });
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить',exact:true}).click();
@@ -166,8 +166,8 @@ test('object and global drafts are independent, field save preserves other unsav
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик второго');
-    const writes = await r.page.evaluate(() => readerTransport.requests.filter(q => ['PATCH','PUT','POST'].includes(q.method) && !q.url.includes('/tabs/') && q.url !== '/api/debug'));
-    expect(writes).toEqual([{url:'/api/settings/feed/one',method:'PATCH',body:{prompt_theses:'Черновик первого'}}]);
+    const writes = await r.page.evaluate(() => readerTransport.requests.filter(q => ['PATCH','PUT','POST'].includes(q.method) && !q.url.includes('/tabs/') && !q.url.includes('/client-sessions') && q.url !== '/api/v3/diagnostics'));
+    expect(writes).toEqual([{url:'/api/v3/settings/feed/one',method:'PATCH',body:{prompt_theses:'Черновик первого'}}]);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
@@ -181,7 +181,7 @@ test('reconnection drafts belong to each existing Telegram feed without changing
       const feeds = ['one','two'].map(id=>({id,title:id,kind:'telegram',identity:'telegram:'+id,folder_id:'f',original_urls:[],importance:'normal',auto_read:false,read_history:false,telegram_peer:'@'+id+'channel',telegram_account:'personal',transport:'telegram'}));
       t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Telegram'}],feeds}});
       t.replies.set('/api/telegram/accounts',{body:['personal']});
-      for (const feed of feeds) t.replies.set('/api/settings/feed/'+feed.id,t.replies.get('/api/settings/oko/global')!);
+      for (const feed of feeds) t.replies.set('/api/v3/settings/feed/'+feed.id,t.replies.get('/api/v3/settings/oko/global')!);
     });
     await r.page.locator('#add-open').click();
     await r.page.getByRole('tab',{name:'Telegram',exact:true}).click();
@@ -215,7 +215,7 @@ test('late subscription and settings responses cannot replace newer object selec
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: one');
-    await r.page.evaluate(() => {readerTransport.held.set('/api/settings/feed/one',true); readerTransport.held.set('/api/subscriptions',true);});
+    await r.page.evaluate(() => {readerTransport.held.set('/api/v3/settings/feed/one',true); readerTransport.held.set('/api/subscriptions',true);});
     await r.page.keyboard.press('Escape');
     await r.page.locator('#feeds-open').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/subscriptions'));
@@ -225,24 +225,24 @@ test('late subscription and settings responses cannot replace newer object selec
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Отправленный');
-    await r.page.evaluate(() => readerTransport.held.set('/api/settings/feed/two',true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/settings/feed/two',true));
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить',exact:true}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/settings/feed/two'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/settings/feed/two'));
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Более новый черновик');
     await r.page.evaluate(() => {
-      const result = structuredClone(readerTransport.replies.get('/api/settings/oko/global')!.body);
+      const result = structuredClone(readerTransport.replies.get('/api/v3/settings/oko/global')!.body);
       result!.effective.prompt_theses.value = 'Отправленный';
-      readerTransport.replies.set('/api/settings/feed/two',{body:result});
-      readerTransport.release('/api/settings/feed/two',{});
+      readerTransport.replies.set('/api/v3/settings/feed/two',{body:result});
+      readerTransport.release('/api/v3/settings/feed/two',{});
     });
     await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Более новый черновик');
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/settings/feed/one'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/settings/feed/one'));
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
-    await r.page.evaluate(() => readerTransport.release('/api/settings/feed/one',readerTransport.replies.get('/api/settings/oko/global')!.body));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/settings/feed/one',readerTransport.replies.get('/api/v3/settings/oko/global')!.body));
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Более новый черновик');
     expect(r.errors).toEqual([]);
@@ -284,12 +284,12 @@ test('feed inherited fields show their owner and resetting only one override pre
   try {
     await r.start([]); await objects(r);
     await r.page.evaluate(() => {
-      const result = structuredClone(readerTransport.replies.get('/api/settings/oko/global')!.body);
+      const result = structuredClone(readerTransport.replies.get('/api/v3/settings/oko/global')!.body);
       result!.effective.prompt_theses = {value:'Свой промпт',scope:'feed',owner:'one'};
       result!.effective.prompt_filters = {value:'Фильтр папки',scope:'folder',owner:'f'};
       result!.overrides = {prompt_theses:'Свой промпт'};
-      readerTransport.replies.set('/api/settings/feed/one',{body:result});
-      readerTransport.replies.set('PATCH /api/settings/feed/one',{body:{}});
+      readerTransport.replies.set('/api/v3/settings/feed/one',{body:result});
+      readerTransport.replies.set('PATCH /api/v3/settings/feed/one',{body:{}});
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
@@ -300,7 +300,7 @@ test('feed inherited fields show their owner and resetting only one override pre
     await editSetting(r.page, 'prompt_filters');
     await r.page.locator('#setting-prompt_filters').fill('Несохранённый фильтр');
     await r.page.evaluate(() => {
-      const result=readerTransport.replies.get('/api/settings/feed/one')!.body;
+      const result=readerTransport.replies.get('/api/v3/settings/feed/one')!.body;
       result!.effective.prompt_theses={value:'Промпт папки',scope:'folder',owner:'f'};result!.overrides={};
     });
     await editSetting(r.page, 'prompt_theses');
@@ -323,18 +323,18 @@ test('late failed save cannot replace messages after closing and reopening the s
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Отправлено');
-    await r.page.evaluate(() => readerTransport.held.set('/api/settings/feed/one', true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/settings/feed/one', true));
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить',exact:true}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/settings/feed/one'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/settings/feed/one'));
     await r.page.keyboard.press('Escape');
-    await r.page.evaluate(() => readerTransport.held.delete('/api/settings/feed/one'));
+    await r.page.evaluate(() => readerTransport.held.delete('/api/v3/settings/feed/one'));
     await r.page.locator('#feeds-open').click();
     await editSetting(r.page, 'prompt_theses');
     await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Новый черновик');
-    await r.page.evaluate(() => readerTransport.release('/api/settings/feed/one', {detail:'Старая ошибка'}, 500));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/settings/feed/one', {detail:'Старая ошибка'}, 500));
     await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старая ошибка'))).toBe(true);
     await expect(r.page.locator('#settings-message')).not.toContainText('Старая ошибка');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Новый черновик');
@@ -348,25 +348,25 @@ test('field save completes after leaving a model check; stale checks cannot repo
     await r.page.locator('#settings-open').click();
     await modelPage(r.page);
     await r.page.evaluate(() => {
-      readerTransport.held.set('/api/processors/llamacpp/check',true);
-      readerTransport.replies.set('PATCH /api/settings/oko/global',{body:{}});
+      readerTransport.held.set('/api/v3/processors/llamacpp/check',true);
+      readerTransport.replies.set('PATCH /api/v3/settings/oko/global',{body:{}});
     });
     await r.page.locator('#llamacpp-check').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/processors/llamacpp/check'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/processors/llamacpp/check'));
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Сохранить параллельно');
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('.setting-row').filter({has:r.page.locator('#setting-prompt_theses')}).getByRole('button',{name:'Сохранить',exact:true}).click();
     await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
-    await r.page.evaluate(() => readerTransport.release('/api/processors/llamacpp/check',{mode:'Локальная',model:'working-model',models:['working-model']}));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/processors/llamacpp/check',{mode:'Локальная',model:'working-model',models:['working-model']}));
     await expect(r.page.locator('#llamacpp-check-status')).not.toContainText('working-model');
     await modelPage(r.page);
-    await r.page.evaluate(() => readerTransport.held.set('/api/processors/llamacpp/check',true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/processors/llamacpp/check',true));
     await r.page.locator('#llamacpp-check').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/processors/llamacpp/check'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/processors/llamacpp/check'));
     await r.page.keyboard.press('Escape');
     await r.page.locator('#settings-open').click();
-    await r.page.evaluate(() => readerTransport.release('/api/processors/llamacpp/check',{detail:'Старый сбой модели'},500));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/processors/llamacpp/check',{detail:'Старый сбой модели'},500));
     await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
     await expect(r.page.locator('#llamacpp-check-status')).not.toContainText('Старый сбой модели');
     expect(r.errors).toEqual([]);
@@ -451,7 +451,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     await r.page.evaluate(() => {
       readerTransport.native.add('/api/status');
       readerTransport.native.add('/api/subscriptions');
-      readerTransport.replies.set('PATCH /api/feeds/one',{body:{}});
+      readerTransport.replies.set('PATCH /api/v3/feeds/one',{body:{}});
     });
     // An old background read is still pending when the server write completes.
     await expect.poll(() => Boolean(heldStatus)).toBe(true);

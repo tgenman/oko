@@ -35,7 +35,10 @@ class BrowserError(BaseModel):
     @classmethod
     def browser_timestamp(cls, value: Any) -> Any:
         # JSON carries ISO strings; keep strict validation for all other types.
-        return datetime.fromisoformat(value) if isinstance(value, str) else value
+        if isinstance(value, str):
+            parsed = datetime.fromisoformat(value)
+            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        return value
 
 
 def redact(value: str, secret: str = '') -> str:

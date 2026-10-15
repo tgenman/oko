@@ -92,11 +92,11 @@ test('late failed settings write is visible once in the panel and explicit draft
     await r.page.locator('[data-settings-target="reading"]').click();
     await r.page.locator('[data-settings-target="field/theses"]').click();
     await r.page.locator('#setting-theses').uncheck();
-    await r.page.evaluate(()=>readerTransport.held.set('/api/settings/oko/global',true));
+    await r.page.evaluate(()=>readerTransport.held.set('/api/v3/settings/oko/global',true));
     await r.page.locator('#setting-save-theses').click();
-    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/settings/oko/global'));
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/settings/oko/global'));
     await r.page.locator('#settings-close').click();
-    await r.page.evaluate(()=>readerTransport.release('/api/settings/oko/global',{detail:'Сохранение не удалось'},500));
+    await r.page.evaluate(()=>readerTransport.release('/api/v3/settings/oko/global',{detail:'Сохранение не удалось'},500));
     await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
     await expect(r.page.locator('#status-panel')).toBeHidden();
     await r.page.locator('#status-toggle').click();
@@ -183,12 +183,12 @@ test('discarding a failed processor draft restores its saved values',async()=>{
     await r.start([]);
     await r.page.evaluate(()=>{
       const choice={model:'small',reasoning_effort:'low',fast:false};
-      readerTransport.replies.set('/api/processors/codex',{body:{config:Object.fromEntries(['filter','theses'].map(k=>[k,choice]))}});
-      readerTransport.replies.set('/api/processors/codex/models',{body:{models:[{model:'small',display_name:'Small',reasoning_efforts:['low','high'],default_reasoning_effort:'low',fast_supported:false,default:true}]}});
+      readerTransport.replies.set('/api/v3/processors/codex',{body:{config:Object.fromEntries(['filter','theses'].map(k=>[k,choice]))}});
+      readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models:[{model:'small',display_name:'Small',reasoning_efforts:['low','high'],default_reasoning_effort:'low',fast_supported:false,default:true}]}});
     });
     await r.page.locator('#settings-open').click();await r.page.locator('[data-settings-target="models"]').click();await r.page.locator('[data-settings-target="codex"]').click();
     await r.page.locator('#codex-theses-effort').selectOption('high');
-    await r.page.evaluate(()=>readerTransport.replies.set('PUT /api/processors/codex',{status:500,body:{detail:'synthetic failure'}}));
+    await r.page.evaluate(()=>readerTransport.replies.set('PUT /api/v3/processors/codex',{status:500,body:{detail:'synthetic failure'}}));
     await r.page.locator('#codex-save').click();
     await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
     await r.page.locator('#codex-discard').click();

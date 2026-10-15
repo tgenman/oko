@@ -17,10 +17,32 @@ def affected(value: previous.ProblemObject) -> wire.AffectedResource:
     return wire.AffectedResource(wire.RuntimeResource(kind='runtime'))
 
 
-def problem(value: previous.Problem) -> wire.LegacyCurrentProblem | wire.LegacyRetryingProblem | wire.LegacyFinishedProblem:
+def problem(value: previous.Problem) -> wire.CurrentProblem | wire.RetryingProblem | wire.FinishedProblem | wire.LegacyCurrentProblem | wire.LegacyRetryingProblem | wire.LegacyFinishedProblem:
     # Preserve historical identity and facts. Old UI actions are deliberately
     # not interpreted as executable domain recovery commands.
     command = wire.CommandId(value.request_id) if isinstance(value.request_id, str) and value.request_id else None
+    if isinstance(value.operation, str) and value.operation.startswith('{'):
+        context = wire.CommandContext.model_validate_json(value.operation).root
+        resources: list[wire.AffectedResource] = []
+        recovery: list[wire.RecoveryIntent] = []
+        if isinstance(context, wire.CommandSettingsPatch):
+            resources.append(wire.AffectedResource(wire.SettingsResource(kind='settings', target=context.target)))
+            if context.keys:
+                recovery.append(wire.RecoveryIntent(wire.RecoveryChangeSetting(kind='change_setting', target=context.target, keys=context.keys)))
+        elif isinstance(context, (wire.CommandCodexSave, wire.CommandCodexCheck, wire.CommandProcessorSave, wire.CommandProcessorCheck)):
+            processor = wire.ProcessorId('codex' if isinstance(context, (wire.CommandCodexSave, wire.CommandCodexCheck)) else 'llamacpp')
+            resources.append(wire.AffectedResource(wire.ProcessorResource(kind='processor', processor_id=processor)))
+            recovery.append(wire.RecoveryIntent(wire.RecoveryConfigureProcessor(kind='configure_processor', processor_id=processor)))
+        elif isinstance(context, wire.CommandFeedPatch):
+            resources.append(wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=context.feed_id)))
+        data = dict(id=value.id, code='command_outcome_unknown' if value.code=='action-unknown' else 'command_failed',
+                    command_id=command, title=value.title, message=value.next_step, consequence=value.consequence,
+                    affected=resources, recovery=recovery, created_at=timestamp(value.created_at), state=value.state)
+        if value.state == 'finished':
+            return wire.FinishedProblem.model_validate(dict(data, finished_at=timestamp(value.finished_at) if value.finished_at else None, outcome=value.outcome))
+        if value.state == 'retrying':
+            return wire.RetryingProblem.model_validate(dict(data, retry_at=timestamp(value.next_at) if value.next_at else None))
+        return wire.CurrentProblem.model_validate(data)
     if value.state == 'finished':
         if value.finished_at is None or value.outcome is None:
             raise ValueError('Finished problem lacks its outcome')
@@ -44,12 +66,12 @@ def problems(value: previous.ProblemSnapshot) -> wire.ProblemSnapshot:
     recent: list[wire.FinishedProblem | wire.LegacyFinishedProblem] = []
     for entry in value.current:
         projected = problem(entry)
-        if isinstance(projected, wire.LegacyFinishedProblem):
+        if isinstance(projected, (wire.FinishedProblem, wire.LegacyFinishedProblem)):
             raise ValueError('Current snapshot contains a finished problem')
         current.append(projected)
     for entry in value.recent:
         projected = problem(entry)
-        if not isinstance(projected, wire.LegacyFinishedProblem):
+        if not isinstance(projected, (wire.FinishedProblem, wire.LegacyFinishedProblem)):
             raise ValueError('Recent snapshot contains an unfinished problem')
         recent.append(projected)
     return wire.ProblemSnapshot(current=current, recent=recent, count=value.count, updated_at=timestamp(value.updated_at))
@@ -119,3 +141,49 @@ def history(value: previous.InitialHistoryStatus) -> wire.FeedHistoryState:
     else:
         state = wire.HistoryDiscovering(state='discovering', run=value.run, selection=selection, progress=progress)
     return wire.FeedHistoryState(feed_id=wire.FeedId(value.feed_id), history=wire.HistoryState(state))
+
+
+def subscription(value: previous.SubscriptionFeed) -> wire.SubscriptionFeed:
+    data = value.model_dump(exclude_unset=True)
+    data['history'] = history(previous.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, previous.History) else wire.HistoryState(wire.HistoryAbsent(state='absent', legacy_since=timestamp(value.legacy_since) if isinstance(value.legacy_since, float) else None)).model_dump(mode='json')
+    data.pop('initial_history', None)
+    data.pop('legacy_since', None)
+    data['connection'] = 'ready' if data.get('connection') == 'connected' else data.get('connection', 'unavailable')
+    if value.kind == 'telegram':
+        if value.transport is None or value.transport == 'telegram' and not isinstance(value.telegram_account, str):
+            data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_connection'
+            data['access'] = wire.TelegramUnconfiguredAccess(kind='unconfigured', source_locator=value.identity if isinstance(value.identity, str) else value.id).model_dump(mode='json')
+        elif value.transport == 'telegram':
+            data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_profile_confirmation'
+            data['access'] = wire.TelegramLegacyClientAccess(kind='legacy_client', alias=value.telegram_account if isinstance(value.telegram_account, str) else '', peer_id=wire.TelegramPeerId(str(value.telegram_peer)) if isinstance(value.telegram_peer, int) else None, source_locator=value.identity if isinstance(value.identity, str) else value.id).model_dump(mode='json')
+        else:
+            username = value.telegram_username if isinstance(value.telegram_username, str) else str(data['identity']).removeprefix('telegram:').removeprefix('@')
+            data['access'] = wire.TelegramWebAccess(kind='web', username=username, preview_url=wire.SourceUrl('https://t.me/s/' + username)).model_dump(mode='json')
+        data.pop('transport', None)
+    for key in ('telegram_account', 'telegram_peer', 'telegram_topic', 'telegram_username', 'read_history', 'auto_read'):
+        data.pop(key, None)
+    return wire.SubscriptionFeed.model_validate(data)
+
+
+def codex(value: previous.CodexState) -> wire.CodexProcessorState:
+    data = value.model_dump(exclude_unset=True)
+    availability = {key: data.get(key) for key in ('local', 'version')}
+    availability.update(auth=data.get('auth', 'unchecked'), limits_checked=value.limits_checked,
+                        quota_windows=[{'used_percent': row.used_percent, 'resets_at': timestamp(row.resets_at).model_dump(mode='json') if isinstance(row.resets_at, (int, float)) else None} for row in value.quota_windows] if isinstance(value.quota_windows, list) else [])
+    if value.available:
+        availability['state'] = 'available'
+    else:
+        availability.update(state='unavailable', reason='not_authenticated' if data.get('auth') == 'missing' else 'unavailable', message=value.reason)
+        if availability['auth'] not in ('unknown', 'missing', 'chatgpt', 'api_key', 'unchecked'):
+            availability['auth'] = 'unknown'
+    return wire.CodexProcessorState(configuration=wire.CodexConfiguration.model_validate(value.config.model_dump()) if value.config else None,
+                                    availability=wire.CodexAvailability.model_validate(availability))
+
+
+def diagnostic(value: previous.DiagnosticEntry) -> wire.DiagnosticEntry:
+    data = value.model_dump()
+    data.setdefault('material_ids', [])
+    for old, new in (('first_time', 'first_at'), ('last_time', 'last_at')):
+        parsed = datetime.fromisoformat(data.pop(old))
+        data[new] = (parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)).isoformat()
+    return wire.DiagnosticEntry.model_validate(data)

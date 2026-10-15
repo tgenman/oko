@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { mountSurface } from '../renderer';
 import type { ReaderApi } from '../api/reader';
-import { debugBrowser, debugEntries, clearDebug } from '../api/legacy-generated/sdk.gen';
-import type { DiagnosticEntry, BrowserError } from '../api/legacy-generated/types.gen';
+import { reportClientDiagnostic as debugBrowser, diagnosticEntries as debugEntries, clearDiagnostics as clearDebug } from '../api/generated/sdk.gen';
+import type { DiagnosticEntry, ClientDiagnosticEvent as BrowserError } from '../api/generated/types.gen';
 type Pending = Required<Omit<BrowserError, 'first_at' | 'occurred_at'>> & {
     first_at: string;
     occurred_at: string;
@@ -23,7 +23,7 @@ function byId(id: string) { return document.getElementById(id)!; }
 function ErrorDetails({ entry, identity }: {
     entry: Entry;
     identity: string;
-}) { const [open, setOpen] = useState(false); return <details data-key={identity} open={open} onToggle={event => setOpen(event.currentTarget.open)}><summary>{`${new Date(entry.last_time).toLocaleString()} · ${entry.source} · ${entry.message} · ×${entry.count}${entry.pending ? ' · не сохранено' : ''}`}</summary><p>{`Первое: ${new Date(entry.first_time).toLocaleString()} · Последнее: ${new Date(entry.last_time).toLocaleString()} · ${entry.error_type}`}</p><pre>{entry.traceback || entry.message}</pre></details>; }
+}) { const [open, setOpen] = useState(false); return <details data-key={identity} open={open} onToggle={event => setOpen(event.currentTarget.open)}><summary>{`${new Date(entry.last_at).toLocaleString()} · ${entry.source} · ${entry.message} · ×${entry.count}${entry.pending ? ' · не сохранено' : ''}`}</summary><p>{`Первое: ${new Date(entry.first_at).toLocaleString()} · Последнее: ${new Date(entry.last_at).toLocaleString()} · ${entry.error_type}`}</p><pre>{entry.traceback || entry.message}</pre></details>; }
 let reporter: (error: unknown, source: string, newOccurrence: boolean) => void = () => { };
 export function reportError(error: unknown, source = 'Браузер', newOccurrence = false) { reporter(error, source, newOccurrence); }
 export function createDebugPanel({ token, readerApi }: {
@@ -58,15 +58,15 @@ export function createDebugPanel({ token, readerApi }: {
             if (old) {
                 if ((old.streams[entry.stream_id] ?? 0) < entry.sequence) {
                     old.count += entry.count;
-                    old.last_time = old.last_time > entry.occurred_at ? old.last_time : entry.occurred_at;
-                    old.first_time = old.first_time < entry.first_at ? old.first_time : entry.first_at;
+                    old.last_at = old.last_at > entry.occurred_at ? old.last_at : entry.occurred_at;
+                    old.first_at = old.first_at < entry.first_at ? old.first_at : entry.first_at;
                 }
                 old.pending = true;
             }
             else
-                groups.set(identity, { ...entry, id: entry.event_id, streams: {}, first_time: entry.first_at, last_time: entry.occurred_at, pending: true });
+                groups.set(identity, { ...entry, id: entry.event_id, streams: {}, first_at: entry.first_at, last_at: entry.occurred_at, pending: true });
         }
-        const entries = [...groups.values()].sort((a, b) => b.last_time.localeCompare(a.last_time)).slice(0, 100);
+        const entries = [...groups.values()].sort((a, b) => b.last_at.localeCompare(a.last_at)).slice(0, 100);
         mountSurface(panel, <><div className="debug-heading"><h2>Исключения <span id="debug-count">{Math.max(serverCount, entries.length)}</span></h2><button id="debug-clear" type="button" disabled={clearing} onClick={() => { void clear(); }}>Очистить историю ошибок</button></div><p>Последние 100 групп ошибок сохраняются локально и доступны после перезапуска.</p><p id="debug-status" role="status">{storageError ? 'Журнал не сохранён на диск: ' + clean(storageError) : transportError}</p><p id="debug-empty" hidden={entries.length > 0}>Ошибок пока нет</p><div id="debug-errors">{entries.map(entry => <ErrorDetails key={key(entry)} identity={key(entry)} entry={entry}/>)}</div></>);
     }
     function flush() {
@@ -83,14 +83,14 @@ export function createDebugPanel({ token, readerApi }: {
                 entry.sealed = true;
                 const { sealed, ...body } = entry;
                 const result = (await debugBrowser({ client: readerApi.client, body })).data;
-                if (result.entry && retained(result.entry)) {
+                if (result.state==='accepted' && retained(result.entry)) {
                     const received = result.entry;
                     remote = remote.filter(group => group.id !== received.id);
                     remote.push(received);
                     revision++;
                 }
-                storageError = result.persistence_error || '';
-                if (result.ok === false)
+                storageError = result.state==='persistence_failure'?result.message:'';
+                if (result.state==='persistence_failure')
                     break;
                 pending = pending.filter(item => item.event_id !== entry.event_id);
             }
@@ -181,8 +181,8 @@ export function createDebugPanel({ token, readerApi }: {
             // Finish an old delivery before deleting it; newer occurrences wait.
             await delivery;
             const result = (await clearDebug({ client: readerApi.client })).data;
-            if (!result.ok)
-                throw new Error(result.persistence_error || 'Не удалось сохранить очистку журнала');
+            if (result.state==='persistence_failure')
+                throw new Error(result.message);
             remote = [];
             pending = pending.filter(entry => entry.sequence > cutoff);
             serverCount = 0;

@@ -22,7 +22,7 @@ def test_docs_offer_canonical_contract_without_admitting_reader_work(tmp_path):
         contract = client.get('/openapi.json')
         assert contract.status_code == 200
         assert contract.json()['openapi'] == '3.1.0'
-        assert '/api/status' in contract.json()['paths']
+        assert '/api/v3/status' in contract.json()['paths']
         status = client.get('/api/status',headers={'Authorization':'Bearer synthetic'}).json()
         assert status['live_tabs'] == 0
         for asset in ['/docs/initializer.js','/docs/swagger-ui-bundle.js','/docs/swagger-ui.css']:

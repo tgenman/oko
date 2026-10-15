@@ -11201,14 +11201,101 @@ components:
         alias: example
         peer_id: null
         source_locator: example
+    TelegramUnconfiguredAccess:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: unconfigured
+        source_locator:
+          type: string
+          minLength: 1
+      required:
+      - kind
+      - source_locator
+      additionalProperties: false
+      examples:
+      - kind: unconfigured
+        source_locator: telegram:example
+    TelegramUnconfiguredSubscriptionFeed:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/FeedId'
+        title:
+          type: string
+        folder_id:
+          $ref: '#/components/schemas/FolderId'
+        identity:
+          type: string
+          minLength: 1
+        original_urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceLocator'
+        importance:
+          $ref: '#/components/schemas/Importance'
+        initial_days:
+          type: integer
+          minimum: 1
+          maximum: 3650
+        public_ai:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+        history:
+          $ref: '#/components/schemas/HistoryState'
+        kind:
+          type: string
+          const: telegram
+        access:
+          $ref: '#/components/schemas/TelegramUnconfiguredAccess'
+        connection:
+          type: string
+          enum:
+          - needs_connection
+          - deleting
+      required:
+      - id
+      - title
+      - folder_id
+      - identity
+      - original_urls
+      - importance
+      - initial_days
+      - public_ai
+      - history
+      - kind
+      - access
+      - connection
+      additionalProperties: false
+      examples:
+      - id: example
+        title: example
+        folder_id: example
+        identity: example
+        original_urls: []
+        importance: normal
+        initial_days: 1
+        public_ai: null
+        history:
+          state: absent
+          legacy_since: null
+        kind: telegram
+        access:
+          kind: unconfigured
+          source_locator: telegram:example
+        connection: needs_connection
     TelegramAccess:
       oneOf:
+      - $ref: '#/components/schemas/TelegramUnconfiguredAccess'
       - $ref: '#/components/schemas/TelegramWebAccess'
       - $ref: '#/components/schemas/TelegramClientAccess'
       - $ref: '#/components/schemas/TelegramLegacyClientAccess'
       discriminator:
         propertyName: kind
         mapping:
+          unconfigured: '#/components/schemas/TelegramUnconfiguredAccess'
           web: '#/components/schemas/TelegramWebAccess'
           client: '#/components/schemas/TelegramClientAccess'
           legacy_client: '#/components/schemas/TelegramLegacyClientAccess'
@@ -11855,6 +11942,7 @@ components:
           type: string
           enum:
           - ready
+          - needs_connection
           - unavailable
           - deleting
       required:
@@ -12042,6 +12130,7 @@ components:
         connection: needs_profile_confirmation
     SubscriptionFeed:
       oneOf:
+      - $ref: '#/components/schemas/TelegramUnconfiguredSubscriptionFeed'
       - $ref: '#/components/schemas/DemoSubscriptionFeed'
       - $ref: '#/components/schemas/RssSubscriptionFeed'
       - $ref: '#/components/schemas/YoutubeSubscriptionFeed'
@@ -15543,13 +15632,29 @@ components:
       examples:
       - state: persistence_failure
         message: example
+    DiagnosticIgnored:
+      type: object
+      properties:
+        state:
+          type: string
+          const: ignored
+        reason:
+          type: string
+          const: material_viewed
+      required: [state, reason]
+      additionalProperties: false
+      examples:
+      - state: ignored
+        reason: material_viewed
     DiagnosticReceipt:
       oneOf:
+      - $ref: '#/components/schemas/DiagnosticIgnored'
       - $ref: '#/components/schemas/DiagnosticAccepted'
       - $ref: '#/components/schemas/DiagnosticPersistenceFailure'
       discriminator:
         propertyName: state
         mapping:
+          ignored: '#/components/schemas/DiagnosticIgnored'
           accepted: '#/components/schemas/DiagnosticAccepted'
           persistence_failure: '#/components/schemas/DiagnosticPersistenceFailure'
       examples:
@@ -17510,6 +17615,28 @@ components:
             owner: global
           keys: []
         result: failed
+    LegacyCommandContext:
+      type: object
+      description: Response-only context for a persisted command whose operation was retired or cannot be reconstructed. No URL, page or submitted values are exposed.
+      properties:
+        operation:
+          type: string
+          const: legacy
+        name:
+          type: string
+          enum: [import_subscriptions, import_preview, create_digest, unrecognized_operation]
+      required: [operation, name]
+      additionalProperties: false
+      examples:
+      - operation: legacy
+        name: import_subscriptions
+    StoredCommandContext:
+      oneOf:
+      - $ref: '#/components/schemas/CommandContext'
+      - $ref: '#/components/schemas/LegacyCommandContext'
+      examples:
+      - operation: legacy
+        name: import_subscriptions
     CommandReceiptPending:
       type: object
       properties:
@@ -17519,7 +17646,7 @@ components:
         id:
           $ref: '#/components/schemas/CommandId'
         context:
-          $ref: '#/components/schemas/CommandContext'
+          $ref: '#/components/schemas/StoredCommandContext'
         updated_at:
           $ref: '#/components/schemas/Timestamp'
       required:
@@ -17547,7 +17674,7 @@ components:
         id:
           $ref: '#/components/schemas/CommandId'
         context:
-          $ref: '#/components/schemas/CommandContext'
+          $ref: '#/components/schemas/StoredCommandContext'
         updated_at:
           $ref: '#/components/schemas/Timestamp'
       required:
@@ -17575,7 +17702,7 @@ components:
         id:
           $ref: '#/components/schemas/CommandId'
         context:
-          $ref: '#/components/schemas/CommandContext'
+          $ref: '#/components/schemas/StoredCommandContext'
         updated_at:
           $ref: '#/components/schemas/Timestamp'
         error:
@@ -17628,7 +17755,7 @@ components:
         id:
           $ref: '#/components/schemas/CommandId'
         context:
-          $ref: '#/components/schemas/CommandContext'
+          $ref: '#/components/schemas/StoredCommandContext'
         updated_at:
           $ref: '#/components/schemas/Timestamp'
       required:

@@ -24,7 +24,33 @@ async function reader() {
       const held = new Map<string, boolean>();
       const pending = new Map<string, (value: Response | Promise<Response>)=>void>();
       const aliases = new Map<string, string>();
+      // Transitional v2 scenario snapshots are adapted only in this synthetic
+      // transport. Production HTTP acceptance verifies the real v3 envelopes.
+      const v3Reply=(url:string,method:string,body:unknown):unknown=>{
+        if(url==='/api/v3/processors/llamacpp'&&method==='GET'&&body===null)return {configuration:null};
+        if(!body||typeof body!=='object')return body;
+        if(url.startsWith('/api/v3/settings/')&&'effective' in body&&'overrides' in body&&!('scope' in body)){
+          const [, , , ,scope,owner]=url.split('/');
+          const effective=Object.fromEntries(Object.entries(body.effective||{}).map(([key,item])=>{
+            if(!item||typeof item!=='object'||!('value' in item)||!('scope' in item))return [key,item];
+            return [key,{value:item.value,origin:{scope:item.scope,...(item.scope==='default'?{}:{owner:'owner' in item?item.owner:'global'})}}];
+          }));
+          return {scope,owner,effective,overrides:body.overrides};
+        }
+        if(url==='/api/v3/processors/llamacpp'&&method==='GET'&&!('configuration' in body))return {configuration:body};
+        if(url==='/api/v3/processors/llamacpp/check'&&'local' in body&&'model' in body&&'models' in body)return {locality:body.local?'local':'remote',model:body.model,models:body.models};
+        if(url==='/api/v3/processors/codex'&&method==='GET'&&'config' in body)return {configuration:body.config,availability:{state:'unavailable',auth:'unchecked',version:null,local:null,limits_checked:false,quota_windows:[],reason:'unavailable',message:''}};
+        if(url==='/api/v3/processors/codex/check'&&'available' in body)return {...body,state:body.available?'available':'unavailable',message:'reason' in body?body.reason:''};
+        if(url==='/api/v3/diagnostics'){
+          const entry=(value:unknown):unknown=>{if(!value||typeof value!=='object'||!('first_time' in value)||!('last_time' in value))return value;const {first_time,last_time,...rest}=value;return {...rest,first_at:first_time,last_at:last_time};};
+          if(method==='GET'&&'groups' in body&&Array.isArray(body.groups))return {...body,groups:body.groups.map(entry)};
+          if(method==='DELETE'&&'ok' in body)return body.ok?{state:'cleared'}:{state:'persistence_failure',message:'persistence_error' in body?body.persistence_error:''};
+          if(method==='POST'&&'ok' in body)return body.ok===false?{state:'persistence_failure',message:'persistence_error' in body?body.persistence_error:''}:'entry' in body&&body.entry?{state:'accepted',entry:entry(body.entry)}:{state:'ignored',reason:'material_viewed'};
+        }
+        return body;
+      };
       const response = async (url: string, method: string, body: unknown, status = 200) => {
+        if(status>=200&&status<300)body=v3Reply(url,method,body);
         await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
         return new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
       };
@@ -32,7 +58,7 @@ async function reader() {
         replies, held, pending, aliases, native: new Set(), requests: [],
         release(url, body, status = 200) {
           const resolve = pending.get(url); if (!resolve) throw new Error('No pending reply: ' + url); pending.delete(url); held.delete(url);
-          resolve(response(url, 'GET', body, status));
+          resolve(response(url, window.readerTransport.requests.filter(request=>request.url===url).at(-1)?.method||'GET', body, status));
         },
       };
       window.fetch = async (url, options) => {
@@ -61,11 +87,11 @@ async function reader() {
         t.replies.set('/api/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
         t.replies.set('/api/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
         t.replies.set('/api/navigation', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0}], count:0}});
-        t.replies.set('/api/processors/codex', {body:{config:null}});
+        t.replies.set('/api/v3/processors/codex', {body:{config:null}});
         t.replies.set('/api/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
-        t.replies.set('/api/processors/codex/models', {body:{models:[]}});
+        t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});
         const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', processor: 'codex'};
-        t.replies.set('/api/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
+        t.replies.set('/api/v3/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
         t.replies.set('/api/cards', {body: materials.map(({text, description, display_text, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
         for (const material of materials) {
           const {snippet, feed_title, ...opened} = material;

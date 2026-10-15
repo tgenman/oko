@@ -12,7 +12,7 @@ test('add URL uses one form and automatically shows YouTube connection', async (
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/feeds', {body: feed});
       t.replies.set('/api/feeds/verify', {body: {url: feed.original_urls[0], title: '3Blue1Brown', kind: 'youtube', verification: 'checked', existing: null}});
-      t.replies.set('/api/settings/feed/youtube', {body: {...t.replies.get('/api/settings/oko/global')!.body, feed}});
+      t.replies.set('/api/v3/settings/feed/youtube', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw');
@@ -42,7 +42,7 @@ test('debug toggle shows server traceback and caught browser errors are sent whi
     await r.page.evaluate(() => readerTransport.replies.set('/api/collect', {status: 500, body: {detail: 'collection failed'}}));
     await expect(r.page.locator('#debug-panel')).toBeHidden();
     await r.page.locator('#collect').click();
-    await r.page.waitForFunction(() => readerTransport.requests.some(r => r.url === '/api/debug' && r.method === 'POST' && r.body!.message === 'collection failed'));
+    await r.page.waitForFunction(() => readerTransport.requests.some(r => r.url === '/api/v3/diagnostics' && r.method === 'POST' && r.body!.message === 'collection failed'));
     await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-panel')).toBeVisible();
@@ -62,7 +62,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
     await r.page.evaluate(() => {
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      t.replies.set('/api/processors/llamacpp', {body: null});
+      t.replies.set('/api/v3/processors/llamacpp', {body: null});
       t.held.set('/api/feeds/verify', true);
     });
     await r.page.locator('#add-open').click();
@@ -80,7 +80,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
       const feed = {id: 'existing', title: 'Старое имя', kind: 'rss', transport: 'rss', importance: 'high', initial_days: 7, folder_id: 'f'};
       readerTransport.replies.set('/api/feeds/verify', {body: {existing: feed}});
       readerTransport.replies.set('/api/subscriptions', {body: {feeds: [feed], folders: [{id: 'f', title: 'Старая папка'}]}});
-      readerTransport.replies.set('/api/settings/feed/existing', {body: {...readerTransport.replies.get('/api/settings/oko/global')!.body, feed}});
+      readerTransport.replies.set('/api/v3/settings/feed/existing', {body: {...readerTransport.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#feeds-dialog')).toBeVisible();
@@ -97,7 +97,7 @@ test('offline browser errors group, retain material scroll, and retry the same d
     await expect(r.page.locator('#title')).toHaveText('one');
     await r.page.evaluate(() => {
       document.querySelector('article')!.scrollTop = 500;
-      readerTransport.replies.set('POST /api/debug', {status: 503, body: {detail: 'offline'}});
+      readerTransport.replies.set('POST /api/v3/diagnostics', {status: 503, body: {detail: 'offline'}});
       for (let i = 0; i < 3; i++) window.dispatchEvent(new ErrorEvent('error', {error: new Error('offline-js'), message: 'offline-js'}));
     });
     const scroll = await r.page.locator('article').evaluate(node => node.scrollTop);
@@ -108,11 +108,11 @@ test('offline browser errors group, retain material scroll, and retry the same d
     await expect(r.page.locator('#debug-errors')).toContainText('не сохранено');
     await expect(r.page.locator('#title')).toHaveText('one');
     expect(await r.page.locator('article').evaluate(node => node.scrollTop)).toBe(scroll);
-    const event = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/debug' && r.method === 'POST')!.body!.event_id);
-    await r.page.evaluate(() => readerTransport.replies.delete('POST /api/debug'));
+    const event = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/diagnostics' && r.method === 'POST')!.body!.event_id);
+    await r.page.evaluate(() => readerTransport.replies.delete('POST /api/v3/diagnostics'));
     await expect(r.page.locator('#debug-errors')).not.toContainText('не сохранено', {timeout: 6000});
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
-    expect(await r.page.evaluate(id => readerTransport.requests.filter(r => r.url === '/api/debug' && r.method === 'POST' && r.body!.event_id === id).length, event)).toBeGreaterThan(1);
+    expect(await r.page.evaluate(id => readerTransport.requests.filter(r => r.url === '/api/v3/diagnostics' && r.method === 'POST' && r.body!.event_id === id).length, event)).toBeGreaterThan(1);
     await r.page.locator('#status-close').click();
     expect(await r.page.locator('article').evaluate(node => node.scrollTop)).toBe(scroll);
   } finally { await r.close(); }
@@ -123,7 +123,7 @@ test('browser pending diagnostics mask quoted passwords and Basic credentials', 
   try {
     await r.start([]);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('POST /api/debug', {status: 503, body: {detail: 'offline'}});
+      readerTransport.replies.set('POST /api/v3/diagnostics', {status: 503, body: {detail: 'offline'}});
       const message = 'password="correct horse battery staple" Authorization: Basic dXNlcjpwYXNz';
       window.dispatchEvent(new ErrorEvent('error', {error: new Error(message), message}));
     });
@@ -132,7 +132,7 @@ test('browser pending diagnostics mask quoted passwords and Basic credentials', 
     await expect(r.page.locator('#debug-errors')).toContainText('[hidden]');
     await expect(r.page.locator('#debug-errors')).not.toContainText('horse');
     await expect(r.page.locator('#debug-errors')).not.toContainText('dXNlcjpwYXNz');
-    const body = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/debug' && r.method === 'POST')!.body);
+    const body = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/diagnostics' && r.method === 'POST')!.body);
     expect(JSON.stringify(body)).not.toContain('horse');
     expect(JSON.stringify(body)).not.toContain('dXNlcjpwYXNz');
   } finally { await r.close(); }
@@ -150,18 +150,18 @@ test('switch works with keyboard and clearing history rejects a late journal res
     const size = await r.page.locator('#status-toggle').boundingBox();
     expect(size!.width).toBeGreaterThan(size!.height);
     await r.page.evaluate(() => {
-      readerTransport.held.set('/api/debug', true);
+      readerTransport.held.set('/api/v3/diagnostics', true);
       readerTransport.held.set('/api/status', true);
     });
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/debug'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/diagnostics'));
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/status'));
     const old = (await r.api('debug')).groups;
     // Release only the old GET; DELETE uses the normal transport immediately.
-    await r.page.evaluate(() => readerTransport.held.delete('/api/debug'));
+    await r.page.evaluate(() => readerTransport.held.delete('/api/v3/diagnostics'));
     await r.page.locator('#debug-clear').click();
     await expect(r.page.locator('#debug-empty')).toBeVisible();
     await expect(r.page.locator('#debug-count')).toHaveText('0');
-    await r.page.evaluate(groups => readerTransport.release('/api/debug', {groups, persistence_error: ''}), old);
+    await r.page.evaluate(groups => readerTransport.release('/api/v3/diagnostics', {groups, persistence_error: ''}), old);
     await r.page.evaluate(() => readerTransport.release('/api/status', {stage: 'Готово', errors: [], sources: [], ready_sources:1, total_sources:1, debug_count: 31, debug_persistence_error: 'old disk error'}));
     await expect(r.page.locator('#debug-errors')).not.toContainText('old error');
     await expect(r.page.locator('#debug-count')).toHaveText('0');

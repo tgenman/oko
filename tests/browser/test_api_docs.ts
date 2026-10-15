@@ -26,8 +26,8 @@ test('standalone Swagger displays the complete contract without reader calls or 
     const response = await page.goto(origin + '/docs');
     assert.match(response!.headers()['content-security-policy'], /script-src 'self'/);
     await page.locator('.opblock').last().waitFor();
-    assert.equal(await page.locator('.opblock').count(), 49);
-    await page.locator('.opblock-summary').filter({hasText: '/api/status'}).click();
+    assert.equal(await page.locator('.opblock').count(), 50);
+    await page.locator('.opblock-summary').filter({hasText: '/api/v3/status'}).click();
     assert.equal(await page.getByRole('button', {name:'Try it out'}).count(), 0);
     assert.equal(await page.getByRole('button', {name:/Authorize/}).count(), 0);
     assert.deepEqual(errors, []);
@@ -36,7 +36,7 @@ test('standalone Swagger displays the complete contract without reader calls or 
     const contract = await (await context.request.get(origin + '/openapi.json')).json();
     assert.equal(contract.openapi, '3.1.0');
     await page.screenshot({path:artifactPath('swagger-contract.png'), fullPage:true});
-    assert.equal((await context.request.get(origin + '/api/status')).status(), 404);
+    assert.equal((await context.request.get(origin + '/api/v3/status')).status(), 404);
   } finally {
     await context.close();
     server.kill('SIGTERM');

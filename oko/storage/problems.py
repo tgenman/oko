@@ -1,10 +1,24 @@
 """Current reader obstacles; identity and recovery are independent of message text."""
 import json
+from dataclasses import dataclass
 import uuid
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
+
+
+@dataclass(frozen=True)
+class CommandRecord:
+    identity: str
+    context_json: str | None
+    error_json: str | None
+    result: str
+    updated: float
+
+
+class CommandContextMismatch(ValueError):
+    pass
 
 
 class Problems:
@@ -21,6 +35,8 @@ class Problems:
               sequence INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, identity TEXT NOT NULL,
               body TEXT NOT NULL, started REAL NOT NULL, completed REAL, result TEXT NOT NULL);
         ''')
+        # Recovery projection only: preserve the original service records for rollback.
+        self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result='pending'")}
 
     def snapshot(self, now: float) -> dict[str, Any]:
         current: list[dict[str, Any]] = []
@@ -106,10 +122,10 @@ class Problems:
         current.extend(groups.values())
         for receipt in self.db.execute('''SELECT * FROM reader_action_results r WHERE sequence=(
             SELECT max(sequence) FROM reader_action_results WHERE identity=r.identity) AND result IN ('failed','unknown','pending') ''').fetchall():
-            if receipt['result'] == 'pending' and not self.db.execute("SELECT 1 FROM reader_problems WHERE identity=? AND finished IS NULL", ('action:' + receipt['identity'],)).fetchone():
+            if receipt['result'] == 'pending' and receipt['id'] not in self._startup_pending and not self.db.execute("SELECT 1 FROM reader_problems WHERE identity=? AND finished IS NULL", ('action:' + receipt['identity'],)).fetchone():
                 continue
             context = json.loads(receipt['body'])
-            unknown = receipt['result'] == 'unknown'
+            unknown = receipt['result'] == 'unknown' or receipt['result'] == 'pending' and receipt['id'] in self._startup_pending
             receipt_action: dict[str, Any] | None = context['action']
             if unknown and receipt_action and receipt_action['kind'] not in ('settings', 'feed-settings', 'material', 'add'):
                 receipt_action = None
@@ -118,13 +134,36 @@ class Problems:
                 consequence='Око сверяет результат; действие не повторяется автоматически.' if unknown else 'Не удалось подтвердить выполнение действия.',
                 next_step='Проверьте состояние после восстановления связи.' if unknown else 'Вернитесь к действию, чтобы исправить проблему.',
                 objects=context['objects'],action=receipt_action,operation=receipt['identity'],request_id=receipt['id'],
-                state='retrying' if receipt['result'] == 'pending' else 'current',created_at=receipt['started'],finished_at=None,outcome=None,next_at=None))
+                state='retrying' if receipt['result'] == 'pending' and not unknown else 'current',created_at=receipt['started'],finished_at=None,outcome=None,next_at=None))
         return self.reconcile(current, now)
 
-    def action_started(self, identity: str, context: dict[str, Any], now: float) -> None:
+    def command_record(self, identity: str) -> CommandRecord | None:
+        row = self.db.execute('SELECT * FROM reader_action_results WHERE id=?', (identity,)).fetchone()
+        if row is None:
+            return None
+        body = json.loads(row['body'])
+        return CommandRecord(row['identity'], json.dumps(body['command_context']) if 'command_context' in body else None,
+                             body.get('command_error'), 'unknown' if row['result']=='pending' and identity in self._startup_pending else row['result'], row['completed'] or row['started'])
+
+    def command_error(self, identity: str, error_json: str) -> None:
+        row = self.db.execute('SELECT body FROM reader_action_results WHERE id=?', (identity,)).fetchone()
+        if row:
+            body = json.loads(row['body'])
+            body['command_error'] = error_json
+            with self.db:
+                self.db.execute('UPDATE reader_action_results SET body=? WHERE id=?', (json.dumps(body), identity))
+
+    def action_started(self, identity: str, context: dict[str, Any], now: float, *, restart: bool = False, expected_identity: str | None = None) -> None:
         with self.db:
+            prior = self.db.execute('SELECT identity FROM reader_action_results WHERE id=?', (identity,)).fetchone()
+            if restart and prior and prior['identity'] != (expected_identity or context['identity']):
+                raise CommandContextMismatch('Контекст команды не совпадает')
+            if restart:
+                self._startup_pending.discard(identity)
             self.db.execute('INSERT OR IGNORE INTO reader_action_results(id,identity,body,started,result) VALUES (?,?,?,?,?)',
                             (identity, context['identity'], json.dumps(context), now, 'pending'))
+            if restart:
+                self.db.execute("UPDATE reader_action_results SET body=?,started=?,completed=NULL,result='pending' WHERE id=?", (json.dumps(context), now, identity))
 
     def action_finished(self, identity: str, succeeded: bool, now: float) -> None:
         with self.db:
@@ -132,10 +171,13 @@ class Problems:
                             (now, 'succeeded' if succeeded else 'failed', identity))
 
     def report_action(self, identity: str, context: dict[str, Any], result: str, now: float) -> str:
+        existed = self.command_record(identity)
         self.action_started(identity, context, now)
         row = self.db.execute('SELECT * FROM reader_action_results WHERE id=?', (identity,)).fetchone()
         if row['identity'] != context['identity']:
-            raise ValueError('Контекст действия не совпадает')
+            raise CommandContextMismatch('Контекст действия не совпадает')
+        if existed and existed.result == 'pending' and existed.context_json:
+            return 'pending'
         if row['result'] in ('pending', 'unknown'):
             with self.db:
                 self.db.execute('UPDATE reader_action_results SET result=? WHERE id=?', (result, identity))

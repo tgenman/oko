@@ -37,7 +37,7 @@ test('feed settings independently expand folders and return to the selected obje
     expect(await r.page.locator('#feeds-dialog').evaluate(n=>n.scrollWidth<=n.clientWidth)).toBe(true);
     await r.page.screenshot({path:artifactPath('feed-tree-ios-settings-mobile.png')});
     expect((await r.api('subscriptions')).feeds).toHaveLength(data.feeds.length);
-    expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>['PATCH','PUT','POST','DELETE'].includes(q.method) && !q.url.includes('/tabs/') && !/^\/api\/v3\/client-sessions(?:\/[^/?]+)?$/.test(q.url) && q.url !== '/api/debug'))).toEqual([]);
+    expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>['PATCH','PUT','POST','DELETE'].includes(q.method) && !q.url.includes('/tabs/') && !/^\/api\/v3\/client-sessions(?:\/[^/?]+)?$/.test(q.url) && q.url !== '/api/v3/diagnostics'))).toEqual([]);
     await r.page.setViewportSize({width:1280,height:900});
     await r.page.screenshot({path:artifactPath('feed-tree-ios-settings-desktop.png')});
     expect(r.errors).toEqual([]);

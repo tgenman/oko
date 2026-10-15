@@ -113,7 +113,7 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
             return None if self.outcome == 'missing' else 'Проверенные субтитры.'
     captions, ai = Missing(), []
     wall = [time.time()]
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, ai_transport=model_transport(ai), wall_clock=lambda: wall[0]), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, ai_transport=model_transport(ai), wall_clock=lambda: wall[0]), headers=HEADERS) as client:
         feed = subscribe(client)
         client.patch('/api/settings/feed/' + feed, json={'theses': False})
         client.post('/api/tabs/reader/heartbeat')

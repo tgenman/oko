@@ -30,22 +30,26 @@ def test_contract_build_covers_real_reader_and_validates_baseline(tmp_path):
     with TestClient(create_app(tmp_path, token='synthetic')) as client:
         routes = {(route.path, method.lower()) for route in client.app.routes if getattr(route, 'path', '').startswith('/api/') for method in route.methods}
         described = {(path, method) for path, operations in spec['paths'].items() for method in operations if method in {'get','post','put','patch','delete'}}
-        assert described == routes
-        assert len({operation['operationId'] for operations in spec['paths'].values() for operation in operations.values()}) == len(routes)
+        # Expand-contract: legacy routes remain backed by the reviewed v2 baseline.
+        legacy = json.loads((ROOT / 'api/baseline.json').read_text())
+        legacy_routes = {(path, method) for path, operations in legacy['paths'].items() for method in operations if method in {'get','post','put','patch','delete'}}
+        assert {route for route in routes if not route[0].startswith('/api/v3/')} == legacy_routes
+        assert {route for route in routes if route[0].startswith('/api/v3/')} <= described
+        assert len({operation['operationId'] for operations in spec['paths'].values() for operation in operations.values()}) == len(described)
         for path in ['/api/status', '/api/navigation', '/api/cards', '/api/subscriptions', '/api/settings/oko/global', '/api/youtube', '/api/debug']:
             response = client.get(path, headers={'Authorization':'Bearer synthetic'})
             assert response.status_code == 200
-            validate_reply(spec, '/api/settings/{scope}/{owner}' if path.startswith('/api/settings/') else path, 'get', response)
+            validate_reply(legacy, '/api/settings/{scope}/{owner}' if path.startswith('/api/settings/') else path, 'get', response)
         response = client.get('/api/status')
         assert response.status_code == 403
-        validate_reply(spec, '/api/status', 'get', response)
+        validate_reply(legacy, '/api/status', 'get', response)
         response = client.patch('/api/settings/oko/global',json={'theses':'wrong'},headers={'Authorization':'Bearer synthetic'})
         assert response.status_code == 422
-        validate_reply(spec, '/api/settings/{scope}/{owner}', 'patch', response)
+        validate_reply(legacy, '/api/settings/{scope}/{owner}', 'patch', response)
 
 
 def test_real_settings_import_diagnostics_and_exact_history_obey_contract(tmp_path):
-    spec = bundled()
+    spec = json.loads((ROOT / 'api/baseline.json').read_text())
     headers = {'Authorization':'Bearer synthetic'}
     with TestClient(create_app(tmp_path, token='synthetic')) as client:
         for payload in [{'prompt_theses':'Synthetic'}, {'prompt_theses':None}, {}]:
@@ -79,7 +83,7 @@ def test_real_settings_import_diagnostics_and_exact_history_obey_contract(tmp_pa
 
 def test_build_rejects_external_references_before_fetching_them(tmp_path):
     spec = copy.deepcopy(bundled())
-    spec['paths']['/api/status']['get']['responses']['200']['content']['application/json']['schema'] = {'$ref':'https://example.invalid/private'}
+    spec['paths']['/api/v3/status']['get']['responses']['200']['content']['application/json']['schema'] = {'$ref':'https://example.invalid/private'}
     invalid = tmp_path / 'invalid.json'
     invalid.write_text(json.dumps(spec))
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/api.py'), 'validate', '--spec', str(invalid)], capture_output=True, text=True)

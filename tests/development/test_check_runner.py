@@ -143,10 +143,24 @@ def test_ui_checks_production_http_modules_before_browser(tmp_path):
     assert 'PASS http' in result.stdout
 
 
+def ordinary_checkout(tmp_path):
+    """Exercise ordinary runner policy independently of an outer candidate run."""
+    import shutil
+    checkout = tmp_path / 'ordinary'
+    (checkout / 'scripts').mkdir(parents=True)
+    shutil.copy(ROOT / 'scripts/check', checkout / 'scripts/check')
+    for name in ('tests/browser/test_material_list.ts', 'tests/reader/test_web_assets.py', 'frontend/src/main.tsx'):
+        file = checkout / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text('')
+    return checkout
+
+
 def test_python_and_types_do_not_require_node(tmp_path):
+    checkout = ordinary_checkout(tmp_path)
     env = runtimes(tmp_path)
     env['OKO_NODE'] = str(tmp_path / 'absent-node')
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', 'types'],
+    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'python', 'types'],
                             env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS python-tests' in result.stdout and 'PASS types' in result.stdout
@@ -214,13 +228,14 @@ def test_invalid_file_selection_fails_before_checks(tmp_path):
 
 
 def test_python_file_selection_supports_test_id_and_does_not_require_node(tmp_path):
+    checkout = ordinary_checkout(tmp_path)
     env = runtimes(tmp_path)
     env['OKO_NODE'] = str(tmp_path / 'missing-node')
     record = tmp_path / 'commands'
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_PYTHON'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as f: f.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files', 'tests/reader/test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data'], env=env, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'python', '--files', 'tests/reader/test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data' in record.read_text()
     assert 'PASS python-tests' in result.stdout
@@ -256,6 +271,7 @@ def test_browser_gets_resolved_python_in_checkout_without_virtualenv(tmp_path):
 
 
 def test_report_keeps_full_output_failures_and_separate_reruns(tmp_path):
+    checkout = ordinary_checkout(tmp_path)
     import json
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])
@@ -272,7 +288,7 @@ if 'pytest' in sys.argv:
 sys.exit(0)
 '''))
     reports = tmp_path / 'reports'
-    command = [sys.executable, str(ROOT / 'scripts/check'), 'all', '--report-dir', str(reports)]
+    command = [sys.executable, str(checkout / 'scripts/check'), 'all', '--report-dir', str(reports)]
     result = subprocess.run(command, env=env, capture_output=True, text=True)
     assert result.returncode == 1
     first = next(reports.iterdir())
@@ -287,13 +303,13 @@ sys.exit(0)
     assert 'x' * 100000 in log and 'stderr diagnostic' in log
     first_json = (first / 'report.json').read_text()
     runtime.write_text('#!/usr/bin/env python3\nimport os, sys\nif \"-e\" in sys.argv: print(os.environ[\"OKO_BROWSER_EXECUTABLE\"])\nsys.exit(0)\n')
-    retry = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
+    retry = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
     assert retry.returncode == 0, retry.stdout + retry.stderr
     assert (first / 'report.json').read_text() == first_json
     second = next(path for path in reports.iterdir() if path != first)
     rerun = json.loads((second / 'report.json').read_text())
     assert list(rerun['suites']) == ['tooling-types', 'browser-types', 'browser']
-    assert rerun['selected_files']['browser'] == [str(ROOT / 'tests/browser/test_material_list.ts')]
+    assert rerun['selected_files']['browser'] == [str(checkout / 'tests/browser/test_material_list.ts')]
 
 
 def test_report_records_missing_dependency_without_claiming_success(tmp_path):

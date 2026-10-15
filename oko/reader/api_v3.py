@@ -1,7 +1,7 @@
 """Versioned HTTP boundary; domain execution remains owned by Runtime.
 
-The first migration slice owns execution policy and neutral client presence.
-Other v3 operations are added as their domain consumers migrate.
+Execution policy, neutral client presence and migrated domain families share
+this boundary. Remaining operations migrate with their domain consumers.
 """
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -51,6 +51,12 @@ def error_response(status: int, value: wire.ErrorEnvelope) -> JSONResponse:
 
 
 def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Callable[[], float], journal: Journal) -> None:
+    from oko.reader import settings_v3, commands_v3, processors_v3, diagnostics_v3
+    settings_v3.register(app, runtime)
+    commands_v3.register(app, runtime)
+    processors_v3.register(app, runtime)
+    diagnostics_v3.register(app, runtime, journal)
+
     @app.exception_handler(ApiError)
     async def api_error(request: Request, error: ApiError) -> JSONResponse:
         return error_response(error.status, error.value)
@@ -157,3 +163,8 @@ def positive_version(value: str) -> int:
     if number > 9007199254740991:
         raise ApiError(422, invalid('path', 'number'))
     return number
+
+
+def no_query(request: Request) -> None:
+    if request.query_params:
+        raise ApiError(422, invalid('query', next(iter(request.query_params))))
