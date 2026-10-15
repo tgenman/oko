@@ -134,10 +134,10 @@ def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path
 
 def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
     def response(request):
-        return httpx.Response(200, text=rss() if '/telegram/' in request.url.path else '<article>Текст</article>')
-    saved_sources(tmp_path, [('https://source.test/telegram/channel/example', 'Источник', 'Новости')])
+        return httpx.Response(200, text=rss() if request.url.path == '/feed' else '<article>Текст</article>')
+    saved_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
-        # An old saved Telegram RSS fallback can be revoked.
+        # RSS collection can be disabled independently of immutable Telegram access.
         feed = client.get('/api/subscriptions').json()['feeds'][0]
         client.patch('/api/feeds/' + feed['id'], json={'transport': 'rss'})
         client.post('/api/tabs/test/heartbeat')

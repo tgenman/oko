@@ -25,8 +25,9 @@ def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: P
         reset = client.patch(url, json={'prompt_theses': None}).json()
         assert reset['effective']['prompt_theses']['value'] == 'Только темы'
         assert reset['overrides'] == {'prompt_filters': 'Без рекламы'}
-        patch = {'importance': 'high', 'initial_days': 7, 'auto_read': False, 'public_ai': True, 'read_history': False, 'transport': 'telegram'}
+        patch = {'importance': 'high', 'initial_days': 7, 'auto_read': False, 'public_ai': True, 'read_history': False}
         assert client.patch('/api/feeds/' + feed['id'], json=patch).status_code == 200
+        assert client.patch('/api/feeds/' + feed['id'], json={'transport':'telegram'}).status_code == 400
         assert client.patch(url, json={'importance': 'high'}).status_code == 422
         assert client.patch(url, json={'theses': 'yes'}).status_code == 422
         assert client.patch(url, json={'originals': 'wrong'}).status_code == 422

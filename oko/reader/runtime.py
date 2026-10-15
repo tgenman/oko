@@ -836,7 +836,10 @@ class Runtime:
     async def remove_feed(self, identity: str) -> None:
         async with self._actions:
             current = self.require_store()
+            members = {r[0] for r in current.db.execute('SELECT id FROM items WHERE feed_id=?', (identity,))}
             current.remove_feed(identity)
+            if self.diagnostics:
+                self.diagnostics.forget_materials(members)
             await self._cancel()
             self._sources.pop(identity, None)
             self._telegram_bindings.pop(identity, None)

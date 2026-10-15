@@ -183,6 +183,8 @@ class TelegramAccess:
         subscriptions.check_owner('feed', feed)
         row = self.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
         binding = self.binding(feed)
+        if binding and ((binding['kind'] == 'legacy_client' and binding['alias'] != profile['account']) or (binding['kind'] == 'client' and binding['account_user_id'] != str(profile['user_id']))):
+            raise TelegramConflict('access_immutable', dict(feed_id=feed), 'Сохранённый аккаунт нельзя заменить другим профилем')
         if row['kind'] != 'telegram' or row['transport'] == 'rss' or row['connection'] == 'deleting' or (binding and binding['kind'] == 'web') or (row['telegram_peer'] and row['telegram_peer'] != info['peer']) or (binding and binding.get('role', profile['role']) != profile['role']):
             raise TelegramConflict('access_immutable', dict(feed_id=feed), 'Для другой привязки удалите фид и добавьте заново')
         with self.db:

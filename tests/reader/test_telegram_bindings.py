@@ -116,16 +116,22 @@ def test_session_substitution_blocks_collection_and_same_person_recovers(tmp_pat
         assert client.post('/api/v3/telegram/connect', json=body).status_code == 200
 
 
-def legacy_feeds(root, *, topics=False):
+def legacy_feeds(root, *, topics=False, accounts=('one', 'two', 'three')):
     """A pre-upgrade database: helpers never run an account or migrate a user."""
     from oko.storage.store import Store
-    from oko.collection.telegram.source import ConnectTelegram
+    from oko.subscriptions.subscriptions import key
     from oko.collection.contracts import Material, Publication
     store = Store(root, lambda _: None)
     result = []
-    for account in ('one', 'two', 'three'):
-        feed = store.subscriptions.connect_telegram(ConnectTelegram(account=account, peer='@shared', folder='Old', auto_read=False, topic_id=20 if topics else None),
-            dict(peer=-1001234567890, username='shared', title=account))
+    for account in accounts:
+        identity = f'telegram-peer:{account}:-1001234567890' + (':topic:20' if topics else '')
+        feed = dict(id=key(identity))
+        with store.db:
+            store.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,0)', (key('folder:Old'),'Old'))
+            store.db.execute("""INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,
+                telegram_peer,telegram_account,telegram_username,telegram_topic,auto_read)
+                VALUES (?,?,?,'telegram',?,?,'connected','telegram',?,?,?,?,0)""",
+                (feed['id'], identity, account, key('folder:Old'), '["@shared"]', -1001234567890, account, 'shared', 20 if topics else None))
         result.append(feed['id'])
         store.enqueue_discovery(feed['id'])
         job = store.next_job(0, feeds=[feed['id']])
@@ -318,3 +324,49 @@ def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
             assert not (tmp_path/'staging'/old_material).exists()
     finally:
         release.set()
+
+
+def test_legacy_adoption_cannot_replace_unknown_original_person_with_another_profile(tmp_path):
+    feed = legacy_feeds(tmp_path, accounts=('one',))[0]
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()), headers=HEADERS) as client:
+        before = client.get('/api/v3/subscriptions').json()
+        assert client.put('/api/v3/telegram/profiles/collection', json={'configuration_ref':'two'}).status_code == 200
+        response = client.post('/api/telegram/connect', json=dict(account='two',peer='-1001234567890',feed_id=feed,folder='Other',auto_read=False))
+        assert response.status_code == 409
+        assert client.get('/api/v3/subscriptions').json() == before
+        material = client.get('/api/cards').json()[0]['id']
+        assert client.get('/api/materials/'+material).json()['text'] == 'one'
+
+
+def test_confirmed_alias_cannot_be_reassigned_to_another_peer(tmp_path):
+    class Aliases(Accounts):
+        async def info(self, account, peer):
+            first = peer == '@first'
+            return dict(peer=-1001234567890 if first else -1009999999999, title='First' if first else 'Second',
+                kind='channel',forum=False,username='first' if first else 'second',usernames=['shared'])
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Aliases()), headers=HEADERS) as client:
+        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
+        body = dict(source_locator='@first',folder='Inbox',access={'kind':'client','profile':'personal'})
+        first = client.post('/api/v3/telegram/connect', json=body).json()['feed_id']
+        response = client.post('/api/v3/telegram/connect', json={**body, 'source_locator':'@second'})
+        assert response.status_code == 409 and response.json()['code'] == 'source_identity_conflict'
+        assert response.json()['details']['feed_id'] == first
+        feeds = client.get('/api/v3/subscriptions').json()['feeds']
+        assert len(feeds) == 1 and feeds[0]['id'] == first and feeds[0]['title'] == 'First'
+
+
+def test_failed_or_redirected_preview_never_creates_a_binding(tmp_path):
+    import httpx
+    from pathlib import Path
+    landing = (Path(__file__).resolve().parents[1]/'fixtures/telegram/unavailable.html').read_bytes()
+    responses = [httpx.Response(200, content=landing), httpx.Response(302, headers={'location':'https://example.test/private'})]
+    calls = []
+    def reply(request):
+        calls.append(str(request.url))
+        return responses.pop(0)
+    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+        for _ in range(2):
+            response = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture',folder='Web'))
+            assert response.status_code == 503 and response.json()['code'] == 'source_unavailable'
+            assert not client.get('/api/v3/subscriptions').json()['feeds']
+    assert len(calls) == 2 and all(url.startswith('https://t.me/') for url in calls)
