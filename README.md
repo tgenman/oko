@@ -12,7 +12,7 @@
 
 ## Запуск
 
-Браузерный интерфейс написан на React и strict TypeScript в `frontend/src/`, сборка — Vite. Python выдаёт готовые HTML, JS/CSS и API на одном origin. Око запускается из репозитория; Node нужен для подготовки frontend. Для разработки установите Python-зависимости через `poetry sync` (включая группу `dev`), выполните `npm ci`, `npm run api:generate` и `npm run build`; `npm run dev` пересобирает assets при правках для того же Python-сервера. Source checkout отклоняет отсутствующую или устаревшую сборку до запуска Runtime.
+Браузерный интерфейс написан на React и strict TypeScript в `frontend/src/`, сборка — Vite. Python выдаёт готовые HTML, JS/CSS и API на одном origin. Око запускается из репозитория; Node нужен для подготовки frontend. Для разработки установите Python-зависимости через `uv sync --locked` (включая группу `dev`), выполните `npm ci`, `npm run api:generate` и `npm run build`; `npm run dev` пересобирает assets при правках для того же Python-сервера. Source checkout отклоняет отсутствующую или устаревшую сборку до запуска Runtime.
 
 Контракт — [api/openapi.yaml](api/openapi.yaml). Обе библиотеки DTO/SDK генерируются из него; `npm run api:check` выявляет drift без записи в checkout. У работающего Око документация находится на `/docs`; `npm run api:docs` показывает её отдельно без Runtime. [Команды контракта](api/README.md), [запуск из checkout](docs/development/package.md).
 
@@ -22,17 +22,15 @@ Codex на macOS: Око предпочитает непосредственно
 
 Исходник запуска — `scripts/launch.applescript`. Пересобрать приложение после изменения исходника: `osacompile -o Око.app scripts/launch.applescript`. Приложение должно оставаться в корне проекта; журнал запуска находится в `data/launcher.log`.
 
-Python 3.11–3.14 и Poetry 2.5.1 (CLI устанавливается отдельно от `.venv`):
+Python 3.11–3.14 и uv 0.11.28 (CLI устанавливается отдельно от `.venv`):
 
 Подготовка CLI, переход существующего окружения и откат описаны в [инструкции Python-окружения](docs/development/python-environment.md).
 
 ```sh
-poetry env use python3.11
-poetry check --lock --strict
-poetry sync
-poetry run python -m oko
+uv sync --locked --python python3.11
+uv run --locked python -m oko
 # Демонстрация без настоящих источников:
-poetry run python -m oko --demo
+uv run --locked python -m oko --demo
 ```
 
 Браузер открывается автоматически. Повтор той же команды открывает действующий экземпляр. `--data /путь` выбирает хранилище; по умолчанию это `data/` текущего каталога. `--no-browser` оставляет открытие браузера вызывающему коду. Без `--demo` подключаются импортированные RSS/Atom. При открытой вкладке сбор выполняется при запуске, для новых подписок, по кнопке «Обновить источники» и раз в пять минут.
@@ -100,7 +98,7 @@ SQLite хранит идентичности, состояние, позиции
 Запуск с существующим окружением клиента:
 
 ```sh
-poetry run python -m oko --telegram-env /Users/dabondarev/repo_personal/telegram-mcp/.env
+uv run --locked python -m oko --telegram-env /Users/dabondarev/repo_personal/telegram-mcp/.env
 ```
 
 Минимальный клиент находится в Око и вызывает Telethon напрямую. MCP и код/окружение проекта `telegram-mcp` не используются. Из существующей `.env` читаются настройки авторизации, без копирования файла и сессий. Поддерживаются именованные StringSession и существующие `.session` (относительные пути считаются от `.env`), device identity и proxy; пулы `TELEGRAM_SESSION_STRINGS` пока не поддерживаются. Собственный процесс клиента позволяет принудительно остановить зависшее скачивание. Защита сессии совместима с прежним клиентом: занятый аккаунт показывается как ошибка, без остановки другого клиента. Старый флаг `--telegram-project` оставлен как сокращение пути к `.env`, без импорта его кода. Вход и создание сессий здесь не выполняются.

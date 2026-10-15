@@ -202,7 +202,7 @@ TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/
                'tests/support/', 'frontend/src/api/generated/', 'frontend/src/api/legacy-generated/',
                'oko/reader/generated/', 'oko/reader/legacy_generated/',
                'tests/api/test_governance.py', 'tests/api/test_strict_generation.py',
-               'package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock',
+               'package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock',
                'tsconfig.json', 'tsconfig.browser-tests.json', 'tsconfig.tooling.json',
                'vite.config.mts', 'eslint.config.ts', '.gitignore', 'tests/process_server.py')
 

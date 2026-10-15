@@ -18,7 +18,7 @@ if (['validate','docs'].includes(command)) {
 if (!['generate','check'].includes(command)) throw new Error('Expected generate or check');
 const cacheInputs = ['api', 'scripts/api.py', 'scripts/api-cache.mts',
   'scripts/api-templates', 'scripts/generate-api.mts', 'scripts/generate_api.py', 'scripts/legacy_api.py',
-  'pyproject.toml', 'poetry.lock',
+  'pyproject.toml', 'uv.lock',
   'frontend/src/api/generated', 'frontend/src/api/legacy-generated',
   'oko/reader/generated', 'oko/reader/legacy_generated'];
 const key = async () => fingerprint(root, cacheInputs, {environment: await toolchain(root, python)});
