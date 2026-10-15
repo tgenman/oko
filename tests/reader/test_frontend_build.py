@@ -42,14 +42,14 @@ def test_failed_build_preserves_previous_complete_generation(tmp_path: Path):
     root = Path(__file__).resolve().parents[2]
     checkout = tmp_path / 'checkout'
     checkout.mkdir()
-    for name in ('frontend', 'scripts', 'api', 'oko', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs'):
+    for name in ('frontend', 'scripts', 'api', 'oko', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.tooling.json', 'vite.config.mts'):
         source = root / name
         if source.is_dir():
             shutil.copytree(source, checkout / name, ignore=shutil.ignore_patterns('__pycache__', 'frontend_build'))
         else:
             shutil.copy(source, checkout / name)
     (checkout / 'node_modules').symlink_to(root / 'node_modules', target_is_directory=True)
-    command = ['node', str(checkout / 'scripts/build-frontend.mjs')]
+    command = ['node', '--import', 'tsx', str(checkout / 'scripts/build-frontend.mts')]
     environment = dict(os.environ, OKO_PYTHON=sys.executable)
     first = subprocess.run(command, cwd=checkout, env=environment, capture_output=True, text=True)
     assert first.returncode == 0, first.stdout + first.stderr
@@ -80,7 +80,7 @@ def test_watch_publishes_complete_generations_and_retains_open_tab_assets(tmp_pa
     root = Path(__file__).resolve().parents[2]
     checkout = tmp_path / 'checkout'
     checkout.mkdir()
-    for name in ('frontend', 'scripts', 'api', 'oko', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs'):
+    for name in ('frontend', 'scripts', 'api', 'oko', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.tooling.json', 'vite.config.mts'):
         source = root / name
         if source.is_dir():
             shutil.copytree(source, checkout / name, ignore=shutil.ignore_patterns('__pycache__', 'frontend_build'))
@@ -91,7 +91,7 @@ def test_watch_publishes_complete_generations_and_retains_open_tab_assets(tmp_pa
     current = build / 'current.json'
     log = tmp_path / 'watch.log'
     with log.open('w') as output:
-        process = subprocess.Popen(['node', str(checkout / 'scripts/build-frontend.mjs'), '--watch'], cwd=checkout, env=dict(os.environ, OKO_PYTHON=sys.executable), stdout=output, stderr=output)
+        process = subprocess.Popen(['node', '--import', 'tsx', str(checkout / 'scripts/build-frontend.mts'), '--watch'], cwd=checkout, env=dict(os.environ, OKO_PYTHON=sys.executable), stdout=output, stderr=output)
         try:
             deadline = time.monotonic() + 15
             while 'Watching frontend' not in log.read_text() and time.monotonic() < deadline:

@@ -191,6 +191,22 @@ def test_browser_types_failure_prevents_browser_execution(tmp_path):
     assert '\nRUN browser\n' not in result.stdout
 
 
+def test_tooling_types_failure_prevents_build_and_browser(tmp_path):
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace(
+        'sys.exit(0)', "sys.exit(7 if any('tsconfig.tooling.json' in arg for arg in sys.argv) else 0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'FAIL tooling-types' in result.stdout
+    assert 'NOT RUN build\n' in result.stdout
+    assert 'NOT RUN http\n' in result.stdout
+    assert 'NOT RUN browser\n' in result.stdout
+    assert '\nRUN build\n' not in result.stdout
+    assert '\nRUN browser\n' not in result.stdout
+
+
 def test_invalid_file_selection_fails_before_checks(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/missing.ts'], env=runtimes(tmp_path), capture_output=True, text=True)
     assert result.returncode != 0
@@ -276,7 +292,7 @@ sys.exit(0)
     assert (first / 'report.json').read_text() == first_json
     second = next(path for path in reports.iterdir() if path != first)
     rerun = json.loads((second / 'report.json').read_text())
-    assert list(rerun['suites']) == ['browser-types', 'browser']
+    assert list(rerun['suites']) == ['tooling-types', 'browser-types', 'browser']
     assert rerun['selected_files']['browser'] == [str(ROOT / 'tests/browser/test_material_list.ts')]
 
 
@@ -341,7 +357,7 @@ def test_browser_name_filter_is_passed_and_reported(tmp_path):
 def test_failed_lint_skips_browser_but_keeps_other_results(tmp_path):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])
-    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cjs' in value for value in sys.argv) else 0)"))
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cts' in value for value in sys.argv) else 0)"))
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert 'FAIL lint' in result.stdout and 'NOT RUN browser' in result.stdout
@@ -435,7 +451,7 @@ def test_lifecycle_profile_selects_dedicated_scenarios(tmp_path):
 def test_explicit_suite_order_cannot_run_browser_before_selected_lint(tmp_path):
     env=runtimes(tmp_path)
     runtime=Path(env['OKO_NODE'])
-    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cjs' in value for value in sys.argv) else 0)"))
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cts' in value for value in sys.argv) else 0)"))
     result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'browser','syntax','lint'],env=env,capture_output=True,text=True)
     assert result.returncode==1,result.stdout+result.stderr
     assert '\nRUN browser\n' not in result.stdout

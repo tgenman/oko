@@ -1,3 +1,4 @@
+import type {BinaryLike} from 'node:crypto';
 import {build} from 'vite';
 import {createHash} from 'node:crypto';
 import {promises as fs} from 'node:fs';
@@ -7,8 +8,8 @@ import ts from 'typescript';
 
 const root = resolve(import.meta.dirname, '..');
 const output = join(root, 'oko/frontend_build');
-const inputs = ['frontend', 'api/openapi.yaml', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs', 'scripts/build-frontend.mjs'];
-async function files(directory) {
+const inputs = ['frontend', 'api/openapi.yaml', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.tooling.json', 'vite.config.mts', 'scripts/build-frontend.mts'];
+async function files(directory: string): Promise<string[]> {
   const found = [];
   for (const entry of (await fs.readdir(directory, {withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
     const path = join(directory, entry.name);
@@ -17,7 +18,7 @@ async function files(directory) {
   }
   return found.sort();
 }
-const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const digest = (bytes: BinaryLike) => createHash('sha256').update(bytes).digest('hex');
 async function sourceDigest() {
   const hash = createHash('sha256');
   for (const input of inputs) {
@@ -30,14 +31,15 @@ async function sourceDigest() {
   return hash.digest('hex');
 }
 async function compile() {
-  execFileSync(process.execPath,[join(root,'scripts/generate-api.mjs'),'check'],{stdio:'inherit'});
+  execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'-p',join(root,'tsconfig.tooling.json')],{cwd:root,stdio:'inherit'});
+  execFileSync(process.execPath,['--import','tsx',join(root,'scripts/generate-api.mts'),'check'],{stdio:'inherit'});
   execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'--noEmit'],{cwd:root,stdio:'inherit'});
   const before = await sourceDigest();
   const stage = join(output, '.stage-' + process.pid);
   await fs.mkdir(output,{recursive:true});
   await fs.rm(stage,{recursive:true,force:true});
   try {
-    const result = await build({configFile:join(root,'vite.config.mjs'),build:{outDir:stage,emptyOutDir:true}});
+    const result = await build({configFile:join(root,'vite.config.mts'),build:{outDir:stage,emptyOutDir:true}});
     await fs.mkdir(join(stage,'docs'),{recursive:true});
     await fs.copyFile(join(root,'frontend/docs/index.html'),join(stage,'docs/index.html'));
     const initializer=ts.transpileModule(await fs.readFile(join(root,'frontend/docs/initializer.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}});
@@ -57,17 +59,17 @@ async function compile() {
     // A stable transport entry is retained for its public browser boundary;
     // production reader imports always refer to hashed assets.
     const bundles = Array.isArray(result) ? result : [result];
-    const transport = bundles.flatMap(bundle=>bundle.output || []).find(chunk=>chunk.type==='chunk' && chunk.isEntry && chunk.name==='transport')?.fileName;
+    const transport = bundles.flatMap(bundle=>'output' in bundle ? bundle.output : []).find(chunk=>chunk.type==='chunk' && chunk.isEntry && chunk.name==='transport')?.fileName;
     if (!transport) throw new Error('Transport entry missing from the frontend bundle');
     await fs.writeFile(join(stage,'transport.js'),'export * from "/'+transport+'";\n');
     if (before !== await sourceDigest()) throw new Error('Sources changed during build; retry');
-    const assets = {};
+    const assets: Record<string,string> = {};
     for (const file of await files(stage)) assets[relative(stage,file).split('\\').join('/')] = digest(await fs.readFile(file));
     const generation = digest(JSON.stringify(assets));
     const target = join(output,'generations',generation);
     await fs.mkdir(join(output,'generations'),{recursive:true});
     try {await fs.rename(stage,target);} catch(error) {
-      if (!['EEXIST','ENOTEMPTY'].includes(error.code)) throw error;
+      if (!['EEXIST','ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
       await fs.rm(stage,{recursive:true,force:true});
     }
     const temporary = join(output,'.current-' + process.pid);
@@ -86,7 +88,7 @@ if (process.argv.includes('--check')) {
     let active = false, pending = false;
     const rebuild = async () => {
       pending = true; if(active) return; active=true;
-      while(pending) {pending=false; try {await compile();} catch(error) {console.error(error.message);}}
+      while(pending) {pending=false; try {await compile();} catch(error) {console.error(error instanceof Error ? error.message : String(error));}}
       active=false;
     };
     let seen = await sourceDigest();
@@ -96,7 +98,7 @@ if (process.argv.includes('--check')) {
       try {
         const next = await sourceDigest();
         if(next !== seen) {seen=next; await rebuild();}
-      } catch(error) {console.error(error.message);}
+      } catch(error) {console.error(error instanceof Error ? error.message : String(error));}
     },250);
     console.log('Watching frontend; Python serves the latest complete generation.');
   }

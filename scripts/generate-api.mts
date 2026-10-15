@@ -24,8 +24,8 @@ execFileSync(python, [path.join(root,'scripts/api-compat.py'),'check'], {stdio:'
 execFileSync(python, [path.join(root,'scripts/generate_api.py'),command], {stdio:'inherit'});
 const temporary = await mkdtemp(path.join(tmpdir(),'oko-sdk-'));
 const saved = path.join(root,'frontend/src/api/generated');
-async function files(directory, prefix='') {
-  const result = new Map();
+async function files(directory: string, prefix=''): Promise<Map<string, Buffer>> {
+  const result = new Map<string, Buffer>();
   for (const entry of await readdir(directory,{withFileTypes:true})) {
     const name = path.join(prefix,entry.name);
     if (entry.isDirectory()) for (const [key,bytes] of await files(path.join(directory,entry.name),name)) result.set(key,bytes);
@@ -44,7 +44,8 @@ try {
     {name:'@hey-api/client-fetch',throwOnError:true},
     {name:'@hey-api/sdk',auth:false},
   ]});
-  const document=JSON.parse(bundle.toString('utf8'));
+  type Operation = {responses?:Record<string,{content?:Record<string,{schema?:{format?:string}}>}>};
+  const document: {paths: Record<string,Record<string,Operation>>}=JSON.parse(bundle.toString('utf8'));
   const binary=[];
   for(const [route,methods] of Object.entries(document.paths))for(const [method,operation] of Object.entries(methods)) {
     const media=operation.responses?.['200']?.content || {};

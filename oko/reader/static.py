@@ -37,7 +37,7 @@ def validate_frontend() -> Path:
         checkout = Path(__file__).resolve().parents[2]
         if (checkout / 'frontend/index.html').is_file() and (checkout / 'package.json').is_file():
             source = hashlib.sha256()
-            for name in ('frontend', 'api/openapi.yaml', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.mjs', 'scripts/build-frontend.mjs'):
+            for name in ('frontend', 'api/openapi.yaml', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.tooling.json', 'vite.config.mts', 'scripts/build-frontend.mts'):
                 path = checkout / name
                 for file in sorted((p for p in path.rglob('*') if p.is_file()), key=lambda p: p.relative_to(checkout).as_posix()) if path.is_dir() else [path]:
                     source.update(file.relative_to(checkout).as_posix().encode())
