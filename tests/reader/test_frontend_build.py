@@ -90,17 +90,20 @@ def test_watch_publishes_complete_generations_and_retains_open_tab_assets(tmp_pa
     build = checkout / 'oko/frontend_build'
     current = build / 'current.json'
     log = tmp_path / 'watch.log'
+    # Each generation runs API checks and TypeScript before bundling; CI takes
+    # longer than 15 seconds even for a successful build.
+    build_timeout = 60
     with log.open('w') as output:
         process = subprocess.Popen(['node', '--import', 'tsx', str(checkout / 'scripts/build-frontend.mts'), '--watch'], cwd=checkout, env=dict(os.environ, OKO_PYTHON=sys.executable), stdout=output, stderr=output)
         try:
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + build_timeout
             while 'Watching frontend' not in log.read_text() and time.monotonic() < deadline:
                 time.sleep(0.02)
             assert 'Watching frontend' in log.read_text(), log.read_text()
             old = json.loads(current.read_text())
             style = checkout / 'frontend/style.css'
             style.write_text(style.read_text() + '\nbody { --watch-test: 1; }\n')
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + build_timeout
             while time.monotonic() < deadline:
                 manifest = json.loads(current.read_text())
                 for name in manifest['assets']:
