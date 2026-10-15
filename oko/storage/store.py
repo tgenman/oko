@@ -41,6 +41,12 @@ class Store:
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(root / 'state.sqlite')
         self.db.row_factory = sqlite3.Row
+        # Reject unsupported topic migration before any PRAGMA/schema/data write.
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feeds'").fetchone():
+            columns = {r['name'] for r in self.db.execute('PRAGMA table_info(feeds)')}
+            if 'telegram_topic' in columns and self.db.execute('SELECT 1 FROM feeds WHERE telegram_topic IS NOT NULL').fetchone():
+                self.db.close()
+                raise sqlite3.DatabaseError('Telegram: требуется ручная миграция фидов отдельных тем; данные не изменены')
         self.db.execute('PRAGMA secure_delete=ON')
         self.db.execute('PRAGMA journal_mode=DELETE')
         if self.db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
@@ -254,20 +260,26 @@ class Store:
         if ai_only:
             query += " AND kind IN ('filter','theses')"
         elif deleting_only:
-            query += " AND kind='delete'"
+            query += " AND kind IN ('delete','feed-delete')"
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
-            query += f" AND (kind='delete' OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
+            query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
         query += " AND NOT (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed WHERE h.paused=1 OR (h.scan_complete=0 AND json_extract(h.selection,'$.mode')='count')))"
-        query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
+        query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
+        query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *('' if f == 'demo' else f for f in available), *available)
         row = self.db.execute(query, params).fetchone()
         if not row:
             return None
         with self.db:
-            self.db.execute('UPDATE execution_settings SET generation=generation+1 WHERE job=? AND generation=?', (row['id'], row['generation']))
-            self.db.execute("UPDATE jobs SET status='running',attempt=attempt+1,generation=generation+1 WHERE id=?", (row['id'],))
+            # SQLite may reuse an INTEGER PRIMARY KEY after feed cleanup. Keep
+            # dispatch generations monotonic even when every old job was removed.
+            sequence = self.db.execute("SELECT value FROM state WHERE key='job-dispatch-generation'").fetchone()
+            generation = max(row['generation'], int(sequence[0]) if sequence else 0) + 1
+            self.db.execute("INSERT INTO state VALUES ('job-dispatch-generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(generation),))
+            self.db.execute('UPDATE execution_settings SET generation=? WHERE job=? AND generation=?', (generation, row['id'], row['generation']))
+            self.db.execute("UPDATE jobs SET status='running',attempt=attempt+1,generation=? WHERE id=?", (generation, row['id']))
         current = self.db.execute('SELECT * FROM jobs WHERE id=?', (row['id'],)).fetchone()
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
@@ -275,8 +287,8 @@ class Store:
         self.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
 
     def valid(self, job: Job) -> bool:
-        row = self.db.execute('SELECT status,generation FROM jobs WHERE id=?', (job.id,)).fetchone()
-        return bool(row and row['status'] == 'running' and row['generation'] == job.generation)
+        row = self.db.execute('SELECT status,generation,kind,item FROM jobs WHERE id=?', (job.id,)).fetchone()
+        return bool(row and row['status'] == 'running' and row['generation'] == job.generation and row['kind'] == job.kind and row['item'] == job.item)
 
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
@@ -345,6 +357,42 @@ class Store:
         self.fault('after_viewed_commit')
         return True
 
+    def remove_feed(self, feed: str) -> None:
+        self.subscriptions.check_owner('feed', feed)
+        with self.db:
+            self.db.execute("UPDATE feeds SET connection='deleting' WHERE id=?", (feed,))
+            items = [r[0] for r in self.db.execute('SELECT id FROM items WHERE feed_id=?', (feed,))]
+            self.problems.forget_materials(set(items), self.wall_clock())
+            self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE (item=? OR item IN (SELECT id FROM items WHERE feed_id=?)) AND kind NOT IN ('delete','feed-delete')", (feed, feed))
+            for item in items:
+                self.filters.forget(item)
+                self.youtube.reset(item)
+                self.versions.forget(item)
+                self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
+                self.db.execute('DELETE FROM retained_theses WHERE item=?', (item,))
+                # This is local cleanup, not viewed(): never create read eligibility.
+                self.db.execute('UPDATE items SET viewed=1,complete=0 WHERE id=?', (item,))
+                self.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,generation=generation+1", (item,))
+            self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('feed-delete',?)", (feed,))
+        self.fault('after_feed_delete_commit')
+
+    def finish_feed_deletion(self, job: Job) -> None:
+        feed = job.item
+        if self.db.execute("SELECT 1 FROM jobs WHERE kind='delete' AND status!='done' AND item IN (SELECT id FROM items WHERE feed_id=?)", (feed,)).fetchone():
+            self.retry(job, 0, 'Ожидание очистки файлов', .1)
+            return
+        self.fault('before_feed_claim_release')
+        with self.db:
+            self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?))', (feed, feed))
+            self.db.execute('DELETE FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?)', (feed, feed))
+            self.db.execute('DELETE FROM items WHERE feed_id=?', (feed,))
+            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
+                self.db.execute(f'DELETE FROM {table} WHERE feed=?', (feed,))
+            self.db.execute("DELETE FROM settings WHERE scope='feed' AND owner=?", (feed,))
+            self.db.execute('DELETE FROM state WHERE key IN (?,?,?)', ('cursor:'+feed, 'cursor:telegram:'+feed, 'feed-status:'+feed))
+            self.subscriptions.telegram.release(feed)
+            self.db.execute('DELETE FROM feeds WHERE id=?', (feed,))
+
     def delete(self, job: Job) -> None:
         self.fault('before_delete')
         for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item):
@@ -390,9 +438,10 @@ class Store:
 
     def status(self) -> dict[str, Any]:
         rows = self.db.execute('SELECT kind,status,error,count(*) AS count FROM jobs GROUP BY kind,status,error').fetchall()
-        jobs = [dict(r) for r in rows]
+        # The durable feed sweep is deletion work, not a new public job kind.
+        jobs = [dict(r, kind='delete' if r['kind'] == 'feed-delete' else r['kind']) for r in rows]
         errors = sorted({r['error'] for r in rows if r['error']})
-        pending_deletes = any(r['kind'] == 'delete' and r['status'] != 'done' for r in rows)
+        pending_deletes = any(r['kind'] in ('delete', 'feed-delete') and r['status'] != 'done' for r in rows)
         return dict(jobs=jobs, errors=errors, deleting=pending_deletes)
 
 

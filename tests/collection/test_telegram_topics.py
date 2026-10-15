@@ -49,49 +49,6 @@ def connect_topic(client, topic_id):
     return response.json()
 
 
-def test_topics_connect_independently_and_viewed_confirms_only_selected_topic(tmp_path: Path):
-    tg = ForumTelegram()
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
-        client.post('/api/tabs/test/heartbeat')
-        topics = client.post('/api/telegram/topics', json=dict(account='fixture', peer='@forum'))
-        assert topics.status_code == 200
-        assert [t['id'] for t in topics.json()] == [1, 20, 30]
-        first, second = connect_topic(client, 20), connect_topic(client, 30)
-        assert first['id'] != second['id']
-        assert first['telegram_topic'] == 20
-        assert connect_topic(client, 20)['id'] == first['id']
-        assert len(client.get('/api/subscriptions').json()['feeds']) == 2
-        cards = settled(client, 2)
-        one = next(c for c in cards if c['feed_id'] == first['id'])
-        assert one['url'] == 'https://t.me/c/1234567890/20/120'
-        assert client.get('/api/materials/' + one['id']).json()['text'] == 'Тема 20'
-        assert tg.confirmations == []
-        assert client.post('/api/materials/' + one['id'] + '/viewed').status_code == 200
-        for _ in range(100):
-            if tg.confirmations:
-                break
-            time.sleep(.02)
-        assert tg.confirmations == [(20, 120)]
-        assert client.get('/api/cards').json()[0]['feed_id'] == second['id']
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
-        client.post('/api/tabs/test/heartbeat')
-        assert settled(client)[0]['feed_id'] == second['id']
-        feeds = client.get('/api/subscriptions').json()['feeds']
-        assert {f['telegram_topic'] for f in feeds} == {20, 30}
-
-
-def test_forum_requires_an_existing_topic_and_general_is_a_separate_feed(tmp_path: Path):
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=ForumTelegram()), headers=HEADERS) as client:
-        client.post('/api/tabs/test/heartbeat')
-        missing = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Форумы', auto_read=False))
-        assert missing.status_code == 400 and 'Выберите тему' in missing.json()['detail']
-        assert client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Форумы', auto_read=False, topic_id=99)).status_code == 409
-        assert client.get('/api/subscriptions').json()['feeds'] == []
-        feed = connect_topic(client, 1)
-        assert feed['telegram_topic'] == 1
-        assert settled(client)[0]['title'] == 'Тема 1'
-
-
 def test_owned_worker_scopes_sdk_history_media_and_read_requests(tmp_path: Path, monkeypatch):
     import asyncio
     import json
@@ -133,52 +90,6 @@ def test_owned_worker_scopes_sdk_history_media_and_read_requests(tmp_path: Path,
     calls = [json.loads(line) for line in trace.read_text().splitlines()]
     assert not any(c['op'] == 'BROAD_ACK' for c in calls)
     assert [(c['topic'], c['maximum']) for c in calls if c['op'] == 'ReadDiscussionRequest'] == [(20, 141), (1, 131)]
-
-
-def test_general_empty_history_page_advances_and_album_media_survive_reader_restart(tmp_path: Path, monkeypatch):
-    from oko.collection.telegram.source import LocalTelegram
-    from tests.support.telegram_forum_sdk import forum_sdk
-    env, _ = forum_sdk(tmp_path, monkeypatch)
-    root = tmp_path / 'data'
-    def app():
-        return create_app(root, token='test-token', telegram_client=LocalTelegram(env, root))
-    with TestClient(app(), headers=HEADERS) as client:
-        client.post('/api/tabs/test/heartbeat')
-        general, engineering = connect_topic(client, 1), connect_topic(client, 20)
-        cards = settled(client, 2)
-        assert {c['feed_id'] for c in cards} == {general['id'], engineering['id']}
-        album = next(c for c in cards if c['feed_id'] == engineering['id'])
-        material = client.get('/api/materials/' + album['id']).json()
-        assert material['members'] == [140, 141] and len(material['attachments']) == 2
-        for attachment in material['attachments']:
-            assert client.get(attachment['url']).content == b'fixture-image'
-    with TestClient(app(), headers=HEADERS) as client:
-        client.post('/api/tabs/test/heartbeat')
-        assert len(settled(client, 2)) == 2
-        assert client.post('/api/materials/' + album['id'] + '/viewed').status_code == 200
-        assert client.get('/api/cards').json()[0]['feed_id'] == general['id']
-        assert client.get('/api/materials/' + album['id']).status_code == 404
-        for attachment in material['attachments']:
-            assert client.get(attachment['url']).status_code == 404
-
-
-def test_topic_autoread_and_rebinding_do_not_affect_other_topics(tmp_path: Path):
-    tg = ForumTelegram()
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
-        client.post('/api/tabs/test/heartbeat')
-        first = connect_topic(client, 20)
-        connect_topic(client, 30)
-        settled(client, 2)
-        bad = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Форумы',
-                          auto_read=False, topic_id=30, feed_id=first['id']))
-        assert bad.status_code == 400
-        assert client.patch('/api/feeds/' + first['id'], json=dict(auto_read=True)).status_code == 200
-        for _ in range(100):
-            if tg.confirmations:
-                break
-            time.sleep(.02)
-        assert tg.confirmations == [(20, 120)]
-        assert len(client.get('/api/cards').json()) == 2
 
 
 def test_whole_forum_worker_keeps_general_new_deleted_topics_and_refuses_broad_ack(tmp_path, monkeypatch):
@@ -227,3 +138,45 @@ async def main():
 asyncio.run(main())
 """], capture_output=True, text=True, check=True, timeout=10)
     assert json.loads(probe.stdout) == [131, 140, 141, 142, 143, 144]
+
+
+def test_forum_is_one_binding_and_legacy_topic_creation_is_rejected(tmp_path):
+    from tests.support.telegram import configure
+    with TestClient(create_app(tmp_path, token='test-token', api_only=True, telegram_client=ForumTelegram()), headers=HEADERS) as client:
+        configure(client)
+        response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Forum', auto_read=False, topic_id=20))
+        assert response.status_code == 400
+        assert not client.get('/api/subscriptions').json()['feeds']
+        connected = client.post('/api/v3/telegram/connect', json=dict(source_locator='@forum', folder='Forum', access={'kind':'client','profile':'personal'}))
+        assert connected.status_code == 200, connected.text
+        feeds = client.get('/api/v3/subscriptions').json()['feeds']
+        assert len(feeds) == 1 and feeds[0]['access']['kind'] == 'client'
+        assert 'topic_id' not in feeds[0]['access']
+
+
+def test_worker_checks_expected_person_before_history_media_and_ack(tmp_path, monkeypatch):
+    import asyncio
+    import json
+    import pytest
+    from oko.collection.contracts import SourceError
+    from oko.collection.telegram.source import LocalTelegram
+    from tests.support.telegram_forum_sdk import forum_sdk
+    identity = tmp_path/'identity'
+    identity.write_text('10001')
+    monkeypatch.setenv('SDK_IDENTITY_FILE', str(identity))
+    env, trace = forum_sdk(tmp_path, monkeypatch)
+    async def check():
+        worker = LocalTelegram(env, tmp_path/'data')
+        try:
+            assert await worker.identity('fixture') == 10001
+            worker.expected_users['fixture'] = 10001
+            identity.write_text('202')
+            for op, params in [('page',dict(after=0,since=0)), ('download',dict(id=140)), ('acknowledge',dict(max_id=141))]:
+                with pytest.raises(SourceError):
+                    await worker.request(op, account='fixture', peer=-1001234567890, topic_id=20, **params)
+        finally:
+            await worker.close()
+    asyncio.run(check())
+    calls = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert [c['id'] for c in calls if c['op'] == 'identity'] == [10001,202,202,202]
+    assert not any(c['op'] in ('history','download','ReadDiscussionRequest','BROAD_ACK') for c in calls)

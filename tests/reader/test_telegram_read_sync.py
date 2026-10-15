@@ -1,3 +1,4 @@
+from tests.support.telegram import connect_request
 import time
 import pytest
 from fastapi.testclient import TestClient
@@ -173,7 +174,7 @@ def test_folder_completion_confirms_unique_message_set(tmp_path):
         assert client.get('/api/cards').json() == []
 
 
-@pytest.mark.parametrize('action', ['stop', 'close', 'transport'])
+@pytest.mark.parametrize('action', ['stop', 'close', 'delete'])
 def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
     import asyncio
     import threading
@@ -202,7 +203,7 @@ def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
             elif action == 'close':
                 client.post('/api/tabs/test/close')
             else:
-                client.patch('/api/feeds/' + feed['id'], json={'transport': 'rss'})
+                client.delete('/api/v3/feeds/' + feed['id'])
             network.release.set()
             time.sleep(.1)
             assert network.acks == []
@@ -287,7 +288,7 @@ def test_complete_early_post_is_auto_confirmed_before_loading_later_post(tmp_pat
     try:
         with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
             client.post('/api/tabs/test/heartbeat')
-            response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=True))
+            response = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=True))
             assert response.status_code == 200
             assert network.started.wait(3)
             assert network.acks == [11]

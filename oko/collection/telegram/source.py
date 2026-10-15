@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Callable
 from contextlib import suppress
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import sys
@@ -18,6 +19,7 @@ from oko.collection.contracts import Attachment, Material, Publication
 
 
 class TelegramClient(Protocol):
+    async def identity(self, account: str) -> int: ...
     async def accounts(self) -> list[str]: ...
     async def topics(self, account: str, peer: str | int) -> list[dict[str, Any]]: ...
     async def info(self, account: str, peer: str | int, topic_id: int | None = None) -> dict[str, Any]: ...
@@ -55,11 +57,19 @@ class LocalTelegram:
         self.spool = self.root / 'staging' / '_telegram'
         self.allowed: Callable[[], bool] = lambda: True
         self.generation = 0
+        self.expected_users: dict[str, int] = {}
+        self._configuration_digest: str | None = None
 
     async def request(self, operation: str, **args: Any) -> Any:
         generation = self.generation
         async with self.lock:
             try:
+                if self.env_file.is_file():
+                    digest = hashlib.sha256(self.env_file.read_bytes()).hexdigest()
+                    if self._configuration_digest is not None and digest != self._configuration_digest:
+                        await self.close()
+                        generation = self.generation
+                    self._configuration_digest = digest
                 if generation != self.generation or not self.allowed():
                     raise SourceError('Подключение Telegram остановлено')
                 if not self.process or self.process.returncode is not None:
@@ -72,6 +82,8 @@ class LocalTelegram:
                         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=4*1024*1024)
                 process = self.process
                 assert process.stdin and process.stdout
+                if args.get('account') in self.expected_users and operation != 'identity':
+                    args['expected_user_id'] = self.expected_users[args['account']]
                 process.stdin.write((json.dumps(dict(op=operation, **args)) + '\n').encode())
                 await process.stdin.drain()
                 line = await asyncio.wait_for(process.stdout.readline(), timeout=180 if operation == 'download' else 30)
@@ -96,6 +108,12 @@ class LocalTelegram:
                 record_caught('source.request')
                 await self.close()
                 raise SourceError('Telegram-клиент недоступен') from None
+
+    async def identity(self, account: str) -> int:
+        value = await self.request('identity', account=account)
+        if type(value) is not int or value <= 0:
+            raise SourceError('Telegram не подтвердил личность аккаунта')
+        return value
 
     async def accounts(self) -> list[str]:
         value: list[str] = await self.request('accounts')
@@ -157,6 +175,7 @@ class LocalTelegram:
 class TelegramSource:
     changes = 'Telegram: при сборе перечитываются известные непросмотренные сообщения и вложения. Отсутствующие сообщения сохраняются локально; исчезновение может означать удаление или потерю доступа.'
     def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None, topic_id: int | None = None) -> None:
+        self.identity_info: dict[str, Any] | None = None
         self.topic_id = topic_id
         self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days
@@ -173,6 +192,7 @@ class TelegramSource:
         # Refill it in the current worker, but never change the feed's identity.
         if self.username:
             info = await self.client.info(self.account, '@' + self.username, **self.scope)
+            self.identity_info = info
             if info['peer'] != self.peer:
                 raise SourceError('Username Telegram теперь принадлежит другому источнику; переподключите фид', code='source-reconnect')
 

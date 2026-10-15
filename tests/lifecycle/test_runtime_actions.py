@@ -7,12 +7,12 @@ import time
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from oko.collection.contracts import SourceError
-from tests.support.telegram import Telegram, connect
+from tests.support.telegram import Telegram, connect, configure
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 
 
-def test_viewed_and_transport_change_wait_for_one_cleanup(tmp_path: Path):
+def test_viewed_and_feed_deletion_wait_for_one_cleanup(tmp_path: Path):
     downloading, cleaning, release = threading.Event(), threading.Event(), threading.Event()
     class Client(Telegram):
         closing = False
@@ -46,7 +46,7 @@ def test_viewed_and_transport_change_wait_for_one_cleanup(tmp_path: Path):
             viewed = pool.submit(client.post, '/api/materials/' + item + '/viewed')
             try:
                 assert cleaning.wait(2)
-                switched = pool.submit(client.patch, '/api/feeds/' + feed['id'], json={'transport': None})
+                switched = pool.submit(client.delete, '/api/v3/feeds/' + feed['id'])
                 # Queries remain usable while cleanup is waiting.
                 assert client.get('/api/materials/' + item).status_code == 404
                 assert client.get('/api/subscriptions').status_code == 200
@@ -55,7 +55,10 @@ def test_viewed_and_transport_change_wait_for_one_cleanup(tmp_path: Path):
                 release.set()
             assert viewed.result(timeout=2).status_code == 200
             assert switched.result(timeout=2).status_code == 200
-        assert client.get('/api/subscriptions').json()['feeds'][0]['transport'] is None
+        for _ in range(100):
+            if not client.get('/api/subscriptions').json()['feeds']: break
+            time.sleep(.02)
+        assert not client.get('/api/subscriptions').json()['feeds']
         assert client.get('/api/cards').json() == []
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
@@ -75,6 +78,7 @@ def test_stop_does_not_wait_for_connect_and_rejects_late_metadata(tmp_path: Path
     kwargs = dict(token='test-token', telegram_client=Client())
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         client.post('/api/tabs/a/heartbeat')
+        configure(client)
         with ThreadPoolExecutor(max_workers=1) as pool:
             pending = pool.submit(client.post, '/api/telegram/connect', json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=False))
             try:

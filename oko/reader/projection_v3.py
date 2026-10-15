@@ -146,14 +146,18 @@ def history(value: previous.InitialHistoryStatus) -> wire.FeedHistoryState:
     return wire.FeedHistoryState(feed_id=wire.FeedId(value.feed_id), history=wire.HistoryState(state))
 
 
-def subscription(value: previous.SubscriptionFeed) -> wire.SubscriptionFeed:
+def subscription(value: previous.SubscriptionFeed, binding: dict[str, object] | None = None) -> wire.SubscriptionFeed:
     data = value.model_dump(exclude_unset=True)
     data['history'] = history(previous.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, previous.History) else wire.HistoryState(wire.HistoryAbsent(state='absent', legacy_since=timestamp(value.legacy_since) if isinstance(value.legacy_since, float) else None)).model_dump(mode='json')
     data.pop('initial_history', None)
     data.pop('legacy_since', None)
     data['connection'] = 'ready' if data.get('connection') == 'connected' else data.get('connection', 'unavailable')
     if value.kind == 'telegram':
-        if value.transport is None or value.transport == 'telegram' and not isinstance(value.telegram_account, str):
+        if binding and binding['kind'] in ('web', 'client'):
+            data['access'] = binding
+            if binding['kind'] == 'client':
+                data['auto_read'], data['read_history'] = bool(value.auto_read), bool(value.read_history)
+        elif value.transport is None or value.transport == 'telegram' and not isinstance(value.telegram_account, str):
             data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_connection'
             data['access'] = wire.TelegramUnconfiguredAccess(kind='unconfigured', source_locator=value.identity if isinstance(value.identity, str) else value.id).model_dump(mode='json')
         elif value.transport == 'telegram':
@@ -164,7 +168,8 @@ def subscription(value: previous.SubscriptionFeed) -> wire.SubscriptionFeed:
             data['access'] = wire.TelegramWebAccess(kind='web', username=username, preview_url=wire.SourceUrl('https://t.me/s/' + username)).model_dump(mode='json')
         data.pop('transport', None)
     for key in ('telegram_account', 'telegram_peer', 'telegram_topic', 'telegram_username', 'read_history', 'auto_read'):
-        data.pop(key, None)
+        if key not in ('auto_read', 'read_history') or not binding or binding['kind'] != 'client':
+            data.pop(key, None)
     return wire.SubscriptionFeed.model_validate(data)
 
 

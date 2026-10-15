@@ -29,6 +29,10 @@ class FakeClient:
                                    date=now, megagroup=True, forum=True, username='forum', access_hash=1)
     async def connect(self): pass
     async def disconnect(self): pass
+    async def get_me(self):
+        identity = int(Path(os.environ['SDK_IDENTITY_FILE']).read_text()) if os.environ.get('SDK_IDENTITY_FILE') else 10001
+        self.log(op='identity', id=identity)
+        return type('User', (), {'id': identity})()
     async def is_user_authorized(self): return True
     async def get_entity(self, peer): return self.entity
     def log(self, **body):
