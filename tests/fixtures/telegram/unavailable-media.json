@@ -1,0 +1,15 @@
+{
+  "kind": "synthetic_transport_response",
+  "source_fixture": "album.html",
+  "post": "durov/373",
+  "member_anchor": "https://t.me/durov/374?single",
+  "target": "video src within that member anchor",
+  "response": {"status": 403, "body": ""},
+  "expected": {
+    "retain_original_text_and_other_media": true,
+    "material_full": false,
+    "retry_only_missing_media": true,
+    "fallback_to_client": false
+  },
+  "evidence_limit": "403 is injected at the external HTTP seam, not a measured Telegram/CDN response. Used by web adapter acceptance in issue #20."
+}

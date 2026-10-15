@@ -58,6 +58,9 @@ class FakeClient:
         # A full first page in other topics must not stall General's cursor.
         rows = [message(i,30) for i in range(31,131)]
         rows += [message(131,1), message(140,20,777,True), message(141,20,777,True), message(142,30)]
+        if os.environ.get('SDK_WHOLE_FORUM'):
+            # 50 is new; 60 no longer appears in the topic catalogue.
+            rows += [message(143,50), message(144,60)]
         return rows
     async def get_messages(self, entity, **params):
         self.log(op='history', reply_to=params.get('reply_to'), after=params.get('offset_id'), ids=params.get('ids'))

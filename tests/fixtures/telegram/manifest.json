@@ -1,0 +1,18 @@
+{
+  "public": {
+    "url": "https://t.me/s/telegram?before=410",
+    "sha256": "a42454eac6819c009d7d2fe2831f72e617972c23d87a6d2a39ae9c59397f556f"
+  },
+  "album": {
+    "url": "https://t.me/s/durov?before=400",
+    "sha256": "01da722426a67c7eb83e45f92bf07e44de6b63f45c6f9865c1647e203d1dbbf1"
+  },
+  "empty": {
+    "url": "https://t.me/s/telegram?before=1",
+    "sha256": "e9c2b21727ecf5b4d3149c0d6f695fb1a0cda08592402b054491bc881297ca5f"
+  },
+  "unavailable": {
+    "url": "https://t.me/s/oko_fixture_missing_20261015",
+    "sha256": "9dffdccd5541c1421c3d0303d7ff33078c14f9f74ecdce31ad3def146caff62f"
+  }
+}
