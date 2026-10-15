@@ -38,9 +38,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [python, browser]
+        suite: [python, browser, tools]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup
       - uses: actions/download-artifact@v4
         with:
@@ -50,7 +52,13 @@ jobs:
         run: npm run build:check
       - if: matrix.suite == 'browser'
         run: npx playwright install --with-deps chromium
-      - run: poetry run ./scripts/check ${{ matrix.suite }}
+      - if: matrix.suite != 'tools'
+        run: poetry run ./scripts/check ${{ matrix.suite }}
+      - if: matrix.suite == 'tools'
+        name: Test development tools only when their inputs changed
+        env:
+          CHECK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: poetry run ./scripts/check tools --if-changed --base "$CHECK_BASE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

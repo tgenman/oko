@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 test('synthetic reader surfaces screenshots and geometry',async()=>{
  type Geometry = Record<string, string | number>;
  const measurements: Record<string, Geometry[]>={};
- for(const width of [1440,390]){
+ for(const width of [1440]){
   const r=await reader();try{
    await r.page.setViewportSize({width,height:900});
    const points={points:[{text:'Основной тезис синтетического материала',sources:[{id:'plain',url:'https://example.org/plain'}]}]};

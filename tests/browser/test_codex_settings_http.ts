@@ -32,9 +32,9 @@ test('production HTTP saves choices, reads provenance and recreates material fro
   expect(errors).toEqual([]);
 });
 
-test('mobile model screens save connection and independent Codex choices through production HTTP', {timeout:30000}, async t=>{
+test('model screens save connection and independent Codex choices through production HTTP', {timeout:30000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
-  await page.setViewportSize({width:390,height:844});
+  await page.setViewportSize({width:1280,height:900});
   await page.goto(origin+'/#token='+token);
   await page.locator('#settings-open').click();
   await page.locator('[data-settings-target="models"]').click();
@@ -58,7 +58,7 @@ test('mobile model screens save connection and independent Codex choices through
   expect(config!.filter).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
   const width=await page.locator('#settings-dialog').evaluate(dialog=>({scroll:dialog.scrollWidth,client:dialog.clientWidth}));
   expect(width.scroll).toBeLessThanOrEqual(width.client+1);
-  const screenshot=artifactPath('react-models-mobile.png');
+  const screenshot=artifactPath('react-models-desktop.png');
   await page.screenshot({path:screenshot,fullPage:true});
   console.log('Models screenshot: '+screenshot);
 });

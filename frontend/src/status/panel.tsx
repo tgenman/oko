@@ -61,23 +61,14 @@ export function createStatusPanel({ debug, actions, onSettings, onMaterial, onRe
     let snapshot = emptySnapshot, online: boolean | null = null, stopped = false, opener: HTMLElement | null = null, work = '';
     const debugPanel = byId('debug-panel');
     byId('status-journal').append(debugPanel);
-    function focusMode() {
-        const modal = matchMedia('(max-width:700px)').matches;
-        panel.setAttribute('role', modal ? 'dialog' : 'complementary');
-        if (modal)
-            panel.setAttribute('aria-modal', 'true');
-        else
-            panel.removeAttribute('aria-modal');
-        byId('reader-shell').inert = modal && !panel.hidden;
-    }
-    function close(restore = true) { panel.hidden = true; toggle.setAttribute('aria-expanded', 'false'); focusMode(); debug.show(false); if (restore && opener?.isConnected)
+    panel.setAttribute('role', 'complementary');
+    function close(restore = true) { panel.hidden = true; toggle.setAttribute('aria-expanded', 'false'); debug.show(false); if (restore && opener?.isConnected)
         opener.focus({ preventScroll: true }); }
     function material(id: string) { close(false); onMaterial(id); }
     async function act(target: ProblemAction, problem: Problem, trigger: HTMLElement) {
         if (['settings', 'feed-settings', 'add'].includes(target.kind)) {
-            byId('reader-shell').inert = false;
             await onSettings(target, trigger);
-            document.querySelector('dialog[open]')?.addEventListener('close', () => { focusMode(); if (!panel.hidden)
+            document.querySelector('dialog[open]')?.addEventListener('close', () => { if (!panel.hidden)
                 byId('status-close').focus(); }, { once: true });
         }
         else if (target.kind === 'material' && target.id)
@@ -118,12 +109,12 @@ export function createStatusPanel({ debug, actions, onSettings, onMaterial, onRe
         } }}/>);
         const recent = grouped('recent');
         mountSurface(body, <><div className="status-empty" hidden={!online || stopped || shown.count !== 0}><div className="status-check">✓</div><h3>Всё в порядке</h3><p>Сейчас ничего не требует вашего внимания.</p></div>{sections.map(([key, label]) => <div key={key} className="status-group" hidden={!grouped(key).length && !(key === 'wait' && work)}><h3>{label}</h3><div>{cards(key)}</div>{key === 'wait' && <p className="status-work">{work}</p>}</div>)}<Recent count={recent.length}>{cards('recent')}</Recent><button id="status-journal-open" className="status-journal-button" onClick={journal}>Журнал диагностики</button></>);
-        focusMode();
+
     }
     function open(trigger = toggle) { opener = trigger; panel.hidden = false; toggle.setAttribute('aria-expanded', 'true'); const current = actions.merge(snapshot).current.slice().sort((a, b) => b.created_at - a.created_at); const previous = new Map(owners); owners.clear(); for (const p of current)
         owners.set(p.id, previous.get(p.id) || p.section); for (const [id, owner] of previous)
         if (!owners.has(id))
-            owners.set(id, owner); render(); focusMode(); byId('status-close').focus(); }
+            owners.set(id, owner); render(); byId('status-close').focus(); }
     byId('status-journal-back').onclick = () => { statePage(); byId('status-journal-open').focus(); };
     toggle.onclick = () => { if (panel.hidden) {
         statePage();
@@ -136,19 +127,7 @@ export function createStatusPanel({ debug, actions, onSettings, onMaterial, onRe
         return; if (event.key === 'Escape') {
         event.preventDefault();
         close();
-    } if (event.key === 'Tab' && matchMedia('(max-width:700px)').matches) {
-        const buttons = [...panel.querySelectorAll<HTMLElement>('button:not(:disabled),summary')].filter(n => n.getClientRects().length);
-        const first = buttons[0], last = buttons.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last?.focus();
-        }
-        else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first?.focus();
-        }
     } });
-    window.addEventListener('resize', focusMode);
     const header = document.querySelector('header')!;
     new ResizeObserver(() => panel.style.setProperty('--reader-header-height', header.getBoundingClientRect().height + 'px')).observe(header);
     function prune(value: ProblemSnapshot) { const clean = (problem: Problem): Problem => { const objects = problem.objects.filter(o => o.kind !== 'material' || !deleted.has(o.id)); return objects.length !== problem.objects.length && !objects.length ? { ...problem, objects, action: null, state: 'finished', outcome: 'irrelevant' } : { ...problem, objects }; }; const current = value.current.map(clean).filter(p => p.state !== 'finished'); return { ...value, current, recent: value.recent.map(clean), count: current.length }; }

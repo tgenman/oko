@@ -5,7 +5,7 @@ import {editSetting, settingsHome} from './settings-actions.ts';
 test('compact settings navigate to reading and persist only explicitly through HTTP', async () => {
   const r = await reader();
   try {
-    await r.page.setViewportSize({width:390,height:844});
+    await r.page.setViewportSize({width:1280,height:900});
     await r.start([]);
     await r.page.evaluate(() => {
       readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});

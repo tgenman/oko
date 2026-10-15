@@ -152,7 +152,7 @@ test('expanded completion stays in place until collapsed and new problems do not
   } finally {await r.close();}
 });
 
-test('panel reorders only on reopening and fits a modal phone viewport',async()=>{
+test('panel reorders only on reopening and remains a nonmodal desktop sidebar',async()=>{
   const r=await reader();
   try {
     await r.start([]); await status(r,[modelProblem]);
@@ -164,13 +164,8 @@ test('panel reorders only on reopening and fits a modal phone viewport',async()=
     await expect(r.page.locator('.status-problem h3').first()).toHaveText(modelProblem.title);
     await r.page.locator('#status-close').click();await r.page.locator('#status-toggle').click();
     await expect(r.page.locator('.status-problem h3').first()).toHaveText(newer.title);
-    await r.page.setViewportSize({width:390,height:844});
-    await expect(r.page.locator('#status-panel')).toHaveAttribute('aria-modal','true');
-    expect(await r.page.locator('#reader-shell').evaluate(n=>(n as HTMLElement).inert)).toBe(true);
-    const box=await r.page.locator('#status-panel').boundingBox();
-    expect(box!.x).toBe(0);expect(box!.width).toBe(390);
-    const mobile = artifactPath('status-panel-mobile.png');
-    await r.page.screenshot({path:mobile}); console.info('Status panel screenshot:',mobile);
+    await expect(r.page.locator('#status-panel')).toHaveAttribute('role','complementary');
+    await expect(r.page.locator('#status-panel')).not.toHaveAttribute('aria-modal','true');
     await r.page.keyboard.press('Escape');
     await expect(r.page.locator('#status-toggle')).toBeFocused();
     expect(await r.page.locator('#reader-shell').evaluate(n=>(n as HTMLElement).inert)).toBe(false);

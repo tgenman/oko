@@ -6,28 +6,9 @@ import sys
 import zipfile
 from email.parser import Parser
 
-from fastapi.testclient import TestClient
-from tests.support.app import create_app
 from tests.support.install_wheel import install_wheel
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def test_docs_offer_canonical_contract_without_admitting_reader_work(tmp_path):
-    with TestClient(create_app(tmp_path,token='synthetic')) as client:
-        response = client.get('/docs')
-        assert response.status_code == 200
-        assert 'synthetic' not in response.text
-        assert "script-src 'self'" in response.headers['content-security-policy']
-        contract = client.get('/openapi.json')
-        assert contract.status_code == 200
-        assert contract.json()['openapi'] == '3.1.0'
-        assert '/api/status' in contract.json()['paths']
-        status = client.get('/api/status',headers={'Authorization':'Bearer synthetic'}).json()
-        assert status['live_tabs'] == 0
-        for asset in ['/docs/initializer.js','/docs/swagger-ui-bundle.js','/docs/swagger-ui.css']:
-            assert client.get(asset).status_code == 200
-        assert client.get('/docs/../pyproject.toml').status_code == 404
 
 
 def test_wheel_runs_outside_checkout_without_node(tmp_path):

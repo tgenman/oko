@@ -197,6 +197,145 @@ def checkout_state(excluded):
     return result
 
 
+TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_candidate_checks.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
+               'tests/support/', 'frontend/src/api/generated/', 'frontend/src/api/legacy-generated/',
+               'oko/reader/generated/', 'oko/reader/legacy_generated/',
+               'tests/api/test_governance.py', 'tests/api/test_strict_generation.py',
+               'package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock',
+               'tsconfig.json', 'tsconfig.browser-tests.json', 'tsconfig.tooling.json',
+               'vite.config.mts', 'eslint.config.ts', '.gitignore', 'tests/process_server.py')
+
+
+def tool_changes(root, base=None):
+    """Compare branch + index + worktree, including new files; uncertainty runs tests."""
+    def git(*args):
+        try:
+            return subprocess.run(['git', *args], cwd=root, capture_output=True, text=True)
+        except OSError:
+            return subprocess.CompletedProcess(['git', *args], 1, '', '')
+    if base is None:
+        reference = git('merge-base', 'HEAD', 'origin/main')
+        if reference.returncode or not reference.stdout.strip():
+            return True, ['<comparison unavailable>']
+        base = reference.stdout.strip()
+    changed = git('diff', '--no-renames', '--name-only', '-z', base, '--')
+    staged = git('diff', '--cached', '--no-renames', '--name-only', '-z', base, '--')
+    untracked = git('ls-files', '--others', '--exclude-standard', '-z')
+    if changed.returncode or staged.returncode or untracked.returncode:
+        return True, ['<comparison unavailable>']
+    paths = sorted(set((changed.stdout + staged.stdout + untracked.stdout).split('\0')) - {''})
+    relevant = [name for name in paths if any(name.startswith(prefix) if prefix.endswith('/') else name == prefix for prefix in TOOL_INPUTS)]
+    return bool(relevant), relevant
+
+
+def parallel_tests(names, commands, environment, report, results, match=None):
+    """Fork isolated report owners; the parent owns cancellation and the checkout guard."""
+    baseline = checkout_state(report.directory)
+    children = {}
+    completed = {}
+    interrupted = False
+    try:
+        for name in names:
+            report.output(f'\nRUN {name} (parallel)\n')
+            result_file = report.directory / (name + '-result.json')
+            pid = os.fork()
+            if pid == 0:
+                os.setsid()
+                child_report = Report(report.directory / 'parallel' / name, [name], {})
+                child_report.current = name
+                child_env = dict(environment, OKO_TEST_ARTIFACT_DIR=str(report.directory / 'artifacts' / name))
+                Path(child_env['OKO_TEST_ARTIFACT_DIR']).mkdir(parents=True, exist_ok=True)
+                tick = time.monotonic()
+                code, status = 1, 'FAIL'
+                # The parent replays each complete log; stdout from workers cannot interleave.
+                with open(os.devnull, 'w') as sink:
+                    sys.stdout = sys.stderr = sink
+                    try:
+                        code = 0
+                        for command in commands[name]:
+                            code = execute(command, child_env, report=child_report)
+                            if code:
+                                break
+                        if name == 'browser' and match is not None and not child_report.data['suites'][name].get('passed_scenarios'):
+                            child_report.output('No browser scenarios matched the requested filter.\n')
+                            code = 1
+                        status = f'{"FAIL" if code else "PASS"} ({time.monotonic() - tick:.2f}s)'
+                    except KeyboardInterrupt:
+                        code, status = 130, 'INTERRUPTED'
+                    except BaseException as error:
+                        code = 1
+                        child_report.output(str(error) + '\n')
+                    finally:
+                        child_report.finish({name: status}, code, tick)
+                        result_file.write_text(json.dumps({'report': str(child_report.directory / 'report.json')}))
+                os._exit(code if 0 <= code <= 255 else 1)
+            children[pid] = (name, result_file)
+        while len(completed) < len(children):
+            for pid in children.keys() - completed.keys():
+                ended, status = os.waitpid(pid, os.WNOHANG)
+                if ended:
+                    completed[pid] = status
+            if len(completed) < len(children):
+                time.sleep(.02)
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
+    finally:
+        # Signal workers first: execute() in each worker owns and reaps its children.
+        pending = children.keys() - completed.keys()
+        owned = set()
+        for pid in pending:
+            try:
+                owned.update(descendants(pid))
+            except (OSError, subprocess.SubprocessError):
+                pass  # Worker cleanup still runs; never skip signal/reap on ps failure.
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 5
+        while pending and time.monotonic() < deadline:
+            for pid in list(pending):
+                ended, status = os.waitpid(pid, os.WNOHANG)
+                if ended:
+                    completed[pid] = status
+                    pending.remove(pid)
+            if pending:
+                time.sleep(.02)
+        for pid in pending:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for pid in pending | owned:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for pid in pending:
+            _, completed[pid] = os.waitpid(pid, 0)
+        for pid, (name, result_file) in children.items():
+            report.current = name
+            if result_file.exists():
+                child = json.loads(Path(json.loads(result_file.read_text())['report']).read_text())
+                report.output(Path(child['log']).read_text())
+                report.data['suites'][name] = child['suites'][name]
+                results[name] = child['suites'][name]['status']
+                if completed.get(pid) != 0 and results[name].startswith('PASS'):
+                    results[name] = 'FAIL (worker exited abnormally)'
+            else:
+                results[name] = 'INTERRUPTED' if interrupted else 'FAIL (worker produced no report)'
+        after = checkout_state(report.directory)
+        changed = sorted(name for name in baseline.keys() | after.keys() if baseline.get(name) != after.get(name))
+        for name in names:
+            report.data['suites'][name]['checkout_changes'] = changed
+            if changed:
+                results[name] = 'FAIL (tests changed checkout files)'
+        if changed:
+            report.output('Tests changed checkout files:\n' + ''.join('  ' + name + '\n' for name in changed))
+
+
 def _candidate_parent(path):
     path = path.resolve()
     path.mkdir(parents=True, exist_ok=True)
@@ -208,6 +347,7 @@ def main():
     groups = {'ui': ['build', 'syntax', 'lint', 'http', 'browser', 'diff'],
               'all': ['contracts', 'build', 'syntax', 'lint', 'types', 'http', 'browser', 'diff', 'python-tests', 'entrypoint'],
               'python': ['contracts', 'python-tests'],
+              'tools': ['contracts', 'tool-tests'],
               'lifecycle': ['build', 'syntax', 'lint', 'browser', 'diff']}
     suites = ('contracts', 'build', 'syntax', 'lint', 'http', 'browser', 'browser-types', 'tooling-types', 'diff', 'types', 'entrypoint', 'staged')
     parser.add_argument('sets', nargs='+', choices=(*groups, *suites))
@@ -215,7 +355,11 @@ def main():
     parser.add_argument('--files', nargs='+', help='Explicit browser/Python test files or JavaScript files for lint/syntax; put check sets before this option')
     parser.add_argument('--report-dir', type=Path, default=ROOT / '.scratch/check-runs', help='Parent directory for separate full logs and JSON reports for each run')
     parser.add_argument('--candidate', type=Path, help='Check an unpublished OpenAPI candidate in an isolated copy of this working tree')
+    parser.add_argument('--base', help='Git revision for tool-change selection; default: merge-base with origin/main')
+    parser.add_argument('--if-changed', action='store_true', help='Run the explicit tools suite only when its inputs changed')
     args = parser.parse_args()
+    if args.if_changed and args.sets != ['tools']:
+        parser.error('--if-changed requires the tools group alone')
     candidate_context = None
     if args.candidate or (ROOT / '.oko-candidate.json').exists() or (os.environ.get('OKO_CANDIDATE_CONTEXT') and (ROOT / 'scripts/candidate.py').exists()):
         from candidate import context, prepare
@@ -249,16 +393,23 @@ def main():
     env = os.environ.copy()
     started = time.monotonic()
     names = list(dict.fromkeys(name for selected in args.sets for name in groups.get(selected, [selected])))
+    scope_root = Path(candidate_context['source_root']) if candidate_context else ROOT
+    tools_required, tool_inputs = tool_changes(scope_root, args.base)
+    if 'all' in args.sets and tools_required and not args.files:
+        if 'tool-tests' not in names:
+            names.append('tool-tests')
+    if args.if_changed and not tools_required:
+        names.remove('tool-tests')
     if {'build','syntax','lint','browser'} & set(names) and 'tooling-types' not in names:
         names.insert(0, 'tooling-types')
     if 'browser' in names and 'browser-types' not in names:
         names.insert(names.index('browser'), 'browser-types')
-    if {'browser', 'python-tests'} & set(names):
-        early = [name for name in ['contracts','tooling-types','syntax','lint','types','browser-types'] if name in names]
+    if {'browser', 'python-tests', 'tool-tests'} & set(names):
+        early = [name for name in ['contracts','tooling-types','syntax','lint','types','browser-types','build','http'] if name in names]
         names = early + [name for name in names if name not in early]
     if args.match is not None and 'browser' not in names:
         parser.error('--match requires browser checks')
-    selected_files = {'browser': [], 'python-tests': [], 'syntax': [], 'lint': []}
+    selected_files = {'browser': [], 'python-tests': [], 'tool-tests': [], 'syntax': [], 'lint': []}
     for value in args.files or []:
         filename, *node_id = value.split('::', 1)
         candidate = (ROOT / filename).resolve()
@@ -268,7 +419,7 @@ def main():
         matched = False
         for name in names:
             browser = name == 'browser' and relative.parts[:2] == ('tests', 'browser') and candidate.name.startswith('test_') and candidate.suffix == '.ts' and not node_id
-            python_test = name == 'python-tests' and relative.parts[0] == 'tests' and candidate.suffix == '.py'
+            python_test = name in ('python-tests', 'tool-tests') and relative.parts[0] == 'tests' and candidate.suffix == '.py'
             javascript = ((name in ('syntax', 'lint') and candidate.suffix in ('.js', '.cjs', '.mjs', '.ts', '.tsx', '.cts', '.mts')) or (name == 'syntax' and candidate.suffix in ('.ts', '.tsx'))) and not node_id
             if browser or python_test or javascript:
                 selected_files[name].append(str(candidate) + ('::' + node_id[0] if node_id else ''))
@@ -288,6 +439,9 @@ def main():
         report.data['suites'] = {name: dict(status='NOT RUN', commands=[], failures=[]) for name in names}
         report.data['candidate'] = dict(candidate_context, full_check='all' in args.sets)
     report.data['browser_name_pattern'] = args.match
+    report.data['tool_selection'] = dict(required=tools_required, inputs=tool_inputs, base=args.base)
+    if ('all' in args.sets and not args.files) or args.if_changed:
+        report.output('Tool tests: ' + ('selected' if tools_required else 'unchanged; not selected') + '\n')
     results = dict.fromkeys(names, 'NOT RUN')
     current = None
     exit_code = 1
@@ -327,13 +481,14 @@ def main():
             'browser': [[node, '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-concurrency=2', *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts'))))]],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
-        if candidate_context or {'contracts', 'http', 'python-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):
+        if candidate_context or {'contracts', 'http', 'python-tests', 'tool-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):
             default_python = str(ROOT / '.venv/bin/python') if (ROOT / '.venv/bin/python').exists() else 'python3'
             python = executable(env.get('OKO_PYTHON', default_python), 'Python')
             env['OKO_PYTHON'] = python
             commands.update({'contracts': [[python, str(ROOT / 'scripts/check_test_contracts.py')]], 'http': [[python, '-m', 'pytest', '-q', 'tests/reader/test_web_assets.py', 'tests/reader/test_frontend_delivery.py', 'tests/reader/test_frontend_build.py', 'tests/reader/test_http_contracts.py']],
                              'staged': [[python, str(ROOT / 'scripts/check-staged')]],
                              'python-tests': [[python, '-m', 'pytest', '-q', *dict.fromkeys(selected_files['python-tests'])]],
+                             'tool-tests': [[python, '-m', 'pytest', '-q', *(selected_files['tool-tests'] or TOOL_TESTS)]],
                              'types': [[python, '-m', 'mypy', 'oko', 'tests/support/codex.py', 'tests/support/app.py']],
                              'entrypoint': [[python, '-m', 'oko', '--help']]})
         if candidate_context:
@@ -343,9 +498,25 @@ def main():
                 'package-install': [[python, str(ROOT / 'scripts/candidate-install.py')]]})
         if ('syntax' in names and not commands['syntax']) or ('browser' in names and not list((ROOT / 'tests/browser').glob('test_*.ts'))):
             raise RuntimeError('Required UI modules or browser tests are missing.')
+        if 'python-tests' in commands and not selected_files['python-tests']:
+            commands['python-tests'][0].extend('--ignore=' + name for name in TOOL_TESTS)
+            if 'http' in names:
+                commands['python-tests'][0].extend('--ignore=' + name for name in commands['http'][0][4:])
+        def blocked(name):
+            return (any(results.get(gate, '').startswith('FAIL') for gate in ('tooling-types', 'build', 'types'))
+                    or (name == 'browser' and any(results.get(gate, '').startswith('FAIL') for gate in ('syntax', 'lint', 'browser-types'))))
         for current in names:
-            if current == 'python-tests' and 'http' in names and not selected_files['python-tests']:
-                commands[current][0].extend('--ignore=' + name for name in commands['http'][0][4:])
+            if results[current] != 'NOT RUN':
+                continue
+            if current in ('browser', 'python-tests', 'tool-tests'):
+                runnable = [name for name in names if name in ('browser', 'python-tests', 'tool-tests') and results[name] == 'NOT RUN' and not blocked(name)]
+                if len(runnable) > 1:
+                    parallel_tests(runnable, commands, env, report, results, args.match)
+                    if results[current] != 'NOT RUN':
+                        continue
+                if blocked(current):
+                    report.output(f'{current} skipped because a prerequisite failed.\n')
+                    continue
             if current in ('build','syntax','lint','http','browser','python-tests') and results.get('tooling-types', '').startswith('FAIL'):
                 report.output(f'{current} skipped because tooling types failed.\n')
                 continue
@@ -362,7 +533,7 @@ def main():
             report.output(f'\nRUN {current}\n')
             tick = time.monotonic()
             baseline = None
-            if current in ['browser','python-tests']:
+            if current in ['browser','python-tests','tool-tests']:
                 artifact_dir = report.directory / 'artifacts' / current
                 artifact_dir.mkdir(parents=True, exist_ok=True)
                 env['OKO_TEST_ARTIFACT_DIR'] = str(artifact_dir)
@@ -392,7 +563,7 @@ def main():
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
         exit_code = int(any(not (value.startswith('PASS') or value == 'PENDING_REVIEW') for value in results.values()))
     except KeyboardInterrupt:
-        if current:
+        if current and results[current] == 'NOT RUN':
             results[current] = 'INTERRUPTED'
         report.output('\nInterrupted\n', stream=sys.stderr)
         exit_code = 130

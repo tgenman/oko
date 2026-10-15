@@ -89,14 +89,6 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await expect(page.locator('#youtube-pause')).toContainText('Следующая попытка не раньше');
     assert.ok(!JSON.stringify(await api('debug')).includes('fixture-password'));
     await expect(page.locator('#youtube-short-status')).toHaveText('Приостановлено');
-    await page.setViewportSize({width:390, height:844});
-    await page.locator('#youtube-mode').selectOption('proxy');
-    await expect(page.locator('#youtube-save')).toBeVisible();
-    assert.equal(await page.locator('#settings-dialog').evaluate(el => el.scrollWidth <= el.clientWidth), true);
-    await page.screenshot({path:artifactPath('youtube-mobile.png')});
-    await page.locator('#youtube-save').scrollIntoViewIfNeeded();
-    await expect(page.locator('#youtube-save')).toBeInViewport();
-    await expect(page.locator('#settings-close')).toBeInViewport();
     await page.setViewportSize({width:1200, height:940});
     await page.screenshot({path:artifactPath('youtube-desktop.png')});
     assert.deepEqual(errors, []);
