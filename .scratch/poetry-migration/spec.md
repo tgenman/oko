@@ -1,6 +1,6 @@
 # Полный переход на Poetry
 
-Status: ready-for-agent
+Status: done
 
 ## Согласовано
 
@@ -108,4 +108,4 @@ poetry run ./scripts/check all
 - [Poetry: зависимости и группы](https://python-poetry.org/docs/managing-dependencies/).
 - [Poetry: установка и границы lock-файла](https://python-poetry.org/docs/basic-usage/).
 
-Факты собраны чтением репозитория; проверки и сборка не запускались. Продуктовые термины не меняются, изменения GLOSSARY.md не требуются.
+При подготовке плана факты собраны чтением репозитория. Реализация и фактические проверки завершены: [отчёт](../../docs/verification/poetry-migration.md). Продуктовые термины не меняются, изменения GLOSSARY.md не требуются.

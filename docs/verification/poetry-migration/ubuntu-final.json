@@ -1,0 +1,102 @@
+{
+  "started_at": "20261015T065206Z",
+  "selected_files": {
+    "browser": [
+      "/repo-integrated/tests/browser/test_installed_docs.ts"
+    ],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (0.83s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo-integrated/node_modules/typescript/bin/tsc",
+            "-p",
+            "/repo-integrated/tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (1.52s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo-integrated/node_modules/typescript/bin/tsc",
+            "-p",
+            "/repo-integrated/tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "build": {
+      "status": "PASS (16.96s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo-integrated/node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/repo-integrated/scripts/build-frontend.mts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/repo-integrated/scripts/build-frontend.mts",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (13.92s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/repo-integrated/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-concurrency=2",
+            "/repo-integrated/tests/browser/test_installed_docs.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 1,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "exit_code": 0,
+  "duration_seconds": 33.51,
+  "log": "/repo-integrated/.scratch/check-runs/20261015T065206Z-62512059/output.log"
+}
