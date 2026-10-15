@@ -67,3 +67,54 @@ Canonical и generated API bytes не менялись; удалённые appro
   не используется как доказательство. Новых skip нет.
 
 Полный прогон и независимое ревью дополняются ниже после завершения.
+
+## Итоговые проверки и исправления ревью
+
+Первый полный `./scripts/check all tools` на 9328dc3: **FAIL, 131.00 s**.
+Python 372 passed / 2 failed: старые setup в `test_source_disabled_switch...`
+и `test_effective_fields_reset...` меняли Telegram transport через PATCH.
+Проверка отключения источника переведена на обычный RSS, проверка прав и
+наследования сохранена, отдельно проверен отказ смены Telegram transport.
+Browser: 117 pass / 2 прежних skip; tools: 111 pass; HTTP 9 pass; прочие
+наборы PASS. Отчёт: `.scratch/check-runs/20261015T190343Z-899cc313/report.json`.
+После исправлений целевой runner PASS 8.67 s; новый HTTP-файл 14 pass.
+
+Первое независимое Spec review выявило один P1: legacy adoption по совпадению
+peer допускала другой alias аккаунта. Red HTTP regression воспроизвёл 200
+вместо 409. Исправление сверяет исходный alias и сохранённый user ID до записи;
+каталог и материал не меняются. Retired upsert в Subscriptions удалён; fixture
+явно строит pre-upgrade SQL, а миграция проверяется через HTTP. Standards
+review замечаний не имело; повторные обе оси подтвердили 0 оставшихся замечаний.
+
+Дополнительно воспроизведён late discover после delete/re-add: SQLite повторно
+выдаёт job ID, прежние id/generation могли совпасть. Добавлен сохраняемый
+монотонный dispatch generation; перенос execution_settings сохраняет параметры
+и signature retry, valid проверяет также kind/item. HTTP red/green подтверждает,
+что старый ответ не создаёт карточку и не завершает новое задание. Старое
+правило ID RSS/YouTube сохранено. Широкое изменение их ID было отклонено
+автоматической проверкой как выход за #18 и не применялось; защита поколений
+решает риск без него. Python+types после этой правки: **PASS, 41.70 s**,
+387 tests (эта выборка также включает HTTP), mypy всего приложения PASS.
+Отчёт: `.scratch/check-runs/20261015T191645Z-79cfb3b2/report.json`.
+
+В ходе работы main продвинулся до `3f15488` (PR #24, uv). Он подлит merge
+bbc0670: Poetry не возвращён, BeautifulSoup перенесён в uv.lock без обновления
+остальных библиотек main. Создана отдельная .venv этого worktree через
+`uv sync --locked --python python3.11`; пользовательская .venv не синхронизировалась.
+Внутренний feed-delete job проецируется в существующий публичный delete kind:
+HTTP red 500 во время cleanup исправлен на 200 и phase=deleting. Последний
+HTTP-файл: **15 passed, 4.89 s**, mypy: PASS.
+
+Повторный полный прогон обоснован новой базой, окружением и командами uv:
+`./scripts/check all tools` на 5db41da — **PASS, 106.07 s, exit 0**.
+
+- Python: **378 passed** (193 + 185).
+- HTTP: **9 passed**.
+- Browser: **117 passed**, 0 fail, **2 прежних skipped**.
+- Tools: **111 passed** (49 + 62).
+- Contracts, все типы, syntax, lint, build, diff, entrypoint: PASS.
+
+Финальный JSON: `.scratch/check-runs/20261015T191956Z-c5b8cc24/report.json`.
+Независимые targeted reviews исправления generation, merge uv и status fix:
+**0 замечаний по Spec и Standards**. После полного прогона менялся только этот
+отчёт; `git diff --check` PASS. Личная аккаунтная приёмка не проводилась.
