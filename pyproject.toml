@@ -28,7 +28,6 @@ dev = [
     "jsonschema==4.26.0",
     "pyyaml==6.0.3",
     "poetry-core==2.5.0",
-    "installer==0.7.0",
 ]
 
 [tool.pytest.ini_options]
@@ -42,10 +41,3 @@ files = ["oko"]
 [tool.poetry]
 requires-poetry = "==2.5.1"
 packages = [{ include = "oko" }]
-include = [
-    { path = "oko/frontend_build/**/*", format = ["wheel"] },
-    { path = "oko/reader/legacy_generated/*.json", format = ["wheel", "sdist"] },
-    { path = "oko/reader/generated/*.json", format = ["wheel", "sdist"] },
-    { path = "oko/reader/generated/*.yaml", format = ["wheel", "sdist"] },
-    { path = "oko/reader/docs/**/*", format = ["wheel", "sdist"] },
-]

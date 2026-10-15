@@ -52,3 +52,24 @@ Canonical OpenAPI, baseline, generated-библиотеки, scripts/check, CI �
 Просмотрены финальные Playwright screenshots: [desktop](evidence/task3/desktop.png), [материал при mobile viewport](evidence/task3/mobile-material.png). Чтение, текст, ссылки, media и кнопки сохранены. Общая существующая компоновка при узком viewport не перерабатывалась; mobile screenshot фиксирует затронутую область материала.
 
 Личные источники, Telegram-аккаунты и настоящие модели не использовались. Проверки candidate не разрешают выпуск v3: semantic review/baseline остаются задачей 07. Пользовательский экземпляр не перезапускался.
+
+## Обновление main и новый полный прогон
+
+По запросу пользователя получен и влит `origin/main` на `5c4d4f1` (PR #14, `7d11c00`: кеш проверок индекса, параллельные Python shards, удаление wheel delivery). Merge без конфликтов. `scripts/check`, `scripts/check-staged`, `scripts/check-types.mts` и CI совпадают с main; ускорения сохранены. Новый полный прогон выполнен после слияния, включая автоматически выбранные тесты инструментов.
+
+Команда: `./scripts/check all --candidate api/openapi.yaml --report-dir /private/tmp/oko-task3-main-full`.
+
+Результат: **все исполняемые проверки PASS**, exit code 0; compatibility остаётся **PENDING_REVIEW**, baseline не утверждался.
+
+- Python приложения: 182 + 164 = **346 passed**.
+- Тесты инструментов: 53 + 63 = **116 passed**.
+- HTTP: **9 passed**.
+- Browser: **120 passed, 2 previously authorized skipped, 0 failed**.
+- Генерация, drift, contracts, syntax/lint, Python/TypeScript types, сборка, diff и entrypoint: PASS.
+- Время: **166.97 s**. Отчёт: `/private/tmp/oko-task3-main-full/20261015T160701Z-c1ac5118/report.json`.
+
+Дополнительных падений после merge не обнаружено; новые исправления или отключения тестов не потребовались. Изменение числа Python-тестов связано с удалёнными в main wheel-проверками; новый runner сам выбирает группы и shards. Этот новый полный PASS относится к поведенческим и инструментальным проверкам объединённой версии и не заменяет предстоящий semantic review выпуска v3.
+
+Обычный pre-commit остановился на compatibility gate (v3 ещё не утверждён). До переноса candidate-коммита пользователь прервал этот процесс и явно потребовал удалить hook. Удалены `.githooks/pre-commit` и `scripts/install-hooks`; тесты проверок индекса переведены на прямой `check staged`, добавлена проверка свободного commit. Ручные проверки и CI остаются; baseline не менялся. Полный прогон выше выполнен до удаления hook, отдельная проверка изменённого набора выполняется после удаления.
+
+После удаления hook: `pytest tests/development/test_hooks.py -q` — 13 passed, 16.56 s. Первый запуск дал 4 failed / 9 passed из-за проверок только stderr; прямой runner объединяет вывод в stdout. Ожидания исправлены на stdout + stderr, сами проверки неправильного индекса и кеширования сохранены. Отдельный сценарий подтверждает, что commit больше не запускает проверку индекса.

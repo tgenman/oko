@@ -1,3 +1,4 @@
+import {checkTypes} from './check-types.mts';
 import {validateAssets} from './frontend-assets.mts';
 import type {BinaryLike} from 'node:crypto';
 import {cached, fingerprint, remember, toolchain} from './api-cache.mts';
@@ -49,8 +50,8 @@ async function compile() {
       return;
     } catch { /* Rebuild missing, stale or damaged output from verified sources. */ }
   }
-  execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'-p',join(root,'tsconfig.tooling.json')],{cwd:root,stdio:'inherit'});
-  execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'--noEmit'],{cwd:root,stdio:'inherit'});
+  await checkTypes(root, 'tsconfig.tooling.json');
+  await checkTypes(root, 'tsconfig.json');
   const {build} = await import('vite');
   const {default: ts} = await import('typescript');
   const before = await sourceDigest();

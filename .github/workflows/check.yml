@@ -17,8 +17,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - name: Regenerate and compare API without cached evidence
-        run: poetry run npm run api:check -- --fresh
-      - run: poetry run ./scripts/check contracts build syntax lint types browser-types diff entrypoint
+        env:
+          OKO_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: |
+          poetry run node --import tsx scripts/generate-api.mts check --fresh
+          poetry run ./scripts/check contracts build syntax lint types diff entrypoint
       - uses: actions/upload-artifact@v4
         with:
           name: checked-frontend
@@ -43,18 +46,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Select tool tests before installing dependencies
+        id: selection
+        if: matrix.suite == 'tools'
+        env:
+          CHECK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          required=$(python3 scripts/check tools --tools-needed --base "$CHECK_BASE")
+          case "$required" in true|false) ;; *) echo "Invalid tool selection" >&2; exit 1 ;; esac
+          echo "required=$required" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup
+        if: matrix.suite != 'tools' || steps.selection.outputs.required == 'true'
       - uses: actions/download-artifact@v4
+        if: matrix.suite != 'tools' || steps.selection.outputs.required == 'true'
         with:
           name: checked-frontend
           path: oko/frontend_build/
       - name: Verify downloaded asset integrity and source freshness
+        if: matrix.suite != 'tools' || steps.selection.outputs.required == 'true'
         run: npm run build:check
       - if: matrix.suite == 'browser'
         run: npx playwright install --with-deps chromium
       - if: matrix.suite != 'tools'
         run: poetry run ./scripts/check ${{ matrix.suite }}
-      - if: matrix.suite == 'tools'
+      - if: matrix.suite == 'tools' && steps.selection.outputs.required == 'true'
         name: Test development tools only when their inputs changed
         env:
           CHECK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

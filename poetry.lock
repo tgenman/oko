@@ -610,18 +610,6 @@ files = [
 ]
 
 [[package]]
-name = "installer"
-version = "0.7.0"
-description = "A library for installing Python wheels."
-optional = false
-python-versions = ">=3.7"
-groups = ["dev"]
-files = [
-    {file = "installer-0.7.0-py3-none-any.whl", hash = "sha256:05d1933f0a5ba7d8d6296bb6d5018e7c94fa473ceb10cf198a92ccea19c27b53"},
-    {file = "installer-0.7.0.tar.gz", hash = "sha256:a26d3e3116289bb08216e0d0f7d925fcef0b0194eedfa0c944bcaaa106c4b631"},
-]
-
-[[package]]
 name = "isort"
 version = "8.0.1"
 description = "A Python utility / library to sort Python imports."
@@ -2104,4 +2092,4 @@ secretstorage = ["secretstorage"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "28610baa5da82aa59358513295f066c45f603a719bb57f1b275c32806cca0dff"
+content-hash = "030b6aca6dd29c6328b43e3e6e522b43341b179ae3760dfdadc59667eecc0b88"

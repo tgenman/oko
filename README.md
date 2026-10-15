@@ -12,9 +12,9 @@
 
 ## Запуск
 
-Браузерный интерфейс написан на React и strict TypeScript в `frontend/src/`, сборка — Vite. Python выдаёт готовые HTML, JS/CSS и API на одном origin. Установленная поставка содержит assets и не требует Node или исходного checkout. Для разработки установите Python extra `dev`, выполните `npm ci`, `npm run api:generate` и `npm run build`; `npm run dev` пересобирает assets при правках для того же Python-сервера. Source checkout отклоняет отсутствующую или устаревшую сборку до запуска Runtime.
+Браузерный интерфейс написан на React и strict TypeScript в `frontend/src/`, сборка — Vite. Python выдаёт готовые HTML, JS/CSS и API на одном origin. Око запускается из репозитория; Node нужен для подготовки frontend. Для разработки установите Python-зависимости через `poetry sync` (включая группу `dev`), выполните `npm ci`, `npm run api:generate` и `npm run build`; `npm run dev` пересобирает assets при правках для того же Python-сервера. Source checkout отклоняет отсутствующую или устаревшую сборку до запуска Runtime.
 
-Контракт — [api/openapi.yaml](api/openapi.yaml). Обе библиотеки DTO/SDK генерируются из него; `npm run api:check` выявляет drift без записи в checkout, `npm run api:compat` сверяет reviewed baseline. У работающего Око документация находится на `/docs`; `npm run api:docs` показывает её отдельно без Runtime. [Команды контракта](api/README.md), [поставка wheel](docs/development/package.md).
+Контракт — [api/openapi.yaml](api/openapi.yaml). Обе библиотеки DTO/SDK генерируются из него; `npm run api:check` выявляет drift без записи в checkout, `npm run api:compat` сверяет reviewed baseline. У работающего Око документация находится на `/docs`; `npm run api:docs` показывает её отдельно без Runtime. [Команды контракта](api/README.md), [запуск из checkout](docs/development/package.md).
 
 Codex на macOS: Око предпочитает непосредственно проверенный бинарник из `ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`; если его нет, ищет CLI в PATH. `OKO_CODEX_BINARY` задаёт явный путь для другой установки. Диагностика, каталог и обработка используют один выбранный файл; допуск требует проверенного SHA-256. Текущая проверенная сборка — `0.162.0-alpha.17.2`. Shell-обёртка из `codex-cli/bin/` не используется: профиль запрещает запуск других программ. Обновление приложения с изменением бинарника потребует повторной проверки допуска. Сохранённые модели Око автоматически не заменяются.
 
@@ -73,7 +73,7 @@ SQLite хранит идентичности, состояние, позиции
 
 ## Проверки
 
-Для нового checkout включите обязательные локальные проверки: `./scripts/install-hooks`. Перед коммитом проверяются staged-синтаксис и JavaScript `no-undef`; push не повторяет тесты. Полный набор выполняется в CI для pull request и push в `main`. Подготовка окружения и выбор отдельных наборов и файлов описаны в [инструкции проверок](tests/browser/README.md).
+Автоматических Git hooks нет. Для ручной проверки индекса используйте `./scripts/check staged`; commit и push не запускают проверки. Полный набор выполняется в CI для pull request и push в `main`. Подготовка окружения и выбор отдельных наборов и файлов описаны в [инструкции проверок](tests/browser/README.md).
 
 ```sh
 ./scripts/check ui
