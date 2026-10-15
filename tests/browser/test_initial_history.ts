@@ -13,7 +13,7 @@ test('RSS connection selects count or inclusive date and displays saved history 
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/feeds', {body: feed});
       t.replies.set('/api/feeds/verify', {body: {url: feed.original_urls[0], title: feed.title, kind: 'rss', verification: 'checked', existing: null}});
-      t.replies.set('/api/settings/feed/rss', {body: {...t.replies.get('/api/settings/oko/global')!.body, feed}});
+      t.replies.set('/api/v3/settings/feed/rss', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/feed');
@@ -66,7 +66,7 @@ test('finite history warning and unknown date are visible in settings and materi
       const feed = {id: 'rss', title: 'История', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal' as const, initial_days: 1,
         initial_history: window.readerFixtures.history({mode: 'count', count: 100, count_text: '100', loaded: 15, state: 'done', frozen: true, scan_complete: true, available: 15, paused: false, warnings: ['Порядок RSS неоднозначен: точность выбора последних N не подтверждена']})};
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
-      t.replies.set('/api/settings/feed/rss', {body: {...t.replies.get('/api/settings/oko/global')!.body, feed}});
+      t.replies.set('/api/v3/settings/feed/rss', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
       t.replies.set('/api/materials/unknown', {body: {...card, originals: true, images: [], attachments: []}});
     }, card);
     await expect(r.page.locator('#cards')).toContainText('Дата неизвестна');

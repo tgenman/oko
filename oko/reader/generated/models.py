@@ -260,6 +260,12 @@ class Streams(RootModel[StrictInt]):
     root: StrictInt = Field(..., ge=0, le=9007199254740991)
 
 
+class DiagnosticIgnored(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: Literal["material_viewed"]
+    state: Literal["ignored"]
+
+
 class DiagnosticPersistenceFailure(WireModel):
     model_config = ConfigDict(extra="forbid")
     message: StrictStr
@@ -428,6 +434,17 @@ class KnownLocalModel(WireModel):
     model_config = ConfigDict(extra="forbid")
     name: StrictStr = Field(..., min_length=1)
     state: Literal["known"]
+
+
+class LegacyCommandContext(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Literal[
+        "import_subscriptions",
+        "import_preview",
+        "create_digest",
+        "unrecognized_operation",
+    ]
+    operation: Literal["legacy"]
 
 
 class LegacyProcessorSelection(WireModel):
@@ -880,6 +897,12 @@ class TelegramProfileRequest(WireModel):
 class TelegramRole(RootModel[Literal["personal", "collection"]]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal["personal", "collection"] = Field(..., examples=["personal"])
+
+
+class TelegramUnconfiguredAccess(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["unconfigured"]
+    source_locator: StrictStr = Field(..., min_length=1)
 
 
 class TelegramUserId(RootModel[StrictStr]):
@@ -2147,30 +2170,6 @@ class CommandObservation(WireModel):
     result: Literal["failed", "unknown"]
 
 
-class CommandReceiptAbandoned(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    context: CommandContext
-    id: CommandId
-    outcome: Literal["abandoned"]
-    updated_at: Timestamp
-
-
-class CommandReceiptPending(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    context: CommandContext
-    id: CommandId
-    outcome: Literal["pending"]
-    updated_at: Timestamp
-
-
-class CommandReceiptSucceeded(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    context: CommandContext
-    id: CommandId
-    outcome: Literal["succeeded"]
-    updated_at: Timestamp
-
-
 class CompleteFolder409Errors(RootModel[CompositionChangedError | RuntimeStoppedError]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: CompositionChangedError | RuntimeStoppedError = Field(
@@ -2209,9 +2208,11 @@ class DiagnosticAccepted(WireModel):
     state: Literal["accepted"]
 
 
-class DiagnosticReceipt(RootModel[DiagnosticAccepted | DiagnosticPersistenceFailure]):
+class DiagnosticReceipt(
+    RootModel[DiagnosticIgnored | DiagnosticAccepted | DiagnosticPersistenceFailure]
+):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: DiagnosticAccepted | DiagnosticPersistenceFailure = Field(
+    root: DiagnosticIgnored | DiagnosticAccepted | DiagnosticPersistenceFailure = Field(
         ...,
         discriminator="state",
         examples=[
@@ -2465,11 +2466,28 @@ class StorageUnavailableError(WireModel):
     message: StrictStr
 
 
+class StoredCommandContext(RootModel[CommandContext | LegacyCommandContext]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: CommandContext | LegacyCommandContext = Field(
+        ..., examples=[{"name": "import_subscriptions", "operation": "legacy"}]
+    )
+
+
 class TelegramAccess(
-    RootModel[TelegramWebAccess | TelegramClientAccess | TelegramLegacyClientAccess]
+    RootModel[
+        TelegramUnconfiguredAccess
+        | TelegramWebAccess
+        | TelegramClientAccess
+        | TelegramLegacyClientAccess
+    ]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: TelegramWebAccess | TelegramClientAccess | TelegramLegacyClientAccess = Field(
+    root: (
+        TelegramUnconfiguredAccess
+        | TelegramWebAccess
+        | TelegramClientAccess
+        | TelegramLegacyClientAccess
+    ) = Field(
         ...,
         discriminator="kind",
         examples=[
@@ -2627,10 +2645,26 @@ class TelegramSourceReference(WireModel):
     source_url: SourceUrl
 
 
+class TelegramUnconfiguredSubscriptionFeed(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    access: TelegramUnconfiguredAccess
+    connection: Literal["needs_connection", "deleting"]
+    folder_id: FolderId
+    history: HistoryState
+    id: FeedId
+    identity: StrictStr = Field(..., min_length=1)
+    importance: Importance
+    initial_days: StrictInt = Field(..., ge=1, le=3650)
+    kind: Literal["telegram"]
+    original_urls: list[SourceLocator]
+    public_ai: StrictBool | None
+    title: StrictStr
+
+
 class TelegramWebSubscriptionFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramWebAccess
-    connection: Literal["ready", "unavailable", "deleting"]
+    connection: Literal["ready", "needs_connection", "unavailable", "deleting"]
     folder_id: FolderId
     history: HistoryState
     id: FeedId
@@ -2781,6 +2815,30 @@ class CodexProcessorState(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: CodexAvailability
     configuration: CodexConfiguration | None
+
+
+class CommandReceiptAbandoned(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    context: StoredCommandContext
+    id: CommandId
+    outcome: Literal["abandoned"]
+    updated_at: Timestamp
+
+
+class CommandReceiptPending(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    context: StoredCommandContext
+    id: CommandId
+    outcome: Literal["pending"]
+    updated_at: Timestamp
+
+
+class CommandReceiptSucceeded(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    context: StoredCommandContext
+    id: CommandId
+    outcome: Literal["succeeded"]
+    updated_at: Timestamp
 
 
 class DemoSubscriptionFeed(WireModel):
@@ -2947,7 +3005,8 @@ class SourceReference(
 
 class SubscriptionFeed(
     RootModel[
-        DemoSubscriptionFeed
+        TelegramUnconfiguredSubscriptionFeed
+        | DemoSubscriptionFeed
         | RssSubscriptionFeed
         | YoutubeSubscriptionFeed
         | UnresolvedSubscriptionFeed
@@ -2958,7 +3017,8 @@ class SubscriptionFeed(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
-        DemoSubscriptionFeed
+        TelegramUnconfiguredSubscriptionFeed
+        | DemoSubscriptionFeed
         | RssSubscriptionFeed
         | YoutubeSubscriptionFeed
         | UnresolvedSubscriptionFeed
@@ -3668,7 +3728,7 @@ class TelegramConnect409Errors(
 
 class CommandReceiptFailed(WireModel):
     model_config = ConfigDict(extra="forbid")
-    context: CommandContext
+    context: StoredCommandContext
     error: ErrorEnvelope
     id: CommandId
     outcome: Literal["failed"]

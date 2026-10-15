@@ -11,7 +11,7 @@ test('history can pause and resume in feed settings without offering restart aft
       const history = window.readerFixtures.history({mode:'count',count:20,count_text:'20',loaded:7,available:20,state:'loading',frozen:true,paused:false});
       const feed = {id:'rss',title:'История',kind:'rss',transport:'rss',folder_id:'f',original_urls:['https://source.test/feed'],importance:'normal',initial_days:1,initial_history:history};
       t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
-      t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global')!.body,feed}});
+      t.replies.set('/api/v3/settings/feed/rss',{body:{...t.replies.get('/api/v3/settings/oko/global')!.body,feed}});
       t.replies.set('/api/feeds/rss/history',{body:{...history,paused:true,state:'paused'}});
     });
     await r.page.locator('#feeds-open').click();

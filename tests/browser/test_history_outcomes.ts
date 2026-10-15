@@ -11,7 +11,7 @@ test('initial history shows partial, retry and unavailable outcomes with errors'
       const feed = {id:'rss',title:'История',kind:'rss',transport:'rss',folder_id:'f',original_urls:['https://source.test/feed'],importance:'normal',initial_days:1,
         initial_history:window.readerFixtures.history({mode:'count',count:20,loaded:18,incomplete:2,retrying:1,unavailable:1,state:'loading',frozen:true,available:20,paused:false,errors:[{item:'unavailable',message:'Источник недоступен'}]})};
       t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
-      t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global')!.body,feed}});
+      t.replies.set('/api/v3/settings/feed/rss',{body:{...t.replies.get('/api/v3/settings/oko/global')!.body,feed}});
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
@@ -33,7 +33,7 @@ test('count selection does not announce shortfall before metadata scan completes
       const feed = {id:'rss',title:'История',kind:'telegram',transport:'telegram',folder_id:'f',original_urls:['@source'],importance:'normal',
         initial_history:window.readerFixtures.history({mode:'count',count:100,loaded:0,state:'selecting',frozen:false,scan_complete:false,available:10,paused:false,discovery_error:'Архив недоступен',discovery_retry_at:Date.now()/1000+600})};
       t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
-      t.replies.set('/api/settings/feed/rss',{body:{...t.replies.get('/api/settings/oko/global')!.body,feed}});
+      t.replies.set('/api/v3/settings/feed/rss',{body:{...t.replies.get('/api/v3/settings/oko/global')!.body,feed}});
     });
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();

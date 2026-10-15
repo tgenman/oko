@@ -9,8 +9,8 @@ test('Telegram accounts are selectable and incomplete or pending connection is d
     await r.page.addInitScript(() => {
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      t.replies.set('/api/processors/llamacpp', {body: null});
-      t.replies.set('/api/settings/oko/global', {body: {effective: {}, overrides: {}}});
+      t.replies.set('/api/v3/processors/llamacpp', {body: null});
+      t.replies.set('/api/v3/settings/oko/global', {body: {effective: {}, overrides: {}}});
       t.replies.set('/api/telegram/accounts', {body: ['personal', 'work']});
       t.held.set('/api/telegram/connect', true);
     });
@@ -46,7 +46,7 @@ test('forum selection resets on peer change and stale topics cannot attach to a 
     await r.page.addInitScript(() => {
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      t.replies.set('/api/processors/llamacpp', {body: null});
+      t.replies.set('/api/v3/processors/llamacpp', {body: null});
       t.replies.set('/api/telegram/accounts', {body: ['personal']});
       t.held.set('/api/telegram/topics', true);
     });
@@ -90,7 +90,7 @@ test('ordinary channel stays connectable after checking its empty topic list', a
     await r.page.addInitScript(() => {
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      t.replies.set('/api/processors/llamacpp', {body: null});
+      t.replies.set('/api/v3/processors/llamacpp', {body: null});
       t.replies.set('/api/telegram/accounts', {body: ['personal']});
       t.replies.set('/api/telegram/topics', {body: []});
     });
@@ -112,7 +112,7 @@ test('missing accounts and failed loading prevent connection until a successful 
     await r.page.addInitScript(() => {
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      t.replies.set('/api/processors/llamacpp', {body: null});
+      t.replies.set('/api/v3/processors/llamacpp', {body: null});
       t.replies.set('/api/telegram/accounts', {body: {detail: 'Клиент недоступен'}, status: 409});
     });
     await r.start([]);
@@ -139,12 +139,12 @@ test('imported Telegram feed uses the same account selection and keeps its feed 
     await r.page.addInitScript(() => {
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Работа'}], feeds: [{id: 'imported', kind: 'telegram', identity: 'telegram:fixture', title: 'Канал', folder_id: 'f', original_urls: ['https://t.me/fixture'], importance: 'normal', initial_days: 1, public_ai: false, auto_read: null, read_history: false, transport: null, connection: 'needs_connection'}]}});
-      t.replies.set('/api/processors/llamacpp', {body: null});
+      t.replies.set('/api/v3/processors/llamacpp', {body: null});
       t.replies.set('/api/telegram/accounts', {body: ['personal']});
       t.held.set('/api/telegram/connect', true);
     });
     await r.start([]);
-    await r.page.evaluate(() => readerTransport.replies.set('/api/settings/feed/imported', readerTransport.replies.get('/api/settings/oko/global')!));
+    await r.page.evaluate(() => readerTransport.replies.set('/api/v3/settings/feed/imported', readerTransport.replies.get('/api/v3/settings/oko/global')!));
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/imported"]').click();
     await feedOptions(r.page);

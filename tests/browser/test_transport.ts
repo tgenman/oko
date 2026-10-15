@@ -58,7 +58,7 @@ test('reader transport shares authorization and preserves JSON, media and closin
           signal:options!.signal === controller.signal});
         return new Response('{"saved":true}', {headers:{'Content-Type':'application/json'}});
       }});
-      const saved = await transport.json('/api/settings/feed/f', 'PATCH', {theses:false}, controller.signal);
+      const saved = await transport.json('/api/v3/settings/feed/f', 'PATCH', {theses:false}, controller.signal);
       await transport.media('/api/materials/a/media/image', controller.signal, 'no-store');
       await transport.media('https://other.test/image');
       await transport.close('/api/tabs/tab/close');
@@ -68,7 +68,7 @@ test('reader transport shares authorization and preserves JSON, media and closin
     });
     expect(result.saved).toEqual({saved:true});
     expect(result.media).toEqual({ok:false,status:503,diagnosticId:'media-diagnostic'});
-    expect(result.requests[0]).toEqual({url:'/api/settings/feed/f',method:'PATCH',cache:'no-store',authorization:'Bearer transport-session',contentType:'application/json',body:'{"theses":false}',signal:true});
+    expect(result.requests[0]).toEqual({url:'/api/v3/settings/feed/f',method:'PATCH',cache:'no-store',authorization:'Bearer transport-session',contentType:'application/json',body:'{"theses":false}',signal:true});
     expect(result.requests[1]).toEqual({url:'/api/materials/a/media/image',cache:'no-store',authorization:'Bearer transport-session',signal:true});
     expect(result.requests[2].authorization).toBeUndefined();
     expect(result.requests[3]).toEqual({url:'/api/tabs/tab/close',method:'POST',keepalive:true,authorization:'Bearer transport-session',signal:false});
@@ -114,7 +114,7 @@ test('reader shows malformed responses and failed diagnostics retry only the ori
   try {
     await r.start([material('one')]);
     await r.page.route('**/api/collect', route => route.fulfill({status:200,contentType:'text/html',body:'<html>broken reply</html>'}));
-    await r.page.route('**/api/debug', route => route.request().method() === 'POST'
+    await r.page.route('**/api/v3/diagnostics', route => route.request().method() === 'POST'
       ? route.fulfill({status:503,contentType:'text/html',body:'<html>offline</html>'}) : route.continue());
     await r.page.locator('#collect').click();
     await expect(r.page.locator('.header-command-error:not([hidden])')).toContainText('Некорректный ответ Око');
@@ -122,8 +122,8 @@ test('reader shows malformed responses and failed diagnostics retry only the ori
     await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('Некорректный ответ Око');
     await expect(r.page.locator('#debug-errors')).toContainText('не сохранено');
-    await expect.poll(() => r.page.evaluate(() => readerTransport.requests.filter(request => request.url === '/api/debug' && request.method === 'POST').length)).toBeGreaterThan(1);
-    const requests = await r.page.evaluate(() => readerTransport.requests.filter(request => request.url === '/api/debug' && request.method === 'POST').map(request => request.body));
+    await expect.poll(() => r.page.evaluate(() => readerTransport.requests.filter(request => request.url === '/api/v3/diagnostics' && request.method === 'POST').length)).toBeGreaterThan(1);
+    const requests = await r.page.evaluate(() => readerTransport.requests.filter(request => request.url === '/api/v3/diagnostics' && request.method === 'POST').map(request => request.body));
     expect(new Set(requests.map(body => body!.event_id)).size).toBe(1);
     expect(requests.every(body => body!.message === 'Некорректный ответ Око')).toBe(true);
     expect(r.errors).toEqual([]);

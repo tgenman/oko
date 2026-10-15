@@ -228,10 +228,15 @@ class Runtime:
                     ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
                     total_sources=len(self._sources))
 
-    async def action_started(self, identity: str, context: dict[str, Any]) -> None:
+    async def action_started(self, identity: str, context: dict[str, Any], *, restart: bool = False, expected_identity: str | None = None) -> None:
         async with self._actions:
             if self._store and not self.stopped:
-                self._store.problems.action_started(identity, context, self._wall_clock())
+                self._store.problems.action_started(identity, context, self._wall_clock(), restart=restart, expected_identity=expected_identity)
+
+    async def action_failed(self, identity: str, error_json: str) -> None:
+        async with self._actions:
+            if self._store and not self.stopped:
+                self._store.problems.command_error(identity, error_json)
 
     async def action_finished(self, identity: str, succeeded: bool) -> None:
         async with self._actions:
@@ -245,8 +250,8 @@ class Runtime:
                 return 'abandoned'
             try:
                 return self.require_store().problems.report_action(identity, context, result, self._wall_clock())
-            except ValueError as error:
-                raise ActionError('invalid', str(error), expected=True) from None
+            except ValueError:
+                raise
 
     async def abandon_problem(self, identity: str) -> None:
         async with self._actions:

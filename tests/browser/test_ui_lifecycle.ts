@@ -9,8 +9,8 @@ test('a completed field write reconciles after Back without discarding a newer d
   const r = await reader(); let held: Route | null | undefined;
   try {
     await r.start([]);
-    await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/settings/oko/global');});
-    await r.page.route('**/api/settings/oko/global',async route=>{
+    await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
+    await r.page.route('**/api/v3/settings/oko/global',async route=>{
       if (route.request().method()==='PATCH') held=route; else await route.continue();
     });
     await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
@@ -33,7 +33,7 @@ test('a completed field write reconciles after Back without discarding a newer d
 
 test('Back restores the current field and section links after a saved editor rerenders', async () => {
   const r=await reader();try{
-    await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/settings/oko/global');});
+    await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
     await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
     await r.page.locator('#setting-originals').uncheck();await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
     await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
@@ -74,19 +74,19 @@ test('returning to Codex retries a catalog load interrupted by section navigatio
     await r.start([]);
     await r.page.evaluate(models => {
       readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
-      readerTransport.replies.set('/api/processors/llamacpp',{body:null});
-      readerTransport.replies.set('/api/processors/codex/models',{body:{models}});
-      readerTransport.held.set('/api/processors/codex/models',true);
+      readerTransport.replies.set('/api/v3/processors/llamacpp',{body:null});
+      readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models}});
+      readerTransport.held.set('/api/v3/processors/codex/models',true);
     }, models);
     await r.page.locator('#settings-open').click();
     await r.page.locator('[data-settings-target="models"]').click();
     await r.page.locator('[data-settings-target="codex"]').click();
-    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/processors/codex/models'));
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/processors/codex/models'));
     await r.page.locator('#settings-dialog .settings-back').click();
     await r.page.evaluate(()=>{
-      window.interruptedCatalogReply = readerTransport.pending.get('/api/processors/codex/models')!;
-      readerTransport.pending.delete('/api/processors/codex/models');
-      readerTransport.held.delete('/api/processors/codex/models');
+      window.interruptedCatalogReply = readerTransport.pending.get('/api/v3/processors/codex/models')!;
+      readerTransport.pending.delete('/api/v3/processors/codex/models');
+      readerTransport.held.delete('/api/v3/processors/codex/models');
     });
     await r.page.locator('[data-settings-target="codex"]').click();
     await expect(r.page.locator('#codex-theses-model')).toHaveValue('small');
@@ -102,7 +102,7 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
     await r.start([]);
     await r.page.evaluate(() => {
       readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
-      readerTransport.replies.set('/api/processors/llamacpp', {body:null});
+      readerTransport.replies.set('/api/v3/processors/llamacpp', {body:null});
     });
     await r.page.locator('#settings-open').click();
     await r.page.locator('[data-settings-target="youtube"]').click();

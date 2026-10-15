@@ -101,6 +101,14 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.exception_handler(ActionError)
     async def action_error(request: Request, error: ActionError) -> JSONResponse:
+        if request.url.path.startswith('/api/v3/'):
+            from oko.reader.generated import models as v3
+            command_id = v3.CommandId(request.state.command_id) if request.method != 'GET' else None
+            if runtime.stopped:
+                return api_v3.error_response(409, v3.ErrorEnvelope(v3.RuntimeStoppedError(code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=command_id)))
+            if error.kind == 'unavailable':
+                return api_v3.error_response(503, v3.ErrorEnvelope(v3.StorageUnavailableError(code='storage_unavailable', message=str(error.detail), details=v3.StorageUnavailableErrorDetails(retry_at=None), diagnostic_id=None, command_id=command_id)))
+            return api_v3.error_response(400, v3.ErrorEnvelope(v3.ActionInvalidError(code='action_invalid', message=str(error.detail), details=v3.ActionInvalidErrorDetails(reason='invalid_state'), diagnostic_id=None, command_id=command_id)))
         group = journal.capture(error, request.method + ' ' + request.url.path)
         return JSONResponse({'detail': error.detail}, headers={'X-Oko-Error': group} if group else {'X-Oko-Expected': '1'} if error.diagnostic_skip else {}, status_code={'conflict': 409, 'invalid': 400, 'missing': 404, 'unavailable': 503}[error.kind])
 
@@ -174,6 +182,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             diagnostic_source.reset(source_context)
             active_journal.reset(context)
         response.headers['Cache-Control'] = 'no-store'
+        if v3 and request.method in ('POST','PUT','PATCH','DELETE'):
+            response.headers['X-Oko-Action'] = action_id
         if action:
             await runtime.action_finished(action_id, response.status_code < 400)
             response.headers['X-Oko-Action'] = action_id
@@ -216,7 +226,11 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         context = action_context(body.method, body.path, body.fields if isinstance(body.fields, list) else [])
         if context is None:
             raise HTTPException(400, 'Неизвестное действие читателя')
-        result = await runtime.report_action(body.id, context, body.result)
+        from oko.storage.problems import CommandContextMismatch
+        try:
+            result = await runtime.report_action(body.id, context, body.result)
+        except CommandContextMismatch:
+            raise HTTPException(400, 'Контекст действия не совпадает') from None
         return dict(ok=True, result=result)
 
     @app.post('/api/problems/{identity}/abandon', response_model=RESPONSES[('POST', '/api/problems/{identity}/abandon')], response_model_exclude_unset=True)

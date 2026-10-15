@@ -571,14 +571,14 @@ export type CommandReceipt = ({
 } & CommandReceiptAbandoned);
 
 export type CommandReceiptAbandoned = {
-    context: CommandContext;
+    context: StoredCommandContext;
     id: CommandId;
     outcome: 'abandoned';
     updated_at: Timestamp;
 };
 
 export type CommandReceiptFailed = {
-    context: CommandContext;
+    context: StoredCommandContext;
     error: ErrorEnvelope;
     id: CommandId;
     outcome: 'failed';
@@ -586,14 +586,14 @@ export type CommandReceiptFailed = {
 };
 
 export type CommandReceiptPending = {
-    context: CommandContext;
+    context: StoredCommandContext;
     id: CommandId;
     outcome: 'pending';
     updated_at: Timestamp;
 };
 
 export type CommandReceiptSucceeded = {
-    context: CommandContext;
+    context: StoredCommandContext;
     id: CommandId;
     outcome: 'succeeded';
     updated_at: Timestamp;
@@ -834,6 +834,11 @@ export type DiagnosticEntry = {
     traceback: string;
 };
 
+export type DiagnosticIgnored = {
+    reason: 'material_viewed';
+    state: 'ignored';
+};
+
 export type DiagnosticJournal = {
     groups: Array<DiagnosticEntry>;
     persistence_error: string | null;
@@ -845,6 +850,8 @@ export type DiagnosticPersistenceFailure = {
 };
 
 export type DiagnosticReceipt = ({
+    state: 'ignored';
+} & DiagnosticIgnored) | ({
     state: 'accepted';
 } & DiagnosticAccepted) | ({
     state: 'persistence_failure';
@@ -1323,6 +1330,14 @@ export type InternalErrorError = {
 export type KnownLocalModel = {
     name: string;
     state: 'known';
+};
+
+/**
+ * Response-only context for a persisted command whose operation was retired or cannot be reconstructed. No URL, page or submitted values are exposed.
+ */
+export type LegacyCommandContext = {
+    name: 'import_subscriptions' | 'import_preview' | 'create_digest' | 'unrecognized_operation';
+    operation: 'legacy';
 };
 
 export type LegacyCurrentProblem = {
@@ -2133,6 +2148,8 @@ export type StorageUnavailableErrorDetails = {
     retry_at: Timestamp | null;
 };
 
+export type StoredCommandContext = CommandContext | LegacyCommandContext;
+
 export type StoredOverrides = {
     originals?: boolean;
     processor?: StoredProcessorSelection;
@@ -2148,7 +2165,7 @@ export type SubscriptionCatalog = {
     folders: Array<SubscriptionFolder>;
 };
 
-export type SubscriptionFeed = DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed | TelegramClientSubscriptionFeed | TelegramLegacyClientSubscriptionFeed;
+export type SubscriptionFeed = TelegramUnconfiguredSubscriptionFeed | DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed | TelegramClientSubscriptionFeed | TelegramLegacyClientSubscriptionFeed;
 
 export type SubscriptionFolder = {
     id: FolderId;
@@ -2160,6 +2177,8 @@ export type SubscriptionFolder = {
 };
 
 export type TelegramAccess = ({
+    kind: 'unconfigured';
+} & TelegramUnconfiguredAccess) | ({
     kind: 'web';
 } & TelegramWebAccess) | ({
     kind: 'client';
@@ -2366,6 +2385,26 @@ export type TelegramSourceReference = {
     source_url: SourceUrl;
 };
 
+export type TelegramUnconfiguredAccess = {
+    kind: 'unconfigured';
+    source_locator: string;
+};
+
+export type TelegramUnconfiguredSubscriptionFeed = {
+    access: TelegramUnconfiguredAccess;
+    connection: 'needs_connection' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'telegram';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
+    title: string;
+};
+
 export type TelegramUserId = string;
 
 export type TelegramWebAccess = {
@@ -2390,7 +2429,7 @@ export type TelegramWebConnectRequest = {
 
 export type TelegramWebSubscriptionFeed = {
     access: TelegramWebAccess;
-    connection: 'ready' | 'unavailable' | 'deleting';
+    connection: 'ready' | 'needs_connection' | 'unavailable' | 'deleting';
     folder_id: FolderId;
     history: HistoryState;
     id: FeedId;

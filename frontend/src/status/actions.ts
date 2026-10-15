@@ -1,10 +1,13 @@
+import type {CommandContext} from '../api/generated/types.gen';
+import {observeCommand,commandReceipt,abandonProblem} from '../api/generated/sdk.gen';
 import type { ReaderApi } from '../api/reader';
 import type { Problem, ProblemAction, ProblemObject, ProblemSnapshot, ReportAction } from '../api/legacy-generated/types.gen';
-import { reportReaderAction, abandonProblem } from '../api/legacy-generated/sdk.gen';
+import { reportReaderAction } from '../api/legacy-generated/sdk.gen';
 export type VisibleProblem = Problem & {
     saved?: boolean;
 };
 type Request = ReportAction & {
+    context?:CommandContext;
     fields: string[];
     sequence: number;
     key: string;
@@ -18,6 +21,7 @@ export function createReaderActions({ readerApi, onChanged }: {
     readerApi: ReaderApi;
     onChanged(): void;
 }) {
+    const commandIds=new Map<string,string>();
     const pending = new Map<string, {
         request: Request;
         problem: VisibleProblem;
@@ -31,6 +35,17 @@ export function createReaderActions({ readerApi, onChanged }: {
         const request: Request = { id: crypto.randomUUID(), method, path: '/api/' + path, fields, result: 'unknown', sequence: ++sequence, key: '' };
         request.key = method + ':' + request.path + ':' + field;
         latest.set(request.key, request.sequence);
+        return request;
+    }
+    function beginCommand(context:CommandContext):Request {
+        let path='';let method:Request['method']='POST';let fields:string[]=[];
+        if(context.operation==='settings_patch') {path='settings/'+context.target.scope+'/'+context.target.owner;method='PATCH';fields=context.keys;}
+        else if(context.operation==='feed_patch') {path='feeds/'+context.feed_id;method='PATCH';fields=context.fields;}
+        else if(context.operation==='codex_save'||context.operation==='processor_save') {path='processors/'+(context.operation==='codex_save'?'codex':'llamacpp');method='PUT';}
+        else if(context.operation==='codex_check'||context.operation==='processor_check')path='processors/'+(context.operation==='codex_check'?'codex':'llamacpp')+'/check';
+        const request:Request={id:crypto.randomUUID(),context,method,path:'/api/'+path,fields,result:'unknown',sequence:++sequence,key:method+':/api/'+path+':'+(fields.length===1?fields[0]:'')};
+        latest.set(request.key,request.sequence);
+        commandIds.set(request.key,request.id);
         return request;
     }
     function describe(request: Request, unknown: boolean): VisibleProblem {
@@ -76,7 +91,9 @@ export function createReaderActions({ readerApi, onChanged }: {
         try {
             for (const [key, entry] of pending) {
                 const { id, method, path, fields, result } = entry.request;
-                const reply = (await reportReaderAction({ client: readerApi.client, body: { id, method, path, fields, result } })).data;
+                const context=entry.request.context;
+                const reply=context?{result:(await observeCommand({client:readerApi.client,body:{id,context,result}})).data.outcome}:(await reportReaderAction({ client: readerApi.client, body: { id, method, path, fields, result } })).data;
+                if(context)reply.result=(await commandReceipt({client:readerApi.client,path:{identity:id}})).data.outcome;
                 if (pending.get(key) !== entry)
                     continue;
                 if (reply.result === 'succeeded' || reply.result === 'abandoned')
@@ -91,8 +108,22 @@ export function createReaderActions({ readerApi, onChanged }: {
             onChanged();
         }
     }
+    function matchesDraft(value:string|undefined,path:string,field:string):boolean {
+        if(!value?.startsWith('{'))return false;
+        try {
+            const context:unknown=JSON.parse(value);
+            if(!context||typeof context!=='object'||!('operation' in context))return false;
+            if(context.operation==='codex_save')return path==='processors/codex';
+            if(context.operation==='processor_save')return path==='processors/llamacpp';
+            if(context.operation==='settings_patch'&&'target' in context&&'keys' in context){
+                const target=context.target;
+                return !!target&&typeof target==='object'&&'scope' in target&&'owner' in target&&path==='settings/'+target.scope+'/'+target.owner&&Array.isArray(context.keys)&&context.keys.length===1&&context.keys[0]===field;
+            }
+        }catch{/* A historical operation key is not JSON. */}
+        return false;
+    }
     return {
-        begin, flush,
+        begin, beginCommand, flush,
         forgetMaterials(ids: string[]) {
             const deleted = new Set(ids);
             for (const [key, entry] of pending)
@@ -101,7 +132,7 @@ export function createReaderActions({ readerApi, onChanged }: {
         },
         failed(request: Request | null, value: unknown) {
             const error: Failure = value && typeof value === 'object' ? value : {};
-            if (!request || error.name === 'AbortError' || latest.get(request.key) !== request.sequence)
+            if (!request || latest.get(request.key) !== request.sequence)
                 return;
             request.result = error.confirmed ? 'failed' : 'unknown';
             pending.set(request.key, { request, problem: describe(request, !error.confirmed) });
@@ -115,7 +146,7 @@ export function createReaderActions({ readerApi, onChanged }: {
         merge(snapshot: ProblemSnapshot) {
             const values = [...snapshot.current, ...snapshot.recent];
             for (const [key, entry] of pending)
-                if (values.some(p => p.request_id === entry.request.id || p.operation === key))
+                if (values.some(p => (p.request_id === entry.request.id || p.operation === key) && p.code !== 'action-unknown'))
                     pending.delete(key);
             const current = [...snapshot.current, ...[...pending.values()].map(p => p.problem)];
             return { ...snapshot, current, count: current.length };
@@ -128,7 +159,7 @@ export function createReaderActions({ readerApi, onChanged }: {
                 const status = await readerApi.status();
                 snapshot = status.problems || snapshot;
             }
-            const failed = snapshot.current.find(p => p.operation === key && p.code === 'action-failed');
+            const failed = snapshot.current.find(p => (p.operation === key || p.request_id === commandIds.get(key) || matchesDraft(p.operation,path,field)) && p.code === 'action-failed');
             if (failed)
                 await abandonProblem({ client: readerApi.client, path: { identity: failed.id } });
             pending.delete(key);
