@@ -51,8 +51,13 @@ def frontend_repository(root: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(value)
     (root / 'frontend/icons').mkdir()
-    for name in ('tsconfig.json', 'tsconfig.tooling.json', 'vite.config.mts'):
-        shutil.copy2(ROOT / name, root / name)
+    shutil.copy2(ROOT / 'vite.config.mts', root / 'vite.config.mts')
+    # Build publication tests need a real type error, not every tool's type graph.
+    config = {'compilerOptions': {'strict': True, 'noEmit': True, 'skipLibCheck': True,
+                                 'target': 'ES2022', 'module': 'ESNext', 'moduleResolution': 'bundler',
+                                 'types': []}, 'files': ['frontend/src/main.ts']}
+    for name in ('tsconfig.json', 'tsconfig.tooling.json'):
+        (root / name).write_text(json.dumps(config))
     result = subprocess.run(['node', '--import', 'tsx', 'scripts/generate-api.mts', 'generate'], cwd=root,
                             env={**os.environ, 'OKO_PYTHON': sys.executable}, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr

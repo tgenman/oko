@@ -5,13 +5,38 @@ import subprocess
 import sys
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[2]
+ROOT = REPO
+
+
+@pytest.fixture(scope='module', autouse=True)
+def runner_checkout(tmp_path_factory):
+    """Exercise the real CLI against a tiny inventory, independent of API migration."""
+    import shutil
+    global ROOT
+    checkout = tmp_path_factory.mktemp('runner-checkout')
+    (checkout / 'scripts').mkdir()
+    shutil.copy2(REPO / 'scripts/check', checkout / 'scripts/check')
+    for name in ('frontend/app.ts', 'tests/browser/test_material_list.ts',
+                 'tests/browser/test_opened_material.ts', 'tests/browser/test_settings_navigation.ts',
+                 'tests/browser/test_ui_lifecycle.ts', 'tests/reader/test_web_assets.py',
+                 'tests/reader/test_frontend_build.py'):
+        file = checkout / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text('')
+    ROOT = checkout
+    try:
+        yield
+    finally:
+        ROOT = REPO
 
 
 def runtimes(tmp_path):
     runtime = tmp_path / 'runtime'
     runtime.write_text('''#!/usr/bin/env python3
 import os, sys
+if "merge-base" in sys.argv:
+    print("fixture-base")
 if "-e" in sys.argv:
     print(os.environ["OKO_BROWSER_EXECUTABLE"])
 sys.exit(0)
@@ -143,24 +168,10 @@ def test_ui_checks_production_http_modules_before_browser(tmp_path):
     assert 'PASS http' in result.stdout
 
 
-def ordinary_checkout(tmp_path):
-    """Exercise ordinary runner policy independently of an outer candidate run."""
-    import shutil
-    checkout = tmp_path / 'ordinary'
-    (checkout / 'scripts').mkdir(parents=True)
-    shutil.copy(ROOT / 'scripts/check', checkout / 'scripts/check')
-    for name in ('tests/browser/test_material_list.ts', 'tests/reader/test_web_assets.py', 'frontend/src/main.tsx'):
-        file = checkout / name
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text('')
-    return checkout
-
-
 def test_python_and_types_do_not_require_node(tmp_path):
-    checkout = ordinary_checkout(tmp_path)
     env = runtimes(tmp_path)
     env['OKO_NODE'] = str(tmp_path / 'absent-node')
-    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'python', 'types'],
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', 'types'],
                             env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS python-tests' in result.stdout and 'PASS types' in result.stdout
@@ -228,14 +239,13 @@ def test_invalid_file_selection_fails_before_checks(tmp_path):
 
 
 def test_python_file_selection_supports_test_id_and_does_not_require_node(tmp_path):
-    checkout = ordinary_checkout(tmp_path)
     env = runtimes(tmp_path)
     env['OKO_NODE'] = str(tmp_path / 'missing-node')
     record = tmp_path / 'commands'
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_PYTHON'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as f: f.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'python', '--files', 'tests/reader/test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data'], env=env, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files', 'tests/reader/test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data' in record.read_text()
     assert 'PASS python-tests' in result.stdout
@@ -271,7 +281,6 @@ def test_browser_gets_resolved_python_in_checkout_without_virtualenv(tmp_path):
 
 
 def test_report_keeps_full_output_failures_and_separate_reruns(tmp_path):
-    checkout = ordinary_checkout(tmp_path)
     import json
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])
@@ -288,7 +297,7 @@ if 'pytest' in sys.argv:
 sys.exit(0)
 '''))
     reports = tmp_path / 'reports'
-    command = [sys.executable, str(checkout / 'scripts/check'), 'all', '--report-dir', str(reports)]
+    command = [sys.executable, str(ROOT / 'scripts/check'), 'all', '--report-dir', str(reports)]
     result = subprocess.run(command, env=env, capture_output=True, text=True)
     assert result.returncode == 1
     first = next(reports.iterdir())
@@ -303,13 +312,13 @@ sys.exit(0)
     assert 'x' * 100000 in log and 'stderr diagnostic' in log
     first_json = (first / 'report.json').read_text()
     runtime.write_text('#!/usr/bin/env python3\nimport os, sys\nif \"-e\" in sys.argv: print(os.environ[\"OKO_BROWSER_EXECUTABLE\"])\nsys.exit(0)\n')
-    retry = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
+    retry = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
     assert retry.returncode == 0, retry.stdout + retry.stderr
     assert (first / 'report.json').read_text() == first_json
     second = next(path for path in reports.iterdir() if path != first)
     rerun = json.loads((second / 'report.json').read_text())
     assert list(rerun['suites']) == ['tooling-types', 'browser-types', 'browser']
-    assert rerun['selected_files']['browser'] == [str(checkout / 'tests/browser/test_material_list.ts')]
+    assert rerun['selected_files']['browser'] == [str(ROOT / 'tests/browser/test_material_list.ts')]
 
 
 def test_report_records_missing_dependency_without_claiming_success(tmp_path):
@@ -503,7 +512,7 @@ def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_
     pytest = [command for command in commands if 'pytest' in command]
     assert len(pytest) == 2
     modules = pytest[0][pytest[0].index('-q') + 1:]
-    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in modules}
+    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in [*modules, 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_candidate_checks.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py']}
     record.write_text('')
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files',
                              'tests/reader/test_frontend_build.py'], env=env, capture_output=True, text=True)
@@ -512,3 +521,167 @@ def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_
     pytest = next(command for command in commands if 'pytest' in command)
     assert not any(value.startswith('--ignore=') for value in pytest)
     assert pytest[-1].endswith('tests/reader/test_frontend_build.py')
+
+
+def test_parallel_groups_overlap_and_keep_separate_logs(tmp_path):
+    import json
+    env = runtimes(tmp_path)
+    barrier = tmp_path / 'barrier'
+    barrier.mkdir()
+    env['BARRIER'] = str(barrier)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', """
+if '--test' in sys.argv or ('pytest' in sys.argv and 'tests/reader/test_web_assets.py' not in sys.argv):
+    import time
+    from pathlib import Path
+    name = 'browser' if '--test' in sys.argv else 'python-tests'
+    directory = Path(os.environ['BARRIER'])
+    (directory / name).write_text('started')
+    deadline = time.monotonic() + 5
+    while len(list(directory.iterdir())) < 2:
+        if time.monotonic() > deadline:
+            sys.exit(9)
+        time.sleep(.01)
+    print('owned-output-' + name)
+sys.exit(0)
+"""))
+    reports = tmp_path / 'reports'
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'all', '--report-dir', str(reports)], env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(next(reports.glob('*/report.json')).read_text())
+    for name in ('browser', 'python-tests'):
+        assert report['suites'][name]['status'].startswith('PASS')
+        log = next(reports.glob('*/parallel/' + name + '/*/output.log')).read_text()
+        assert 'owned-output-' + name in log
+        other = 'python-tests' if name == 'browser' else 'browser'
+        assert 'owned-output-' + other not in log
+
+
+def test_tool_selection_covers_branch_index_worktree_untracked_and_deleted(tmp_path):
+    import runpy
+    scope = runpy.run_path(str(REPO / 'scripts/check'))['tool_changes']
+    checkout = tmp_path / 'scope'
+    checkout.mkdir()
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=checkout, text=True).strip()
+    git('init', '-q')
+    git('config', 'user.name', 'Test')
+    git('config', 'user.email', 'test@example.test')
+    (checkout / 'scripts').mkdir()
+    file = checkout / 'scripts/check'
+    file.write_text('original')
+    git('add', '.')
+    git('commit', '-qm', 'base')
+    base = git('rev-parse', 'HEAD')
+    assert scope(checkout)[0]  # Missing origin/main must fail closed.
+    assert scope(checkout, base) == (False, [])
+    (checkout / 'app.py').write_text('app change')
+    assert scope(checkout, base) == (False, [])
+    file.write_text('worktree change')
+    assert scope(checkout, base) == (True, ['scripts/check'])
+    git('add', 'scripts/check')
+    file.write_text('original')
+    # git diff base sees effective worktree; staged bytes must be checked too.
+    assert scope(checkout, base)[0]
+    file.write_text('worktree change')
+    git('add', 'scripts/check')
+    git('commit', '-qm', 'tool change')
+    assert scope(checkout, base)[0]
+    assert not scope(checkout, 'HEAD')[0]
+    file.unlink()
+    assert scope(checkout, 'HEAD')[0]
+    git('restore', 'scripts/check')
+    git('mv', 'scripts/check', 'moved-outside-tools.py')
+    assert scope(checkout, 'HEAD') == (True, ['scripts/check'])
+    git('commit', '-qm', 'move')
+    (checkout / 'scripts/new-tool').write_text('new')
+    assert scope(checkout, 'HEAD')[0]
+    assert scope(checkout, 'missing-reference')[0]
+
+
+def test_parallel_interruption_reaps_both_groups_and_their_children(tmp_path):
+    import json
+    import signal
+    import time
+    env = runtimes(tmp_path)
+    markers = tmp_path / 'markers'
+    markers.mkdir()
+    env['MARKERS'] = str(markers)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', """
+if '--test' in sys.argv or ('pytest' in sys.argv and 'tests/reader/test_web_assets.py' not in sys.argv):
+    import subprocess
+    from pathlib import Path
+    name = 'browser' if '--test' in sys.argv else 'python-tests'
+    child_code = 'import os,signal,time; from pathlib import Path; root=Path(os.environ["MARKERS"]); name=' + repr(name) + '; signal.signal(signal.SIGTERM, lambda *_: (root.joinpath(name+"-stopped").write_text("stopped"), exit(0))); root.joinpath(name+"-ready").write_text(str(os.getpid())); time.sleep(60)'
+    subprocess.run([sys.executable, '-c', child_code], start_new_session=True)
+sys.exit(0)
+"""))
+    reports = tmp_path / 'reports'
+    process = subprocess.Popen([sys.executable, str(ROOT / 'scripts/check'), 'all', '--report-dir', str(reports)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 10
+        while len(list(markers.glob('*-ready'))) < 2 and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert len(list(markers.glob('*-ready'))) == 2
+        process.send_signal(signal.SIGINT)
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 130, stdout + stderr
+        report = json.loads(next(reports.glob('*/report.json')).read_text())
+        for name in ('browser', 'python-tests'):
+            assert report['suites'][name]['status'] == 'INTERRUPTED'
+            assert (markers / (name + '-stopped')).read_text() == 'stopped'
+            pid = int((markers / (name + '-ready')).read_text())
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        for ready in markers.glob('*-ready'):
+            try:
+                os.kill(int(ready.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_parallel_mutation_fails_both_groups_without_reverting_files(tmp_path):
+    import shutil
+    import json
+    checkout = tmp_path / 'checkout'
+    shutil.copytree(ROOT, checkout)
+    tracked = checkout / 'frontend/app.ts'
+    subprocess.run(['git', 'init', '-q'], cwd=checkout, check=True)
+    subprocess.run(['git', 'add', '.'], cwd=checkout, check=True)
+    env = runtimes(tmp_path)
+    env['PATH'] = os.environ['PATH']
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nif '--test' in sys.argv: Path('frontend/app.ts').write_text('unexpected mutation')\nsys.exit(0)"))
+    reports = tmp_path / 'reports'
+    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'browser', 'python', '--report-dir', str(reports)], env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 1, result.stdout + result.stderr
+    report = json.loads(next(reports.glob('*/report.json')).read_text())
+    for name in ('browser', 'python-tests'):
+        assert report['suites'][name]['status'].startswith('FAIL')
+        assert report['suites'][name]['checkout_changes'] == ['frontend/app.ts']
+    assert tracked.read_text() == 'unexpected mutation'
+
+
+def test_explicit_tools_are_not_duplicated_and_build_precedes_parallel_groups(tmp_path):
+    import ast
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'all', 'tools'], env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
+    assert sum('tests/development/test_hooks.py' in command for command in commands) == 1
+    record.write_text('')
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', 'python', 'build'], env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
+    last_build = max(i for i, command in enumerate(commands) if any('build-frontend.mts' in arg for arg in command))
+    first_test = min(i for i, command in enumerate(commands) if '--test' in command or 'pytest' in command)
+    assert last_build < first_test

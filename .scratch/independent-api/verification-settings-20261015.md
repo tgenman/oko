@@ -57,3 +57,12 @@ Code-review: Standards первоначально 1 P2 (race context/start), Spe
 - Полный прогон и все первоначальные failures сохранены выше. Все упавшие сценарии после исправлений прошли ограниченные повторы; новый полный PASS не заявляется.
 
 - Штатный pre-commit в изолированном candidate: exact staged API/Python/TypeScript regeneration и browser/tooling types — PASS, 19.09 s; compatibility PENDING_REVIEW. Проверенный Git tree затем переносится на ветку worktree только после проверки полного равенства tree hash; hooks не отключались.
+
+
+## Интеграция main после завершения задачи
+
+Влит origin/main c8e40b3, включая PR #12 / 5f7b71a: параллельные browser/Python группы, отдельный tools набор с отбором по diff, быстрые synthetic fixtures и удаление дорогих дублей. Scripts/check, CI, runner tests и API tooling сохранены из main. Из файлов ускорения 25 совпадают побайтно, 5 отличаются только переходом HTTP URL на v3; owner.ts совмещает API v3 с удалением неиспользуемого detail из main. Все 408 upstream удалений сохранены.
+
+Конфликты API/installed-package и YouTube tests разрешены в пользу актуальных проверок main; прежний ordinary_checkout заменён общей fixture из main. Legacy diagnostic input снова требует timezone, как в main; чтение исторического журнала остаётся через response projection.
+
+Проверки после merge: pytest test_check_runner.py + test_v3_settings.py — 51 passed (27.15 s); TypeScript приложения/browser/tooling — PASS; candidate build/drift и три browser-сценария пересечения — PASS (3 passed). Отчёт /private/tmp/oko-task2-main-merge/20261015T151811Z-cc3fbff0/report.json. Полный набор повторно не запускался.

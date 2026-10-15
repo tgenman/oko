@@ -6,8 +6,22 @@ import subprocess
 import sys
 
 import yaml
+import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[2]
+ROOT = REPO
+
+
+@pytest.fixture(autouse=True)
+def small_candidate_source(tmp_path, monkeypatch):
+    from tests.support.build_tools import api_repository
+    source = tmp_path / 'source-repository'
+    api_repository(source)
+    (source / '.gitignore').write_text('/node_modules\n/.venv\n')
+    for args in (['init', '-q'], ['add', '.'],
+                 ['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-qm', 'fixture']):
+        subprocess.run(['git', *args], cwd=source, check=True, capture_output=True)
+    monkeypatch.setattr(sys.modules[__name__], 'ROOT', source)
 
 
 def test_candidate_diff_run_is_isolated_and_keeps_baseline_unreviewed(tmp_path):
@@ -19,7 +33,7 @@ def test_candidate_diff_run_is_isolated_and_keeps_baseline_unreviewed(tmp_path):
     baseline = (ROOT / 'api/baseline.json').read_bytes()
     canonical = (ROOT / 'api/openapi.yaml').read_bytes()
     reports = tmp_path / 'reports'
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'diff', '--candidate', str(candidate), '--report-dir', str(reports)], env={**os.environ, 'OKO_PYTHON': sys.executable}, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'diff', '--candidate', str(candidate), '--report-dir', str(reports)], cwd=ROOT, env={**os.environ, 'OKO_PYTHON': sys.executable}, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     report_path = next(reports.glob('*/report.json'))
     report = json.loads(report_path.read_text())
@@ -43,7 +57,7 @@ def test_candidate_rejects_tampering_baseline_approval_and_bad_spec(tmp_path):
     candidate = tmp_path / 'candidate.yaml'
     candidate.write_bytes((ROOT / 'api/openapi.yaml').read_bytes())
     reports = tmp_path / 'reports'
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'diff', '--candidate', str(candidate), '--report-dir', str(reports)], env={**os.environ, 'OKO_PYTHON': sys.executable}, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'diff', '--candidate', str(candidate), '--report-dir', str(reports)], cwd=ROOT, env={**os.environ, 'OKO_PYTHON': sys.executable}, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads(next(reports.glob('*/report.json')).read_text())
     tree = Path(report['candidate']['root'])
@@ -62,7 +76,7 @@ def test_candidate_rejects_tampering_baseline_approval_and_bad_spec(tmp_path):
     assert refused.returncode != 0
     assert 'context does not match' in refused.stdout + refused.stderr
     candidate.write_text('invalid OpenAPI')
-    failed = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'diff', '--candidate', str(candidate), '--report-dir', str(tmp_path / 'invalid')], env={**os.environ, 'OKO_PYTHON': sys.executable}, capture_output=True, text=True)
+    failed = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'diff', '--candidate', str(candidate), '--report-dir', str(tmp_path / 'invalid')], cwd=ROOT, env={**os.environ, 'OKO_PYTHON': sys.executable}, capture_output=True, text=True)
     assert failed.returncode != 0
     assert 'FAIL compatibility' in failed.stdout
 

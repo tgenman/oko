@@ -20,4 +20,4 @@
 
 Ранние primary-source ветки также сохранены: `codex/header-ios-prototype`, `codex/reader-surfaces-ios-prototype`, `codex/status-panel-prototype`. Новый архив фиксирует последние локальные версии; старые коммиты не переписаны.
 
-Планы, решения и исторические скриншоты остаются в локальном трекере: [шапка](../../.scratch/header-ios-preview/spec.md), [папки и фиды](../../.scratch/feed-tree-ios-preview/spec.md), [окно добавления и чтение](../../.scratch/reader-surfaces-ios-preview/spec.md), [панель состояния](../../.scratch/status-messages/spec.md).
+Завершённые планы, решения и исторические скриншоты удалены из рабочего дерева; их последняя версия доступна в [истории проекта](https://github.com/tgenman/oko/tree/365e2b38f86d6e2bedccbb40b14c615b6f069455/.scratch).

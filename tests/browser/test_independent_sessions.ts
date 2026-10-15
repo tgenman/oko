@@ -27,8 +27,6 @@ test('neutral web and independent HTTP sessions coexist and close independently'
   const stale=await fetch(r.origin+'/api/v3/client-sessions/'+independent.id,{method:'PUT',headers});
   assert.equal(stale.status,410);assert.equal((await stale.json()).code,'client_session_expired');
   await r.page.screenshot({path:await artifactPath('independent-sessions-desktop.png'),fullPage:true});
-  await r.page.setViewportSize({width:390,height:844});
-  await r.page.screenshot({path:await artifactPath('independent-sessions-mobile.png'),fullPage:true});
   const reload=r.page.waitForEvent('framenavigated');
   await r.page.evaluate(()=>{
     window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));

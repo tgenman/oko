@@ -2,7 +2,7 @@
 
 # Правки источников: проверка №13
 
-2026-10-10. База ревью: `989e143a49b260c6596565c9f1361c75bed1746f`. Тикет: `.scratch/oko-implementation/issues/13-source-revisions.md`.
+2026-10-10. База ревью: `989e143a49b260c6596565c9f1361c75bed1746f`. Тикет: [исторический план](https://github.com/tgenman/oko/blob/365e2b38f86d6e2bedccbb40b14c615b6f069455/.scratch/oko-implementation/issues/13-source-revisions.md).
 
 ## Поведение и хранение
 
