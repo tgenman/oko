@@ -43,6 +43,12 @@ def main():
                 failed = True
     failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check_test_contracts.py')), '--staged']).returncode != 0 or failed
     failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check-api-staged.py'))]).returncode != 0 or failed
+    if any(os.fsdecode(name).endswith(('.ts', '.tsx')) or os.fsdecode(name) in ('tsconfig.browser-tests.json', 'package.json', 'package-lock.json') for name in names.split(b'\0') if name):
+        node = shutil.which(os.environ.get('OKO_NODE', 'node'))
+        if not node:
+            print('Node missing for staged browser type checking.', file=sys.stderr)
+            return 1
+        failed = subprocess.run([node, str(Path(__file__).with_name('check-browser-types.cjs'))]).returncode != 0 or failed
     return int(failed)
 
 

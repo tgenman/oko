@@ -139,7 +139,7 @@ def test_ui_checks_production_http_modules_before_browser(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
                             env=runtimes(tmp_path), capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.index('RUN http') < result.stdout.index('RUN browser')
+    assert result.stdout.index('RUN http') < result.stdout.index('RUN browser\n')
     assert 'PASS http' in result.stdout
 
 
@@ -169,17 +169,30 @@ def test_browser_file_selection_only_runs_requested_file(tmp_path):
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as f: f.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.cjs'], env=env, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = record.read_text()
     assert '--test-concurrency=2' in commands
-    assert 'test_material_list.cjs' in commands
-    assert 'test_opened_material.cjs' not in commands
+    assert 'test_material_list.ts' in commands
+    assert 'test_opened_material.ts' not in commands
     assert 'PASS browser' in result.stdout
 
 
+def test_browser_types_failure_prevents_browser_execution(tmp_path):
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace(
+        'sys.exit(0)', "sys.exit(7 if any('tsconfig.browser-tests.json' in arg for arg in sys.argv) else 0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'FAIL browser-types' in result.stdout
+    assert 'NOT RUN browser\n' in result.stdout
+    assert '\nRUN browser\n' not in result.stdout
+
+
 def test_invalid_file_selection_fails_before_checks(tmp_path):
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/missing.cjs'], env=runtimes(tmp_path), capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/missing.ts'], env=runtimes(tmp_path), capture_output=True, text=True)
     assert result.returncode != 0
     assert 'RUN browser' not in result.stdout
 
@@ -199,7 +212,7 @@ def test_python_file_selection_supports_test_id_and_does_not_require_node(tmp_pa
 
 def test_selection_rejects_file_from_wrong_suite_and_outside_checkout(tmp_path):
     env = runtimes(tmp_path)
-    for filename in ('tests/reader/test_web_assets.py', str(tmp_path / 'test_external.cjs')):
+    for filename in ('tests/reader/test_web_assets.py', str(tmp_path / 'test_external.ts')):
         if filename.startswith(str(tmp_path)):
             Path(filename).write_text('')
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', filename], env=env, capture_output=True, text=True)
@@ -213,7 +226,7 @@ def test_browser_gets_resolved_python_in_checkout_without_virtualenv(tmp_path):
     (checkout / 'scripts').mkdir(parents=True)
     (checkout / 'tests/browser').mkdir(parents=True)
     shutil.copy(ROOT / 'scripts/check', checkout / 'scripts/check')
-    (checkout / 'tests/browser/test_reader_http.cjs').write_text('')
+    (checkout / 'tests/browser/test_reader_http.ts').write_text('')
     env = runtimes(tmp_path)
     env.pop('OKO_PYTHON')
     (tmp_path / 'python3').symlink_to(sys.executable)
@@ -258,13 +271,13 @@ sys.exit(0)
     assert 'x' * 100000 in log and 'stderr diagnostic' in log
     first_json = (first / 'report.json').read_text()
     runtime.write_text('#!/usr/bin/env python3\nimport os, sys\nif \"-e\" in sys.argv: print(os.environ[\"OKO_BROWSER_EXECUTABLE\"])\nsys.exit(0)\n')
-    retry = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.cjs', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
+    retry = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
     assert retry.returncode == 0, retry.stdout + retry.stderr
     assert (first / 'report.json').read_text() == first_json
     second = next(path for path in reports.iterdir() if path != first)
     rerun = json.loads((second / 'report.json').read_text())
-    assert list(rerun['suites']) == ['browser']
-    assert rerun['selected_files']['browser'] == [str(ROOT / 'tests/browser/test_material_list.cjs')]
+    assert list(rerun['suites']) == ['browser-types', 'browser']
+    assert rerun['selected_files']['browser'] == [str(ROOT / 'tests/browser/test_material_list.ts')]
 
 
 def test_report_records_missing_dependency_without_claiming_success(tmp_path):
@@ -318,7 +331,7 @@ def test_browser_name_filter_is_passed_and_reported(tmp_path):
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nif '--test' in sys.argv: print('# pass 1')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'late.*draft', '--files', 'tests/browser/test_settings_navigation.cjs', '--report-dir', str(tmp_path / 'reports')], env=env, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'late.*draft', '--files', 'tests/browser/test_settings_navigation.ts', '--report-dir', str(tmp_path / 'reports')], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert '--test-name-pattern=late.*draft' in record.read_text()
     report = json.loads((next((tmp_path / 'reports').iterdir()) / 'report.json').read_text())
@@ -352,10 +365,10 @@ def test_browser_artifacts_are_scoped_to_run_and_checkout_mutation_fails(tmp_pat
     (checkout / 'scripts').mkdir(parents=True)
     (checkout / 'tests/browser').mkdir(parents=True)
     shutil.copy(ROOT / 'scripts/check', checkout / 'scripts/check')
-    tracked = checkout / 'tests/browser/test_example.cjs'
+    tracked = checkout / 'tests/browser/test_example.ts'
     tracked.write_text('original\n')
     subprocess.run(['git','init','-q',str(checkout)],check=True)
-    subprocess.run(['git','-C',str(checkout),'add','tests/browser/test_example.cjs'],check=True)
+    subprocess.run(['git','-C',str(checkout),'add','tests/browser/test_example.ts'],check=True)
     env = runtimes(tmp_path)
     env['PATH'] = os.environ['PATH']  # This scenario inspects a real temporary Git inventory.
     env['MUTATE'] = str(tracked)
@@ -372,12 +385,12 @@ sys.exit(0)
     result = subprocess.run([sys.executable,str(checkout/'scripts/check'),'browser','--report-dir',str(tmp_path/'reports')],env=env,capture_output=True,text=True)
     assert result.returncode == 1, result.stdout + result.stderr
     assert 'Tests changed checkout files' in result.stdout
-    assert 'tests/browser/test_example.cjs' in result.stdout
+    assert 'tests/browser/test_example.ts' in result.stdout
     assert tracked.read_text() == 'changed by test\n'  # The guard reports, it never resets user files.
     directory = next((tmp_path/'reports').iterdir())
     assert Path((tmp_path/'artifact-directory').read_text()) == directory/'artifacts/browser'
     report=json.loads((directory/'report.json').read_text())
-    assert report['suites']['browser']['checkout_changes'] == ['tests/browser/test_example.cjs']
+    assert report['suites']['browser']['checkout_changes'] == ['tests/browser/test_example.ts']
 
 
 def test_python_guard_allows_dirty_baseline_and_owned_artifacts_but_rejects_new_files(tmp_path):
@@ -415,8 +428,8 @@ def test_lifecycle_profile_selects_dedicated_scenarios(tmp_path):
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
     result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'lifecycle'],env=env,capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
-    assert 'test_ui_lifecycle.cjs' in record.read_text()
-    assert 'test_material_list.cjs' not in record.read_text()
+    assert 'test_ui_lifecycle.ts' in record.read_text()
+    assert 'test_material_list.ts' not in record.read_text()
 
 
 def test_explicit_suite_order_cannot_run_browser_before_selected_lint(tmp_path):

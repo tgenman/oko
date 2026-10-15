@@ -1,0 +1,128 @@
+import type {Route} from 'playwright';
+import {test} from 'node:test';
+import {reader, expect} from './support.ts';
+import {editSetting, settingsHome, feedOptions} from './settings-actions.ts';
+import {objects, models} from './settings-fixtures.ts';
+import assert from 'node:assert/strict';
+
+test('a completed field write reconciles after Back without discarding a newer draft', async () => {
+  const r = await reader(); let held: Route | null | undefined;
+  try {
+    await r.start([]);
+    await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/settings/oko/global');});
+    await r.page.route('**/api/settings/oko/global',async route=>{
+      if (route.request().method()==='PATCH') held=route; else await route.continue();
+    });
+    await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
+    await r.page.locator('#setting-originals').uncheck();
+    await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
+    await expect.poll(()=>Boolean(held)).toBe(true);
+    await r.page.locator('#setting-originals').check();
+    await r.page.locator('#settings-dialog .settings-back').click();
+    await held!.continue(); held=null;
+    await expect(r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true})).toContainText('Выключено');
+    await expect(r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true})).toBeFocused();
+    await r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true}).click();
+    await expect(r.page.locator('#setting-originals')).toBeChecked();
+    await expect(r.page.locator('.setting-row:visible details summary')).toBeVisible();
+    await r.page.locator('.setting-row:visible details summary').click();
+    await expect(r.page.locator('.setting-row:visible details')).toContainText('Выключено');
+    await expect(r.page.locator('#settings-message')).not.toContainText('Настройка сохранена');
+  } finally {if(held)await (held as Route).abort();await r.close();}
+});
+
+test('Back restores the current field and section links after a saved editor rerenders', async () => {
+  const r=await reader();try{
+    await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/settings/oko/global');});
+    await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
+    await r.page.locator('#setting-originals').uncheck();await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
+    await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
+    await r.page.locator('#settings-dialog .settings-back').click();
+    const field=r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true});
+    await expect(field).toBeFocused();
+    await expect(field).toHaveAccessibleDescription('Выключено');
+    await r.page.locator('#settings-dialog .settings-back').click();
+    await expect(r.page.getByRole('button',{name:'Чтение',exact:true})).toBeFocused();
+  }finally{await r.close();}
+});
+
+test('Back closes Telegram reconnection and rejects delayed accounts from the previous section', async () => {
+  const r=await reader();try{
+    await r.start([]);await objects(r);
+    await r.page.evaluate(()=>{
+      const feed=readerTransport.replies.get('/api/subscriptions')!.body!.feeds[0];
+      Object.assign(feed,{kind:'telegram',identity:'telegram:onechannel',transport:'telegram',telegram_peer:'@onechannel',telegram_account:'personal',auto_read:false});
+      readerTransport.replies.set('/api/telegram/accounts',{body:['personal']});
+      readerTransport.held.set('/api/telegram/accounts',true);
+    });
+    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/one"]').click();await feedOptions(r.page);
+    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/telegram/accounts'));
+    await r.page.locator('#feeds-dialog .settings-back').click();
+    await r.page.evaluate(()=>readerTransport.release('/api/telegram/accounts',['personal']));
+    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
+    await settingsHome(r.page);await editSetting(r.page,'prompt_theses');
+    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
+    await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
+    expect(r.errors).toEqual([]);
+  }finally{await r.close();}
+});
+
+test('returning to Codex retries a catalog load interrupted by section navigation', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.page.evaluate(models => {
+      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/processors/llamacpp',{body:null});
+      readerTransport.replies.set('/api/processors/codex/models',{body:{models}});
+      readerTransport.held.set('/api/processors/codex/models',true);
+    }, models);
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('[data-settings-target="models"]').click();
+    await r.page.locator('[data-settings-target="codex"]').click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/processors/codex/models'));
+    await r.page.locator('#settings-dialog .settings-back').click();
+    await r.page.evaluate(()=>{
+      window.interruptedCatalogReply = readerTransport.pending.get('/api/processors/codex/models')!;
+      readerTransport.pending.delete('/api/processors/codex/models');
+      readerTransport.held.delete('/api/processors/codex/models');
+    });
+    await r.page.locator('[data-settings-target="codex"]').click();
+    await expect(r.page.locator('#codex-theses-model')).toHaveValue('small');
+    await r.page.evaluate(()=>window.interruptedCatalogReply(new Response(JSON.stringify({models:[]}),{headers:{'Content-Type':'application/json'}})));
+    await expect(r.page.locator('#codex-theses-model')).toHaveValue('small');
+    expect(r.errors).toEqual([]);
+  } finally {await r.close();}
+});
+
+test('late settings replies do not overwrite a newer draft or reopen a closed form', async () => {
+  const r = await reader();
+  try {
+    await r.start([]);
+    await r.page.evaluate(() => {
+      readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
+      readerTransport.replies.set('/api/processors/llamacpp', {body:null});
+    });
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('[data-settings-target="youtube"]').click();
+    await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
+    await r.page.locator('#youtube-mode').selectOption('proxy');
+    await r.page.locator('#youtube-address').fill('http://first.test:8000');
+    await r.page.locator('#youtube-password').fill('first-password');
+    await r.page.evaluate(() => readerTransport.held.set('/api/youtube', true));
+    await r.page.locator('#youtube-save').click();
+    await expect.poll(() => r.page.evaluate(() => readerTransport.pending.has('/api/youtube'))).toBe(true);
+    await r.page.locator('#youtube-address').fill('http://second.test:8000');
+    await r.page.locator('#youtube-password').fill('second-password');
+    await r.page.locator('#settings-close').click();
+    await r.page.evaluate(() => readerTransport.release('/api/youtube', {mode:'proxy', address:'http://first.test:8000', has_password:true, has_username:false, paused:false, next_at:0, strikes:0, reason:''}));
+    await expect(r.page.locator('#settings-dialog')).not.toBeVisible();
+    await r.page.locator('#settings-open').click();
+    await r.page.locator('[data-settings-target="youtube"]').click();
+    await expect(r.page.locator('#youtube-address')).toHaveValue('http://second.test:8000');
+    await expect(r.page.locator('#youtube-password')).toHaveValue('second-password');
+    await expect(r.page.locator('#youtube-message')).toHaveText('');
+    assert.deepEqual(r.errors, []);
+  } finally {await r.close();}
+});

@@ -1,6 +1,6 @@
 # Поставка читателя и контракта
 
-Из checkout с установленными закреплёнными Python-группы `dev` и npm-зависимостями:
+Из checkout с установленными закреплёнными зависимостями Python-группы `dev` и npm:
 
 ```sh
 npm run build
@@ -25,5 +25,5 @@ Smoke поставки устанавливает настоящий wheel че�
 
 ```sh
 poetry run python -m pytest tests/api/test_installed_package.py tests/reader/test_frontend_build.py -q
-node --test tests/browser/test_installed_docs.cjs
+poetry run node --require ./scripts/register-browser-typescript.cjs --test tests/browser/test_installed_docs.ts
 ```
