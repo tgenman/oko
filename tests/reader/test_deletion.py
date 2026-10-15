@@ -1,4 +1,5 @@
 from tests.support.sources import LateSource
+from tests.support.reader import Clock, wait_for
 import time
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -28,11 +29,12 @@ def test_viewed_during_fetch_never_publishes_late_result(tmp_path: Path):
 
 
 def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_path: Path):
+    clock = Clock()
     fail = True
     def fault(point):
         if point == 'before_delete' and fail:
             raise OSError('secret content in provider exception')
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         for _ in range(100):
@@ -47,7 +49,8 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         assert client.get('/api/status').json()['errors'] == ['Ошибка удаления']
         assert (tmp_path / 'content' / item).exists()
         fail = False
-        time.sleep(1.1)
+        clock.now += 1.1
+        wait_for(client, lambda: client.get('/api/status').json()['errors'] == [])
         assert client.get('/api/status').json()['errors'] == []
         assert not (tmp_path / 'content' / item).exists()
 
@@ -100,11 +103,12 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         async def discover(self, cursor):
             self.calls += 1
             return await super().discover(cursor)
+    clock = Clock()
     fail = True
     def fault(point):
         if point == 'before_delete' and fail:
             raise OSError('temporary disk error')
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         for _ in range(100):
@@ -116,7 +120,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         viewed_source = cards[0]['url'].rsplit('/', 1)[1]
         client.post(f'/api/materials/{item}/viewed')
     source = CountingSource()
-    with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'theses': False})
         client.post('/api/tabs/a/heartbeat')
         time.sleep(.1)
@@ -126,7 +130,8 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         assert source.calls == 0
         assert (tmp_path / 'content' / item).exists()
         fail = False
-        time.sleep(1.2)
+        clock.now += 1.2
+        wait_for(client, lambda: source.calls == 1 and not (tmp_path / 'content' / item).exists())
         assert not (tmp_path / 'content' / item).exists()
         assert source.calls == 1
         assert client.get('/api/status').json()['errors'] == []

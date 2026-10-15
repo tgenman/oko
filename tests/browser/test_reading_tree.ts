@@ -51,6 +51,7 @@ test('tree keeps current choice across moves and deletion and rejects late cards
 
 test('width, focus, source warning and settings help remain separate from selection', async () => {
  const r=await reader(); try {
+  await r.page.clock.install();
   await r.start([material('one')]);
   await r.page.evaluate(()=>{
    const t=readerTransport, feed={id:'feed',title:'Длинное название источника для проверки многоточия в дереве',folder_id:'f',kind:'youtube',transport:'youtube',count:1,original_urls:[],importance:'normal'};
@@ -66,7 +67,10 @@ test('width, focus, source warning and settings help remain separate from select
   const divider=r.page.locator('#sidebar-resize');
   await divider.focus(); await r.page.keyboard.press('ArrowRight');
   await expect(divider).toHaveAttribute('aria-valuenow','290');
-  await r.page.waitForTimeout(650); await expect(divider).toBeFocused();
+  await r.page.evaluate(()=>{readerTransport.replies.get('/api/v3/reading-composition')!.body!.count=7;});
+  await r.page.clock.fastForward(500);
+  await expect(r.page.locator('#all-folders .tree-count')).toHaveText('7');
+  await expect(divider).toBeFocused();
   await r.page.locator('[data-feed="feed"]').dblclick();
   await expect(r.page.locator('#feeds-dialog')).toBeVisible();
   await feedOptions(r.page);
@@ -81,6 +85,7 @@ test('width, focus, source warning and settings help remain separate from select
 
 test('tree uses publication counts, alphabetical feeds and compact local icons', async () => {
  const r=await reader(); try {
+  await r.page.clock.install();
   await r.start([material('one',{feed_id:'a',title:'Альфа'}),material('two',{feed_id:'b',title:'Бета'})]);
   await r.page.evaluate(()=>{
    readerTransport.replies.set('/api/v3/reading-composition',{body:{count:45,folders:[{id:'f',title:'Наука',count:45},{id:'empty',title:'Пустая',count:0}],feeds:[{id:'b',title:'Бета',kind:'telegram',folder_id:'f',count:20},{id:'a',title:'Альфа — очень длинное название синтетического YouTube-канала',kind:'youtube',folder_id:'f',count:25},{id:'c',title:'Вести',kind:'rss',folder_id:'f',count:0}]}});
@@ -99,7 +104,9 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   expect(clipped).toBe(true);
   await r.page.screenshot({path:artifactPath('feed-sidebar.png')});
   await r.page.locator('[data-feed="a"]').focus();
-  await r.page.waitForTimeout(600);
+  await r.page.evaluate(()=>{readerTransport.replies.get('/api/v3/reading-composition')!.body!.count=46;});
+  await r.page.clock.fastForward(500);
+  await expect(r.page.locator('#all-folders .tree-count')).toHaveText('46');
   await expect(r.page.locator('[data-feed="a"]')).toBeFocused();
   await r.page.keyboard.press('Enter');
   await expect(r.page.locator('[data-feed="a"]')).toHaveAttribute('aria-pressed','true');

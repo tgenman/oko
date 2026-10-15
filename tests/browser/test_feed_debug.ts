@@ -220,6 +220,7 @@ test('adding a feed selects existing folders or keeps a new folder draft across 
 test('journal polling updates a group without losing its disclosure or keyboard focus', async () => {
   const r = await reader();
   try {
+    await r.page.clock.install();
     await r.start([]);
     await r.api('debug', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
     await r.page.locator('#status-toggle').click();
@@ -230,7 +231,8 @@ test('journal polling updates a group without losing its disclosure or keyboard 
     await expect(details).toHaveAttribute('open','');
     await expect(summary).toBeFocused();
     await r.api('debug', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
-    await expect(summary).toContainText('×2',{timeout:6000});
+    await r.page.clock.fastForward(2000);
+    await expect(summary).toContainText('×2');
     await expect(details).toHaveAttribute('open','');
     await expect(summary).toBeFocused();
     const journal=artifactPath('react-journal-desktop.png');

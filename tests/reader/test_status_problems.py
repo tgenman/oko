@@ -148,13 +148,14 @@ def test_shared_youtube_pause_across_feeds_is_one_problem(tmp_path):
 
 
 def test_viewed_material_scrubs_problem_objects_but_failed_delete_remains_current(tmp_path):
-    from tests.support.reader import setup_reader
+    from tests.support.reader import Clock, setup_reader
     from oko.collection.demo import DemoSource
+    clock = Clock()
     failing = [False]
     def fault(point):
         if point == 'before_delete' and failing[0]:
             raise OSError('synthetic deletion failure')
-    with TestClient(create_app(tmp_path, token='test', source=DemoSource(), fault=fault), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', source=DemoSource(), fault=fault, clock=clock), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         client.post('/api/materials/' + item + '/unsupported')
         before = client.get('/api/status').json()['problems']
@@ -168,6 +169,7 @@ def test_viewed_material_scrubs_problem_objects_but_failed_delete_remains_curren
         old = next(p for p in result['recent'] if p['code'] == 'action-failed')
         assert old['outcome'] == 'irrelevant' and old['action'] is None
         failing[0] = False
+        clock.now += 1.1
         wait_for(client,lambda:not any(p['code']=='delete' for p in client.get('/api/status').json()['problems']['current']))
 
 

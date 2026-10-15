@@ -49,17 +49,19 @@ def import_channel(client):
     return feed
 
 
-def test_sixty_history_materials_survive_restart_without_per_video_list_requests(tmp_path):
+def test_history_materials_survive_restart_without_per_video_list_requests(tmp_path):
+    # Six videos exceed the four-request budget, so per-video listing fails.
+    # This complete-page fixture does not exercise playlist pagination.
     history, requests = HistoryFixture(), []
     with reader(tmp_path, history, requests) as client:
         feed = import_channel(client)
         client.post('/api/tabs/history/heartbeat')
-        response = client.post('/api/feeds/' + feed + '/history', json={'mode': 'count', 'count': 60})
+        response = client.post('/api/feeds/' + feed + '/history', json={'mode': 'count', 'count': 6})
         assert response.status_code == 200, response.text
         progress = wait_history(client, feed, lambda h: h['state'] == 'done')
-        assert progress['loaded'] == 60 and progress['available'] == 60
+        assert progress['loaded'] == 6 and progress['available'] == 6
         cards = client.get('/api/cards', params={'feed': feed}).json()
-        assert len(cards) == 60
+        assert len(cards) == 6
         assert [c['title'] for c in cards[:3]] == ['Video 60', 'Video 59', 'Video 58']
         assert all(not c['published_known'] for c in cards)
         assert len(history.calls) == 1
@@ -70,7 +72,7 @@ def test_sixty_history_materials_survive_restart_without_per_video_list_requests
         client.post('/api/tabs/history/heartbeat')
         time.sleep(.1)
         assert len(history.calls) == 1
-        assert len(client.get('/api/cards', params={'feed': feed}).json()) == 59
+        assert len(client.get('/api/cards', params={'feed': feed}).json()) == 5
 
 
 def test_partial_error_requires_manual_resume_and_rss_remains_independent(tmp_path):

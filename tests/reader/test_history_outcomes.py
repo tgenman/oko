@@ -2,6 +2,7 @@ import time
 import httpx
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
+from tests.support.reader import Clock, wait_for
 from tests.support.feed_url import HEADERS, verify, add
 
 
@@ -32,6 +33,7 @@ def test_initial_history_retry_partial_and_terminal_outcomes_survive_restart(tmp
 
 
 def test_temporary_error_retries_and_completes_without_waiting_for_ai(tmp_path):
+    clock = Clock()
     calls = 0
     def reply(request):
         nonlocal calls
@@ -39,16 +41,14 @@ def test_temporary_error_retries_and_completes_without_waiting_for_ai(tmp_path):
             return httpx.Response(200, text='<rss><channel><title>История</title><item><guid>one</guid><title>One</title><link>https://source.test/one</link></item></channel></rss>')
         calls += 1
         return httpx.Response(429, headers={'retry-after': '1'}) if calls == 1 else httpx.Response(200, text='<article>Полный текст</article>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), clock=clock), headers=HEADERS) as client:
         feed = add(client, verify(client, 'https://source.test/feed')).json()
-        states = []
-        for _ in range(200):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            states.append(history['retrying'])
-            if history['state'] == 'done':
-                break
-            time.sleep(.015)
-        assert 1 in states
+        def progress():
+            return client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
+        wait_for(client, lambda: progress()['retrying'] == 1)
+        assert calls == 1
+        clock.now += 1.1
+        history = wait_for(client, lambda: value if (value := progress())['state'] == 'done' else None)
         assert calls == 2
         assert history['loaded'] == 1
         assert history['state'] == 'done'

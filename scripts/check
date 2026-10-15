@@ -247,12 +247,16 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                                and str(file.resolve()) not in ignored)
             files = list(dict.fromkeys(files))
             if len(files) > 1 and all((ROOT / value.split('::')[0]).is_file() for value in files):
-                buckets, weights = [[], []], [0, 0]
+                # Spend extra workers on a standalone Python run, not on CPU
+                # contention with browser/codegen processes in the full run.
+                standalone_python = name == 'python-tests' and not {'browser', 'tool-tests'} & set(names)
+                count = min(len(files), 4 if standalone_python else 2)
+                buckets, weights = [[] for _ in range(count)], [0] * count
                 def weight(value):
                     file = Path(value.split('::')[0])
                     return max(1, (file if file.is_absolute() else ROOT / file).stat().st_size)
                 for value in sorted(dict.fromkeys(files), key=lambda value: (-weight(value), value)):
-                    index = min(range(2), key=lambda i: weights[i])
+                    index = min(range(count), key=lambda i: weights[i])
                     buckets[index].append(value)
                     weights[index] += weight(value)
                 for index, bucket in enumerate(buckets, 1):
@@ -399,7 +403,7 @@ def main():
     parser.add_argument('--match', help='Regex selecting browser scenarios by name (requires browser checks)')
     parser.add_argument('--files', nargs='+', help='Explicit browser/Python test files or JavaScript files for lint/syntax; put check sets before this option')
     parser.add_argument('--report-dir', type=Path, default=ROOT / '.scratch/check-runs', help='Parent directory for separate full logs and JSON reports for each run')
-    parser.add_argument('--browser-workers', type=int, choices=(2, 4), default=2, help='Concurrent browser files (bounded to 2 or 4)')
+    parser.add_argument('--browser-workers', type=int, choices=(2, 4), default=4, help='Concurrent browser files (bounded to 2 or 4)')
     parser.add_argument('--tools-needed', action='store_true', help='Print tool-change selection and exit before setting up runtimes')
     parser.add_argument('--base', help='Git revision for tool-change selection; default: merge-base with origin/main')
     parser.add_argument('--if-changed', action='store_true', help='Run the explicit tools suite only when its inputs changed')
