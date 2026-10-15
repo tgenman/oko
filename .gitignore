@@ -19,3 +19,6 @@ oko/frontend_build/
 /.idea/misc.xml
 
 .scratch/check-cache/
+
+# Local Codex diagnostics can contain account identifiers.
+/error.log

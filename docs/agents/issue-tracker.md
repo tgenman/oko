@@ -1,8 +1,10 @@
-# Issue tracker: Local Markdown
+# Трекер задач: GitHub Issues
 
-Issues and specs for this repo live as markdown files in `.scratch/`.
+Задачи проекта Око ведутся в [GitHub Issues репозитория `tgenman/oko`](https://github.com/tgenman/oko/issues). Создание и публикация задач по заданию пользователя выполняются в этом трекере; отдельный запрос «загрузить в GitHub» не требуется.
 
-## Conventions
+Локальные документы в `.scratch/` используются для подготовки спецификаций, черновиков и снимков требований, с полем `GitHub:` для связи с опубликованной задачей. Актуальные состояние, метки, исполнитель и обсуждение задачи читаются из GitHub. Локальные `Status:`/`Assignee:` не доказывают актуальный статус удалённой задачи.
+
+## Локальные черновики и снимки
 
 - One feature per directory: `.scratch/<feature-slug>/`
 - The spec is `.scratch/<feature-slug>/spec.md`
@@ -12,19 +14,99 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 
 ## When a skill says "publish to the issue tracker"
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
+Создай GitHub issue в `tgenman/oko` через подключённый GitHub-плагин. Для публикации пакета локальных черновиков используй процесс ниже.
 
 ## When a skill says "fetch the relevant ticket"
 
-Read the file at the referenced path. The user will normally pass the path or the issue number directly.
+Прочитай issue и его комментарии через GitHub-плагин. Номер без URL относится к `tgenman/oko`. Если передан локальный путь, прочитай документ и используй его поле `GitHub:` для получения актуального состояния; неопубликованный документ остаётся черновиком.
+
+## Публикация в GitHub
+
+Публикуй через подключённый GitHub-плагин. Сначала найди только нужные методы в `ALL_TOOLS` и прочитай их полные `description`: там находятся актуальные схемы аргументов. CLI с уже настроенной авторизацией — запасной путь; браузер нужен, когда API недоступен. SSH-ключ для Git не является API-авторизацией.
+
+Экспортёр [scripts/github_issues.py](../../scripts/github_issues.py) работает без credentials и сетевых запросов. Он готовит точные аргументы для `create_issue`/`update_issue` плагина и проверяет полный результат чтения. Это один процесс с двумя участниками: экспортёр проверяет данные, плагин выполняет API-вызовы. Экспортёр сам ничего не публикует и не запускает агента.
+
+### 1. Подготовь план
+
+Уточни репозиторий по `origin` и проверь доступ через `get_repo`. Описания `issues/NN-slug.md` должны иметь заголовок `#`, уникальные номера и существующие ацикличные зависимости `Blocked by: 01, 02` либо `Нет`.
+
+```sh
+issue_export_dir=$(mktemp -d)
+python3 scripts/github_issues.py plan .scratch/feature-name \
+  --repo OWNER/REPO --output "$issue_export_dir/plan.json"
+```
+
+План сохраняет весь текст, включая многострочные критерии и пункты без C-номеров. Обычные Markdown-ссылки и reference definitions переносятся; примеры в коде сохраняются. Документы получают ссылки на точный локальный HEAD, а ссылки между задачами заполняются после получения GitHub-номеров. До публикации проверь через API, что этот коммит и документы доступны в целевом репозитории.
+
+Если контекст ещё не опубликован или отличается от версии коммита, подготовка остановится. Предпочтительно опубликовать согласованные Markdown-документы в репозитории в рамках разрешённого объёма. Для уже существующих документов в issue/comment допустим явный `--links links.json`:
+
+```json
+{".scratch/feature-name/spec.md": "https://github.com/OWNER/REPO/issues/12#issuecomment-123"}
+```
+
+Проверь содержимое этих ссылок через API. Файлы, существующие только на локальном диске, не доступны облачному агенту. Копирование больших спецификаций в цепочку новых комментариев — запасной вариант, а не основной формат хранения.
+
+### 2. Сверь с полным списком issues
+
+Для одного feature работает один публикующий исполнитель. Запроси через `fetch` все страницы `https://api.github.com/repos/OWNER/REPO/issues?state=all&per_page=100&page=1`, включая закрытые задачи. Продолжай до страницы короче 100 записей. Поисковый индекс не заменяет этот список при восстановлении после потери ответа.
+
+Сохрани свежий снимок. Массив принимает REST issue objects либо нормализованные issue objects плагина; PR пропускаются. `complete: true` ставится только после получения всех страниц:
+
+```json
+{
+  "repository": "OWNER/REPO",
+  "complete": true,
+  "issues": [{"number": 12, "html_url": "https://github.com/OWNER/REPO/issues/12", "title": "Задача", "body": "Полный Markdown", "state": "open"}]
+}
+```
+
+```sh
+python3 scripts/github_issues.py reconcile "$issue_export_dir/plan.json" \
+  --remote "$issue_export_dir/remote-01.json" --output "$issue_export_dir/actions-01.json"
+```
+
+Маркер `<!-- oko-issue:feature-name:01 -->` задаёт идентичность независимо от заголовка и GitHub-номера. Уже записанное локальное поле `GitHub:` также учитывается. Повтор маркера, конфликт привязки, одноимённая непривязанная задача или правки существующего тела останавливают весь пакет до записи. Старые ручные импорты с отличающимся оформлением требуют сверки, а не создания ещё одного issue.
+
+### 3. Выполни только предложенные действия
+
+Для `actions[].operation` вызови соответствующий метод плагина с `actions[].arguments`. Вызовы записи выполняются последовательно. Первым проходом создаются недостающие задачи; вторым — только ссылки в точных промежуточных телах этого плана. Состояния, метки и assignees не меняются; человеческие правки, включая отмеченные критерии, автоматически не перезаписываются.
+
+После подтверждённых ответов обнови снимок возвращёнными issue objects либо перечитай список; повтори `reconcile` с новым файлом результата. Если результат записи неизвестен, сначала заново получи полный список из API. Повторное выполнение старого `create_issue` запрещено: у API создания нет гарантии idempotency. Маркеры защищают повторный импорт после сверки, но не заменяют единственного исполнителя при одновременной публикации одного feature.
+
+Публикация описаний не включает установку метки запуска `Ready`, отправку задачи Codex или изменение workflows. Такие действия требуют отдельного задания.
+
+### 4. Прочитай результат и проверь
+
+Получи тела всех опубликованных issues заново через API и собери полный снимок. Затем:
+
+```sh
+python3 scripts/github_issues.py verify "$issue_export_dir/plan.json" \
+  --remote "$issue_export_dir/remote-final.json" --output "$issue_export_dir/receipt.json"
+```
+
+Успех — код 0 и `verified: true` для текущего plan/snapshot digest. Проверяется весь заголовок и Markdown, а не только число критериев: потерянная строка, изменённый checkbox, незаполненная ссылка или отсутствующая задача дают отказ. Нормализуются только CRLF. Частичная публикация не считается успехом.
+
+Сохрани plan, снимки, actions и receipt отдельно от плана разработки. Добавь подтверждённые URL в локальные `GitHub:`. Для исправлений создавай новый план и новые файлы результатов; наличие старого receipt не подтверждает новый прогон. В ответе дай ссылки, результат проверки и оставшиеся ограничения. Тела ответов API в чат не выводи: достаточно ID, URL, количества сохранённых критериев и ошибок.
+
+## Проверка экспортёра
+
+```sh
+./scripts/check python --files tests/development/test_github_issues.py
+```
+
+CLI проверяется на временных Git-репозиториях и синтетических API-снимках; реальные issues автоматические тесты не создают. Набор находится под существующими `check all`/CI, синтаксис скрипта — под обычным staged hook.
+
+## Pull requests as a triage surface
+
+**PRs as a request surface: no.**
 
 ## Wayfinding operations
 
-Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
+Для `/wayfinder` карта и дочерние задачи ведутся в GitHub Issues репозитория `tgenman/oko`.
 
-- **Map**: `.scratch/<effort>/map.md` (the Notes / Decisions-so-far / Fog body).
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `claimed`/`resolved`.
-- **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
-- **Claim**: set `Status: claimed` and save before any work.
-- **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
+- **Map**: issue с меткой `wayfinder:map` и разделами Notes / Decisions-so-far / Fog.
+- **Child ticket**: GitHub sub-issue карты с меткой `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Если sub-issues недоступны, используй список задач в теле карты и строку `Part of #<map>` в дочернем issue.
+- **Blocking**: нативные зависимости GitHub Issues. Если они недоступны, строка `Blocked by: #<n>, #<n>` в начале тела. Задача разблокирована, когда все блокирующие issues закрыты.
+- **Frontier**: открытые дочерние issues карты без открытых блокирующих задач и без исполнителя; выбирай первую по порядку карты.
+- **Claim**: назначь ведущего исполнителя в GitHub до начала работы.
+- **Resolve**: запиши ответ комментарием, закрой дочернее issue и добавь краткий итог со ссылкой в Decisions-so-far карты.
