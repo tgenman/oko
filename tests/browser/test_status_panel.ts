@@ -1,4 +1,4 @@
-import type {Problem} from '../../frontend/src/api/generated/types.gen';
+import type {Problem} from '../../frontend/src/api/legacy-generated/types.gen';
 import type {ReaderFixture} from './support.ts';
 import {test} from 'node:test';
 import {reader, material, expect} from './support.ts';

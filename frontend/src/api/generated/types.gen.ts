@@ -4,70 +4,187 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
-/**
- * AI
- */
-export type Ai = {
-    /**
-     * Error
-     */
-    error: string | null;
-    /**
-     * Status
-     */
-    status: 'pending' | 'running' | 'done' | 'cancelled';
+export type AccessImmutableError = {
+    code: 'access_immutable';
+    command_id: CommandId | null;
+    details: AccessImmutableErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
 };
 
-export type ActionReceipt = {
-    ok: boolean;
-    result: 'failed' | 'unknown' | 'succeeded' | 'abandoned' | 'pending';
+export type AccessImmutableErrorDetails = {
+    feed_id: FeedId | null;
 };
 
-/**
- * AddFeed
- */
-export type AddFeed = {
-    /**
-     * Folder
-     */
+export type AccountIdentityMismatchError = {
+    code: 'account_identity_mismatch';
+    command_id: CommandId | null;
+    details: AccountIdentityMismatchErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type AccountIdentityMismatchErrorDetails = {
+    role: TelegramRole;
+};
+
+export type ActionInvalidError = {
+    code: 'action_invalid';
+    command_id: CommandId | null;
+    details: ActionInvalidErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ActionInvalidErrorDetails = {
+    reason: string;
+};
+
+export type AddFeed409Errors = ({
+    code: 'verification_expired';
+} & VerificationExpiredError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError);
+
+export type AddFeed503Errors = ({
+    code: 'source_unavailable';
+} & SourceUnavailableError) | ({
+    code: 'storage_unavailable';
+} & StorageUnavailableError);
+
+export type AddFeedRequest = {
     folder?: string;
-    initial_history?: InitialHistory;
     /**
-     * Title
+     * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
      */
+    initial_history?: HistorySelection;
     title: string;
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Verification
-     */
+    url: FeedConnectionUrl;
     verification: string;
 };
 
-/**
- * Attachment
- */
+export type AffectedResource = ({
+    kind: 'material';
+} & MaterialResource) | ({
+    kind: 'feed';
+} & FeedResource) | ({
+    kind: 'folder';
+} & FolderResource) | ({
+    kind: 'problem';
+} & ProblemResource) | ({
+    kind: 'command';
+} & CommandResource) | ({
+    kind: 'processor';
+} & ProcessorResource) | ({
+    kind: 'telegram_profile';
+} & TelegramProfileResource) | ({
+    kind: 'runtime';
+} & RuntimeResource) | ({
+    kind: 'settings';
+} & SettingsResource);
+
+export type AllCollectionTarget = {
+    scope: 'all';
+};
+
+export type ApiVersionRemovedError = {
+    code: 'api_version_removed';
+    command_id: CommandId | null;
+    details: ApiVersionRemovedErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ApiVersionRemovedErrorDetails = {
+    api_version: string;
+};
+
 export type Attachment = {
-    /**
-     * Kind
-     */
     kind: 'image' | 'video' | 'audio' | 'circle' | 'file';
-    /**
-     * Mime
-     */
     mime: string;
+    url: MediaUrl;
+};
+
+export type AuthorizationErrors = ({
+    code: 'session_required';
+} & SessionRequiredError) | ({
+    code: 'host_not_allowed';
+} & HostNotAllowedError) | ({
+    code: 'origin_not_allowed';
+} & OriginNotAllowedError);
+
+export type AvailablePublicationContent = {
+    attachments: Array<Attachment>;
+    availability: 'available';
+    changed: boolean;
+    completeness: ContentCompleteness;
     /**
-     * Url
+     * Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.
      */
-    url: string;
+    description: string;
+    /**
+     * Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.
+     */
+    display_text: string;
+    images: Array<MediaUrl>;
+    loading: boolean;
+    previous_versions: Array<PreviousVersionReference>;
+    revision_id: RevisionId;
+    source_deleted: boolean;
+    text: string;
+    version: number;
+};
+
+export type AvailableReadableMaterial = {
+    availability: 'available';
+    content: AvailablePublicationContent;
+    feed_id: FeedId;
+    feed_title: string;
+    filter: FilterState;
+    folder_id: FolderId;
+    id: MaterialId;
+    importance: Importance;
+    originals: boolean;
+    published_at: Timestamp | null;
+    snippet: string;
+    source: SourceReference;
+    source_position: number | null;
+    source_url: SourceUrl;
+    theses: ThesesState;
+    title: string;
+};
+
+export type AvailableReadingCard = {
+    attachments: Array<Attachment>;
+    availability: 'available';
+    changed: boolean;
+    completeness: ContentCompleteness;
+    feed_id: FeedId;
+    feed_title: string;
+    filter: FilterState;
+    folder_id: FolderId;
+    id: MaterialId;
+    images: Array<MediaUrl>;
+    importance: Importance;
+    loading: boolean;
+    originals: boolean;
+    previous_versions: Array<PreviousVersionReference>;
+    published_at: Timestamp | null;
+    revision_id: RevisionId;
+    snippet: string;
+    source: SourceReference;
+    source_deleted: boolean;
+    source_position: number | null;
+    source_url: SourceUrl;
+    theses: ThesesState;
+    title: string;
+    version: number;
 };
 
 /**
  * BrowserError
  */
-export type BrowserError = {
+export type ClientDiagnosticEvent = {
     /**
      * Count
      */
@@ -80,26 +197,17 @@ export type BrowserError = {
      * Event Id
      */
     event_id?: string;
-    /**
-     * First At
-     */
-    first_at?: string | null;
+    first_at?: Timestamp;
     /**
      * Location
      */
     location?: string;
-    /**
-     * Material Ids
-     */
-    material_ids?: Array<string>;
+    material_ids?: Array<MaterialId>;
     /**
      * Message
      */
     message: string;
-    /**
-     * Occurred At
-     */
-    occurred_at?: string | null;
+    occurred_at?: Timestamp;
     /**
      * Sequence
      */
@@ -119,128 +227,86 @@ export type BrowserError = {
 };
 
 /**
- * Card
+ * 0 < renew_after_seconds < lease_seconds. Intervals are seconds; host uses monotonic time.
  */
-export type Card = {
-    ai?: Ai | null;
+export type ClientPresenceLifetimePolicy = {
     /**
-     * Attachments
+     * Default: 15 seconds.
      */
-    attachments?: Array<Attachment>;
+    grace_seconds: number;
+    kind: 'client_presence';
     /**
-     * Captions
+     * Default: 6 seconds.
      */
-    captions?: 'available' | 'not_requested' | 'unavailable' | 'error' | null;
+    lease_seconds: number;
     /**
-     * Changed
+     * Default: 2 seconds; less than lease_seconds.
      */
-    changed?: boolean;
-    /**
-     * Complete
-     */
-    complete: boolean;
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    /**
-     * Feed Title
-     */
-    feed_title: string;
-    filter?: Filter;
-    /**
-     * Folder Id
-     */
-    folder_id: string;
-    /**
-     * Full
-     */
-    full?: boolean;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Images
-     */
-    images?: Array<string>;
-    /**
-     * Importance
-     */
-    importance: 'normal' | 'elevated' | 'high';
-    /**
-     * Loading
-     */
-    loading?: boolean;
-    /**
-     * Members
-     */
-    members?: Array<number>;
-    /**
-     * Originals
-     */
-    originals?: boolean;
-    /**
-     * Previous
-     */
-    previous?: Array<Previous>;
-    /**
-     * Provenance
-     */
-    provenance?: UnknownProvenance | CodexProvenance | LocalProvenance | null;
-    /**
-     * Published
-     */
-    published: number;
-    /**
-     * Published Known
-     */
-    published_known: boolean;
-    /**
-     * Reason
-     */
-    reason?: string;
-    /**
-     * Snippet
-     */
-    snippet: string;
-    /**
-     * Source Deleted
-     */
-    source_deleted?: boolean;
-    /**
-     * Source Order
-     */
-    source_order?: number | null;
-    theses?: Summary | null;
-    /**
-     * Title
-     */
-    title: string;
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Version
-     */
-    version?: string;
+    renew_after_seconds: number;
 };
 
-export type CodexCheck = {
-    auth?: string;
-    available: boolean;
+export type ClientSession = {
+    expires_at: Timestamp;
+    id: ClientSessionId;
+    renew_after_seconds: number;
+};
+
+export type ClientSessionClosed = {
+    closed: true;
+    id: ClientSessionId;
+};
+
+export type ClientSessionExpiredError = {
+    code: 'client_session_expired';
+    command_id: CommandId | null;
+    details: ClientSessionExpiredErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ClientSessionExpiredErrorDetails = {
+    id: ClientSessionId;
+};
+
+export type ClientSessionId = string;
+
+export type CodexAvailability = ({
+    state: 'available';
+} & CodexAvailable) | ({
+    state: 'unavailable';
+} & CodexUnavailable);
+
+export type CodexAvailable = {
+    auth: 'chatgpt' | 'api_key';
     limits_checked: boolean;
-    local?: boolean;
-    quota_windows?: Array<QuotaWindow>;
-    reason: string;
-    version?: string | null;
+    local: boolean;
+    quota_windows: Array<QuotaWindow>;
+    state: 'available';
+    version: string | null;
 };
 
 /**
  * CodexChoice
  */
 export type CodexChoice = {
+    /**
+     * Fast
+     */
+    fast: boolean;
+    /**
+     * Model
+     */
+    model: string;
+    /**
+     * Reasoning Effort
+     */
+    reasoning_effort: string;
+};
+
+/**
+ * CodexChoice
+ */
+export type CodexChoiceRequest = {
     /**
      * Fast
      */
@@ -255,7 +321,21 @@ export type CodexChoice = {
     reasoning_effort: string;
 };
 
-export type CodexModel = {
+export type CodexConfiguration = {
+    filter: CodexChoice;
+    theses: CodexChoice;
+};
+
+export type CodexConfigurationRequest = {
+    filter: CodexChoiceRequest;
+    theses: CodexChoiceRequest;
+};
+
+export type CodexModelCatalog = {
+    models: Array<CodexModelDescriptor>;
+};
+
+export type CodexModelDescriptor = {
     default: boolean;
     default_reasoning_effort: string;
     display_name: string;
@@ -264,116 +344,488 @@ export type CodexModel = {
     reasoning_efforts: Array<string>;
 };
 
-export type CodexModels = {
-    models: Array<CodexModel>;
+export type CodexModels503Errors = ({
+    code: 'processor_unavailable';
+} & ProcessorUnavailableError) | ({
+    code: 'storage_unavailable';
+} & StorageUnavailableError);
+
+export type CodexProcessorState = {
+    availability: CodexAvailability;
+    configuration: CodexConfiguration | null;
 };
 
-/**
- * CodexProvenance
- */
-export type CodexProvenance = {
-    /**
-     * Fast
-     */
+export type CodexResultProvenance = {
     fast: boolean;
-    /**
-     * Model
-     */
+    kind: 'codex';
     model: string;
-    /**
-     * Processor
-     */
-    processor: 'codex';
-    /**
-     * Reasoning Effort
-     */
     reasoning_effort: string;
 };
 
-/**
- * CodexSettings
- */
-export type CodexSettings = {
-    filter: CodexChoice;
-    theses: CodexChoice;
-};
-
-export type CodexState = {
-    auth?: string;
-    available: boolean;
-    config: CodexSettings | null;
+export type CodexUnavailable = {
+    auth: 'unknown' | 'missing' | 'chatgpt' | 'api_key' | 'unchecked';
     limits_checked: boolean;
-    local?: boolean;
-    quota_windows?: Array<QuotaWindow>;
-    reason: string;
-    version?: string | null;
+    local: boolean | null;
+    message: string;
+    quota_windows: Array<QuotaWindow>;
+    reason: 'not_installed' | 'not_authenticated' | 'quota_exhausted' | 'unavailable';
+    state: 'unavailable';
+    version: string | null;
 };
 
-export type CompletionConflict = {
+export type CollectionTarget = ({
+    scope: 'all';
+} & AllCollectionTarget) | ({
+    scope: 'feed';
+} & FeedCollectionTarget);
+
+export type CollectionTelegramProfileIdentityMismatch = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
     message: string;
-    preview: CompletionPreview;
+    reason: 'account_identity_mismatch';
+    role: 'collection';
+    state: 'identity_mismatch';
+    verified_user_id: TelegramUserId;
+};
+
+export type CollectionTelegramProfileReady = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    role: 'collection';
+    state: 'ready';
+    verified_user_id: TelegramUserId;
+};
+
+export type CollectionTelegramProfileState = ({
+    state: 'unconfigured';
+} & CollectionTelegramProfileUnconfigured) | ({
+    state: 'ready';
+} & CollectionTelegramProfileReady) | ({
+    state: 'unavailable';
+} & CollectionTelegramProfileUnavailable) | ({
+    state: 'identity_mismatch';
+} & CollectionTelegramProfileIdentityMismatch);
+
+export type CollectionTelegramProfileUnavailable = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    message: string;
+    reason: WaitingReason;
+    role: 'collection';
+    state: 'unavailable';
+    verified_user_id: TelegramUserId | null;
+};
+
+export type CollectionTelegramProfileUnconfigured = {
+    role: 'collection';
+    state: 'unconfigured';
+};
+
+/**
+ * The command was accepted. Asynchronous work may still be running; this is not evidence it completed.
+ */
+export type CommandAcknowledgement = {
+    command_id: CommandId;
+    ok: true;
+};
+
+export type CommandAddFeed = {
+    operation: 'add_feed';
+};
+
+export type CommandCodexCheck = {
+    operation: 'codex_check';
+};
+
+export type CommandCodexSave = {
+    operation: 'codex_save';
+};
+
+export type CommandCollect = {
+    operation: 'collect';
+    target: CollectionTarget;
+};
+
+export type CommandCompleteFolder = {
+    folder_id: FolderId;
+    operation: 'complete_folder';
+};
+
+export type CommandContext = ({
+    operation: 'settings_patch';
+} & CommandSettingsPatch) | ({
+    operation: 'feed_patch';
+} & CommandFeedPatch) | ({
+    operation: 'codex_save';
+} & CommandCodexSave) | ({
+    operation: 'processor_save';
+} & CommandProcessorSave) | ({
+    operation: 'youtube_configure';
+} & CommandYoutubeConfigure) | ({
+    operation: 'telegram_connect';
+} & CommandTelegramConnect) | ({
+    operation: 'telegram_profile_save';
+} & CommandTelegramProfileSave) | ({
+    operation: 'add_feed';
+} & CommandAddFeed) | ({
+    operation: 'remove_feed';
+} & CommandRemoveFeed) | ({
+    operation: 'history_start';
+} & CommandHistoryStart) | ({
+    operation: 'history_pause';
+} & CommandHistoryPause) | ({
+    operation: 'history_cancel';
+} & CommandHistoryCancel) | ({
+    operation: 'collect';
+} & CommandCollect) | ({
+    operation: 'complete_folder';
+} & CommandCompleteFolder) | ({
+    operation: 'stop';
+} & CommandStop) | ({
+    operation: 'regenerate';
+} & CommandRegenerate) | ({
+    operation: 'retry_theses';
+} & CommandRetryTheses) | ({
+    operation: 'retry_material';
+} & CommandRetryMaterial) | ({
+    operation: 'restore_filter';
+} & CommandRestoreFilter) | ({
+    operation: 'retry_filter';
+} & CommandRetryFilter) | ({
+    operation: 'viewed';
+} & CommandViewed) | ({
+    operation: 'codex_check';
+} & CommandCodexCheck) | ({
+    operation: 'processor_check';
+} & CommandProcessorCheck) | ({
+    operation: 'verify_feed';
+} & CommandVerifyFeed) | ({
+    operation: 'preview_completion';
+} & CommandPreviewCompletion);
+
+export type CommandContextMismatchError = {
+    code: 'command_context_mismatch';
+    command_id: CommandId | null;
+    details: CommandContextMismatchErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type CommandContextMismatchErrorDetails = {
+    command_id: CommandId;
+};
+
+export type CommandFeedPatch = {
+    feed_id: FeedId;
+    fields: Array<FeedField>;
+    operation: 'feed_patch';
+};
+
+export type CommandHistoryCancel = {
+    feed_id: FeedId;
+    operation: 'history_cancel';
+};
+
+export type CommandHistoryPause = {
+    feed_id: FeedId;
+    operation: 'history_pause';
+};
+
+export type CommandHistoryStart = {
+    feed_id: FeedId;
+    operation: 'history_start';
+};
+
+export type CommandId = string;
+
+export type CommandObservation = {
+    context: CommandContext;
+    id: CommandId;
+    result: 'failed' | 'unknown';
+};
+
+export type CommandPreviewCompletion = {
+    folder_id: FolderId;
+    operation: 'preview_completion';
+};
+
+export type CommandProcessorCheck = {
+    operation: 'processor_check';
+};
+
+export type CommandProcessorSave = {
+    operation: 'processor_save';
+};
+
+export type CommandReceipt = ({
+    outcome: 'pending';
+} & CommandReceiptPending) | ({
+    outcome: 'succeeded';
+} & CommandReceiptSucceeded) | ({
+    outcome: 'failed';
+} & CommandReceiptFailed) | ({
+    outcome: 'unknown';
+} & CommandReceiptUnknown) | ({
+    outcome: 'abandoned';
+} & CommandReceiptAbandoned);
+
+export type CommandReceiptAbandoned = {
+    context: CommandContext;
+    id: CommandId;
+    outcome: 'abandoned';
+    updated_at: Timestamp;
+};
+
+export type CommandReceiptFailed = {
+    context: CommandContext;
+    error: ErrorEnvelope;
+    id: CommandId;
+    outcome: 'failed';
+    updated_at: Timestamp;
+};
+
+export type CommandReceiptPending = {
+    context: CommandContext;
+    id: CommandId;
+    outcome: 'pending';
+    updated_at: Timestamp;
+};
+
+export type CommandReceiptSucceeded = {
+    context: CommandContext;
+    id: CommandId;
+    outcome: 'succeeded';
+    updated_at: Timestamp;
+};
+
+export type CommandReceiptUnknown = {
+    id: CommandId;
+    outcome: 'unknown';
+};
+
+export type CommandRegenerate = {
+    material_id: MaterialId;
+    operation: 'regenerate';
+};
+
+export type CommandRemoveFeed = {
+    feed_id: FeedId;
+    operation: 'remove_feed';
+};
+
+export type CommandResource = {
+    command_id: CommandId;
+    kind: 'command';
+};
+
+export type CommandRestoreFilter = {
+    material_id: MaterialId;
+    operation: 'restore_filter';
+};
+
+export type CommandRetryFilter = {
+    material_id: MaterialId;
+    operation: 'retry_filter';
+};
+
+export type CommandRetryMaterial = {
+    material_id: MaterialId;
+    operation: 'retry_material';
+};
+
+export type CommandRetryTheses = {
+    material_id: MaterialId;
+    operation: 'retry_theses';
+};
+
+export type CommandSettingsPatch = {
+    keys: Array<SettingKey>;
+    operation: 'settings_patch';
+    target: SettingsTarget;
+};
+
+export type CommandStop = {
+    operation: 'stop';
+};
+
+export type CommandTelegramConnect = {
+    operation: 'telegram_connect';
+};
+
+export type CommandTelegramProfileSave = {
+    operation: 'telegram_profile_save';
+    role: TelegramRole;
+};
+
+export type CommandVerifyFeed = {
+    operation: 'verify_feed';
+};
+
+export type CommandViewed = {
+    material_id: MaterialId;
+    operation: 'viewed';
+};
+
+export type CommandYoutubeConfigure = {
+    operation: 'youtube_configure';
+};
+
+export type CompleteContent = {
+    state: 'complete';
+};
+
+export type CompleteFolder409Errors = ({
+    code: 'composition_changed';
+} & CompositionChangedError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError);
+
+export type CompleteFolderRequest = {
+    token: string;
 };
 
 export type CompletionPreview = {
-    cards: number;
-    originals: number;
+    cards_count: number;
+    publications_count: number;
     token: string;
 };
 
-/**
- * CompletionRequest
- */
-export type CompletionRequest = {
-    /**
-     * Token
-     */
-    token: string;
+export type CompositionChangedError = {
+    code: 'composition_changed';
+    command_id: CommandId | null;
+    details: CompositionChangedErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
 };
 
-/**
- * ConnectTelegram
- */
-export type ConnectTelegram = {
-    /**
-     * Account
-     */
-    account: string;
-    /**
-     * Auto Read
-     */
-    auto_read: boolean;
-    /**
-     * Feed Id
-     */
-    feed_id?: string | null;
-    /**
-     * Folder
-     */
-    folder: string;
-    initial_history?: InitialHistory | null;
-    /**
-     * Peer
-     */
-    peer: string;
-    /**
-     * Topic Id
-     */
-    topic_id?: number | null;
+export type CompositionChangedErrorDetails = {
+    preview: CompletionPreview;
 };
 
-export type DiagnosticClear = {
-    ok: boolean;
-    persistence_error: string;
+export type ConfigurationRef = string;
+
+export type ContentCompleteness = ({
+    state: 'complete';
+} & CompleteContent) | ({
+    state: 'incomplete';
+} & IncompleteContent);
+
+export type CreateClientSession409Errors = ({
+    code: 'lifetime_policy_incompatible';
+} & LifetimePolicyIncompatibleError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError);
+
+export type CredentialsChange = ({
+    action: 'keep';
+} & CredentialsKeep) | ({
+    action: 'clear';
+} & CredentialsClear) | ({
+    action: 'replace';
+} & CredentialsReplace);
+
+export type CredentialsClear = {
+    action: 'clear';
+};
+
+export type CredentialsKeep = {
+    action: 'keep';
+};
+
+export type CredentialsReplace = {
+    action: 'replace';
+    password: string;
+    username: string;
+};
+
+export type CurrentProblem = {
+    affected: Array<AffectedResource>;
+    code: ProblemCode;
+    command_id: CommandId | null;
+    /**
+     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
+     */
+    consequence: string;
+    created_at: Timestamp;
+    id: ProblemId;
+    message: string;
+    recovery: Array<RecoveryIntent>;
+    state: 'current';
+    /**
+     * Human-readable subject explanation; clients branch on code, not this text.
+     */
+    title: string;
+};
+
+export type DefaultSettingOrigin = {
+    scope: 'default';
+};
+
+export type DeletionInProgressError = {
+    code: 'deletion_in_progress';
+    command_id: CommandId | null;
+    details: DeletionInProgressErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type DeletionInProgressErrorDetails = {
+    feed_id: FeedId;
+};
+
+export type DemoSourceReference = {
+    feed_id: FeedId;
+    kind: 'demo';
+    source_url: SourceUrl;
+};
+
+export type DemoSubscriptionFeed = {
+    /**
+     * ready normalizes saved connected; unresolved identity or missing transport remain distinct domain states.
+     */
+    connection: 'ready' | 'unavailable' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'demo';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
+    title: string;
+    transport: 'demo' | null;
+};
+
+export type DiagnosticAccepted = {
+    entry: DiagnosticEntry;
+    state: 'accepted';
+};
+
+export type DiagnosticClearFailure = {
+    message: string;
+    state: 'persistence_failure';
+};
+
+export type DiagnosticClearResult = ({
+    state: 'cleared';
+} & DiagnosticClearSuccess) | ({
+    state: 'persistence_failure';
+} & DiagnosticClearFailure);
+
+export type DiagnosticClearSuccess = {
+    state: 'cleared';
 };
 
 export type DiagnosticEntry = {
     count: number;
     error_type: string;
-    first_time: string;
+    first_at: Timestamp;
     id: string;
-    last_time: string;
+    last_at: Timestamp;
     location: string;
-    material_ids?: Array<string>;
+    material_ids: Array<MaterialId>;
     message: string;
     source: string;
     streams: {
@@ -384,915 +836,587 @@ export type DiagnosticEntry = {
 
 export type DiagnosticJournal = {
     groups: Array<DiagnosticEntry>;
-    persistence_error: string;
+    persistence_error: string | null;
 };
 
-export type DiagnosticReceipt = {
-    entry: DiagnosticEntry | null;
-    group: string | null;
-    ok: boolean;
-    persistence_error: string;
+export type DiagnosticPersistenceFailure = {
+    message: string;
+    state: 'persistence_failure';
 };
 
-export type EffectiveSettings = {
-    effective: EffectiveValues;
-    feed?: SubscriptionFeed;
-    overrides: SettingOverrides;
-};
+export type DiagnosticReceipt = ({
+    state: 'accepted';
+} & DiagnosticAccepted) | ({
+    state: 'persistence_failure';
+} & DiagnosticPersistenceFailure);
 
-export type EffectiveValues = {
-    originals: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: boolean;
-    };
-    processor: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: string;
-    };
-    prompt_filters: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: string;
-    };
-    prompt_theses: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: string;
-    };
-    theses: {
-        owner: string | null;
-        scope: 'default' | 'oko' | 'folder' | 'feed';
-        value: boolean;
-    };
-};
-
-export type Error = {
-    detail: string | CompletionConflict | ImportConflict;
-};
-
-/**
- * Feed
- */
-export type Feed = {
-    /**
-     * Auto Read
-     */
-    auto_read?: boolean | null;
-    /**
-     * Connection
-     */
-    connection?: string;
-    /**
-     * Count
-     */
-    count: number;
-    /**
-     * Folder Id
-     */
-    folder_id: string;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Identity
-     */
-    identity?: string;
-    /**
-     * Importance
-     */
-    importance?: 'normal' | 'elevated' | 'high';
-    /**
-     * Initial Days
-     */
-    initial_days?: number;
-    initial_history?: History | null;
-    /**
-     * Kind
-     */
-    kind: 'demo' | 'rss' | 'telegram' | 'youtube' | 'unresolved';
-    /**
-     * Legacy Since
-     */
-    legacy_since?: number | null;
-    /**
-     * Original Urls
-     */
-    original_urls?: Array<string>;
-    /**
-     * Public Ai
-     */
-    public_ai?: boolean | null;
-    /**
-     * Read History
-     */
-    read_history?: boolean | null;
-    /**
-     * Telegram Account
-     */
-    telegram_account?: string | null;
-    /**
-     * Telegram Peer
-     */
-    telegram_peer?: number | null;
-    /**
-     * Telegram Topic
-     */
-    telegram_topic?: number | null;
-    /**
-     * Telegram Username
-     */
-    telegram_username?: string | null;
-    /**
-     * Title
-     */
-    title: string;
-    /**
-     * Transport
-     */
-    transport?: 'demo' | 'rss' | 'telegram' | 'youtube' | null;
-};
-
-/**
- * FeedPatch
- *
- * PATCH: omitted field stays unchanged. Only auto_read and transport permit explicit null; other null values return 400 (not 422).
- */
-export type FeedPatch = {
-    /**
-     * Auto Read
-     */
-    auto_read?: boolean | null;
-    /**
-     * Folder Id
-     */
-    folder_id?: string | null;
-    /**
-     * Importance
-     */
-    importance?: 'normal' | 'elevated' | 'high' | null;
-    /**
-     * Initial Days
-     */
-    initial_days?: number | null;
-    /**
-     * Public Ai
-     */
-    public_ai?: boolean | null;
-    /**
-     * Read History
-     */
-    read_history?: boolean | null;
-    /**
-     * Transport
-     */
-    transport?: 'telegram' | 'rss' | 'youtube' | null;
-};
-
-/**
- * FeedURL
- */
-export type FeedUrl = {
-    /**
-     * Url
-     */
-    url: string;
-};
-
-export type FeedVerification = {
-    existing: SubscriptionFeed | null;
-    kind: 'rss' | 'youtube';
-    title: string;
-    url: string;
-    verification: string;
-};
-
-/**
- * Filter
- */
-export type Filter = {
-    /**
-     * Error
-     */
-    error?: string | null;
-    /**
-     * Hidden
-     */
-    hidden: boolean;
-    /**
-     * Reason
-     */
-    reason: string;
-    /**
-     * Removed
-     */
-    removed: Array<string>;
-    /**
-     * Restored
-     */
-    restored: boolean;
-    /**
-     * Status
-     */
-    status: 'off' | 'pending' | 'running' | 'done' | 'cancelled';
-};
-
-/**
- * Folder
- */
-export type Folder = {
-    /**
-     * Count
-     */
-    count: number;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Position
-     */
-    position?: number;
-    /**
-     * Title
-     */
-    title: string;
-};
-
-/**
- * HTTPValidationError
- */
-export type HttpValidationError = {
-    /**
-     * Detail
-     */
-    detail?: Array<ValidationError>;
-};
-
-/**
- * History
- */
-export type History = {
-    /**
-     * Available
-     */
-    available: number;
-    /**
-     * Cancelled
-     */
-    cancelled?: boolean;
-    /**
-     * Count
-     */
-    count: number | null;
-    /**
-     * Count Text
-     */
-    count_text: string | null;
-    /**
-     * Date
-     */
-    date: string | null;
-    /**
-     * Discovery Error
-     */
-    discovery_error?: string | null;
-    /**
-     * Discovery Retry At
-     */
-    discovery_retry_at?: number | null;
-    /**
-     * Errors
-     */
-    errors: Array<HistoryError>;
-    /**
-     * Frozen
-     */
-    frozen: boolean;
-    /**
-     * Incomplete
-     */
-    incomplete: number;
-    /**
-     * Loaded
-     */
-    loaded: number;
-    /**
-     * Mode
-     */
-    mode: 'count' | 'date';
-    /**
-     * Paused
-     */
-    paused: boolean;
-    /**
-     * Requests
-     */
-    requests?: number;
-    /**
-     * Resume
-     */
-    resume?: number;
-    /**
-     * Retrying
-     */
-    retrying: number;
-    /**
-     * Run
-     */
-    run?: string;
-    /**
-     * Scan Complete
-     */
-    scan_complete: boolean;
-    /**
-     * Since
-     */
-    since: number | null;
-    /**
-     * State
-     */
-    state: 'pending' | 'loading' | 'done' | 'selecting' | 'paused' | 'waiting' | 'cancelled';
-    /**
-     * Timezone
-     */
-    timezone: string;
-    /**
-     * Unavailable
-     */
-    unavailable: number;
-    /**
-     * Viewed
-     */
-    viewed: number;
-    /**
-     * Waiting
-     */
-    waiting?: boolean;
-    /**
-     * Warnings
-     */
-    warnings?: Array<string>;
-};
-
-/**
- * HistoryError
- */
-export type HistoryError = {
-    /**
-     * Item
-     */
-    item: string;
-    /**
-     * Message
-     */
+export type DuplicateSourceError = {
+    code: 'duplicate_source';
+    command_id: CommandId | null;
+    details: DuplicateSourceErrorDetails;
+    diagnostic_id: string | null;
     message: string;
 };
 
-/**
- * HistoryPause
- */
-export type HistoryPause = {
-    /**
-     * Paused
-     */
-    paused: boolean;
+export type DuplicateSourceErrorDetails = {
+    existing_feeds: Array<ExistingTelegramFeed>;
 };
 
-export type ImportConflict = {
-    conflicts: Array<{
-        folders: Array<string>;
-        identity: string;
-    }>;
+export type EffectiveOriginals = {
+    origin: SettingOrigin;
+    value: boolean;
 };
 
-export type ImportFeed = {
-    connection: string;
-    folders: Array<string>;
-    identity: string;
-    kind: 'rss' | 'telegram' | 'youtube' | 'unresolved';
-    original_urls: Array<string>;
+export type EffectiveProcessor = {
+    origin: SettingOrigin;
+    value: StoredProcessorSelection;
+};
+
+export type EffectivePromptFilters = {
+    origin: SettingOrigin;
+    value: string;
+};
+
+export type EffectivePromptTheses = {
+    origin: SettingOrigin;
+    value: string;
+};
+
+export type EffectiveSettingsSnapshot = ({
+    scope: 'oko';
+} & OkoSettingsSnapshot) | ({
+    scope: 'folder';
+} & FolderSettingsSnapshot) | ({
+    scope: 'feed';
+} & FeedSettingsSnapshot);
+
+export type EffectiveSettingsValues = {
+    originals: EffectiveOriginals;
+    processor: EffectiveProcessor;
+    prompt_filters: EffectivePromptFilters;
+    prompt_theses: EffectivePromptTheses;
+    theses: EffectiveTheses;
+};
+
+export type EffectiveTheses = {
+    origin: SettingOrigin;
+    value: boolean;
+};
+
+export type ErrorEnvelope = ({
+    code: 'action_invalid';
+} & ActionInvalidError) | ({
+    code: 'setting_scope_invalid';
+} & SettingScopeInvalidError) | ({
+    code: 'source_connection_invalid';
+} & SourceConnectionInvalidError) | ({
+    code: 'processor_choice_invalid';
+} & ProcessorChoiceInvalidError) | ({
+    code: 'session_required';
+} & SessionRequiredError) | ({
+    code: 'host_not_allowed';
+} & HostNotAllowedError) | ({
+    code: 'origin_not_allowed';
+} & OriginNotAllowedError) | ({
+    code: 'resource_not_found';
+} & ResourceNotFoundError) | ({
+    code: 'media_unavailable';
+} & MediaUnavailableError) | ({
+    code: 'version_unavailable';
+} & VersionUnavailableError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError) | ({
+    code: 'lifetime_policy_incompatible';
+} & LifetimePolicyIncompatibleError) | ({
+    code: 'deletion_in_progress';
+} & DeletionInProgressError) | ({
+    code: 'composition_changed';
+} & CompositionChangedError) | ({
+    code: 'verification_expired';
+} & VerificationExpiredError) | ({
+    code: 'history_conflict';
+} & HistoryConflictError) | ({
+    code: 'duplicate_source';
+} & DuplicateSourceError) | ({
+    code: 'identity_unconfirmed';
+} & IdentityUnconfirmedError) | ({
+    code: 'source_identity_conflict';
+} & SourceIdentityConflictError) | ({
+    code: 'access_immutable';
+} & AccessImmutableError) | ({
+    code: 'profile_not_configured';
+} & ProfileNotConfiguredError) | ({
+    code: 'account_identity_mismatch';
+} & AccountIdentityMismatchError) | ({
+    code: 'profile_in_use';
+} & ProfileInUseError) | ({
+    code: 'profile_account_conflict';
+} & ProfileAccountConflictError) | ({
+    code: 'command_context_mismatch';
+} & CommandContextMismatchError) | ({
+    code: 'api_version_removed';
+} & ApiVersionRemovedError) | ({
+    code: 'client_session_expired';
+} & ClientSessionExpiredError) | ({
+    code: 'request_invalid';
+} & RequestInvalidError) | ({
+    code: 'internal_error';
+} & InternalErrorError) | ({
+    code: 'storage_unavailable';
+} & StorageUnavailableError) | ({
+    code: 'processor_unavailable';
+} & ProcessorUnavailableError) | ({
+    code: 'source_unavailable';
+} & SourceUnavailableError) | ({
+    code: 'profile_unavailable';
+} & ProfileUnavailableError);
+
+export type ExistingFeedVerification = {
+    existing_feed: SubscriptionFeed;
+    state: 'existing';
+};
+
+export type ExistingTelegramFeed = {
+    access: TelegramAccess;
+    feed_id: FeedId;
     title: string;
 };
 
-export type ImportPreview = {
-    feeds: Array<ImportFeed>;
-    folders: Array<string>;
+export type ExplicitLifetimePolicy = {
+    kind: 'explicit';
 };
 
-/**
- * ImportRequest
- */
-export type ImportRequest = {
-    /**
-     * Choices
-     */
-    choices?: {
-        [key: string]: string;
-    };
-    /**
-     * Opml
-     */
-    opml: string;
-};
-
-/**
- * InitialHistory
- */
-export type InitialHistory = {
-    /**
-     * Exact integers above JavaScript safe range are sent as ASCII decimal strings. Count mode requires count >= 1 and null date; date mode requires null count and a nonfuture ISO date in the named IANA timezone. These cross-field constraints are enforced by the server.
-     */
-    count?: number | string | null;
-    /**
-     * Date
-     */
-    date?: string | null;
-    /**
-     * Mode
-     */
-    mode?: 'count' | 'date';
-    /**
-     * Timezone
-     */
-    timezone?: string;
-};
-
-/**
- * InitialHistoryStatus
- */
-export type InitialHistoryStatus = {
-    /**
-     * Available
-     */
-    available: number;
-    /**
-     * Cancelled
-     */
-    cancelled?: boolean;
-    /**
-     * Count
-     */
-    count: number | null;
-    /**
-     * Count Text
-     */
-    count_text: string | null;
-    /**
-     * Date
-     */
-    date: string | null;
-    /**
-     * Discovery Error
-     */
-    discovery_error?: string | null;
-    /**
-     * Discovery Retry At
-     */
-    discovery_retry_at?: number | null;
-    /**
-     * Errors
-     */
-    errors: Array<HistoryError>;
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    /**
-     * Frozen
-     */
-    frozen: boolean;
-    /**
-     * Incomplete
-     */
-    incomplete: number;
-    /**
-     * Loaded
-     */
-    loaded: number;
-    /**
-     * Mode
-     */
-    mode: 'count' | 'date';
-    /**
-     * Paused
-     */
-    paused: boolean;
-    /**
-     * Requests
-     */
-    requests?: number;
-    /**
-     * Resume
-     */
-    resume?: number;
-    /**
-     * Retrying
-     */
-    retrying: number;
-    /**
-     * Run
-     */
-    run?: string;
-    /**
-     * Scan Complete
-     */
-    scan_complete: boolean;
-    /**
-     * Since
-     */
-    since: number | null;
-    /**
-     * State
-     */
-    state: 'pending' | 'loading' | 'done' | 'selecting' | 'paused' | 'waiting' | 'cancelled';
-    /**
-     * Timezone
-     */
-    timezone: string;
-    /**
-     * Unavailable
-     */
-    unavailable: number;
-    /**
-     * Viewed
-     */
-    viewed: number;
-    /**
-     * Waiting
-     */
-    waiting?: boolean;
-    /**
-     * Warnings
-     */
-    warnings?: Array<string>;
-};
-
-/**
- * Job
- */
-export type Job = {
-    /**
-     * Count
-     */
-    count: number;
-    /**
-     * Error
-     */
-    error: string | null;
-    /**
-     * Kind
-     */
-    kind: 'discover' | 'fetch' | 'theses' | 'filter' | 'delete' | 'read';
-    /**
-     * Status
-     */
-    status: 'pending' | 'running' | 'done' | 'cancelled';
-};
-
-/**
- * LocalProvenance
- */
-export type LocalProvenance = {
-    /**
-     * Model
-     */
-    model: string | null;
-    /**
-     * Processor
-     */
-    processor: string;
-};
-
-/**
- * Material
- */
-export type Material = {
-    ai?: Ai | null;
-    /**
-     * Attachments
-     */
-    attachments?: Array<Attachment>;
-    /**
-     * Captions
-     */
-    captions?: 'available' | 'not_requested' | 'unavailable' | 'error' | null;
-    /**
-     * Changed
-     */
-    changed?: boolean;
-    /**
-     * Complete
-     */
-    complete: boolean;
-    /**
-     * Description
-     */
-    description?: string;
-    /**
-     * Display Text
-     */
-    display_text?: string;
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    filter?: Filter;
-    /**
-     * Folder Id
-     */
-    folder_id?: string;
-    /**
-     * Full
-     */
-    full?: boolean;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Images
-     */
-    images?: Array<string>;
-    /**
-     * Importance
-     */
-    importance?: 'normal' | 'elevated' | 'high';
-    /**
-     * Loading
-     */
-    loading?: boolean;
-    /**
-     * Members
-     */
-    members?: Array<number>;
-    /**
-     * Originals
-     */
-    originals?: boolean;
-    /**
-     * Previous
-     */
-    previous?: Array<Previous>;
-    /**
-     * Provenance
-     */
-    provenance?: UnknownProvenance | CodexProvenance | LocalProvenance | null;
-    /**
-     * Published
-     */
-    published: number;
-    /**
-     * Published Known
-     */
-    published_known?: boolean;
-    /**
-     * Reason
-     */
-    reason?: string;
-    /**
-     * Source Deleted
-     */
-    source_deleted?: boolean;
-    /**
-     * Source Order
-     */
-    source_order?: number | null;
-    /**
-     * Text
-     */
-    text: string;
-    theses?: Summary | null;
-    /**
-     * Title
-     */
+export type FeedCandidate = {
+    kind: 'rss' | 'youtube';
     title: string;
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Version
-     */
-    version?: string;
+    url: SourceUrl;
 };
 
-/**
- * Navigation
- */
-export type Navigation = {
-    /**
-     * Count
-     */
-    count: number;
-    /**
-     * Feeds
-     */
-    feeds: Array<Feed>;
-    /**
-     * Folders
-     */
-    folders: Array<Folder>;
+export type FeedCollectionTarget = {
+    feed_id: FeedId;
+    scope: 'feed';
 };
 
-export type Ok = {
-    ok: boolean;
+export type FeedConnectionUrl = string;
+
+export type FeedField = 'folder_id' | 'importance' | 'initial_days' | 'public_ai' | 'read_history' | 'auto_read' | 'transport';
+
+export type FeedHistoryState = {
+    feed_id: FeedId;
+    history: HistoryState;
 };
 
-/**
- * Overrides
- *
- * PATCH: omitted field stays unchanged; explicit null resets inheritance; a value sets this owner override. No automatic defaults are sent by clients.
- */
-export type Overrides = {
-    /**
-     * Originals
-     */
-    originals?: boolean | null;
-    /**
-     * Processor
-     */
-    processor?: string | null;
-    /**
-     * Prompt Filters
-     */
-    prompt_filters?: string | null;
-    /**
-     * Prompt Theses
-     */
-    prompt_theses?: string | null;
-    /**
-     * Theses
-     */
-    theses?: boolean | null;
+export type FeedId = string;
+
+export type FeedPatchRequest = {
+    auto_read?: boolean | null;
+    folder_id?: FolderId;
+    importance?: Importance;
+    initial_days?: number;
+    public_ai?: boolean;
+    read_history?: boolean;
+    transport?: 'telegram' | 'rss' | 'youtube' | null;
 };
 
-/**
- * Point
- */
-export type Point = {
-    /**
-     * Sources
-     */
-    sources: Array<Reference>;
-    /**
-     * Text
-     */
-    text: string;
+export type FeedResource = {
+    feed_id: FeedId;
+    kind: 'feed';
 };
 
-/**
- * Previous
- */
-export type Previous = {
-    /**
-     * Number
-     */
-    number?: number;
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Version
-     */
-    version?: string;
+export type FeedSettingOrigin = {
+    owner: FeedId;
+    scope: 'feed';
 };
 
-/**
- * Problem
- */
-export type Problem = {
-    action: ProblemAction | null;
+export type FeedSettingsSnapshot = {
+    effective: EffectiveSettingsValues;
+    feed: SubscriptionFeed;
+    overrides: StoredOverrides;
+    owner: FeedId;
+    scope: 'feed';
+};
+
+export type FeedSettingsTarget = {
+    owner: FeedId;
+    scope: 'feed';
+};
+
+export type FeedUrlRequest = {
+    url: FeedConnectionUrl;
+};
+
+export type FeedVerification = ({
+    state: 'new';
+} & NewFeedVerification) | ({
+    state: 'existing';
+} & ExistingFeedVerification);
+
+export type FieldViolation = {
+    code: 'required' | 'unknown_field' | 'invalid_type' | 'invalid_value' | 'invalid_format' | 'out_of_range' | 'duplicate_parameter';
+    location: 'body' | 'path' | 'query' | 'header';
+    message: string;
+    segments: Array<string | number>;
+};
+
+export type FilterAttemptState = {
+    attempt: UnfinishedProcessingAttempt;
+    diagnostic_message: string | null;
+    result: FilterResult | null;
+};
+
+export type FilterReadyState = {
+    attempt: ProcessingReady;
+    diagnostic_message: string | null;
+    result: FilterResult;
+};
+
+export type FilterResult = {
+    hidden: boolean;
+    provenance: Provenance;
+    reason: string;
+    removed: Array<string>;
+    restored: boolean;
+};
+
+export type FilterState = FilterReadyState | FilterAttemptState;
+
+export type FinishedProblem = {
+    affected: Array<AffectedResource>;
+    code: ProblemCode;
+    command_id: CommandId | null;
     /**
-     * Code
-     */
-    code: string;
-    /**
-     * Consequence
+     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
      */
     consequence: string;
+    created_at: Timestamp;
+    finished_at: Timestamp;
+    id: ProblemId;
+    message: string;
+    outcome: 'resolved' | 'irrelevant';
+    recovery: Array<RecoveryIntent>;
+    state: 'finished';
     /**
-     * Created At
-     */
-    created_at: number;
-    /**
-     * Finished At
-     */
-    finished_at: number | null;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Next At
-     */
-    next_at: number | null;
-    /**
-     * Next Step
-     */
-    next_step: string;
-    /**
-     * Objects
-     */
-    objects: Array<ProblemObject>;
-    /**
-     * Operation
-     */
-    operation?: string;
-    /**
-     * Outcome
-     */
-    outcome: 'resolved' | 'irrelevant' | null;
-    /**
-     * Reason
-     */
-    reason?: string;
-    /**
-     * Request Id
-     */
-    request_id?: string;
-    /**
-     * Section
-     */
-    section: 'action' | 'wait' | 'object';
-    /**
-     * State
-     */
-    state: 'current' | 'retrying' | 'finished';
-    /**
-     * Title
+     * Human-readable subject explanation; clients branch on code, not this text.
      */
     title: string;
 };
 
-/**
- * ProblemAction
- */
-export type ProblemAction = {
-    /**
-     * Id
-     */
-    id?: string;
-    /**
-     * Kind
-     */
-    kind: string;
-    /**
-     * Page
-     */
-    page?: string;
-    /**
-     * Scope
-     */
-    scope?: 'oko' | 'folder' | 'feed';
+export type FolderId = string;
+
+export type FolderResource = {
+    folder_id: FolderId;
+    kind: 'folder';
+};
+
+export type FolderSettingOrigin = {
+    owner: FolderId;
+    scope: 'folder';
+};
+
+export type FolderSettingsSnapshot = {
+    effective: EffectiveSettingsValues;
+    overrides: StoredOverrides;
+    owner: FolderId;
+    scope: 'folder';
+};
+
+export type FolderSettingsTarget = {
+    owner: FolderId;
+    scope: 'folder';
+};
+
+export type HistoryAbsent = {
+    legacy_since: Timestamp | null;
+    state: 'absent';
 };
 
 /**
- * ProblemObject
+ * Cancelled is terminal for this run and promises no active retry. Progress counters remain the recorded selected-composition outcomes; retrying counts unresolved entries, not executing jobs.
  */
-export type ProblemObject = {
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Kind
-     */
-    kind: 'settings' | 'feed' | 'material';
-    /**
-     * Label
-     */
-    label: string;
+export type HistoryCancelled = {
+    outcome: 'cancelled';
+    progress: HistoryProgress;
+    run: string;
+    selection: HistorySelection;
+    state: 'cancelled';
 };
 
-/**
- * ProblemSnapshot
- */
-export type ProblemSnapshot = {
-    /**
-     * Count
-     */
-    count: number;
-    /**
-     * Current
-     */
-    current: Array<Problem>;
-    /**
-     * Recent
-     */
-    recent: Array<Problem>;
-    /**
-     * Updated At
-     */
-    updated_at: number;
+export type HistoryComplete = {
+    progress: HistoryProgress;
+    run: string;
+    selection: HistorySelection;
+    state: 'complete';
 };
 
-export type ProcessorCheck = {
-    local: boolean;
-    mode: string;
+export type HistoryConflictError = {
+    code: 'history_conflict';
+    command_id: CommandId | null;
+    details: HistoryConflictErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type HistoryConflictErrorDetails = {
+    feed_id: FeedId;
+    history: HistoryState;
+};
+
+export type HistoryCountSelection = {
+    count: PositiveDecimal;
+    mode: 'count';
+};
+
+export type HistoryDateSelection = {
+    date: LocalDate;
+    mode: 'date';
+    timezone: IanaTimezone;
+};
+
+export type HistoryDiscovering = {
+    progress: HistoryProgress;
+    run: string;
+    selection: HistorySelection;
+    state: 'discovering';
+};
+
+export type HistoryDiscoveryProblem = {
+    code: WaitingReason;
+    /**
+     * Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.
+     */
+    message: string;
+    retry_at: Timestamp | null;
+};
+
+export type HistoryFetching = {
+    progress: HistoryProgress;
+    run: string;
+    selection: HistorySelection;
+    state: 'fetching';
+};
+
+export type HistoryItemError = {
+    code: 'source_unavailable' | 'material_incomplete' | 'storage_unavailable';
+    material_id: MaterialId;
+    message: string;
+};
+
+export type HistoryNotStarted = {
+    progress: HistoryProgress;
+    selection: HistorySelection;
+    state: 'not_started';
+};
+
+export type HistoryPauseRequest = {
+    paused: boolean;
+};
+
+export type HistoryPaused = {
+    paused_phase: 'not_started' | 'discovering' | 'fetching' | 'waiting';
+    progress: HistoryProgress;
+    run: string;
+    selection: HistorySelection;
+    state: 'paused';
+};
+
+export type HistoryProgress = {
+    available: number;
+    discovery_problem: HistoryDiscoveryProblem | null;
+    errors: Array<HistoryItemError>;
+    incomplete: number;
+    loaded: number;
+    /**
+     * The selected archive composition is fixed; distinct from discovery scan completion.
+     */
+    manifest_complete: boolean;
+    requests: number;
+    retrying: number;
+    scan_complete: boolean;
+    unavailable: number;
+    viewed: number;
+    warnings: Array<string>;
+};
+
+export type HistorySelection = ({
+    mode: 'count';
+} & HistoryCountSelection) | ({
+    mode: 'date';
+} & HistoryDateSelection);
+
+export type HistoryStart409Errors = ({
+    code: 'history_conflict';
+} & HistoryConflictError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError);
+
+export type HistoryState = ({
+    state: 'absent';
+} & HistoryAbsent) | ({
+    state: 'not_started';
+} & HistoryNotStarted) | ({
+    state: 'discovering';
+} & HistoryDiscovering) | ({
+    state: 'fetching';
+} & HistoryFetching) | ({
+    state: 'paused';
+} & HistoryPaused) | ({
+    state: 'waiting';
+} & HistoryWaiting) | ({
+    state: 'complete';
+} & HistoryComplete) | ({
+    state: 'cancelled';
+} & HistoryCancelled);
+
+export type HistoryWaiting = {
+    progress: HistoryProgress;
+    reason: WaitingReason;
+    retry_at: Timestamp | null;
+    run: string;
+    selection: HistorySelection;
+    state: 'waiting';
+};
+
+export type HostNotAllowedError = {
+    code: 'host_not_allowed';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type IanaTimezone = string;
+
+export type IdentityUnconfirmedError = {
+    code: 'identity_unconfirmed';
+    command_id: CommandId | null;
+    details: IdentityUnconfirmedErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type IdentityUnconfirmedErrorDetails = {
+    feed_id: FeedId | null;
+};
+
+export type Image404Errors = ({
+    code: 'resource_not_found';
+} & ResourceNotFoundError) | ({
+    code: 'media_unavailable';
+} & MediaUnavailableError);
+
+export type Importance = 'normal' | 'elevated' | 'high';
+
+export type IncompleteContent = {
+    message: string;
+    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'legacy';
+    state: 'incomplete';
+};
+
+export type InternalErrorError = {
+    code: 'internal_error';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string;
+    message: string;
+};
+
+export type KnownLocalModel = {
+    name: string;
+    state: 'known';
+};
+
+export type LegacyCurrentProblem = {
+    affected: Array<AffectedResource>;
+    code: 'legacy_problem';
+    command_id: CommandId | null;
+    /**
+     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
+     */
+    consequence: string;
+    created_at: Timestamp;
+    id: ProblemId;
+    message: string;
+    raw_code: string;
+    recovery: Array<RecoveryIntent>;
+    state: 'current';
+    /**
+     * Human-readable subject explanation; clients branch on code, not this text.
+     */
+    title: string;
+};
+
+export type LegacyFinishedProblem = {
+    affected: Array<AffectedResource>;
+    code: 'legacy_problem';
+    command_id: CommandId | null;
+    /**
+     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
+     */
+    consequence: string;
+    created_at: Timestamp;
+    finished_at: Timestamp;
+    id: ProblemId;
+    message: string;
+    outcome: 'resolved' | 'irrelevant';
+    raw_code: string;
+    recovery: Array<RecoveryIntent>;
+    state: 'finished';
+    /**
+     * Human-readable subject explanation; clients branch on code, not this text.
+     */
+    title: string;
+};
+
+export type LegacyProcessorSelection = {
+    kind: 'legacy';
+    value: string;
+};
+
+export type LegacyRetryingProblem = {
+    affected: Array<AffectedResource>;
+    code: 'legacy_problem';
+    command_id: CommandId | null;
+    /**
+     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
+     */
+    consequence: string;
+    created_at: Timestamp;
+    id: ProblemId;
+    message: string;
+    raw_code: string;
+    recovery: Array<RecoveryIntent>;
+    retry_at: Timestamp | null;
+    state: 'retrying';
+    /**
+     * Human-readable subject explanation; clients branch on code, not this text.
+     */
+    title: string;
+};
+
+export type LifetimePolicy = ({
+    kind: 'explicit';
+} & ExplicitLifetimePolicy) | ({
+    kind: 'client_presence';
+} & ClientPresenceLifetimePolicy);
+
+export type LifetimePolicyIncompatibleError = {
+    code: 'lifetime_policy_incompatible';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type LocalDate = string;
+
+export type LocalModel = ({
+    state: 'known';
+} & KnownLocalModel) | ({
+    state: 'unknown';
+} & UnknownLocalModel);
+
+export type LocalProcessorCheck = {
+    locality: 'local' | 'remote';
     model: string;
     models: Array<string>;
 };
@@ -1300,7 +1424,25 @@ export type ProcessorCheck = {
 /**
  * ProcessorConfig
  */
-export type ProcessorConfig = {
+export type LocalProcessorConfiguration = {
+    /**
+     * Endpoint
+     */
+    endpoint: string;
+    /**
+     * Local Execution
+     */
+    local_execution: boolean;
+    /**
+     * Model
+     */
+    model: string;
+};
+
+/**
+ * ProcessorConfig
+ */
+export type LocalProcessorConfigurationRequest = {
     /**
      * Endpoint
      */
@@ -1315,412 +1457,1123 @@ export type ProcessorConfig = {
     model: string;
 };
 
+export type LocalProcessorState = {
+    configuration: LocalProcessorConfiguration | null;
+};
+
+export type LocalResultProvenance = {
+    kind: 'local';
+    model: LocalModel;
+    processor_id: 'llamacpp';
+};
+
+export type MaterialId = string;
+
+export type MaterialResource = {
+    kind: 'material';
+    material_id: MaterialId;
+};
+
+export type MediaUnavailableError = {
+    code: 'media_unavailable';
+    command_id: CommandId | null;
+    details: MediaUnavailableErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type MediaUnavailableErrorDetails = {
+    material_id: MaterialId;
+    name: string;
+};
+
+export type MediaUrl = string;
+
+export type NavigationFeed = {
+    count: number;
+    feed: SubscriptionFeed;
+};
+
+export type NewFeedVerification = {
+    candidate: FeedCandidate;
+    state: 'new';
+    verification: string;
+};
+
+export type OkoSettingOrigin = {
+    owner: 'global';
+    scope: 'oko';
+};
+
+export type OkoSettingsSnapshot = {
+    effective: EffectiveSettingsValues;
+    overrides: StoredOverrides;
+    owner: 'global';
+    scope: 'oko';
+};
+
+export type OkoSettingsTarget = {
+    owner: 'global';
+    scope: 'oko';
+};
+
+export type OriginNotAllowedError = {
+    code: 'origin_not_allowed';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type PendingPublicationContent = {
+    availability: 'pending';
+    loading: boolean;
+};
+
+export type PendingReadableMaterial = {
+    availability: 'pending';
+    content: PendingPublicationContent;
+    feed_id: FeedId;
+    feed_title: string;
+    filter: FilterState;
+    folder_id: FolderId;
+    id: MaterialId;
+    importance: Importance;
+    originals: boolean;
+    published_at: Timestamp | null;
+    snippet: string;
+    source: SourceReference;
+    source_position: number | null;
+    source_url: SourceUrl;
+    theses: ThesesState;
+    title: string;
+};
+
+export type PendingReadingCard = {
+    availability: 'pending';
+    feed_id: FeedId;
+    feed_title: string;
+    filter: FilterState;
+    folder_id: FolderId;
+    id: MaterialId;
+    importance: Importance;
+    loading: boolean;
+    originals: boolean;
+    published_at: Timestamp | null;
+    snippet: string;
+    source: SourceReference;
+    source_position: number | null;
+    source_url: SourceUrl;
+    theses: ThesesState;
+    title: string;
+};
+
+export type PersonalTelegramProfileIdentityMismatch = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    message: string;
+    reason: 'account_identity_mismatch';
+    role: 'personal';
+    state: 'identity_mismatch';
+    verified_user_id: TelegramUserId;
+};
+
+export type PersonalTelegramProfileReady = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    role: 'personal';
+    state: 'ready';
+    verified_user_id: TelegramUserId;
+};
+
+export type PersonalTelegramProfileState = ({
+    state: 'unconfigured';
+} & PersonalTelegramProfileUnconfigured) | ({
+    state: 'ready';
+} & PersonalTelegramProfileReady) | ({
+    state: 'unavailable';
+} & PersonalTelegramProfileUnavailable) | ({
+    state: 'identity_mismatch';
+} & PersonalTelegramProfileIdentityMismatch);
+
+export type PersonalTelegramProfileUnavailable = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    message: string;
+    reason: WaitingReason;
+    role: 'personal';
+    state: 'unavailable';
+    verified_user_id: TelegramUserId | null;
+};
+
+export type PersonalTelegramProfileUnconfigured = {
+    role: 'personal';
+    state: 'unconfigured';
+};
+
+export type PositiveDecimal = string;
+
+export type PreviousMedia404Errors = ({
+    code: 'resource_not_found';
+} & ResourceNotFoundError) | ({
+    code: 'version_unavailable';
+} & VersionUnavailableError) | ({
+    code: 'media_unavailable';
+} & MediaUnavailableError);
+
+export type PreviousVersion404Errors = ({
+    code: 'resource_not_found';
+} & ResourceNotFoundError) | ({
+    code: 'version_unavailable';
+} & VersionUnavailableError);
+
+export type PreviousVersionReference = {
+    number: number;
+    revision_id: RevisionId;
+    url: MediaUrl;
+};
+
+export type Problem = CurrentProblem | LegacyCurrentProblem | RetryingProblem | LegacyRetryingProblem | FinishedProblem | LegacyFinishedProblem;
+
+export type ProblemCode = 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed';
+
+export type ProblemId = string;
+
+export type ProblemResource = {
+    kind: 'problem';
+    problem_id: ProblemId;
+};
+
+export type ProblemSnapshot = {
+    count: number;
+    current: Array<CurrentProblem | RetryingProblem | LegacyCurrentProblem | LegacyRetryingProblem>;
+    recent: Array<FinishedProblem | LegacyFinishedProblem>;
+    updated_at: Timestamp;
+};
+
+export type ProcessingCancelled = {
+    state: 'cancelled';
+};
+
+export type ProcessingDisabled = {
+    state: 'disabled';
+};
+
+export type ProcessingQueued = {
+    state: 'queued';
+};
+
+export type ProcessingReady = {
+    state: 'ready';
+};
+
+export type ProcessingRunning = {
+    state: 'running';
+};
+
+export type ProcessingWaiting = {
+    reason: WaitingReason;
+    retry_at: Timestamp | null;
+    state: 'waiting';
+};
+
+export type ProcessorChoiceInvalidError = {
+    code: 'processor_choice_invalid';
+    command_id: CommandId | null;
+    details: ProcessorChoiceInvalidErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ProcessorChoiceInvalidErrorDetails = {
+    reason: string;
+};
+
+export type ProcessorId = 'codex' | 'llamacpp';
+
+export type ProcessorResource = {
+    kind: 'processor';
+    processor_id: ProcessorId;
+};
+
+export type ProcessorSelection = 'codex' | 'llamacpp' | string;
+
+export type ProcessorUnavailableError = {
+    code: 'processor_unavailable';
+    command_id: CommandId | null;
+    details: ProcessorUnavailableErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ProcessorUnavailableErrorDetails = {
+    retry_at: Timestamp | null;
+};
+
+export type ProfileAccountConflictError = {
+    code: 'profile_account_conflict';
+    command_id: CommandId | null;
+    details: ProfileAccountConflictErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ProfileAccountConflictErrorDetails = {
+    role: TelegramRole;
+};
+
+export type ProfileInUseError = {
+    code: 'profile_in_use';
+    command_id: CommandId | null;
+    details: ProfileInUseErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ProfileInUseErrorDetails = {
+    role: TelegramRole;
+};
+
+export type ProfileNotConfiguredError = {
+    code: 'profile_not_configured';
+    command_id: CommandId | null;
+    details: ProfileNotConfiguredErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ProfileNotConfiguredErrorDetails = {
+    role: TelegramRole;
+};
+
+export type ProfileUnavailableError = {
+    code: 'profile_unavailable';
+    command_id: CommandId | null;
+    details: ProfileUnavailableErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ProfileUnavailableErrorDetails = {
+    retry_at: Timestamp | null;
+};
+
+export type Provenance = ({
+    kind: 'unknown';
+} & UnknownResultProvenance) | ({
+    kind: 'codex';
+} & CodexResultProvenance) | ({
+    kind: 'local';
+} & LocalResultProvenance);
+
+export type PublicationReference = {
+    material_id: MaterialId;
+    source_url: SourceUrl;
+};
+
+export type PublicationTheses = {
+    points: Array<ThesesPoint>;
+    provenance: Provenance;
+};
+
+export type PublicationVersion = {
+    attachments: Array<Attachment>;
+    completeness: ContentCompleteness;
+    images: Array<MediaUrl>;
+    number: number;
+    revision_id: RevisionId;
+    text: string;
+    title: string;
+};
+
 export type QuotaWindow = {
-    resets_at: number | null;
+    resets_at: Timestamp | null;
     used_percent: number;
 };
 
-/**
- * Reference
- */
-export type Reference = {
+export type ReadableMaterial = ({
+    availability: 'pending';
+} & PendingReadableMaterial) | ({
+    availability: 'available';
+} & AvailableReadableMaterial);
+
+export type ReadingCard = ({
+    availability: 'pending';
+} & PendingReadingCard) | ({
+    availability: 'available';
+} & AvailableReadingCard);
+
+export type ReadingComposition = {
+    count: number;
+    feeds: Array<NavigationFeed>;
+    folders: Array<ReadingFolder>;
+};
+
+export type ReadingFolder = {
+    count: number;
+    id: FolderId;
     /**
-     * Id
+     * Persisted ordering position; demo source legitimately uses -1.
      */
-    id: string;
+    position: number;
+    title: string;
+};
+
+export type RecoveryChangeSetting = {
+    keys: Array<SettingKey>;
+    kind: 'change_setting';
+    target: SettingsTarget;
+};
+
+export type RecoveryConfigureProcessor = {
+    kind: 'configure_processor';
+    processor_id: ProcessorId;
+};
+
+export type RecoveryConfigureTelegramProfile = {
+    kind: 'configure_telegram_profile';
+    role: TelegramRole;
+};
+
+export type RecoveryConnectSource = {
+    kind: 'connect_source';
+    source_kind: 'rss' | 'telegram' | 'youtube';
+};
+
+export type RecoveryInspectMaterials = {
+    kind: 'inspect_materials';
+    material_ids: Array<MaterialId>;
+};
+
+export type RecoveryIntent = ({
+    kind: 'configure_processor';
+} & RecoveryConfigureProcessor) | ({
+    kind: 'configure_telegram_profile';
+} & RecoveryConfigureTelegramProfile) | ({
+    kind: 'change_setting';
+} & RecoveryChangeSetting) | ({
+    kind: 'connect_source';
+} & RecoveryConnectSource) | ({
+    kind: 'inspect_materials';
+} & RecoveryInspectMaterials) | ({
+    kind: 'retry_material';
+} & RecoveryRetryMaterial) | ({
+    kind: 'retry_theses';
+} & RecoveryRetryTheses) | ({
+    kind: 'retry_filter';
+} & RecoveryRetryFilter) | ({
+    kind: 'regenerate';
+} & RecoveryRegenerate) | ({
+    kind: 'retry_collection';
+} & RecoveryRetryCollection);
+
+export type RecoveryRegenerate = {
+    kind: 'regenerate';
+    material_ids: Array<MaterialId>;
+    result_kind: 'filter' | 'theses';
+};
+
+export type RecoveryRetryCollection = {
+    kind: 'retry_collection';
+    target: CollectionTarget;
+};
+
+export type RecoveryRetryFilter = {
+    kind: 'retry_filter';
+    material_ids: Array<MaterialId>;
+};
+
+export type RecoveryRetryMaterial = {
+    kind: 'retry_material';
+    material_ids: Array<MaterialId>;
+};
+
+export type RecoveryRetryTheses = {
+    kind: 'retry_theses';
+    material_ids: Array<MaterialId>;
+};
+
+export type RemoveFeedResult = {
+    feed_id: FeedId;
+    state: 'deleting' | 'deleted';
+};
+
+export type RequestInvalidError = {
+    code: 'request_invalid';
+    command_id: CommandId | null;
+    details: RequestInvalidErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type RequestInvalidErrorDetails = {
+    violations: Array<FieldViolation>;
+};
+
+export type ResourceNotFoundError = {
+    code: 'resource_not_found';
+    command_id: CommandId | null;
+    details: ResourceNotFoundErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type ResourceNotFoundErrorDetails = {
+    resource: AffectedResource;
+};
+
+export type RetryingProblem = {
+    affected: Array<AffectedResource>;
+    code: ProblemCode;
+    command_id: CommandId | null;
     /**
-     * Url
+     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
      */
-    url: string;
+    consequence: string;
+    created_at: Timestamp;
+    id: ProblemId;
+    message: string;
+    recovery: Array<RecoveryIntent>;
+    retry_at: Timestamp | null;
+    state: 'retrying';
+    /**
+     * Human-readable subject explanation; clients branch on code, not this text.
+     */
+    title: string;
+};
+
+export type RevisionId = string;
+
+export type RssSourceReference = {
+    feed_id: FeedId;
+    kind: 'rss';
+    source_url: SourceUrl;
+};
+
+export type RssSubscriptionFeed = {
+    /**
+     * ready normalizes saved connected; unresolved identity or missing transport remain distinct domain states.
+     */
+    connection: 'ready' | 'needs_connection' | 'unavailable' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'rss';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
+    title: string;
+    transport: 'rss' | null;
+};
+
+export type RuntimeResource = {
+    kind: 'runtime';
+};
+
+export type RuntimeStatus = {
+    active_client_sessions: number;
+    api_version: string;
+    diagnostic_count: number;
+    diagnostic_persistence_error: string | null;
+    initial_histories: Array<FeedHistoryState>;
+    lifetime: LifetimePolicy;
+    problems: ProblemSnapshot;
+    ready_sources: number;
+    runtime_state: 'running' | 'stopping' | 'stopped' | 'unavailable';
+    sources: Array<SourceState>;
+    telegram_reads: Array<TelegramReadState>;
+    total_sources: number;
+    viewed_ids: Array<MaterialId>;
+    work: Array<WorkEntry>;
+    work_allowed: boolean;
+    youtube: YouTubeState;
+};
+
+export type RuntimeStoppedError = {
+    code: 'runtime_stopped';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type SessionRequiredError = {
+    code: 'session_required';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type SettingKey = 'originals' | 'theses' | 'prompt_theses' | 'prompt_filters' | 'processor';
+
+export type SettingOrigin = ({
+    scope: 'default';
+} & DefaultSettingOrigin) | ({
+    scope: 'oko';
+} & OkoSettingOrigin) | ({
+    scope: 'folder';
+} & FolderSettingOrigin) | ({
+    scope: 'feed';
+} & FeedSettingOrigin);
+
+export type SettingScopeInvalidError = {
+    code: 'setting_scope_invalid';
+    command_id: CommandId | null;
+    details: SettingScopeInvalidErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type SettingScopeInvalidErrorDetails = {
+    reason: string;
+};
+
+export type SettingsPatch = {
+    originals?: boolean | null;
+    processor?: ProcessorSelection | null;
+    prompt_filters?: string | null;
+    prompt_theses?: string | null;
+    theses?: boolean | null;
+};
+
+export type SettingsPatch400Errors = ({
+    code: 'setting_scope_invalid';
+} & SettingScopeInvalidError) | ({
+    code: 'processor_choice_invalid';
+} & ProcessorChoiceInvalidError);
+
+export type SettingsResource = {
+    kind: 'settings';
+    target: SettingsTarget;
+};
+
+export type SettingsTarget = ({
+    scope: 'oko';
+} & OkoSettingsTarget) | ({
+    scope: 'folder';
+} & FolderSettingsTarget) | ({
+    scope: 'feed';
+} & FeedSettingsTarget);
+
+export type SourceConnectionInvalidError = {
+    code: 'source_connection_invalid';
+    command_id: CommandId | null;
+    details: SourceConnectionInvalidErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type SourceConnectionInvalidErrorDetails = {
+    reason: string;
+};
+
+export type SourceIdentityConflictError = {
+    code: 'source_identity_conflict';
+    command_id: CommandId | null;
+    details: SourceIdentityConflictErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type SourceIdentityConflictErrorDetails = {
+    feed_id: FeedId | null;
 };
 
 /**
- * ReportAction
+ * Saved source address or identifier, retained verbatim. New connections validate the locator against their adapter; this value is not a filesystem path.
  */
-export type ReportAction = {
-    /**
-     * Fields
-     */
-    fields?: Array<string>;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Method
-     */
-    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-    /**
-     * Path
-     */
-    path: string;
-    /**
-     * Result
-     */
-    result: 'failed' | 'unknown';
+export type SourceLocator = string;
+
+export type SourceReference = ({
+    kind: 'demo';
+} & DemoSourceReference) | ({
+    kind: 'rss';
+} & RssSourceReference) | ({
+    kind: 'youtube';
+} & YoutubeSourceReference) | ({
+    kind: 'telegram';
+} & TelegramSourceReference);
+
+export type SourceState = {
+    changes: string | null;
+    feed_id: FeedId;
+    gap: string | null;
+    message: string | null;
+    reason: WaitingReason | null;
+    state: 'ready' | 'collecting' | 'unavailable' | 'deleting';
+    title: string;
 };
 
-export type SettingOverrides = {
+export type SourceUnavailableError = {
+    code: 'source_unavailable';
+    command_id: CommandId | null;
+    details: SourceUnavailableErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type SourceUnavailableErrorDetails = {
+    retry_at: Timestamp | null;
+};
+
+export type SourceUrl = string;
+
+export type StorageUnavailableError = {
+    code: 'storage_unavailable';
+    command_id: CommandId | null;
+    details: StorageUnavailableErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type StorageUnavailableErrorDetails = {
+    retry_at: Timestamp | null;
+};
+
+export type StoredOverrides = {
     originals?: boolean;
-    processor?: string;
+    processor?: StoredProcessorSelection;
     prompt_filters?: string;
     prompt_theses?: string;
     theses?: boolean;
 };
 
-/**
- * SourceStatus
- */
-export type SourceStatus = {
-    /**
-     * Changes
-     */
-    changes?: string | null;
-    /**
-     * Error
-     */
-    error?: string | null;
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    /**
-     * Gap
-     */
-    gap?: string | null;
-    /**
-     * Title
-     */
-    title: string;
-};
+export type StoredProcessorSelection = ProcessorSelection | LegacyProcessorSelection;
 
-/**
- * Status
- */
-export type Status = {
-    /**
-     * Debug Count
-     */
-    debug_count?: number;
-    /**
-     * Debug Persistence Error
-     */
-    debug_persistence_error?: string;
-    /**
-     * Deleting
-     */
-    deleting?: boolean;
-    /**
-     * Error
-     */
-    error?: string | null;
-    /**
-     * Errors
-     */
-    errors: Array<string>;
-    /**
-     * Initial Histories
-     */
-    initial_histories?: Array<InitialHistoryStatus>;
-    /**
-     * Jobs
-     */
-    jobs?: Array<Job>;
-    /**
-     * Live Tabs
-     */
-    live_tabs?: number;
-    problems?: ProblemSnapshot;
-    /**
-     * Ready Sources
-     */
-    ready_sources: number;
-    /**
-     * Sources
-     */
-    sources: Array<SourceStatus>;
-    /**
-     * Stage
-     */
-    stage: string;
-    /**
-     * Stopped
-     */
-    stopped?: boolean;
-    /**
-     * Telegram Reads
-     */
-    telegram_reads?: Array<TelegramRead>;
-    /**
-     * Total Sources
-     */
-    total_sources: number;
-    /**
-     * Viewed Ids
-     */
-    viewed_ids?: Array<string>;
-    youtube?: YouTube | null;
-};
-
-/**
- * Feed
- */
-export type SubscriptionFeed = {
-    /**
-     * Auto Read
-     */
-    auto_read?: boolean | null;
-    /**
-     * Connection
-     */
-    connection?: string;
-    /**
-     * Folder Id
-     */
-    folder_id: string;
-    /**
-     * Id
-     */
-    id: string;
-    /**
-     * Identity
-     */
-    identity?: string;
-    /**
-     * Importance
-     */
-    importance?: 'normal' | 'elevated' | 'high';
-    /**
-     * Initial Days
-     */
-    initial_days?: number;
-    initial_history?: History | null;
-    /**
-     * Kind
-     */
-    kind: 'demo' | 'rss' | 'telegram' | 'youtube' | 'unresolved';
-    /**
-     * Legacy Since
-     */
-    legacy_since?: number | null;
-    /**
-     * Original Urls
-     */
-    original_urls?: Array<string>;
-    /**
-     * Public Ai
-     */
-    public_ai?: boolean | null;
-    /**
-     * Read History
-     */
-    read_history?: boolean | null;
-    /**
-     * Telegram Account
-     */
-    telegram_account?: string | null;
-    /**
-     * Telegram Peer
-     */
-    telegram_peer?: number | null;
-    /**
-     * Telegram Topic
-     */
-    telegram_topic?: number | null;
-    /**
-     * Telegram Username
-     */
-    telegram_username?: string | null;
-    /**
-     * Title
-     */
-    title: string;
-    /**
-     * Transport
-     */
-    transport?: 'demo' | 'rss' | 'telegram' | 'youtube' | null;
-};
-
-export type SubscriptionFolder = {
-    id: string;
-    position: number;
-    title: string;
-};
-
-export type Subscriptions = {
+export type SubscriptionCatalog = {
     feeds: Array<SubscriptionFeed>;
     folders: Array<SubscriptionFolder>;
 };
 
-/**
- * Summary
- */
-export type Summary = {
+export type SubscriptionFeed = DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed | TelegramClientSubscriptionFeed | TelegramLegacyClientSubscriptionFeed;
+
+export type SubscriptionFolder = {
+    id: FolderId;
     /**
-     * Points
+     * Persisted ordering position; demo source legitimately uses -1.
      */
-    points: Array<Point>;
+    position: number;
+    title: string;
 };
 
-/**
- * TelegramPeer
- */
-export type TelegramPeer = {
-    /**
-     * Account
-     */
-    account: string;
-    /**
-     * Peer
-     */
-    peer: string;
+export type TelegramAccess = ({
+    kind: 'web';
+} & TelegramWebAccess) | ({
+    kind: 'client';
+} & TelegramClientAccess) | ({
+    kind: 'legacy_client';
+} & TelegramLegacyClientAccess);
+
+export type TelegramClientAccess = {
+    account_user_id: TelegramUserId;
+    kind: 'client';
+    peer_id: TelegramPeerId;
+    role: TelegramRole;
 };
 
-/**
- * TelegramRead
- */
-export type TelegramRead = {
+export type TelegramClientAccessRequest = {
+    kind: 'client';
+    profile: TelegramRole;
+};
+
+export type TelegramClientConnectRequest = {
+    access: TelegramClientAccessRequest;
+    auto_read?: boolean;
+    folder: string;
     /**
-     * Confirmed
+     * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
      */
-    confirmed: number;
-    /**
-     * Error
-     */
-    error: string;
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    /**
-     * Initial
-     */
-    initial: number | null;
-    /**
-     * Pending
-     */
+    initial_history?: HistorySelection;
+    source_locator: string;
+};
+
+export type TelegramClientSubscriptionFeed = {
+    access: TelegramClientAccess;
+    auto_read: boolean;
+    connection: 'ready' | 'unavailable' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'telegram';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
+    read_history: boolean;
+    title: string;
+};
+
+export type TelegramConfirmedAccess = ({
+    kind: 'web';
+} & TelegramWebAccess) | ({
+    kind: 'client';
+} & TelegramClientAccess);
+
+export type TelegramConnect409Errors = ({
+    code: 'duplicate_source';
+} & DuplicateSourceError) | ({
+    code: 'identity_unconfirmed';
+} & IdentityUnconfirmedError) | ({
+    code: 'source_identity_conflict';
+} & SourceIdentityConflictError) | ({
+    code: 'deletion_in_progress';
+} & DeletionInProgressError) | ({
+    code: 'profile_not_configured';
+} & ProfileNotConfiguredError) | ({
+    code: 'account_identity_mismatch';
+} & AccountIdentityMismatchError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError);
+
+export type TelegramConnect503Errors = ({
+    code: 'profile_unavailable';
+} & ProfileUnavailableError) | ({
+    code: 'source_unavailable';
+} & SourceUnavailableError) | ({
+    code: 'storage_unavailable';
+} & StorageUnavailableError);
+
+export type TelegramConnectRequest = TelegramWebConnectRequest | TelegramClientConnectRequest;
+
+export type TelegramConnectResult = {
+    access: TelegramConfirmedAccess;
+    feed_id: FeedId;
+};
+
+export type TelegramLegacyClientAccess = {
+    alias: string;
+    kind: 'legacy_client';
+    peer_id: TelegramPeerId | null;
+    source_locator: string;
+};
+
+export type TelegramLegacyClientSubscriptionFeed = {
+    access: TelegramLegacyClientAccess;
+    connection: 'needs_profile_confirmation' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'telegram';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
+    title: string;
+};
+
+export type TelegramMessageId = string;
+
+export type TelegramPeerId = string;
+
+export type TelegramProfileConfiguration = {
+    configuration_ref: ConfigurationRef;
+    label: string;
+};
+
+export type TelegramProfileIdentityMismatch = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    message: string;
+    reason: 'account_identity_mismatch';
+    role: TelegramRole;
+    state: 'identity_mismatch';
+    verified_user_id: TelegramUserId;
+};
+
+export type TelegramProfileReady = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    role: TelegramRole;
+    state: 'ready';
+    verified_user_id: TelegramUserId;
+};
+
+export type TelegramProfileRequest = {
+    configuration_ref: ConfigurationRef;
+};
+
+export type TelegramProfileResource = {
+    kind: 'telegram_profile';
+    role: TelegramRole;
+};
+
+export type TelegramProfileSave409Errors = ({
+    code: 'profile_in_use';
+} & ProfileInUseError) | ({
+    code: 'profile_account_conflict';
+} & ProfileAccountConflictError) | ({
+    code: 'account_identity_mismatch';
+} & AccountIdentityMismatchError);
+
+export type TelegramProfileSave503Errors = ({
+    code: 'profile_unavailable';
+} & ProfileUnavailableError) | ({
+    code: 'storage_unavailable';
+} & StorageUnavailableError);
+
+export type TelegramProfileState = ({
+    state: 'unconfigured';
+} & TelegramProfileUnconfigured) | ({
+    state: 'ready';
+} & TelegramProfileReady) | ({
+    state: 'unavailable';
+} & TelegramProfileUnavailable) | ({
+    state: 'identity_mismatch';
+} & TelegramProfileIdentityMismatch);
+
+export type TelegramProfileUnavailable = {
+    checked_at: Timestamp;
+    configuration_ref: ConfigurationRef;
+    message: string;
+    reason: WaitingReason;
+    role: TelegramRole;
+    state: 'unavailable';
+    verified_user_id: TelegramUserId | null;
+};
+
+export type TelegramProfileUnconfigured = {
+    role: TelegramRole;
+    state: 'unconfigured';
+};
+
+export type TelegramProfiles = {
+    collection: CollectionTelegramProfileState;
+    configurations: Array<TelegramProfileConfiguration>;
+    personal: PersonalTelegramProfileState;
+};
+
+export type TelegramReadState = {
+    confirmed: TelegramMessageId | null;
+    error: string | null;
+    feed_id: FeedId;
+    initial: TelegramMessageId | null;
     pending: number;
-    /**
-     * Waiting
-     */
-    waiting: string;
+    waiting: WaitingReason | null;
 };
 
-export type TelegramTopic = {
-    id: number;
+export type TelegramRole = 'personal' | 'collection';
+
+export type TelegramSourceReference = {
+    access: TelegramAccess;
+    feed_id: FeedId;
+    kind: 'telegram';
+    message_ids: Array<TelegramMessageId>;
+    source_url: SourceUrl;
+};
+
+export type TelegramUserId = string;
+
+export type TelegramWebAccess = {
+    kind: 'web';
+    preview_url: SourceUrl;
+    username: string;
+};
+
+export type TelegramWebAccessRequest = {
+    kind: 'web';
+};
+
+export type TelegramWebConnectRequest = {
+    access?: TelegramWebAccessRequest;
+    folder: string;
+    /**
+     * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
+     */
+    initial_history?: HistorySelection;
+    source_locator: string;
+};
+
+export type TelegramWebSubscriptionFeed = {
+    access: TelegramWebAccess;
+    connection: 'ready' | 'unavailable' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'telegram';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
     title: string;
 };
 
-/**
- * UnknownProvenance
- */
-export type UnknownProvenance = {
-    /**
-     * Model
-     */
-    model: null;
+export type ThesesAttemptState = {
+    attempt: UnfinishedProcessingAttempt;
+    diagnostic_message: string | null;
+    result: PublicationTheses | null;
 };
 
-/**
- * ValidationError
- */
-export type ValidationError = {
-    ctx?: {
-        [key: string]: unknown;
-    };
-    input?: unknown;
-    /**
-     * Location
-     */
-    loc: Array<string | number>;
-    /**
-     * Message
-     */
-    msg: string;
-    /**
-     * Error Type
-     */
-    type: string;
-    url?: string;
-};
-
-/**
- * Version
- */
-export type Version = {
-    /**
-     * Attachments
-     */
-    attachments: Array<Attachment>;
-    /**
-     * Full
-     */
-    full: boolean;
-    /**
-     * Images
-     */
-    images: Array<string>;
-    /**
-     * Reason
-     */
-    reason: string;
-    /**
-     * Text
-     */
+export type ThesesPoint = {
+    references: Array<PublicationReference>;
     text: string;
-    /**
-     * Title
-     */
-    title: string;
 };
 
+export type ThesesReadyState = {
+    attempt: ProcessingReady;
+    diagnostic_message: string | null;
+    result: PublicationTheses;
+};
+
+export type ThesesState = ThesesReadyState | ThesesAttemptState;
+
 /**
- * YouTube
+ * RFC 3339 timestamp with a mandatory timezone offset, normalized to UTC in responses.
  */
-export type YouTube = {
+export type Timestamp = string;
+
+export type UnfinishedProcessingAttempt = ({
+    state: 'queued';
+} & ProcessingQueued) | ({
+    state: 'running';
+} & ProcessingRunning) | ({
+    state: 'waiting';
+} & ProcessingWaiting) | ({
+    state: 'cancelled';
+} & ProcessingCancelled) | ({
+    state: 'disabled';
+} & ProcessingDisabled);
+
+export type UnknownLocalModel = {
+    state: 'unknown';
+};
+
+export type UnknownResultProvenance = {
+    kind: 'unknown';
+    reason: 'legacy' | 'not_recorded';
+};
+
+export type UnresolvedSubscriptionFeed = {
     /**
-     * Address
+     * ready normalizes saved connected; unresolved identity or missing transport remain distinct domain states.
      */
+    connection: 'ambiguous' | 'needs_connection' | 'unavailable' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'unresolved';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
+    title: string;
+    transport: 'rss' | null;
+};
+
+export type VerificationExpiredError = {
+    code: 'verification_expired';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type VersionUnavailableError = {
+    code: 'version_unavailable';
+    command_id: CommandId | null;
+    details: VersionUnavailableErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type VersionUnavailableErrorDetails = {
+    material_id: MaterialId;
+    number: number;
+};
+
+export type WaitingReason = 'processor_unavailable' | 'processor_not_configured' | 'public_ai_not_allowed' | 'source_unavailable' | 'youtube_rate_limited' | 'profile_unavailable' | 'storage_unavailable' | 'client_presence_required' | 'retry_scheduled';
+
+export type WorkCollecting = {
+    feed_id: FeedId | null;
+    phase: 'collecting';
+    progress: WorkProgress;
+};
+
+export type WorkDeleting = {
+    feed_id: FeedId | null;
+    phase: 'deleting';
+    progress: WorkProgress;
+};
+
+export type WorkEntry = ({
+    phase: 'idle';
+} & WorkIdle) | ({
+    phase: 'collecting';
+} & WorkCollecting) | ({
+    phase: 'processing';
+} & WorkProcessing) | ({
+    phase: 'deleting';
+} & WorkDeleting) | ({
+    phase: 'waiting';
+} & WorkWaiting);
+
+export type WorkIdle = {
+    phase: 'idle';
+};
+
+export type WorkProcessing = {
+    operation: 'filter' | 'theses';
+    phase: 'processing';
+    progress: WorkProgress;
+};
+
+export type WorkProgress = {
+    completed: number;
+    total: number | null;
+};
+
+export type WorkWaiting = {
+    phase: 'waiting';
+    reason: WaitingReason;
+    retry_at: Timestamp | null;
+};
+
+export type YouTubePatchRequest = {
+    address?: string;
+    credentials?: CredentialsChange;
+    mode?: 'direct' | 'proxy';
+};
+
+export type YouTubeState = {
     address: string;
-    /**
-     * Has Password
-     */
+    admission: 'ready' | 'paused' | 'waiting';
     has_password: boolean;
-    /**
-     * Has Username
-     */
     has_username: boolean;
-    /**
-     * Mode
-     */
     mode: 'direct' | 'proxy';
-    /**
-     * Next At
-     */
-    next_at: number;
-    /**
-     * Paused
-     */
-    paused: boolean;
-    /**
-     * Reason
-     */
-    reason: string;
-    /**
-     * Strikes
-     */
+    reason: WaitingReason | null;
+    retry_at: Timestamp | null;
     strikes: number;
 };
 
-/**
- * Existing JSON patch-like PUT: omitted credentials remain stored, clear_credentials removes them. Strings contain no control characters. Proxy mode requires HTTP(S) address with no credentials/path/query/fragment.
- */
-export type YouTubeSettings = {
-    address?: string;
-    clear_credentials?: boolean;
-    mode?: 'direct' | 'proxy';
-    password?: string;
-    username?: string;
+export type YoutubeSourceReference = {
+    captions: 'available' | 'not_requested' | 'unavailable' | 'error';
+    feed_id: FeedId;
+    kind: 'youtube';
+    source_url: SourceUrl;
+};
+
+export type YoutubeSubscriptionFeed = {
+    /**
+     * ready normalizes saved connected; unresolved identity or missing transport remain distinct domain states.
+     */
+    connection: 'ready' | 'needs_connection' | 'unavailable' | 'deleting';
+    folder_id: FolderId;
+    history: HistoryState;
+    id: FeedId;
+    identity: string;
+    importance: Importance;
+    initial_days: number;
+    kind: 'youtube';
+    original_urls: Array<SourceLocator>;
+    public_ai: boolean | null;
+    title: string;
+    transport: 'youtube' | null;
 };
 
 export type CardsData = {
@@ -1728,252 +2581,514 @@ export type CardsData = {
     path?: never;
     query?: {
         /**
-         * Folder
+         * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
-        folder?: string | null;
+        folder?: FolderId;
         /**
-         * Feed
+         * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
-        feed?: string | null;
+        feed?: FeedId;
         /**
-         * Sort
+         * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
         sort?: 'newest' | 'oldest' | 'importance';
         /**
-         * Show Hidden
+         * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
         show_hidden?: boolean;
     };
-    url: '/api/cards';
+    url: '/api/v3/cards';
 };
 
 export type CardsErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type CardsError = CardsErrors[keyof CardsErrors];
 
 export type CardsResponses = {
     /**
-     * Response Cards Api Cards Get
-     *
-     * Successful operation
+     * Read ordered publication cards for optional folder/feed filters. Preserve hidden-material and sort semantics; no grouped events or digests.
      */
-    200: Array<Card>;
+    200: Array<ReadingCard>;
 };
 
 export type CardsResponse = CardsResponses[keyof CardsResponses];
+
+export type CreateClientSessionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v3/client-sessions';
+};
+
+export type CreateClientSessionErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: CreateClientSession409Errors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type CreateClientSessionError = CreateClientSessionErrors[keyof CreateClientSessionErrors];
+
+export type CreateClientSessionResponses = {
+    /**
+     * Create fresh presence under client_presence only. The new opaque ID has a lease and renew interval; it neither authenticates nor executes a business command.
+     */
+    201: ClientSession;
+};
+
+export type CreateClientSessionResponse = CreateClientSessionResponses[keyof CreateClientSessionResponses];
+
+export type CloseClientSessionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        identity: string;
+    };
+    query?: never;
+    url: '/api/v3/client-sessions/{identity}';
+};
+
+export type CloseClientSessionErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: LifetimePolicyIncompatibleError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type CloseClientSessionError = CloseClientSessionErrors[keyof CloseClientSessionErrors];
+
+export type CloseClientSessionResponses = {
+    /**
+     * Close presence idempotently. Repeating an absent ID succeeds without extending the last-client departure time.
+     */
+    200: ClientSessionClosed;
+};
+
+export type CloseClientSessionResponse = CloseClientSessionResponses[keyof CloseClientSessionResponses];
+
+export type RenewClientSessionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        identity: string;
+    };
+    query?: never;
+    url: '/api/v3/client-sessions/{identity}';
+};
+
+export type RenewClientSessionErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: CreateClientSession409Errors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    410: ClientSessionExpiredError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type RenewClientSessionError = RenewClientSessionErrors[keyof RenewClientSessionErrors];
+
+export type RenewClientSessionResponses = {
+    /**
+     * Renew a currently live presence ID using the monotonic host clock. Expired IDs return 410 and cannot be revived; explicitly create a new session.
+     */
+    200: ClientSession;
+};
+
+export type RenewClientSessionResponse = RenewClientSessionResponses[keyof RenewClientSessionResponses];
 
 export type CollectData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/collect';
+    url: '/api/v3/collect';
 };
 
 export type CollectErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: RuntimeStoppedError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: AddFeed503Errors;
 };
 
 export type CollectError = CollectErrors[keyof CollectErrors];
 
 export type CollectResponses = {
     /**
-     * Successful operation
+     * Schedule collection of admissible sources; acknowledgement does not promise completed downloads. Repeated commands are not execution-deduplicated.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type CollectResponse = CollectResponses[keyof CollectResponses];
 
-export type ClearDebugData = {
-    body?: never;
+export type ObserveCommandData = {
+    body: CommandObservation;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/debug';
+    url: '/api/v3/command-observations';
 };
 
-export type ClearDebugErrors = {
+export type ObserveCommandErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    409: CommandContextMismatchError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
 };
 
-export type ClearDebugError = ClearDebugErrors[keyof ClearDebugErrors];
+export type ObserveCommandError = ObserveCommandErrors[keyof ObserveCommandErrors];
 
-export type ClearDebugResponses = {
+export type ObserveCommandResponses = {
     /**
-     * Successful operation
+     * Record failed or unknown client observation against typed command context. Repeated observation delivery is safe; confirmed server outcomes cannot be overwritten.
      */
-    200: DiagnosticClear;
+    200: CommandReceipt;
 };
 
-export type ClearDebugResponse = ClearDebugResponses[keyof ClearDebugResponses];
+export type ObserveCommandResponse = ObserveCommandResponses[keyof ObserveCommandResponses];
 
-export type DebugEntriesData = {
+export type CommandReceiptData = {
+    body?: never;
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        identity: string;
+    };
+    query?: never;
+    url: '/api/v3/commands/{identity}';
+};
+
+export type CommandReceiptErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type CommandReceiptError = CommandReceiptErrors[keyof CommandReceiptErrors];
+
+export type CommandReceiptResponses = {
+    /**
+     * Reconcile an outcome without executing a command. An unknown ID returns unknown, creates no command and never proves the request was absent.
+     */
+    200: CommandReceipt;
+};
+
+export type CommandReceiptResponse = CommandReceiptResponses[keyof CommandReceiptResponses];
+
+export type ClearDiagnosticsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v3/diagnostics';
+};
+
+export type ClearDiagnosticsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type ClearDiagnosticsError = ClearDiagnosticsErrors[keyof ClearDiagnosticsErrors];
+
+export type ClearDiagnosticsResponses = {
+    /**
+     * Clear only the diagnostic journal; report a persistence failure without claiming successful removal.
+     */
+    200: DiagnosticClearResult;
+};
+
+export type ClearDiagnosticsResponse = ClearDiagnosticsResponses[keyof ClearDiagnosticsResponses];
+
+export type DiagnosticEntriesData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/debug';
+    url: '/api/v3/diagnostics';
 };
 
-export type DebugEntriesErrors = {
+export type DiagnosticEntriesErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
 };
 
-export type DebugEntriesError = DebugEntriesErrors[keyof DebugEntriesErrors];
+export type DiagnosticEntriesError = DiagnosticEntriesErrors[keyof DiagnosticEntriesErrors];
 
-export type DebugEntriesResponses = {
+export type DiagnosticEntriesResponses = {
     /**
-     * Successful operation
+     * Read grouped masked diagnostics without starting work.
      */
     200: DiagnosticJournal;
 };
 
-export type DebugEntriesResponse = DebugEntriesResponses[keyof DebugEntriesResponses];
+export type DiagnosticEntriesResponse = DiagnosticEntriesResponses[keyof DiagnosticEntriesResponses];
 
-export type DebugBrowserData = {
-    body: BrowserError;
+export type ReportClientDiagnosticData = {
+    body: ClientDiagnosticEvent;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/debug';
+    url: '/api/v3/diagnostics';
 };
 
-export type DebugBrowserErrors = {
+export type ReportClientDiagnosticErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
 };
 
-export type DebugBrowserError = DebugBrowserErrors[keyof DebugBrowserErrors];
+export type ReportClientDiagnosticError = ReportClientDiagnosticErrors[keyof ReportClientDiagnosticErrors];
 
-export type DebugBrowserResponses = {
+export type ReportClientDiagnosticResponses = {
     /**
-     * Successful operation
+     * Append a masked client diagnostic. Persistence failure is an explicit success-envelope variant, not a false accepted receipt.
      */
     200: DiagnosticReceipt;
 };
 
-export type DebugBrowserResponse = DebugBrowserResponses[keyof DebugBrowserResponses];
+export type ReportClientDiagnosticResponse = ReportClientDiagnosticResponses[keyof ReportClientDiagnosticResponses];
 
 export type AddFeedData = {
-    body: AddFeed;
+    body: AddFeedRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/feeds';
+    url: '/api/v3/feeds';
 };
 
 export type AddFeedErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: SourceConnectionInvalidError;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: AddFeed409Errors;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: AddFeed503Errors;
 };
 
 export type AddFeedError = AddFeedErrors[keyof AddFeedErrors];
 
 export type AddFeedResponses = {
     /**
-     * Successful operation
+     * Create a single RSS/YouTube subscription using its verified candidate token. Omitted initial_history means count 20; explicit null is invalid. Preserve source uniqueness and perform no OPML import.
      */
     200: SubscriptionFeed;
 };
@@ -1981,110 +3096,162 @@ export type AddFeedResponses = {
 export type AddFeedResponse = AddFeedResponses[keyof AddFeedResponses];
 
 export type VerifyFeedData = {
-    body: FeedUrl;
+    body: FeedUrlRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/feeds/verify';
+    url: '/api/v3/feeds/verify';
 };
 
 export type VerifyFeedErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: SourceConnectionInvalidError;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: RuntimeStoppedError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: AddFeed503Errors;
 };
 
 export type VerifyFeedError = VerifyFeedErrors[keyof VerifyFeedErrors];
 
 export type VerifyFeedResponses = {
     /**
-     * Successful operation
+     * Verify one RSS/YouTube URL and return a new candidate token or the existing subscription. Verification itself does not create a subscription.
      */
     200: FeedVerification;
 };
 
 export type VerifyFeedResponse = VerifyFeedResponses[keyof VerifyFeedResponses];
 
-export type FeedPatchData = {
-    body: FeedPatch;
+export type RemoveFeedData = {
+    body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Identity
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         identity: string;
     };
     query?: never;
-    url: '/api/feeds/{identity}';
+    url: '/api/v3/feeds/{identity}';
+};
+
+export type RemoveFeedErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type RemoveFeedError = RemoveFeedErrors[keyof RemoveFeedErrors];
+
+export type RemoveFeedResponses = {
+    /**
+     * Prohibit work and remove the local subscription, content, versions, media, processing, settings and jobs through resumable cleanup. Deleting remains visible in the catalogue; repeats return current progress. No viewed, Telegram leave/delete/read ack. Claims remain reserved until completion; re-add gets a new ID.
+     */
+    200: RemoveFeedResult;
+};
+
+export type RemoveFeedResponse = RemoveFeedResponses[keyof RemoveFeedResponses];
+
+export type FeedPatchData = {
+    body: FeedPatchRequest;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        identity: string;
+    };
+    query?: never;
+    url: '/api/v3/feeds/{identity}';
 };
 
 export type FeedPatchErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: SourceConnectionInvalidError;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: AccessImmutableError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type FeedPatchError = FeedPatchErrors[keyof FeedPatchErrors];
 
 export type FeedPatchResponses = {
     /**
-     * Successful operation
+     * Patch source configuration after resource-dependent admission. The five non-null fields reject null. Telegram access/profile/account/peer are immutable; web never accepts auto_read/read_history.
      */
     200: SubscriptionFeed;
 };
@@ -2095,170 +3262,166 @@ export type HistoryCancelData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Identity
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         identity: string;
     };
     query?: never;
-    url: '/api/feeds/{identity}/history';
+    url: '/api/v3/feeds/{identity}/history';
 };
 
 export type HistoryCancelErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: HistoryConflictError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type HistoryCancelError = HistoryCancelErrors[keyof HistoryCancelErrors];
 
 export type HistoryCancelResponses = {
     /**
-     * Successful operation
+     * Cancel existing archive work, preserving collected publications. Late results cannot restart the cancelled generation.
      */
-    200: History;
+    200: FeedHistoryState;
 };
 
 export type HistoryCancelResponse = HistoryCancelResponses[keyof HistoryCancelResponses];
 
 export type HistoryPauseData = {
-    body: HistoryPause;
+    body: HistoryPauseRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Identity
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         identity: string;
     };
     query?: never;
-    url: '/api/feeds/{identity}/history';
+    url: '/api/v3/feeds/{identity}/history';
 };
 
 export type HistoryPauseErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    403: AuthorizationErrors;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    404: ResourceNotFoundError;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    409: HistoryConflictError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type HistoryPauseError = HistoryPauseErrors[keyof HistoryPauseErrors];
 
 export type HistoryPauseResponses = {
     /**
-     * Successful operation
+     * Pause or resume the existing archive run with a strict boolean. Archive pause does not stop live collection or delete collected material.
      */
-    200: History;
+    200: FeedHistoryState;
 };
 
 export type HistoryPauseResponse = HistoryPauseResponses[keyof HistoryPauseResponses];
 
 export type HistoryStartData = {
-    body: InitialHistory;
+    body: HistoryCountSelection;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Identity
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         identity: string;
     };
     query?: never;
-    url: '/api/feeds/{identity}/history';
+    url: '/api/v3/feeds/{identity}/history';
 };
 
 export type HistoryStartErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: HistoryStart409Errors;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type HistoryStartError = HistoryStartErrors[keyof HistoryStartErrors];
 
 export type HistoryStartResponses = {
     /**
-     * Successful operation
+     * Start an explicit count-only YouTube archive backfill. A selection is required; exact decimal count is preserved without rounding. No Telegram backfill operation is introduced.
      */
-    200: History;
+    200: FeedHistoryState;
 };
 
 export type HistoryStartResponse = HistoryStartResponses[keyof HistoryStartResponses];
@@ -2267,91 +3430,91 @@ export type FoldersData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/folders';
+    url: '/api/v3/folders';
 };
 
 export type FoldersErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type FoldersError = FoldersErrors[keyof FoldersErrors];
 
 export type FoldersResponses = {
     /**
-     * Successful operation
+     * Read ordered folders and counts of individual source publications.
      */
-    200: Array<Folder>;
+    200: Array<ReadingFolder>;
 };
 
 export type FoldersResponse = FoldersResponses[keyof FoldersResponses];
 
 export type CompleteFolderData = {
-    body: CompletionRequest;
+    body: CompleteFolderRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Folder
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         folder: string;
     };
     query?: never;
-    url: '/api/folders/{folder}/completion';
+    url: '/api/v3/folders/{folder}/completion';
 };
 
 export type CompleteFolderErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: CompleteFolder409Errors;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type CompleteFolderError = CompleteFolderErrors[keyof CompleteFolderErrors];
 
 export type CompleteFolderResponses = {
     /**
-     * Successful operation
+     * Complete the exact folder composition identified by the token, including hidden publications. Composition changes return a fresh preview without completing the old composition. Success deletes completed local content and permits safe Telegram read acknowledgement.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type CompleteFolderResponse = CompleteFolderResponses[keyof CompleteFolderResponses];
@@ -2360,206 +3523,96 @@ export type PreviewCompletionData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Folder
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         folder: string;
     };
     query?: never;
-    url: '/api/folders/{folder}/completion/preview';
+    url: '/api/v3/folders/{folder}/completion/preview';
 };
 
 export type PreviewCompletionErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type PreviewCompletionError = PreviewCompletionErrors[keyof PreviewCompletionErrors];
 
 export type PreviewCompletionResponses = {
     /**
-     * Successful operation
+     * Capture the exact current reading composition into a completion token without deleting or marking anything viewed.
      */
     200: CompletionPreview;
 };
 
 export type PreviewCompletionResponse = PreviewCompletionResponses[keyof PreviewCompletionResponses];
 
-export type ImportSubscriptionsData = {
-    body: ImportRequest;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/import';
-};
-
-export type ImportSubscriptionsErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type ImportSubscriptionsError = ImportSubscriptionsErrors[keyof ImportSubscriptionsErrors];
-
-export type ImportSubscriptionsResponses = {
-    /**
-     * Successful operation
-     */
-    200: Subscriptions;
-};
-
-export type ImportSubscriptionsResponse = ImportSubscriptionsResponses[keyof ImportSubscriptionsResponses];
-
-export type ImportPreviewData = {
-    body: ImportRequest;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/import/preview';
-};
-
-export type ImportPreviewErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type ImportPreviewError = ImportPreviewErrors[keyof ImportPreviewErrors];
-
-export type ImportPreviewResponses = {
-    /**
-     * Successful operation
-     */
-    200: ImportPreview;
-};
-
-export type ImportPreviewResponse = ImportPreviewResponses[keyof ImportPreviewResponses];
-
 export type MaterialData = {
     body?: never;
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
     };
     query?: never;
-    url: '/api/materials/{item}';
+    url: '/api/v3/materials/{item}';
 };
 
 export type MaterialErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type MaterialError = MaterialErrors[keyof MaterialErrors];
 
 export type MaterialResponses = {
     /**
-     * Successful operation
+     * Read one publication and its typed pending/available content. Fetch retries do not hide saved incomplete text; caption state belongs only to YouTube and provenance belongs to results.
      */
-    200: Material;
+    200: ReadableMaterial;
 };
 
 export type MaterialResponse = MaterialResponses[keyof MaterialResponses];
@@ -2568,54 +3621,54 @@ export type RestoreFilterData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
     };
     query?: never;
-    url: '/api/materials/{item}/filter/restore';
+    url: '/api/v3/materials/{item}/filter/restore';
 };
 
 export type RestoreFilterErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    400: ActionInvalidError;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    404: ResourceNotFoundError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type RestoreFilterError = RestoreFilterErrors[keyof RestoreFilterErrors];
 
 export type RestoreFilterResponses = {
     /**
-     * Successful operation
+     * Restore publication visibility and filtered fragments without completing reading or creating a viewed acknowledgement.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type RestoreFilterResponse = RestoreFilterResponses[keyof RestoreFilterResponses];
@@ -2624,54 +3677,58 @@ export type RetryFilterData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
     };
     query?: never;
-    url: '/api/materials/{item}/filter/retry';
+    url: '/api/v3/materials/{item}/filter/retry';
 };
 
 export type RetryFilterErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    400: ActionInvalidError;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    404: ResourceNotFoundError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    409: RuntimeStoppedError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: CodexModels503Errors;
 };
 
 export type RetryFilterError = RetryFilterErrors[keyof RetryFilterErrors];
 
 export type RetryFilterResponses = {
     /**
-     * Successful operation
+     * Schedule an admissible filtering retry with current settings. Preserve prior accepted filtering while a fresh attempt runs.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type RetryFilterResponse = RetryFilterResponses[keyof RetryFilterResponses];
@@ -2680,50 +3737,46 @@ export type ImageData = {
     body?: never;
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
         /**
-         * Name
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         name: string;
     };
     query?: never;
-    url: '/api/materials/{item}/images/{name}';
+    url: '/api/v3/materials/{item}/images/{name}';
 };
 
 export type ImageErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: Image404Errors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type ImageError = ImageErrors[keyof ImageErrors];
 
 export type ImageResponses = {
     /**
-     * Successful operation
+     * Saved bytes; no JSON wrapper.
      */
     200: Blob | File;
 };
@@ -2734,50 +3787,46 @@ export type AttachmentData = {
     body?: never;
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
         /**
-         * Name
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         name: string;
     };
     query?: never;
-    url: '/api/materials/{item}/media/{name}';
+    url: '/api/v3/materials/{item}/media/{name}';
 };
 
 export type AttachmentErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: Image404Errors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type AttachmentError = AttachmentErrors[keyof AttachmentErrors];
 
 export type AttachmentResponses = {
     /**
-     * Successful operation
+     * Saved bytes; no JSON wrapper.
      */
     200: Blob | File;
 };
@@ -2788,54 +3837,58 @@ export type RegenerateData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
     };
     query?: never;
-    url: '/api/materials/{item}/regenerate';
+    url: '/api/v3/materials/{item}/regenerate';
 };
 
 export type RegenerateErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    400: ActionInvalidError;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    404: ResourceNotFoundError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    409: RuntimeStoppedError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: CodexModels503Errors;
 };
 
 export type RegenerateError = RegenerateErrors[keyof RegenerateErrors];
 
 export type RegenerateResponses = {
     /**
-     * Successful operation
+     * Schedule regeneration of applicable publication results. Keep previously accepted results during a new attempt and discard stale generations.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type RegenerateResponse = RegenerateResponses[keyof RegenerateResponses];
@@ -2844,54 +3897,58 @@ export type RetryMaterialData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
     };
     query?: never;
-    url: '/api/materials/{item}/retry';
+    url: '/api/v3/materials/{item}/retry';
 };
 
 export type RetryMaterialErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    400: ActionInvalidError;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    404: ResourceNotFoundError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    409: RuntimeStoppedError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: AddFeed503Errors;
 };
 
 export type RetryMaterialError = RetryMaterialErrors[keyof RetryMaterialErrors];
 
 export type RetryMaterialResponses = {
     /**
-     * Successful operation
+     * Schedule another content fetch for the identified publication. Preserve any saved incomplete copy while retrying and do not mark viewed.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type RetryMaterialResponse = RetryMaterialResponses[keyof RetryMaterialResponses];
@@ -2900,54 +3957,58 @@ export type RetryThesesData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
     };
     query?: never;
-    url: '/api/materials/{item}/theses/retry';
+    url: '/api/v3/materials/{item}/theses/retry';
 };
 
 export type RetryThesesErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    400: ActionInvalidError;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    404: ResourceNotFoundError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    409: RuntimeStoppedError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: CodexModels503Errors;
 };
 
 export type RetryThesesError = RetryThesesErrors[keyof RetryThesesErrors];
 
 export type RetryThesesResponses = {
     /**
-     * Successful operation
+     * Schedule an admissible theses retry for the identified publication; it does not mark the publication viewed.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type RetryThesesResponse = RetryThesesResponses[keyof RetryThesesResponses];
@@ -2956,52 +4017,48 @@ export type PreviousVersionData = {
     body?: never;
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
         /**
-         * Number
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         number: number;
     };
     query?: never;
-    url: '/api/materials/{item}/versions/{number}';
+    url: '/api/v3/materials/{item}/versions/{number}';
 };
 
 export type PreviousVersionErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: PreviousVersion404Errors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type PreviousVersionError = PreviousVersionErrors[keyof PreviousVersionErrors];
 
 export type PreviousVersionResponses = {
     /**
-     * Successful operation
+     * Read a saved author version by positive decimal version number. The previous version is not substituted for current content.
      */
-    200: Version;
+    200: PublicationVersion;
 };
 
 export type PreviousVersionResponse = PreviousVersionResponses[keyof PreviousVersionResponses];
@@ -3010,58 +4067,54 @@ export type PreviousMediaData = {
     body?: never;
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
         /**
-         * Number
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         number: number;
         /**
-         * Kind
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
-        kind: string;
+        kind: 'images' | 'media';
         /**
-         * Name
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         name: string;
     };
     query?: never;
-    url: '/api/materials/{item}/versions/{number}/{kind}/{name}';
+    url: '/api/v3/materials/{item}/versions/{number}/{kind}/{name}';
 };
 
 export type PreviousMediaErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: PreviousMedia404Errors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type PreviousMediaError = PreviousMediaErrors[keyof PreviousMediaErrors];
 
 export type PreviousMediaResponses = {
     /**
-     * Successful operation
+     * Saved bytes; no JSON wrapper.
      */
     200: Blob | File;
 };
@@ -3072,198 +4125,106 @@ export type ViewedData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Item
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         item: string;
     };
     query?: never;
-    url: '/api/materials/{item}/viewed';
+    url: '/api/v3/materials/{item}/viewed';
 };
 
 export type ViewedErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: RuntimeStoppedError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type ViewedError = ViewedErrors[keyof ViewedErrors];
 
 export type ViewedResponses = {
     /**
-     * Successful operation
+     * Explicitly complete the whole identified publication reading composition, deleting its local available content and permitting safe read acknowledgement. A repeat may return 404; never automatically replay after unknown outcome.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type ViewedResponse = ViewedResponses[keyof ViewedResponses];
-
-export type NavigationData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/navigation';
-};
-
-export type NavigationErrors = {
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type NavigationError = NavigationErrors[keyof NavigationErrors];
-
-export type NavigationResponses = {
-    /**
-     * Successful operation
-     */
-    200: Navigation;
-};
-
-export type NavigationResponse = NavigationResponses[keyof NavigationResponses];
-
-export type ReportReaderActionData = {
-    body: ReportAction;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/problems/actions';
-};
-
-export type ReportReaderActionErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type ReportReaderActionError = ReportReaderActionErrors[keyof ReportReaderActionErrors];
-
-export type ReportReaderActionResponses = {
-    /**
-     * Successful operation
-     */
-    200: ActionReceipt;
-};
-
-export type ReportReaderActionResponse = ReportReaderActionResponses[keyof ReportReaderActionResponses];
 
 export type AbandonProblemData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Identity
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         identity: string;
     };
     query?: never;
-    url: '/api/problems/{identity}/abandon';
+    url: '/api/v3/problems/{identity}/abandon';
 };
 
 export type AbandonProblemErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: ActionInvalidError;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type AbandonProblemError = AbandonProblemErrors[keyof AbandonProblemErrors];
 
 export type AbandonProblemResponses = {
     /**
-     * Successful operation
+     * Abandon an eligible unsuccessful editing problem. This does not cancel or undo a committed command.
      */
-    200: Ok;
+    200: CommandReceipt;
 };
 
 export type AbandonProblemResponse = AbandonProblemResponses[keyof AbandonProblemResponses];
@@ -3272,86 +4233,82 @@ export type CodexStateData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/processors/codex';
+    url: '/api/v3/processors/codex';
 };
 
 export type CodexStateErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type CodexStateError = CodexStateErrors[keyof CodexStateErrors];
 
 export type CodexStateResponses = {
     /**
-     * Successful operation
+     * Read saved configuration separately from processor availability and observed quota; unknown quota is not zero.
      */
-    200: CodexState;
+    200: CodexProcessorState;
 };
 
 export type CodexStateResponse = CodexStateResponses[keyof CodexStateResponses];
 
 export type CodexSaveData = {
-    body: CodexSettings;
+    body: CodexConfigurationRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/processors/codex';
+    url: '/api/v3/processors/codex';
 };
 
 export type CodexSaveErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: ProcessorChoiceInvalidError;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type CodexSaveError = CodexSaveErrors[keyof CodexSaveErrors];
 
 export type CodexSaveResponses = {
     /**
-     * Successful operation
+     * Replace the full filter/theses configuration after validating choices against the current model catalogue. Persist locally; future processing uses the accepted choice.
      */
-    200: CodexSettings;
+    200: CodexProcessorState;
 };
 
 export type CodexSaveResponse = CodexSaveResponses[keyof CodexSaveResponses];
@@ -3360,41 +4317,41 @@ export type CodexCheckData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/processors/codex/check';
+    url: '/api/v3/processors/codex/check';
 };
 
 export type CodexCheckErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type CodexCheckError = CodexCheckErrors[keyof CodexCheckErrors];
 
 export type CodexCheckResponses = {
     /**
-     * Successful operation
+     * Check processor admission and quota without changing settings or starting material processing.
      */
-    200: CodexCheck;
+    200: CodexAvailability;
 };
 
 export type CodexCheckResponse = CodexCheckResponses[keyof CodexCheckResponses];
@@ -3403,35 +4360,35 @@ export type CodexModelsData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/processors/codex/models';
+    url: '/api/v3/processors/codex/models';
 };
 
 export type CodexModelsErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: CodexModels503Errors;
 };
 
 export type CodexModelsError = CodexModelsErrors[keyof CodexModelsErrors];
 
 export type CodexModelsResponses = {
     /**
-     * Successful operation
+     * Read dynamic supported models, effort choices and fast support; clients do not hard-code the catalogue.
      */
-    200: CodexModels;
+    200: CodexModelCatalog;
 };
 
 export type CodexModelsResponse = CodexModelsResponses[keyof CodexModelsResponses];
@@ -3440,82 +4397,82 @@ export type ProcessorConfigData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/processors/llamacpp';
+    url: '/api/v3/processors/llamacpp';
 };
 
 export type ProcessorConfigErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type ProcessorConfigError = ProcessorConfigErrors[keyof ProcessorConfigErrors];
 
 export type ProcessorConfigResponses = {
     /**
-     * Successful operation
+     * Read an explicitly absent or present local processor configuration.
      */
-    200: ProcessorConfig | null;
+    200: LocalProcessorState;
 };
 
 export type ProcessorConfigResponse = ProcessorConfigResponses[keyof ProcessorConfigResponses];
 
 export type ProcessorSaveData = {
-    body: ProcessorConfig;
+    body: LocalProcessorConfigurationRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/processors/llamacpp';
+    url: '/api/v3/processors/llamacpp';
 };
 
 export type ProcessorSaveErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    400: ProcessorChoiceInvalidError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    403: AuthorizationErrors;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type ProcessorSaveError = ProcessorSaveErrors[keyof ProcessorSaveErrors];
 
 export type ProcessorSaveResponses = {
     /**
-     * Successful operation
+     * Replace the full processor configuration; validate endpoint and model before accepting the local settings change.
      */
-    200: ProcessorConfig;
+    200: LocalProcessorState;
 };
 
 export type ProcessorSaveResponse = ProcessorSaveResponses[keyof ProcessorSaveResponses];
@@ -3524,159 +4481,192 @@ export type ProcessorCheckData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/processors/llamacpp/check';
+    url: '/api/v3/processors/llamacpp/check';
 };
 
 export type ProcessorCheckErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: CodexModels503Errors;
 };
 
 export type ProcessorCheckError = ProcessorCheckErrors[keyof ProcessorCheckErrors];
 
 export type ProcessorCheckResponses = {
     /**
-     * Successful operation
+     * Probe the configured processor and report execution locality by code, without starting material processing.
      */
-    200: ProcessorCheck;
+    200: LocalProcessorCheck;
 };
 
 export type ProcessorCheckResponse = ProcessorCheckResponses[keyof ProcessorCheckResponses];
+
+export type ReadingCompositionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v3/reading-composition';
+};
+
+export type ReadingCompositionErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type ReadingCompositionError = ReadingCompositionErrors[keyof ReadingCompositionErrors];
+
+export type ReadingCompositionResponses = {
+    /**
+     * Read domain membership, counts and order for publication reading. This is a subject projection with no layout or navigation commands.
+     */
+    200: ReadingComposition;
+};
+
+export type ReadingCompositionResponse = ReadingCompositionResponses[keyof ReadingCompositionResponses];
 
 export type EffectiveSettingsData = {
     body?: never;
     path: {
         /**
-         * Scope
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
-        scope: string;
+        scope: 'oko' | 'folder' | 'feed';
         /**
-         * Owner
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         owner: string;
     };
     query?: never;
-    url: '/api/settings/{scope}/{owner}';
+    url: '/api/v3/settings/{scope}/{owner}';
 };
 
 export type EffectiveSettingsErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    400: SettingScopeInvalidError;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    404: ResourceNotFoundError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type EffectiveSettingsError = EffectiveSettingsErrors[keyof EffectiveSettingsErrors];
 
 export type EffectiveSettingsResponses = {
     /**
-     * Successful operation
+     * Read effective settings and explicit overrides. Scope is oko/folder/feed; oko requires owner global, folder/feed require an existing resource. Feed metadata exists only in the feed snapshot.
      */
-    200: EffectiveSettings;
+    200: EffectiveSettingsSnapshot;
 };
 
 export type EffectiveSettingsResponse = EffectiveSettingsResponses[keyof EffectiveSettingsResponses];
 
 export type SettingsPatchData = {
-    body: Overrides;
+    body: SettingsPatch;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path: {
         /**
-         * Scope
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
-        scope: string;
+        scope: 'oko' | 'folder' | 'feed';
         /**
-         * Owner
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
          */
         owner: string;
     };
     query?: never;
-    url: '/api/settings/{scope}/{owner}';
+    url: '/api/v3/settings/{scope}/{owner}';
 };
 
 export type SettingsPatchErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: SettingsPatch400Errors;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Requested object is unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    404: Error;
+    404: ResourceNotFoundError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    500: InternalErrorError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type SettingsPatchError = SettingsPatchErrors[keyof SettingsPatchErrors];
 
 export type SettingsPatchResponses = {
     /**
-     * Successful operation
+     * Patch the five publication settings. An omitted property keeps its override, null removes its override and a value sets it. No client presence is needed for this local settings write.
      */
-    200: EffectiveSettings;
+    200: EffectiveSettingsSnapshot;
 };
 
 export type SettingsPatchResponse = SettingsPatchResponses[keyof SettingsPatchResponses];
@@ -3685,27 +4675,35 @@ export type StatusData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/status';
+    url: '/api/v3/status';
 };
 
 export type StatusErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
 };
 
 export type StatusError = StatusErrors[keyof StatusErrors];
 
 export type StatusResponses = {
     /**
-     * Successful operation
+     * Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client presence or start external work.
      */
-    200: Status;
+    200: RuntimeStatus;
 };
 
 export type StatusResponse = StatusResponses[keyof StatusResponses];
@@ -3714,33 +4712,41 @@ export type StopData = {
     body?: never;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/stop';
+    url: '/api/v3/stop';
 };
 
 export type StopErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
 };
 
 export type StopError = StopErrors[keyof StopErrors];
 
 export type StopResponses = {
     /**
-     * Successful operation
+     * Accept the global prohibition of new work and begin shutdown. The response may precede process exit; losing it does not prove the instance remained running.
      */
-    200: Ok;
+    200: CommandAcknowledgement;
 };
 
 export type StopResponse = StopResponses[keyof StopResponses];
@@ -3749,358 +4755,259 @@ export type SubscriptionListData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/subscriptions';
+    url: '/api/v3/subscriptions';
 };
 
 export type SubscriptionListErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type SubscriptionListError = SubscriptionListErrors[keyof SubscriptionListErrors];
 
 export type SubscriptionListResponses = {
     /**
-     * Successful operation
+     * Read saved folders and source subscriptions, including deleting entries and unconfirmed legacy client bindings without inventing identity.
      */
-    200: Subscriptions;
+    200: SubscriptionCatalog;
 };
 
 export type SubscriptionListResponse = SubscriptionListResponses[keyof SubscriptionListResponses];
 
-export type CloseTabData = {
-    body?: never;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path: {
-        /**
-         * Tab
-         */
-        tab: string;
-    };
-    query?: never;
-    url: '/api/tabs/{tab}/close';
-};
-
-export type CloseTabErrors = {
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-};
-
-export type CloseTabError = CloseTabErrors[keyof CloseTabErrors];
-
-export type CloseTabResponses = {
-    /**
-     * Successful operation
-     */
-    200: Ok;
-};
-
-export type CloseTabResponse = CloseTabResponses[keyof CloseTabResponses];
-
-export type HeartbeatData = {
-    body?: never;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path: {
-        /**
-         * Tab
-         */
-        tab: string;
-    };
-    query?: never;
-    url: '/api/tabs/{tab}/heartbeat';
-};
-
-export type HeartbeatErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type HeartbeatError = HeartbeatErrors[keyof HeartbeatErrors];
-
-export type HeartbeatResponses = {
-    /**
-     * Successful operation
-     */
-    200: Ok;
-};
-
-export type HeartbeatResponse = HeartbeatResponses[keyof HeartbeatResponses];
-
-export type TelegramAccountsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/telegram/accounts';
-};
-
-export type TelegramAccountsErrors = {
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type TelegramAccountsError = TelegramAccountsErrors[keyof TelegramAccountsErrors];
-
-export type TelegramAccountsResponses = {
-    /**
-     * Successful operation
-     */
-    200: Array<string>;
-};
-
-export type TelegramAccountsResponse = TelegramAccountsResponses[keyof TelegramAccountsResponses];
-
 export type TelegramConnectData = {
-    body: ConnectTelegram;
+    body: TelegramConnectRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/telegram/connect';
+    url: '/api/v3/telegram/connect';
 };
 
 export type TelegramConnectErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: SourceConnectionInvalidError;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    409: TelegramConnect409Errors;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: TelegramConnect503Errors;
 };
 
 export type TelegramConnectError = TelegramConnectErrors[keyof TelegramConnectErrors];
 
 export type TelegramConnectResponses = {
     /**
-     * Successful operation
+     * Create one whole-source Telegram subscription after verifying the chosen web/client binding. Omitted access means web; omitted initial_history means count 20. No topics, joins, alternate-account fallback, account replacement or hidden upsert. Access and real source identity are immutable.
      */
-    200: SubscriptionFeed;
+    200: TelegramConnectResult;
 };
 
 export type TelegramConnectResponse = TelegramConnectResponses[keyof TelegramConnectResponses];
 
-export type TelegramTopicsData = {
-    body: TelegramPeer;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
+export type TelegramProfilesData = {
+    body?: never;
     path?: never;
     query?: never;
-    url: '/api/telegram/topics';
+    url: '/api/v3/telegram/profiles';
 };
 
-export type TelegramTopicsErrors = {
+export type TelegramProfilesErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    403: AuthorizationErrors;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    422: RequestInvalidError;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    500: InternalErrorError;
     /**
-     * Validation Error
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
-export type TelegramTopicsError = TelegramTopicsErrors[keyof TelegramTopicsErrors];
+export type TelegramProfilesError = TelegramProfilesErrors[keyof TelegramProfilesErrors];
 
-export type TelegramTopicsResponses = {
+export type TelegramProfilesResponses = {
     /**
-     * Successful operation
+     * Read the personal and collection roles and opaque references to existing configurations. This read does not verify an account and never discloses session secrets or file paths.
      */
-    200: Array<TelegramTopic>;
+    200: TelegramProfiles;
 };
 
-export type TelegramTopicsResponse = TelegramTopicsResponses[keyof TelegramTopicsResponses];
+export type TelegramProfilesResponse = TelegramProfilesResponses[keyof TelegramProfilesResponses];
+
+export type TelegramProfileSaveData = {
+    body: TelegramProfileRequest;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        role: TelegramRole;
+    };
+    query?: never;
+    url: '/api/v3/telegram/profiles/{role}';
+};
+
+export type TelegramProfileSaveErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: TelegramProfileSave409Errors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: TelegramProfileSave503Errors;
+};
+
+export type TelegramProfileSaveError = TelegramProfileSaveErrors[keyof TelegramProfileSaveErrors];
+
+export type TelegramProfileSaveResponses = {
+    /**
+     * Verify a real account through an existing opaque configuration reference before binding the role. The same PUT rechecks the same account. Failed verification never persists a new unverified binding; dependent feeds prohibit real-account replacement.
+     */
+    200: TelegramProfileState;
+};
+
+export type TelegramProfileSaveResponse = TelegramProfileSaveResponses[keyof TelegramProfileSaveResponses];
 
 export type YoutubeSettingsData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/youtube';
+    url: '/api/v3/youtube';
 };
 
 export type YoutubeSettingsErrors = {
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type YoutubeSettingsError = YoutubeSettingsErrors[keyof YoutubeSettingsErrors];
 
 export type YoutubeSettingsResponses = {
     /**
-     * Successful operation
+     * Read public YouTube transport settings and admission state without returning credentials.
      */
-    200: YouTube;
+    200: YouTubeState;
 };
 
 export type YoutubeSettingsResponse = YoutubeSettingsResponses[keyof YoutubeSettingsResponses];
 
 export type YoutubeConfigureData = {
-    body: YouTubeSettings;
+    body: YouTubePatchRequest;
     headers?: {
         /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
          */
-        'X-Oko-Action'?: string;
+        'X-Oko-Action'?: CommandId;
     };
     path?: never;
     query?: never;
-    url: '/api/youtube';
+    url: '/api/v3/youtube';
 };
 
 export type YoutubeConfigureErrors = {
     /**
-     * Invalid business request
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    400: Error;
+    400: SourceConnectionInvalidError;
     /**
-     * Invalid host, origin or bearer session
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    403: Error;
+    403: AuthorizationErrors;
     /**
-     * Conflict, stopped reader, expired context or changed composition
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Error;
+    422: RequestInvalidError;
     /**
-     * Unexpected reader failure, see diagnostics
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    500: Error;
+    500: InternalErrorError;
     /**
-     * Store or deletion currently unavailable
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: Error;
+    503: StorageUnavailableError;
 };
 
 export type YoutubeConfigureError = YoutubeConfigureErrors[keyof YoutubeConfigureErrors];
 
 export type YoutubeConfigureResponses = {
     /**
-     * Successful operation
+     * Patch YouTube transport settings. Omitted credentials remain unchanged; keep, clear and replace are explicit disjoint operations. Malformed structure is 422; a structurally valid impossible configuration is 400.
      */
-    200: YouTube;
+    200: YouTubeState;
 };
 
 export type YoutubeConfigureResponse = YoutubeConfigureResponses[keyof YoutubeConfigureResponses];

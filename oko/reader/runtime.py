@@ -44,7 +44,7 @@ class ActionError(Exception):
 class Runtime:
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 lease: float, grace: float, source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> None:
+                 admitted: Callable[[], bool], should_stop: Callable[[], bool], source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> None:
         self._youtube_captions = youtube_captions or LocalCaptions()
         self._youtube_history = youtube_history
         self._wall_clock = wall_clock
@@ -56,13 +56,13 @@ class Runtime:
         self._ai_sync = 0.0
         self._ai_stage = 'Проверка обработчика'
         self._root, self._source, self._clock, self._fault = root, source, clock, fault
-        self._shutdown, self._lease, self._grace = shutdown, lease, grace
+        self._shutdown = shutdown
+        self._admitted, self._should_stop = admitted, should_stop
         self._source_feed = source_feed
         self._rss_enabled, self._rss_transport = rss_enabled, rss_transport
         self._telegram_client = telegram_client
         self._sources: dict[str, Source] = {source_feed: source} if source else {}
         self._last_collection = clock()
-        self._tabs: dict[str, float] = {}
         self._completions: dict[str, tuple[str, FolderContents | None]] = {}
         self._feed_checks: dict[str, str] = {}
         self._stop_requested = asyncio.Event()
@@ -70,7 +70,6 @@ class Runtime:
         self._actions = asyncio.Lock()
         self._epoch = 0
         self._requests: set[asyncio.Future[Any]] = set()
-        self._idle_since: float | None = None
         self._store: Store | None = None
         self._error: str | None = None
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=self._wall_clock())
@@ -79,22 +78,17 @@ class Runtime:
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()
         self._detached_ai: set[asyncio.Task[None]] = set()
-        self._previous_tick = clock()
-        self._previous_wall = time.time()
         self.diagnostics: Journal | None = None
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
 
-    def _heartbeat(self, tab: str) -> None:
-        if self.stopped:
-            raise ActionError('conflict', 'Око остановлено')
-        self._tabs[tab] = self._clock()
-        self._idle_since = None
-
     def _live(self) -> bool:
-        now = self._clock()
-        self._tabs = {t: stamp for t, stamp in self._tabs.items() if now-stamp < self._lease}
-        return bool(self._tabs) and not self.stopped
+        return not self.stopped and self._admitted()
+
+    async def admission_changed(self) -> None:
+        async with self._actions:
+            if not self._live() and not self.stopped:
+                await self._cancel()
 
     async def _cancel(self) -> None:
         self._cancelling += 1
@@ -230,13 +224,9 @@ class Runtime:
         else:
             stage = 'Завершено с ошибками' if state['errors'] else 'Готово'
         return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], telegram_reads=self._store.read_sync.statuses() if self._store and not self.stopped else [], sources=source_states, error=self._error, stopped=self.stopped,
-                    live_tabs=len(self._tabs), stage=stage,
+                    stage=stage,
                     ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
                     total_sources=len(self._sources))
-
-    async def heartbeat(self, tab: str) -> None:
-        async with self._actions:
-            self._heartbeat(tab)
 
     async def action_started(self, identity: str, context: dict[str, Any]) -> None:
         async with self._actions:
@@ -262,14 +252,6 @@ class Runtime:
         async with self._actions:
             if not self.require_store().problems.abandon(identity, self._wall_clock()):
                 raise ActionError('invalid', 'Отмена доступна только ошибке соответствующего черновика', expected=True)
-
-    async def close_tab(self, tab: str) -> None:
-        async with self._actions:
-            self._tabs.pop(tab, None)
-            if not self._live() and not self.stopped:
-                await self._cancel()
-                if self._idle_since is None:
-                    self._idle_since = self._clock()
 
     async def stop(self) -> None:
         # Stop intent closes admission immediately, even with queued actions.
@@ -847,23 +829,16 @@ class Runtime:
         except (sqlite3.DatabaseError, OSError):
             record_caught('runtime.run')
             self._error = 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'
-        self._idle_since = self._clock()
         try:
             while not self.stopped:
                 async with self._actions:
-                    now, wall = self._clock(), time.time()
-                    if max(now-self._previous_tick, wall-self._previous_wall) > self._lease:
-                        self._tabs.clear()
-                    self._previous_tick, self._previous_wall = now, wall
+                    now = self._clock()
                     if not self._live():
                         await self._cancel()
-                        if self._idle_since is None:
-                            self._idle_since = now
-                        if now-self._idle_since >= self._grace:
+                        if self._should_stop():
                             self._stop_requested.set()
                             break
                     elif self._store:
-                        self._idle_since = None
                         if now - self._ai_sync >= .5:
                             self._store.read_sync.sync()
                             self._store.processing.sync()

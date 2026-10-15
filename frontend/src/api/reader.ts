@@ -1,8 +1,10 @@
-import {createClient} from './generated/client';
-import {status, heartbeat, closeTab, collect, stop} from './generated/sdk.gen';
-import type {Status} from './generated/types.gen';
+import {createClient} from './legacy-generated/client';
+import {status, collect} from './legacy-generated/sdk.gen';
+import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop} from './generated/sdk.gen';
+import type {RuntimeStatus} from './generated/types.gen';
+import type {Status} from './legacy-generated/types.gen';
 import {ReaderError,decodeJson} from './errors';
-import {isBinaryOperation} from './generated/media.gen';
+import {isBinaryOperation} from './legacy-generated/media.gen';
 export {ReaderError} from './errors';
 
 export type ActionRecord = {id:string};
@@ -15,11 +17,20 @@ export type ActionTracker = {
 export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch: typeof fetch; token: string | null; origin: string; onError?:(error:unknown, source:string)=>void}) {
   let tracker: ActionTracker | undefined;
   const reported = new WeakSet<object>();
+  let versionCheck: Promise<RuntimeStatus> | undefined;
+  async function compatible(): Promise<RuntimeStatus> {
+    if (!versionCheck) versionCheck = runtimeStatus({client}).then(reply => {
+      if (reply.data.api_version.split('.')[0] !== '3') throw new ReaderError('Версия API Око не поддерживается');
+      return reply.data;
+    }).catch(error => {versionCheck=undefined; throw error;});
+    return versionCheck;
+  }
   const client = createClient({baseUrl: origin, cache:'no-store', throwOnError:true,
     fetch: async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
       const url = new URL(request.url);
       if (url.origin !== origin) throw new ReaderError('Посторонний адрес API');
+      if (!['GET','HEAD'].includes(request.method)) await compatible();
       const headers = new Headers(request.headers);
       headers.set('Authorization','Bearer '+token);
       const body = request.body ? await request.text() : undefined;
@@ -61,8 +72,10 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
       const reply = await status({client, signal});
       return reply.data;
     },
-    async heartbeat(tab: string) {return (await heartbeat({client, path:{tab}})).data;},
-    async close(tab: string) {return (await closeTab({client, path:{tab}, keepalive:true})).data;},
+    lifetime: compatible,
+    async createSession() {return (await createClientSession({client})).data;},
+    async renewSession(identity: string) {return (await renewClientSession({client, path:{identity}})).data;},
+    async closeSession(identity: string) {return (await closeClientSession({client, path:{identity}, keepalive:true})).data;},
     async collect(actionId?: string) {return (await collect({client, headers:actionId ? {'X-Oko-Action':actionId} : {}})).data;},
     async stop(actionId?: string) {return (await stop({client, headers:actionId ? {'X-Oko-Action':actionId} : {}})).data;},
   };

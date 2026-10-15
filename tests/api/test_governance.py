@@ -16,8 +16,13 @@ def run(*args, cwd=ROOT):
                           capture_output=True, text=True)
 
 
+def probe():
+    return {'type': 'object', 'required': ['value'], 'properties': {'value': {'type': 'string'}, 'title': {'type': 'string'}}, 'additionalProperties': False}
+
+
 def documents(tmp_path):
     value = yaml.safe_load((ROOT / 'api/openapi.yaml').read_text())
+    value['components']['schemas']['GovernanceProbe'] = probe()
     spec, baseline = tmp_path / 'spec.json', tmp_path / 'baseline.json'
     for path in (spec, baseline):
         path.write_text(json.dumps(value))
@@ -32,11 +37,11 @@ def compat(command, spec, baseline, *extra):
 def test_wire_change_fails_readonly_and_documentation_only_change_passes(tmp_path):
     value, spec, baseline = documents(tmp_path)
     before = baseline.read_bytes()
-    value['components']['schemas']['Card']['properties']['title']['description'] = 'New documentation'
+    value['components']['schemas']['GovernanceProbe']['properties']['title']['description'] = 'New documentation'
     spec.write_text(json.dumps(value))
     assert compat('check', spec, baseline).returncode == 0
     # A property called title remains wire data, rather than documentation.
-    value['components']['schemas']['Card']['properties']['title']['type'] = 'integer'
+    value['components']['schemas']['GovernanceProbe']['properties']['title']['type'] = 'integer'
     spec.write_text(json.dumps(value))
     result = compat('check', spec, baseline)
     assert result.returncode != 0
@@ -48,10 +53,10 @@ def test_wire_change_fails_readonly_and_documentation_only_change_passes(tmp_pat
 
 def test_baseline_update_requires_version_and_semantic_review(tmp_path):
     value, spec, baseline = documents(tmp_path)
-    value['components']['schemas']['Card']['properties']['title']['type'] = 'integer'
+    value['components']['schemas']['GovernanceProbe']['properties']['value']['type'] = 'integer'
     spec.write_text(json.dumps(value))
     review = tmp_path / 'review.md'
-    review.write_text('Semantic review: title is now an integer; all clients migrate together.\n')
+    review.write_text('Semantic review: GovernanceProbe.value is now an integer; all clients migrate together.\n')
     assert compat('baseline', spec, baseline, '--review', str(review)).returncode != 0
     next_version = str(int(value['info']['version'].split('.')[0]) + 1) + '.0.0'
     value['info']['version'] = next_version
@@ -67,7 +72,7 @@ def test_baseline_update_requires_version_and_semantic_review(tmp_path):
 
 def test_missing_and_dynamic_remote_references_fail_before_validation(tmp_path):
     value, spec, _ = documents(tmp_path)
-    schema = value['components']['schemas']['Card']['properties']['title']
+    schema = value['components']['schemas']['GovernanceProbe']['properties']['value']
     for reference in [{'$ref': '#/components/schemas/Absent'},
                       {'$dynamicRef': 'https://example.invalid/private'}]:
         schema.clear()
@@ -83,7 +88,15 @@ def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path)
         shutil.copytree(ROOT / directory, tmp_path / directory)
     for name in ('package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock'):
         shutil.copy2(ROOT / name, tmp_path / name)
+    # This is a synthetic release repository for the staged-governance test.
+    # Its initial reviewed fixture is its own contract, including when the
+    # surrounding suite checks an unreviewed migration candidate.
+    fixture = yaml.safe_load((tmp_path / 'api/openapi.yaml').read_text())
+    fixture['components']['schemas']['GovernanceProbe'] = probe()
+    for filename in ('openapi.yaml', 'baseline.json'):
+        (tmp_path / 'api' / filename).write_text(json.dumps(fixture))
     (tmp_path / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
+    assert run('node', '--import', 'tsx', 'scripts/generate-api.mts', 'generate', cwd=tmp_path).returncode == 0
     assert run('git', 'init', '-q', cwd=tmp_path).returncode == 0
     assert run('git', 'add', 'api', 'scripts', 'frontend', 'oko', 'package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock', cwd=tmp_path).returncode == 0
     assert run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-qm', 'fixture', cwd=tmp_path).returncode == 0
@@ -114,7 +127,7 @@ def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path)
     baseline = tmp_path / 'api/baseline.json'
     previous = baseline.read_text()
     value = json.loads(previous)
-    value['components']['schemas']['Card']['properties']['title']['type'] = 'integer'
+    value['components']['schemas']['GovernanceProbe']['properties']['value']['type'] = 'integer'
     baseline.write_text(json.dumps(value))
     assert run('git', 'add', 'api/baseline.json', cwd=tmp_path).returncode == 0
     baseline.write_text(previous)
@@ -125,7 +138,7 @@ def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path)
     value['info']['version'] = next_version
     spec.write_text(json.dumps(value))
     review = tmp_path / 'semantic-review.md'
-    review.write_text(f'Title changes to integer; version {next_version} requires client migration.\n')
+    review.write_text(f'GovernanceProbe.value changes to integer; version {next_version} requires client migration.\n')
     assert run('node', '--import', 'tsx', 'scripts/generate-api.mts', 'baseline', '--review', str(review), cwd=tmp_path).returncode == 0
     assert run('node', '--import', 'tsx', 'scripts/generate-api.mts', 'generate', cwd=tmp_path).returncode == 0
     assert run('git', 'add', 'api', 'oko/reader/generated', 'frontend/src/api/generated', cwd=tmp_path).returncode == 0

@@ -1,5 +1,5 @@
-import * as sdk from '../api/generated/sdk.gen';
-import type {CodexSettings,CodexModel,ProcessorConfig} from '../api/generated/types.gen';
+import * as sdk from '../api/legacy-generated/sdk.gen';
+import type {CodexSettings,CodexModel,ProcessorConfig} from '../api/legacy-generated/types.gen';
 import {MenusOwner,message} from './owner';
 import {Page,Link,useOwner} from './editor';
 import {createOperations} from './operations';

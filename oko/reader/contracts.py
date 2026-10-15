@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
-from oko.reader.generated.models import (
+from oko.reader.legacy_generated.models import (
     Card as Card, Material as Material, Navigation as Navigation,
     Status as Status, Version as Version,
 )
@@ -20,7 +20,7 @@ CONTRACTS: dict[str, TypeAdapter[Any]] = {
 
 
 def schemas() -> dict[str, Any]:
-    document = json.loads((Path(__file__).parent / 'generated/openapi.json').read_text())
+    document = json.loads((Path(__file__).parent / 'legacy_generated/openapi.json').read_text())
     routes = {'navigation': '/api/navigation', 'cards': '/api/cards',
               'material': '/api/materials/{item}',
               'version': '/api/materials/{item}/versions/{number}',

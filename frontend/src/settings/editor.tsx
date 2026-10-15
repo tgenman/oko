@@ -1,5 +1,5 @@
 import {useId, useState, useSyncExternalStore, type ReactNode} from 'react';
-import type {EffectiveSettings,Overrides,SubscriptionFeed} from '../api/generated/types.gen';
+import type {EffectiveSettings,Overrides,SubscriptionFeed} from '../api/legacy-generated/types.gen';
 import {MenusOwner} from './owner';
 import {historyProgress} from './history';
 export function useOwner(owner:MenusOwner){useSyncExternalStore(owner.subscribe,owner.snapshot);return owner;}

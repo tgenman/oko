@@ -1,0 +1,84 @@
+{
+  "base": "75f6fe1860cb159ab46db026815c25986c7da5b7",
+  "task": 1,
+  "status": "accepted with two user-authorized browser skips",
+  "compatibility": "PENDING_REVIEW",
+  "source_digest": "5adc582aff6774821e6db3b99af8f799d06de1da809bc0a30aec552207afe8bd",
+  "contract_digest": "76ed25ad8f9b98d41cf8511c2cdee27574d8ff5d2813428100d452b5f741fbb6",
+  "baseline_digest": "fa05c366af7cdafe8f7b2f3c37d3987465143480a9f8abec5510dfb7aac49e35",
+  "results": [
+    {
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "scripts/build-frontend.mts"
+      ],
+      "exit_code": 0,
+      "seconds": 18.98
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "seconds": 4.28
+    },
+    {
+      "command": [
+        "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+        "-m",
+        "mypy",
+        "oko"
+      ],
+      "exit_code": 0,
+      "seconds": 2.46
+    },
+    {
+      "command": [
+        "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/api/test_v3_schema.py",
+        "tests/api/test_strict_generation.py",
+        "tests/api/test_v3_lexical.py",
+        "tests/lifecycle/test_independent_lifetime.py",
+        "tests/development/test_candidate_checks.py::test_staged_candidate_context_requires_exact_contract_and_baseline",
+        "-q"
+      ],
+      "exit_code": 0,
+      "seconds": 8.29
+    },
+    {
+      "command": [
+        "node",
+        "--require",
+        "tsx/cjs",
+        "--require",
+        "./scripts/register-browser-typescript.cts",
+        "--test",
+        "tests/browser/test_independent_sessions.ts",
+        "tests/browser/test_transport.ts"
+      ],
+      "exit_code": 0,
+      "seconds": 5.42
+    },
+    {
+      "command": [
+        "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+        "scripts/candidate-install.py"
+      ],
+      "exit_code": 0,
+      "seconds": 22.15
+    }
+  ],
+  "python_passed": 29,
+  "browser_passed": 6,
+  "browser_skipped": 2,
+  "review": {
+    "standards_findings": 0,
+    "spec_findings": 0
+  }
+}

@@ -1,6 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {cards as readCards} from '../api/generated/sdk.gen';
-import type {Card,Navigation} from '../api/generated/types.gen';
+import {cards as readCards} from '../api/legacy-generated/sdk.gen';
+import type {Card,Navigation} from '../api/legacy-generated/types.gen';
 import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {reportError} from '../status/debug';

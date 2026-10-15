@@ -25,10 +25,10 @@ from oko.collection.telegram.source import TelegramClient, ConnectTelegram, Tele
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.actions import action_context
-from oko.reader.docs import install_docs
-from oko.reader.static import install_frontend, validate_frontend
-from oko.reader.generated.operations import RESPONSES
-from oko.reader.generated import models as wire
+from oko.reader.lifetime import Lifetime
+from oko.reader import api_v3
+from oko.reader.legacy_generated.operations import RESPONSES
+from oko.reader.legacy_generated import models as wire
 from oko.reader.wire import normalize, to_domain
 from oko.collection.youtube.source import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -40,13 +40,16 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                clock: Callable[[], float] = time.monotonic,
                fault: Callable[[str], None] = lambda _: None,
                shutdown: Callable[[], None] = lambda: None,
-               lease: float = 6, grace: float = 15, source_feed: str = 'demo',
+               lease: float = 6, grace: float = 15, api_only: bool = False, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
                telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
                youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> FastAPI:
-    validate_frontend()
+    if not api_only:
+        from oko.reader.static import validate_frontend
+        validate_frontend()
+    lifetime = Lifetime('explicit' if api_only else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
     token = token or secrets.token_urlsafe(32)
-    runtime = Runtime(root, source, clock, fault, shutdown, lease, grace, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
+    runtime = Runtime(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
     journal = Journal(root, token)
     runtime.diagnostics = journal
 
@@ -111,6 +114,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError) -> Response:
+        if request.url.path.startswith('/api/v3/'):
+            return api_v3.error_response(422, api_v3.invalid('body', ''))
         group = journal.capture(error, request.method + ' ' + request.url.path)
         response = await request_validation_exception_handler(request, error)
         if group:
@@ -119,22 +124,26 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.middleware('http')
     async def boundary(request: Request, call_next: Any) -> Response:
+        v3 = request.url.path.startswith('/api/v3/')
         host = request.headers.get('host', '')
         if not re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host):
-            return JSONResponse({'detail': 'Недопустимый адрес'}, status_code=403)
+            return api_v3.error_response(403, api_v3.security_error('host_not_allowed')) if v3 else JSONResponse({'detail': 'Недопустимый адрес'}, status_code=403)
         origin = request.headers.get('origin')
         if origin and origin != f'http://{host}':
-            return JSONResponse({'detail': 'Посторонняя страница'}, status_code=403)
+            return api_v3.error_response(403, api_v3.security_error('origin_not_allowed')) if v3 else JSONResponse({'detail': 'Посторонняя страница'}, status_code=403)
         if request.url.path.startswith('/api/'):
             supplied = request.headers.get('authorization', '')
             if not secrets.compare_digest(supplied, f'Bearer {token}'):
-                return JSONResponse({'detail': 'Требуется локальная сессия'}, status_code=403)
+                return api_v3.error_response(403, api_v3.security_error('session_required')) if v3 else JSONResponse({'detail': 'Требуется локальная сессия'}, status_code=403)
+        if v3 and 'X-Oko-Action' in request.headers and not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', request.headers['X-Oko-Action']):
+            return api_v3.error_response(422, api_v3.invalid('header', 'X-Oko-Action'))
         context = active_journal.set(journal)
         source_context = diagnostic_source.set(request.method + ' ' + request.url.path)
         scope_context = capture_scope.set(secrets.token_hex(16))
         action_id = request.headers.get('X-Oko-Action', '')
         if not re.fullmatch(r'[\w-]{1,100}', action_id):
             action_id = secrets.token_hex(16)
+        request.state.command_id = action_id
         fields: list[str] = []
         if request.method in ('PUT', 'POST', 'PATCH', 'DELETE') and request.url.path.startswith('/api/'):
             try:
@@ -152,8 +161,13 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             response: Response = await call_next(request)
         except Exception as error:
             group = journal.capture(error, request.method + ' ' + request.url.path)
-            response = JSONResponse({'detail': 'Ошибка Око; подробности в диагностике'}, status_code=500,
-                                    headers={'X-Oko-Error': group} if group else {})
+            if v3:
+                from oko.reader.generated.models import CommandId, ErrorEnvelope, InternalErrorError
+                response = api_v3.error_response(500, ErrorEnvelope(InternalErrorError(code='internal_error',
+                    message='Ошибка Око; подробности в диагностике', details=None, diagnostic_id=group or journal.add(request.method + ' ' + request.url.path, 'Ошибка Око', ''), command_id=CommandId(action_id))))
+            else:
+                response = JSONResponse({'detail': 'Ошибка Око; подробности в диагностике'}, status_code=500,
+                                        headers={'X-Oko-Error': group} if group else {})
         finally:
             diagnostic_materials.reset(material_context)
             capture_scope.reset(scope_context)
@@ -167,6 +181,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
         return response
+
+    api_v3.register(app, runtime, lifetime, wall_clock, journal)
 
     def store() -> Store:
         return runtime.require_store()
@@ -193,7 +209,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     @app.get('/api/status', response_model=RESPONSES[('GET', '/api/status')], response_model_exclude_unset=True)
     async def status() -> dict[str, Any]:
-        return dict(runtime.status(), debug_count=len(journal.records), debug_persistence_error=journal.persistence_error)
+        return dict(runtime.status(), live_tabs=lifetime.active_clients, debug_count=len(journal.records), debug_persistence_error=journal.persistence_error)
 
     @app.post('/api/problems/actions', response_model=RESPONSES[('POST', '/api/problems/actions')], response_model_exclude_unset=True)
     async def report_reader_action(body: wire.ReportAction) -> dict[str, Any]:
@@ -212,12 +228,18 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def heartbeat(tab: str) -> dict[str, bool]:
         if not re.fullmatch(r'[\w-]{1,80}', tab):
             raise HTTPException(400, 'Неверная вкладка')
-        await runtime.heartbeat(tab)
+        if runtime.stopped:
+            raise ActionError('conflict', 'Око остановлено')
+        if lifetime.mode == 'explicit':
+            raise ActionError('conflict', 'Клиентские сессии не используются при явной остановке')
+        lifetime.register(tab)
+        await runtime.admission_changed()
         return {'ok': True}
 
     @app.post('/api/tabs/{tab}/close', response_model=RESPONSES[('POST', '/api/tabs/{tab}/close')], response_model_exclude_unset=True)
     async def close_tab(tab: str) -> dict[str, bool]:
-        await runtime.close_tab(tab)
+        lifetime.close(tab)
+        await runtime.admission_changed()
         return {'ok': True}
 
     @app.post('/api/stop', response_model=RESPONSES[('POST', '/api/stop')], response_model_exclude_unset=True)
@@ -469,7 +491,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         await runtime.viewed(item)
         return {'ok': True}
 
-    install_docs(app)
-    install_frontend(app)
+    if not api_only:
+        from oko.reader.docs import install_docs
+        from oko.reader.static import install_frontend
+        install_docs(app)
+        install_frontend(app)
 
     return app

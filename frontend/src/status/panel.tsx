@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { mountSurface } from '../renderer';
-import type { Problem, ProblemAction, ProblemSnapshot, Status } from '../api/generated/types.gen';
+import type { Problem, ProblemAction, ProblemSnapshot, Status } from '../api/legacy-generated/types.gen';
 import type { ReaderActions, VisibleProblem } from './actions';
 type Debug = {
     show(open: boolean): void;

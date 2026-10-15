@@ -3,6 +3,7 @@ import asyncio
 from collections.abc import Callable
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -17,18 +18,27 @@ from oko.collection.contracts import Source
 from oko.collection.telegram.source import LocalTelegram
 
 
-def existing(root: Path, browser: bool) -> None:
+def existing(root: Path, browser: bool, *, api_only: bool = False) -> None:
     import time
     for _ in range(100):
         try:
             data = json.loads((root / 'runtime.json').read_text())
-            request = urllib.request.Request(data['url'] + '/api/status',
+            request = urllib.request.Request(data['url'] + '/api/v3/status',
                                             headers={'Authorization': 'Bearer ' + data['token']})
             with urllib.request.urlopen(request, timeout=.2) as response:
                 if response.status == 200:
+                    expected = 'explicit' if api_only else 'client_presence'
+                    status = json.load(response)
+                    actual = status['lifetime']['kind']
+                    if actual != expected:
+                        raise SystemExit(f'Запущенный экземпляр использует {actual}; запрошен {expected}. Завершите его явно перед сменой профиля.')
+                    bundled = json.loads((Path(__file__).parent / 'reader/generated/openapi.json').read_text())
+                    version = status['api_version']
+                    if version.split('.')[0] != bundled['info']['version'].split('.')[0]:
+                        raise SystemExit(f'Запущенный экземпляр использует API {version}; требуется {bundled["info"]["version"]}. Завершите его перед обновлением.')
                     if browser:
                         webbrowser.open(data['url'] + '/#token=' + data['token'])
-                    print('Открыт существующий экземпляр Око.')
+                    print(f'Открыт существующий экземпляр Око ({actual}, API {version}).')
                     return
         except (OSError, ValueError):
             time.sleep(.05)
@@ -42,11 +52,12 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--telegram-project', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--api-only', action='store_true', help='API без веб-интерфейса, работа до явной остановки')
     parser.add_argument('--port', type=int, default=0)
-    parser.add_argument('--lease', type=float, default=6, help='Срок связи вкладки, секунд')
+    parser.add_argument('--lease', type=float, default=6, help='Срок клиентской сессии, секунд')
     parser.add_argument('--grace', type=float, default=15, help='Ожидание переподключения, секунд')
     args = parser.parse_args()
-    if args.lease <= 0 or args.grace <= 0:
+    if not all(math.isfinite(value) and value > 0 for value in (args.lease, args.grace)):
         parser.error('Таймауты должны быть положительными')
     telegram_env = args.telegram_env or (args.telegram_project / '.env' if args.telegram_project else None)
     root = args.data.resolve()
@@ -56,7 +67,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            existing(root, not args.no_browser)
+            existing(root, not (args.no_browser or args.api_only), api_only=args.api_only)
             return
         token = secrets.token_urlsafe(32)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -73,7 +84,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
 
             app = create_app(root, source=source or (DemoSource() if args.demo else None),
                              token=token, fault=fault, shutdown=shutdown,
-                             lease=args.lease, grace=args.grace, rss_enabled=not args.demo,
+                             lease=args.lease, grace=args.grace, api_only=args.api_only, rss_enabled=not args.demo,
                              telegram_client=LocalTelegram(telegram_env, root) if telegram_env and not args.demo else None)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2)
             server = uvicorn.Server(config)
@@ -85,10 +96,12 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                     await asyncio.sleep(.01)
                 if server.started:
                     temporary = root / 'runtime.tmp'
-                    temporary.write_text(json.dumps(dict(url=url, token=token, pid=os.getpid())))
+                    version = json.loads((Path(__file__).parent / 'reader/generated/openapi.json').read_text())['info']['version']
+                    temporary.write_text(json.dumps(dict(url=url, token=token, pid=os.getpid(),
+                                                         lifetime='explicit' if args.api_only else 'client_presence', api_version=version)))
                     os.replace(temporary, root / 'runtime.json')
                     print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram" if telegram_env else "RSS"}).', flush=True)
-                    if not args.no_browser:
+                    if not (args.no_browser or args.api_only):
                         await asyncio.to_thread(webbrowser.open, url + '/#token=' + token)
                 await task
 

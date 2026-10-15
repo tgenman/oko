@@ -1,7 +1,7 @@
 import {flushSync} from 'react-dom';
 import type {ReaderApi} from '../api/reader';
-import * as sdk from '../api/generated/sdk.gen';
-import type {Subscriptions,EffectiveSettings,Overrides,SubscriptionFeed,Status,History,SourceStatus,FeedPatch,YouTube} from '../api/generated/types.gen';
+import * as sdk from '../api/legacy-generated/sdk.gen';
+import type {Subscriptions,EffectiveSettings,Overrides,SubscriptionFeed,Status,History,SourceStatus,FeedPatch,YouTube} from '../api/legacy-generated/types.gen';
 import {createOperations,type Operation} from './operations';
 export type DialogName='add'|'feeds'|'settings';
 export type Draft=Record<string,string|boolean>;

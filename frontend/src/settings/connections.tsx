@@ -1,6 +1,6 @@
 import {useState} from 'react';
-import * as sdk from '../api/generated/sdk.gen';
-import type {FeedVerification,SubscriptionFeed,InitialHistory,TelegramTopic,ImportPreview,ImportConflict} from '../api/generated/types.gen';
+import * as sdk from '../api/legacy-generated/sdk.gen';
+import type {FeedVerification,SubscriptionFeed,InitialHistory,TelegramTopic,ImportPreview,ImportConflict} from '../api/legacy-generated/types.gen';
 import {ReaderError} from '../api/reader';
 import {MenusOwner,message} from './owner';
 import {useOwner,Page} from './editor';

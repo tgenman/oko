@@ -10,6 +10,10 @@ import {execFileSync} from 'node:child_process';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const python = process.env.OKO_PYTHON || path.join(root, '.venv/bin/python');
 const command = process.argv[2] || 'check';
+// Validate the inherited context before validation, generation or nested builds.
+if (process.env.OKO_CANDIDATE_CONTEXT) {
+  execFileSync(python,[path.join(root,'scripts/candidate.py')],{stdio:'pipe'});
+}
 if (['compat','baseline'].includes(command)) {
   execFileSync(python,[path.join(root,'scripts/api-compat.py'),command==='compat'?'check':'baseline',...process.argv.slice(3)],{stdio:'inherit'});
   process.exit(0);
@@ -22,8 +26,14 @@ if (!['generate','check'].includes(command)) throw new Error('Expected generate 
 execFileSync(python, [path.join(root,'scripts/api.py'),'validate'], {stdio:'inherit'});
 execFileSync(python, [path.join(root,'scripts/api-compat.py'),'check'], {stdio:'inherit'});
 execFileSync(python, [path.join(root,'scripts/generate_api.py'),command], {stdio:'inherit'});
+// Expand–contract only: regenerate remaining v2 consumers from the unchanged
+// reviewed baseline. Remove this bridge after the final v3 consumer migrates.
+const canonical = JSON.parse(execFileSync(python,[path.join(root,'scripts/api.py'),'bundle']).toString());
+const transitional = canonical.info.version.startsWith('3.');
+if (transitional) execFileSync(python,[path.join(root,'scripts/generate_api.py'),command,'--schema',path.join(root,'api/baseline.json'),'--output',path.join(root,'oko/reader/legacy_generated')],{stdio:'inherit'});
+for (const legacy of (transitional ? [false,true] : [false])) {
 const temporary = await mkdtemp(path.join(tmpdir(),'oko-sdk-'));
-const saved = path.join(root,'frontend/src/api/generated');
+const saved = path.join(root,legacy ? 'frontend/src/api/legacy-generated' : 'frontend/src/api/generated');
 async function files(directory: string, prefix=''): Promise<Map<string, Buffer>> {
   const result = new Map<string, Buffer>();
   for (const entry of await readdir(directory,{withFileTypes:true})) {
@@ -34,7 +44,7 @@ async function files(directory: string, prefix=''): Promise<Map<string, Buffer>>
   return result;
 }
 try {
-  const bundle = execFileSync(python,[path.join(root,'scripts/api.py'),'bundle']);
+  const bundle = legacy ? await readFile(path.join(root,'api/baseline.json')) : execFileSync(python,[path.join(root,'scripts/api.py'),'bundle']);
   const digest = createHash('sha256').update(bundle).digest('hex');
   const source = path.join(temporary,'openapi.json');
   await writeFile(source,bundle);
@@ -71,3 +81,5 @@ try {
     process.stdout.write('TypeScript API library is current\n');
   }
 } finally {await rm(temporary,{recursive:true,force:true});}
+
+}
