@@ -26,6 +26,10 @@ class ResistantSource(DemoSource):
 if __name__ == '__main__':
     origin = os.environ.get('OKO_TEST_MODEL_ORIGIN')
     def fixture_app(root, **options):
+        if clock_file := os.environ.get('OKO_TEST_CLOCK'):
+            def tick():
+                return float(Path(clock_file).read_text())
+            options.update(clock=tick, wall_clock=tick)
         if origin:
             options['ai_transport'] = OwnedServerTransport(origin)
         return create_app(root, **options)

@@ -39,7 +39,7 @@ def frontend_repository(root: Path) -> None:
     api_repository(root)
     files = {
         'frontend/index.html': '<html><head><link rel="stylesheet" href="/reader-surfaces.css"></head><body><script type="module" src="/src/main.ts"></script></body></html>',
-        'frontend/src/main.ts': "document.body.dataset.ready = 'yes';\n",
+        'frontend/src/main.ts': "export const ready = true;\n",
         'frontend/src/api/transport.ts': 'export const send = () => fetch("/");\n',
         'frontend/style.css': 'body {color: black}\n',
         'frontend/public/reader-surfaces.css': 'body {background: white}\n',
@@ -55,7 +55,7 @@ def frontend_repository(root: Path) -> None:
     # Build publication tests need a real type error, not every tool's type graph.
     config = {'compilerOptions': {'strict': True, 'noEmit': True, 'skipLibCheck': True,
                                  'target': 'ES2022', 'module': 'ESNext', 'moduleResolution': 'bundler',
-                                 'types': []}, 'files': ['frontend/src/main.ts']}
+                                 'lib': ['ES2022'], 'types': []}, 'files': ['frontend/src/main.ts']}
     for name in ('tsconfig.json', 'tsconfig.tooling.json'):
         (root / name).write_text(json.dumps(config))
     result = subprocess.run(['node', '--import', 'tsx', 'scripts/generate-api.mts', 'generate'], cwd=root,

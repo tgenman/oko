@@ -64,13 +64,15 @@ def test_pending_deletion_survives_process_death(tmp_path: Path):
 
 
 def test_single_instance_and_real_shutdown(tmp_path: Path):
-    process = launch(tmp_path, lease='.2', grace='.3')
+    from tests.support.processes import ProcessClock
+    clock = ProcessClock(tmp_path)
+    process = launch(tmp_path, clock=clock, lease='.2', grace='.3')
     try:
         with connect(tmp_path, process) as client:
             client.post('/api/tabs/a/heartbeat')
             client.post('/api/tabs/b/heartbeat')
-            second = launch(tmp_path, lease='.2', grace='.3')
-            # Keep both leases alive while the second launcher probes first.
+            second = launch(tmp_path, clock=clock, lease='.2', grace='.3')
+            # The controlled clock keeps both clients alive during the probe.
             for _ in range(100):
                 client.post('/api/tabs/b/heartbeat')
                 if second.poll() is not None:
@@ -81,6 +83,7 @@ def test_single_instance_and_real_shutdown(tmp_path: Path):
             client.post('/api/tabs/a/close')
             assert process.poll() is None
             client.post('/api/tabs/b/close')
+            clock.advance(.31)
         assert process.wait(timeout=2) == 0
         assert not (tmp_path / 'runtime.json').exists()
         process = launch(tmp_path)
@@ -93,7 +96,9 @@ def test_single_instance_and_real_shutdown(tmp_path: Path):
 
 @pytest.mark.parametrize('action', ['stop', 'last-close'])
 def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path, action):
-    process = launch(tmp_path, 'resist_cancel', lease='.2', grace='.3')
+    from tests.support.processes import ProcessClock
+    clock = ProcessClock(tmp_path)
+    process = launch(tmp_path, 'resist_cancel', clock=clock, lease='.2', grace='.3')
     try:
         with connect(tmp_path, process) as client:
             client.post('/api/tabs/a/heartbeat')
@@ -105,6 +110,8 @@ def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path, action):
             started = time.monotonic()
             path = '/api/stop' if action == 'stop' else '/api/tabs/a/close'
             assert client.post(path).status_code == 200
+            if action == 'last-close':
+                clock.advance(.31)
         assert process.wait(timeout=3) == 0
         assert time.monotonic() - started < 3
     finally:

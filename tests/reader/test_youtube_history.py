@@ -53,9 +53,14 @@ def import_channel(client):
 def test_history_materials_survive_restart_without_per_video_list_requests(tmp_path):
     # Six videos exceed the four-request budget, so per-video listing fails.
     # This complete-page fixture does not exercise playlist pagination.
+    from tests.support.subscriptions import saved_sources
+    # Connection/date-history are covered separately; start with a saved feed so
+    # their concurrent RSS requests cannot contaminate the per-video budget.
+    saved_sources(tmp_path, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Channel', 'Без папки')])
     history, requests = HistoryFixture(), []
     with reader(tmp_path, history, requests) as client:
-        feed = import_channel(client)
+        feed = client.get('/api/subscriptions').json()['feeds'][0]['id']
+        client.patch('/api/settings/feed/' + feed, json={'theses': False})
         client.post('/api/tabs/history/heartbeat')
         response = client.post('/api/feeds/' + feed + '/history', json={'mode': 'count', 'count': 6})
         assert response.status_code == 200, response.text
@@ -66,7 +71,7 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
         assert [c['title'] for c in cards[:3]] == ['Video 60', 'Video 59', 'Video 58']
         assert all(not c['published_known'] for c in cards)
         assert len(history.calls) == 1
-        assert len([u for u in requests if '/feeds/videos.xml' in u]) <= 5  # includes one explicit verification request
+        assert len([u for u in requests if '/feeds/videos.xml' in u]) <= 4  # count-history must not list once per video
         viewed = cards[0]['id']
         assert client.post('/api/materials/' + viewed + '/viewed').status_code == 200
     with reader(tmp_path, history, requests) as client:

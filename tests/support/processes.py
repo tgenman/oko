@@ -10,8 +10,24 @@ class ServerProcess(subprocess.Popen):
     log_path: Path
 
 
-def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = ''):
-    env = dict(os.environ, PYTHONPATH=str(ROOT), OKO_TEST_FAULT=fault, OKO_TEST_MODEL_ORIGIN=model_origin)
+class ProcessClock:
+    """Atomic test-owned clock shared with one subprocess; real waits stay bounded."""
+    def __init__(self, root: Path):
+        root.mkdir(parents=True, exist_ok=True)
+        self.path = root / 'process-clock'
+        self.now = 100.0
+        self.advance(0)
+
+    def advance(self, seconds: float):
+        self.now += seconds
+        temporary = self.path.with_suffix('.tmp')
+        temporary.write_text(str(self.now))
+        temporary.replace(self.path)
+
+
+def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = '', clock: ProcessClock | None = None):
+    env = dict(os.environ, PYTHONPATH=str(ROOT), OKO_TEST_FAULT=fault, OKO_TEST_MODEL_ORIGIN=model_origin,
+               OKO_TEST_CLOCK=str(clock.path) if clock else '')
     logs = root / 'process-logs'
     logs.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(dir=logs, prefix='server-', suffix='.log', delete=False) as output:

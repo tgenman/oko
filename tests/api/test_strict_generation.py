@@ -4,10 +4,14 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_generated_formats_and_boolean_constants_do_not_coerce_json(tmp_path):
+@pytest.fixture(scope='module')
+def generated_library(tmp_path_factory):
+    tmp_path = tmp_path_factory.mktemp('strict-wire')
     document = {'openapi': '3.1.0', 'info': {'title': 'Strict primitives', 'version': '3.0.0'},
                 'paths': {}, 'components': {'schemas': {
                     'EventTime': {'type': 'object', 'additionalProperties': False, 'required': ['occurred_at'], 'properties': {'occurred_at': {'type': 'string', 'format': 'date-time'}}},
@@ -19,12 +23,25 @@ def test_generated_formats_and_boolean_constants_do_not_coerce_json(tmp_path):
                     'Acknowledgement': {'type': 'object', 'additionalProperties': False,
                                         'required': ['ok'], 'properties': {'ok': {'type': 'boolean', 'const': True}}},
                 }}}
+    definitions = {}
+    for name, tag, field in [('CountSelection', 'count', 'count'), ('DateSelection', 'date', 'date')]:
+        definitions[name] = {'type': 'object', 'additionalProperties': False, 'required': ['mode', field],
+                             'properties': {'mode': {'type': 'string', 'const': tag}, field: {'type': 'string'}}}
+    definitions['Selection'] = {'oneOf': [{'$ref': '#/components/schemas/CountSelection'},
+                                         {'$ref': '#/components/schemas/DateSelection'}],
+                                'discriminator': {'propertyName': 'mode'}}
+    document['components']['schemas'].update(definitions)
     source = tmp_path / 'wire.json'
     source.write_text(json.dumps(document))
     generated = subprocess.run([sys.executable, str(ROOT / 'scripts/generate_api.py'), 'generate',
                                 '--schema', str(source), '--output', str(tmp_path / 'generated')],
                                cwd=ROOT, capture_output=True, text=True)
     assert generated.returncode == 0, generated.stdout + generated.stderr
+    return tmp_path
+
+
+def test_generated_formats_and_boolean_constants_do_not_coerce_json(generated_library):
+    tmp_path = generated_library
     probe = subprocess.run([sys.executable, '-c', '''
 import sys
 from pathlib import Path
@@ -60,21 +77,9 @@ assert TimestampList.model_validate_json('["2026-10-15T12:00:00+03:00"]').model_
     assert probe.returncode == 0, probe.stdout + probe.stderr
 
 
-def test_generated_dto_types_catch_constructor_return_and_exhaustive_errors(tmp_path):
-    definitions = {}
-    for name, tag, field in [('CountSelection', 'count', 'count'), ('DateSelection', 'date', 'date')]:
-        definitions[name] = {'type': 'object', 'additionalProperties': False, 'required': ['mode', field],
-                             'properties': {'mode': {'type': 'string', 'const': tag}, field: {'type': 'string'}}}
-    definitions['Selection'] = {'oneOf': [{'$ref': '#/components/schemas/CountSelection'},
-                                         {'$ref': '#/components/schemas/DateSelection'}],
-                                'discriminator': {'propertyName': 'mode'}}
-    source = tmp_path / 'wire.json'
-    source.write_text(json.dumps({'openapi': '3.1.0', 'info': {'title': 'Synthetic static proof', 'version': '3.0.0'},
-                                 'paths': {}, 'components': {'schemas': definitions}}))
-    generated = subprocess.run([sys.executable, str(ROOT / 'scripts/generate_api.py'), 'generate',
-                                '--schema', str(source), '--output', str(tmp_path / 'generated')],
-                               cwd=ROOT, capture_output=True, text=True)
-    assert generated.returncode == 0, generated.stdout + generated.stderr
+def test_generated_dto_types_catch_constructor_return_and_exhaustive_errors(tmp_path, generated_library):
+    import shutil
+    shutil.copytree(generated_library / 'generated', tmp_path / 'generated', ignore=shutil.ignore_patterns('__pycache__'))
     valid = tmp_path / 'positive.py'
     valid.write_text('''from typing import assert_never
 from generated.models import CountSelection, DateSelection
@@ -150,16 +155,13 @@ function wrongField(status: RuntimeStatus) {{
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_generation_is_identical_without_checkout_package_discovery(tmp_path):
+def test_generation_is_identical_without_checkout_package_discovery(tmp_path, generated_library):
     import shutil
-    source = tmp_path / 'schema.json'
-    source.write_text(json.dumps({'openapi': '3.1.0', 'info': {'title': 'Index fixture', 'version': '3.0.0'}, 'paths': {},
-        'components': {'schemas': {'Entry': {'type': 'object', 'properties': {'time': {'type': 'string', 'format': 'date-time'}}, 'required': ['time']}}}}))
+    source = generated_library / 'wire.json'
     minimal = tmp_path / 'minimal'
     (minimal / 'scripts').mkdir(parents=True)
     shutil.copy2(ROOT / 'scripts/generate_api.py', minimal / 'scripts/generate_api.py')
     shutil.copytree(ROOT / 'scripts/api-templates', minimal / 'scripts/api-templates')
-    for tree, output in [(ROOT, tmp_path / 'full-output'), (minimal, tmp_path / 'index-output')]:
-        result = subprocess.run([sys.executable, str(tree / 'scripts/generate_api.py'), 'generate', '--schema', str(source), '--output', str(output)], cwd=tree, capture_output=True, text=True)
-        assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / 'full-output/models.py').read_bytes() == (tmp_path / 'index-output/models.py').read_bytes()
+    result = subprocess.run([sys.executable, str(minimal / 'scripts/generate_api.py'), 'generate', '--schema', str(source), '--output', str(tmp_path / 'index-output')], cwd=minimal, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (generated_library / 'generated/models.py').read_bytes() == (tmp_path / 'index-output/models.py').read_bytes()
