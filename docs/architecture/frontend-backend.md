@@ -8,7 +8,7 @@ React + strict TypeScript находятся в frontend/src; Vite собира�
 
 [API-first policy](../../api/README.md) задаёт проверку drift, совместимости и reviewed baseline. Browser snapshots получают schema2020-12 из canonical bundle и используют Ajv8; ручных wire-схем нет. Standalone Swagger не создаёт Runtime. Встроенные docs поставляются локально, требуют явного Authorize для Try и не создают reader lease.
 
-Python static delivery проверяет content hashes, ревизию контракта и freshness checkout до Runtime. Assets находятся в immutable generations с atomic pointer; старые chunks остаются доступны открытым вкладкам при watch rebuild. [Package builder](../development/package.md) проверяет libs/assets и включает только текущую generation; installed smoke выполняется вне checkout без Node.
+Python static delivery проверяет content hashes, ревизию контракта и freshness checkout до Runtime. Assets находятся в immutable generations с atomic pointer; старые chunks остаются доступны открытым вкладкам при watch rebuild. Читатель запускается [из checkout](../development/package.md); сборка установочного пакета временно удалена.
 
 ## Владение
 
@@ -20,4 +20,4 @@ Python static delivery проверяет content hashes, ревизию кон�
 
 Seam между фронтендом и бэкендом — HTTP interface читателя. Существующие URL, локальная сессия, проверка host/origin и защитные заголовки сохраняются. Успешная серверная запись остаётся состоявшейся после закрытия формы; отмена браузерного ожидания не откатывает её. Несколько читающих запросов не обещают один транзакционный снимок.
 
-Установленная поставка выдаёт интерфейс и API на одном origin без Node и исходного checkout. Неизвестные маршруты данных не превращаются в HTML; обход пути, скрытые файлы и symlink за пределы каталога assets отклоняются. Правила контракта и переходного API: [api/README.md](../../api/README.md).
+Запущенный из checkout читатель выдаёт интерфейс и API на одном origin; Node нужен для подготовки frontend, но не для работы сервера. Неизвестные маршруты данных не превращаются в HTML; обход пути, скрытые файлы и symlink за пределы каталога assets отклоняются. Правила контракта и переходного API: [api/README.md](../../api/README.md).

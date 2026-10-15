@@ -6,11 +6,25 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import staged_cache
 
 
 def main():
     failed = subprocess.run(['git', 'diff', '--cached', '--check']).returncode != 0
     names = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'])
+    changed = [os.fsdecode(name) for name in subprocess.check_output(
+        ['git', 'diff', '--cached', '--name-only', '--no-renames', '-z']).split(b'\0') if name]
+    relevant = any(name.endswith(('.py', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.cts', '.mts', '.json'))
+                   or name.startswith(('scripts/', 'api/')) or name in
+                   ('package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock',
+                    'tsconfig.json', 'tsconfig.tooling.json', 'tsconfig.browser-tests.json')
+                   for name in changed)
+    if not relevant:
+        return int(failed)
+    receipt = staged_cache.key()
+    if not failed and staged_cache.hit(receipt):
+        print('Staged checks cache hit (exact Git index, HEAD, checkers and tools)')
+        return 0
     typed_inputs = []
     for raw in names.split(b'\0'):
         if not raw:
@@ -46,14 +60,20 @@ def main():
         if subprocess.run([node, '--require', 'tsx/cjs', str(Path(__file__).with_name('check-ts.cts')), '--stdin-files'],
                           input=json.dumps(typed_inputs).encode('utf-8')).returncode:
             failed = True
-    failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check_test_contracts.py')), '--staged']).returncode != 0 or failed
+    if any(name.startswith('tests/') and name.endswith('.py') or name in ('oko/processing/codex.py', 'scripts/check_test_contracts.py') for name in changed):
+        failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check_test_contracts.py')), '--staged']).returncode != 0 or failed
     failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check-api-staged.py'))]).returncode != 0 or failed
-    if any(os.fsdecode(name).endswith(('.ts', '.tsx', '.cts', '.mts')) or os.fsdecode(name) in ('tsconfig.browser-tests.json', 'tsconfig.tooling.json', 'tsconfig.json', 'package.json', 'package-lock.json') for name in names.split(b'\0') if name):
+    if any(name.endswith(('.ts', '.tsx', '.cts', '.mts', '.json')) for name in changed):
         node = shutil.which(os.environ.get('OKO_NODE', 'node'))
         if not node:
             print('Node missing for staged browser type checking.', file=sys.stderr)
             return 1
         failed = subprocess.run([node, '--require', 'tsx/cjs', str(Path(__file__).with_name('check-browser-types.cts'))]).returncode != 0 or failed
+    if not failed:
+        if receipt != staged_cache.key():
+            print('Git index or checking inputs changed during pre-commit', file=sys.stderr)
+            return 1
+        staged_cache.remember(receipt)
     return int(failed)
 
 
