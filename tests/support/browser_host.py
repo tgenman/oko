@@ -19,7 +19,10 @@ class Scenario:
         self.origin = f'http://127.0.0.1:{self.socket.getsockname()[1]}'
         self.error = None
         try:
-            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token), log_level='error'))
+            # Browser aborts can leave an unfinished HTTP request. Bound its
+            # drain time before the normal application lifespan shutdown.
+            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token), log_level='error',
+                                                       timeout_graceful_shutdown=1))
         except BaseException:
             self.socket.close()
             raise

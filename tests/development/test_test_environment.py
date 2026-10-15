@@ -159,16 +159,19 @@ def test_factory_default_empty_history_completes_without_a_real_history_worker(t
     from tests.support.app import create_app
     from tests.support.reader import wait_for
     from tests.support.youtube import CHANNEL
-    from tests.support.subscriptions import saved_sources
-    # This scenario starts from a saved feed without initial history. The
-    # single-feed add API now deliberately configures history at creation.
-    saved_sources(tmp_path, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Канал', 'Наука')])
     transport=httpx.MockTransport(lambda request: httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom"/>'))
     with TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=transport),headers=HEADERS) as client:
         client.patch('/api/settings/oko/global',json={'theses':False})
-        feed=client.get('/api/subscriptions').json()['feeds'][0]['id']
         client.post('/api/tabs/reader/heartbeat')
-        assert client.post('/api/feeds/'+feed+'/history',json={'count':3}).status_code==200
-        history=wait_for(client,lambda: (h if (h:=client.get('/api/settings/feed/'+feed).json()['feed']['initial_history']) and h['state']=='done' else None))
+        url=f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}'
+        verified=client.post('/api/v3/feeds/verify',json={'url':url})
+        assert verified.status_code==200, verified.text
+        checked=verified.json()
+        connected=client.post('/api/v3/feeds',json={'url':checked['candidate']['url'],
+            'verification':checked['verification'],'title':'Канал','folder':'Наука',
+            'initial_history':{'mode':'count','count':'3'}})
+        assert connected.status_code==200, connected.text
+        feed=connected.json()['id']
+        history=wait_for(client,lambda: (h if (h:=client.get('/api/settings/feed/'+feed).json()['feed']['initial_history']) and h['mode']=='count' and h['state']=='done' else None))
         assert history['loaded']==0
         assert not client.get('/api/cards').json()

@@ -5,11 +5,12 @@
 
 ## Согласование с v3
 
-Canonical `api/openapi.yaml` уже содержит candidate 3.0.0. Reviewed
-baseline остаётся v2; менять major ещё раз или утверждать baseline в этом
-шаге не требуется. Неизменность canonical/baseline/generated — часть diff.
-Проверки идут через существующий candidate runner, semantic diff остаётся
-PENDING_REVIEW до задачи #7.
+Canonical `api/openapi.yaml` уже содержит v3; этот шаг не меняет его bytes.
+Во время работы main продвинулся до 958a710 (PR #22). Удалённые там API
+approval/candidate gates сохранены удалёнными. `baseline.json` теперь только
+вход для переходных клиентов v2, без процедуры одобрения. Полный финальный
+прогон выполняется штатным `./scripts/check all tools`. Упоминания candidate
+и PENDING_REVIEW в первоначальных результатах ниже — история старой базы.
 
 | Требование Telegram | Текущий canonical / generated |
 | --- | --- |
@@ -122,3 +123,15 @@ build, HTTP (9 pass), entrypoint, diff — PASS. Browser: 117 pass, 0 fail,
 объявляется зелёным полным прогоном. Новых skip нет, старые ускорения и
 удаление hook сохранены; baseline по-прежнему PENDING_REVIEW. Полный JSON:
 `.scratch/check-runs/candidate-1zejuhtx/tree/.scratch/check-runs/20261015T173908Z-de66718d/report.json`.
+
+
+### Слияние свежего main
+
+Влита origin/main 958a710 с ускорениями tests и удалением candidate/approval
+gates. Единственный конфликт в `test_test_environment.py` разрешён точной
+версией main: v3 connect сразу с count=3. Собственный временный saved_sources
+setup заменён исправлением main. Другие изменения main сохранены полностью.
+Предыдущий итог 36 pass относится к предыдущей базе; финальные результаты
+после merge записываются ниже. По финальному до-merge diff и отчёту второе
+точечное spec/standards review также дало 0 замечаний, reviewer отдельно
+выполнил изменённый test_environment (10 pass).

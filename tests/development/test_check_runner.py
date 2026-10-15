@@ -197,7 +197,7 @@ def test_browser_file_selection_only_runs_requested_file(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = record.read_text()
-    assert '--test-concurrency=2' in commands
+    assert '--test-concurrency=4' in commands
     assert 'test_material_list.ts' in commands
     assert 'test_opened_material.ts' not in commands
     assert 'PASS browser' in result.stdout
@@ -512,7 +512,7 @@ def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_
     pytest = [command for command in commands if 'pytest' in command]
     assert len(pytest) == 2
     modules = pytest[0][pytest[0].index('-q') + 1:]
-    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in [*modules, 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_candidate_checks.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py']}
+    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in [*modules, 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py']}
     record.write_text('')
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files',
                              'tests/reader/test_frontend_build.py'], env=env, capture_output=True, text=True)
@@ -690,7 +690,8 @@ def test_explicit_tools_are_not_duplicated_and_build_precedes_parallel_groups(tm
     assert last_build < first_test
 
 
-def test_python_shards_cover_each_selected_file_once_and_report_failure(tmp_path):
+@pytest.mark.parametrize('sets, workers', [(['python'], 4), (['python', 'tools'], 2)])
+def test_python_shards_cover_each_selected_file_once_and_report_failure(tmp_path, sets, workers):
     import ast
     import json
     env = runtimes(tmp_path)
@@ -706,19 +707,30 @@ if 'pytest' in sys.argv:
         sys.exit(1)
 sys.exit(0)
 """))
-    files = ['tests/reader/test_web_assets.py', 'tests/reader/test_frontend_build.py']
+    files = ['tests/reader/test_web_assets.py', 'tests/reader/test_frontend_build.py',
+             'tests/reader/test_security.py', 'tests/reader/test_frontend_delivery.py']
     reports = tmp_path / 'reports'
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--report-dir', str(reports),
-                             '--files', *files], env=env, capture_output=True, text=True)
+    extra = [ROOT / name for name in files[2:]]
+    for file in extra:
+        file.write_text('')
+    try:
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), *sets, '--report-dir', str(reports),
+                                 '--files', *files], env=env, capture_output=True, text=True)
+    finally:
+        for file in extra:
+            file.unlink()
     assert result.returncode == 1
     commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
-    assert len(commands) == 2
+    report = json.loads(next(reports.glob('*/report.json')).read_text())
+    group = report['suites']['python-tests']
+    reported = [entry['command'] for entry in group['commands']]
+    assert all(command in commands for command in reported)
+    commands = reported
+    assert len(commands) == workers
     assert all(command[command.index('-q') + 1:] for command in commands)
     selected = [value for command in commands for value in command[command.index('-q') + 1:]]
     assert sorted(selected) == sorted(str(ROOT / name) for name in files)
-    report = json.loads(next(reports.glob('*/report.json')).read_text())
-    group = report['suites']['python-tests']
-    assert len(group['workers']) == 2 and group['status'].startswith('FAIL')
+    assert len(group['workers']) == workers and group['status'].startswith('FAIL')
     assert group['failures'] == ['tests/reader/test_frontend_build.py::test_fixture']
 
 

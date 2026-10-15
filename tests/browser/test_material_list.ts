@@ -121,6 +121,7 @@ test('polling preserves row focus and anchored scroll, and returning restores ar
 
 test('previews are reused during polling and late media cannot repopulate another area', async () => {
  const r=await reader(); try {
+  await r.page.clock.install();
   const path='/api/v3/materials/one/images/image-0.png';
   await r.page.addInitScript(path=>readerTransport.replies.set(path,{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='}),path);
   await r.start([material('one',{images:[path],version:'1'}),material('two',{feed_id:'second'})]);
@@ -130,7 +131,11 @@ test('previews are reused during polling and late media cannot repopulate anothe
   });
   await expect(r.page.locator('[data-card="one"] img')).toHaveCount(1);
   const requests=await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path);
-  await r.page.waitForTimeout(1100);
+  for (let cycle=0;cycle<2;cycle++) {
+    await r.page.evaluate(cycle=>{readerTransport.replies.get('/api/v3/cards')!.body![0].title='Poll '+cycle;},cycle);
+    await r.page.clock.fastForward(500);
+    await expect(r.page.locator('[data-card="one"] .card-title')).toHaveText('Poll '+cycle);
+  }
   expect(await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path)).toBe(requests);
   await r.page.evaluate(path=>{readerTransport.held.set(path,true); readerTransport.replies.get('/api/v3/cards')!.body![0].version='2';},path);
   await r.page.waitForFunction(path=>readerTransport.pending.has(path),path);
