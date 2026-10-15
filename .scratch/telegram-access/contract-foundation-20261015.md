@@ -135,3 +135,19 @@ setup заменён исправлением main. Другие изменен�
 после merge записываются ниже. По финальному до-merge diff и отчёту второе
 точечное spec/standards review также дало 0 замечаний, reviewer отдельно
 выполнил изменённый test_environment (10 pass).
+
+### Финальный прогон на свежем main — PASS
+
+`./scripts/check all tools` после merge 958a710: **PASS, 109.99 s**, exit 0.
+Python **365 passed** (194 + 171); browser **117 passed, 2 прежних skipped**;
+tools **111 passed** (49 + 62); HTTP **9 passed**. Contracts, tooling/Python/
+browser types, syntax, lint, build, diff, entrypoint — PASS. Проверки
+использовали ускорения и обычный runner из main, без candidate/gates.
+Полный результат относится к объединённой ветке bdb4ec5.
+
+Отчёт: `.scratch/check-runs/20261015T174505Z-7567bf76/report.json`.
+Повторный полный прогон был нужен из-за новой базы и изменившихся команд,
+тестов и сборки, а не для повтора прежней проверки без изменений.
+Оба reviewer проверили merge относительно 958a710 и точное сохранение
+main-версии test_environment: **0 замечаний в каждой оси**. После полного
+прогона изменён только этот отчёт; отдельный `git diff --check` — PASS.
