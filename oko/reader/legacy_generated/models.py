@@ -117,11 +117,6 @@ class CompletionRequest(WireModel):
     token: StrictStr = Field(..., max_length=100, min_length=1, title="Token")
 
 
-class TopicId(RootModel[StrictInt]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictInt = Field(..., ge=1, le=2147483647, title="Topic Id")
-
-
 class DiagnosticClear(WireModel):
     model_config = ConfigDict(extra="forbid")
     ok: StrictBool
@@ -487,12 +482,6 @@ class TelegramRead(WireModel):
     waiting: StrictStr = Field(..., title="Waiting")
 
 
-class TelegramTopic(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: StrictInt
-    title: StrictStr
-
-
 class UnknownProvenance(WireModel):
     model_config = ConfigDict(extra="forbid")
     model: None = Field(..., title="Model")
@@ -596,7 +585,6 @@ class ConnectTelegram(WireModel):
         pattern="^(@?[a-zA-Z][a-zA-Z0-9_]{3,31}|-[0-9]+)$",
         title="Peer",
     )
-    topic_id: TopicId | None | MISSING = Field(default=MISSING, title="Topic Id")
 
 
 class Error(WireModel):
@@ -734,9 +722,6 @@ class SubscriptionFeed(WireModel):
     )
     telegram_peer: StrictInt | None | MISSING = Field(
         default=MISSING, title="Telegram Peer"
-    )
-    telegram_topic: StrictInt | None | MISSING = Field(
-        default=MISSING, title="Telegram Topic"
     )
     telegram_username: StrictStr | None | MISSING = Field(
         default=MISSING, title="Telegram Username"

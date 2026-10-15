@@ -21,12 +21,11 @@ from oko.collection.contracts import Attachment, Material, Publication
 class TelegramClient(Protocol):
     async def identity(self, account: str) -> int: ...
     async def accounts(self) -> list[str]: ...
-    async def topics(self, account: str, peer: str | int) -> list[dict[str, Any]]: ...
-    async def info(self, account: str, peer: str | int, topic_id: int | None = None) -> dict[str, Any]: ...
-    async def page(self, account: str, peer: int, after: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
-    async def history_page(self, account: str, peer: int, upper: int, before: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
-    async def messages(self, account: str, peer: int, ids: list[int], topic_id: int | None = None) -> list[dict[str, Any]]: ...
-    async def download(self, account: str, peer: int, id: int, topic_id: int | None = None) -> bytes: ...
+    async def info(self, account: str, peer: str | int) -> dict[str, Any]: ...
+    async def page(self, account: str, peer: int, after: int, since: float) -> dict[str, Any]: ...
+    async def history_page(self, account: str, peer: int, upper: int, before: int, since: float) -> dict[str, Any]: ...
+    async def messages(self, account: str, peer: int, ids: list[int]) -> list[dict[str, Any]]: ...
+    async def download(self, account: str, peer: int, id: int) -> bytes: ...
     async def read_state(self, account: str, peer: int, since: float, topic_id: int | None = None) -> dict[str, Any]: ...
     async def read_window(self, account: str, peer: int, after: int, until: int, topic_id: int | None = None) -> dict[str, Any]: ...
     async def acknowledge(self, account: str, peer: int, max_id: int, topic_id: int | None = None) -> None: ...
@@ -40,14 +39,66 @@ class TelegramPeer(BaseModel):
 
 
 class ConnectTelegram(TelegramPeer):
-    topic_id: int | None = Field(default=None, ge=1, le=2147483647)
     folder: str = Field(min_length=1, max_length=200)
     feed_id: str | None = None
     auto_read: bool
     initial_history: InitialHistory | None = None
 
 
-class LocalTelegram:
+class _TelegramOperations:
+    async def request(self, operation: str, **args: Any) -> Any:
+        raise NotImplementedError
+
+    async def identity(self, account: str) -> int:
+        value = await self.request('identity', account=account)
+        if type(value) is not int or value <= 0:
+            raise SourceError('Telegram не подтвердил личность аккаунта')
+        return value
+
+    async def accounts(self) -> list[str]:
+        value: list[str] = await self.request('accounts')
+        return value
+
+    async def info(self, account: str, peer: str | int) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('info', account=account, peer=peer)
+        return value
+
+    async def page(self, account: str, peer: int, after: int, since: float) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('page', account=account, peer=peer, after=after, since=since)
+        return value
+
+    async def history_page(self, account: str, peer: int, upper: int, before: int, since: float) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('history_page', account=account, peer=peer, upper=upper, before=before, since=since)
+        return value
+
+    async def messages(self, account: str, peer: int, ids: list[int]) -> list[dict[str, Any]]:
+        value: list[dict[str, Any]] = await self.request('messages', account=account, peer=peer, ids=ids)
+        return value
+
+    async def download(self, account: str, peer: int, id: int) -> bytes:
+        value: bytes = await self.request('download', account=account, peer=peer, id=id)
+        return value
+
+    async def read_state(self, account: str, peer: int, since: float, topic_id: int | None = None) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('read_state', account=account, peer=peer, since=since, topic_id=topic_id)
+        return value
+
+    async def read_window(self, account: str, peer: int, after: int, until: int, topic_id: int | None = None) -> dict[str, Any]:
+        value: dict[str, Any] = await self.request('read_window', account=account, peer=peer, after=after, until=until, topic_id=topic_id)
+        return value
+
+    async def acknowledge(self, account: str, peer: int, max_id: int, topic_id: int | None = None) -> None:
+        if max_id <= 0:
+            raise SourceError('Неверная граница прочитанного Telegram')
+        result = await self.request('acknowledge', account=account, peer=peer, max_id=max_id, topic_id=topic_id)
+        if result is not True:
+            # A repeated already-read boundary can return False. Verify the
+            # server's actual frontier before treating it as failure.
+            state = await self.read_state(account, peer, time.time(), topic_id=topic_id)
+            if state['read_max'] < max_id:
+                raise SourceError('Telegram не подтвердил отметку прочитанного')
+
+class _TelegramWorker(_TelegramOperations):
     """Oko-owned Telethon worker; existing credentials remain at their original path."""
     def __init__(self, env_file: Path, root: Path) -> None:
         self.env_file = (env_file / '.env' if env_file.is_dir() else env_file).resolve()
@@ -99,7 +150,9 @@ class LocalTelegram:
                     finally:
                         path.unlink(missing_ok=True)
                 return result['value']
-            except SourceError:
+            except SourceError as error:
+                if error.remote_type != 'FloodWaitError':
+                    await self.close()
                 raise
             except asyncio.CancelledError:
                 await self.close()
@@ -108,59 +161,6 @@ class LocalTelegram:
                 record_caught('source.request')
                 await self.close()
                 raise SourceError('Telegram-клиент недоступен') from None
-
-    async def identity(self, account: str) -> int:
-        value = await self.request('identity', account=account)
-        if type(value) is not int or value <= 0:
-            raise SourceError('Telegram не подтвердил личность аккаунта')
-        return value
-
-    async def accounts(self) -> list[str]:
-        value: list[str] = await self.request('accounts')
-        return value
-
-    async def topics(self, account: str, peer: str | int) -> list[dict[str, Any]]:
-        value: list[dict[str, Any]] = await self.request('topics', account=account, peer=peer)
-        return value
-
-    async def info(self, account: str, peer: str | int, topic_id: int | None = None) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('info', account=account, peer=peer, topic_id=topic_id)
-        return value
-
-    async def page(self, account: str, peer: int, after: int, since: float, topic_id: int | None = None) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('page', account=account, peer=peer, after=after, since=since, topic_id=topic_id)
-        return value
-
-    async def history_page(self, account: str, peer: int, upper: int, before: int, since: float, topic_id: int | None = None) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('history_page', account=account, peer=peer, upper=upper, before=before, since=since, topic_id=topic_id)
-        return value
-
-    async def messages(self, account: str, peer: int, ids: list[int], topic_id: int | None = None) -> list[dict[str, Any]]:
-        value: list[dict[str, Any]] = await self.request('messages', account=account, peer=peer, ids=ids, topic_id=topic_id)
-        return value
-
-    async def download(self, account: str, peer: int, id: int, topic_id: int | None = None) -> bytes:
-        value: bytes = await self.request('download', account=account, peer=peer, id=id, topic_id=topic_id)
-        return value
-
-    async def read_state(self, account: str, peer: int, since: float, topic_id: int | None = None) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('read_state', account=account, peer=peer, since=since, topic_id=topic_id)
-        return value
-
-    async def read_window(self, account: str, peer: int, after: int, until: int, topic_id: int | None = None) -> dict[str, Any]:
-        value: dict[str, Any] = await self.request('read_window', account=account, peer=peer, after=after, until=until, topic_id=topic_id)
-        return value
-
-    async def acknowledge(self, account: str, peer: int, max_id: int, topic_id: int | None = None) -> None:
-        if max_id <= 0:
-            raise SourceError('Неверная граница прочитанного Telegram')
-        result = await self.request('acknowledge', account=account, peer=peer, max_id=max_id, topic_id=topic_id)
-        if result is not True:
-            # A repeated already-read boundary can return False. Verify the
-            # server's actual frontier before treating it as failure.
-            state = await self.read_state(account, peer, time.time(), topic_id=topic_id)
-            if state['read_max'] < max_id:
-                raise SourceError('Telegram не подтвердил отметку прочитанного')
 
     async def close(self) -> None:
         self.generation += 1
@@ -172,40 +172,98 @@ class LocalTelegram:
         shutil.rmtree(self.spool, ignore_errors=True)
 
 
+class LocalTelegram(_TelegramOperations):
+    """Own one lazy pipe per verified person; configuration remains ClientRegistry's."""
+    def __init__(self, env_file: Path, root: Path) -> None:
+        self.env_file = (env_file / '.env' if env_file.is_dir() else env_file).resolve()
+        self.root = root.resolve()
+        self.allowed: Callable[[], bool] = lambda: True
+        self.expected_users: dict[str, int] = {}
+        self.generation = 0
+        self.workers: dict[int, _TelegramWorker] = {}
+        self._identity_lock = asyncio.Lock()
+
+    async def accounts(self) -> list[str]:
+        from oko.collection.telegram.client import ClientRegistry
+        try:
+            return ClientRegistry(self.env_file).accounts()
+        except (ValueError, OSError):
+            raise SourceError('Окружение Telegram-клиента недоступно') from None
+
+    async def identity(self, account: str) -> int:
+        user = self.expected_users.get(account)
+        if user is not None and user in self.workers:
+            return await self.workers[user].identity(account)
+        # A probe releases its session before the collection worker starts.
+        async with self._identity_lock:
+            probe = _TelegramWorker(self.env_file, self.root / '_probe')
+            probe.allowed = self.allowed
+            try:
+                return await probe.identity(account)
+            finally:
+                await probe.close()
+
+    async def request(self, operation: str, **args: Any) -> Any:
+        if operation == 'accounts':
+            return await self.accounts()
+        if operation == 'identity':
+            return await self.identity(args['account'])
+        account = args['account']
+        user = self.expected_users.get(account)
+        if user is None:
+            user = await self.identity(account)
+            self.expected_users[account] = user
+        worker = self.workers.get(user)
+        if worker is None:
+            worker = _TelegramWorker(self.env_file, self.root)
+            worker.spool = self.root / 'staging' / '_telegram' / str(user)
+            self.workers[user] = worker
+        worker.allowed = self.allowed
+        worker.expected_users[account] = user
+        return await worker.request(operation, **args)
+
+    async def close_account(self, account: str) -> None:
+        user = self.expected_users.get(account)
+        worker = self.workers.pop(user, None) if user is not None else None
+        if worker:
+            await worker.close()
+
+    async def close(self) -> None:
+        self.generation += 1
+        workers, self.workers = self.workers, {}
+        await asyncio.gather(*(worker.close() for worker in workers.values()))
+
+
 class TelegramSource:
     changes = 'Telegram: при сборе перечитываются известные непросмотренные сообщения и вложения. Отсутствующие сообщения сохраняются локально; исчезновение может означать удаление или потерю доступа.'
-    def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None, topic_id: int | None = None) -> None:
+    def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None) -> None:
         self.identity_info: dict[str, Any] | None = None
-        self.topic_id = topic_id
         self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days
         self.initial_history: dict[str, Any] | None = None
+        self.retry_error: SourceError | None = None
         self.more = False
         self.gap: str | None = None
-
-    @property
-    def scope(self) -> dict[str, int]:
-        return {'topic_id': self.topic_id} if self.topic_id is not None else {}
 
     async def resolve(self) -> None:
         # StringSession does not persist Telethon's entity/access-hash cache.
         # Refill it in the current worker, but never change the feed's identity.
         if self.username:
-            info = await self.client.info(self.account, '@' + self.username, **self.scope)
+            info = await self.client.info(self.account, '@' + self.username)
             self.identity_info = info
             if info['peer'] != self.peer:
                 raise SourceError('Username Telegram теперь принадлежит другому источнику; переподключите фид', code='source-reconnect')
 
     def url(self, id: int) -> str:
-        topic = f'{self.topic_id}/' if self.topic_id else ''
-        return f'https://t.me/c/{-self.peer-1000000000000}/{topic}{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
+        return f'https://t.me/c/{-self.peer-1000000000000}/{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
 
     async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+        self.retry_error = None
         await self.resolve()
         if self.initial_history:
             return await self.discover_history(cursor)
         state: dict[str, Any] = json.loads(cursor) if cursor else dict(after=0, since=time.time()-self.initial_days*86400)
-        batch = await self.client.page(self.account, self.peer, state['after'], state['since'], **self.scope)
+        batch = await self.client.page(self.account, self.peer, state['after'], state['since'])
         self.more, self.gap = batch['more'], batch.get('gap')
         dates = {m['id']: m['date'] for m in batch['messages']}
         publications = [p for p in reversed(self.publications(batch['messages']))
@@ -243,7 +301,7 @@ class TelegramSource:
             # Establish the snapshot boundary without enrolling archive materials.
             # Live requests then start above it even if history was paused before
             # its first successful request. Resume rereads this same archive page.
-            batch = await self.client.history_page(self.account, self.peer, 0, 0, state['since'], **self.scope)
+            batch = await self.client.history_page(self.account, self.peer, 0, 0, state['since'])
             state['upper'] = state['after'] = batch['upper']
             state['lane'] = 'live'
             if not state['upper']:
@@ -258,10 +316,11 @@ class TelegramSource:
         history_lane = not state['scan_complete'] and not config.get('paused') and (state['lane'] == 'history' or not state['upper']) and time.time() >= state.get('history_retry_at', 0)
         if history_lane:
             try:
-                batch = await self.client.history_page(self.account, self.peer, state['upper'], state['before'], state['since'], **self.scope)
+                batch = await self.client.history_page(self.account, self.peer, state['upper'], state['before'], state['since'])
             except SourceError as error:
                 if not state['upper']:
                     raise
+                self.retry_error = error
                 record_caught('Telegram: начальная история')
                 state.update(history_error=error.label, history_retry_at=time.time() + error.delay, lane='live')
                 state['history_enroll'] = []
@@ -292,7 +351,7 @@ class TelegramSource:
             state['lane'] = 'live'
             publications = chosen
         else:
-            batch = await self.client.page(self.account, self.peer, state['after'], state['since'], **self.scope)
+            batch = await self.client.page(self.account, self.peer, state['after'], state['since'])
             publications = [p for p in self.publications(batch['messages']) if max(p.members) > state['after']]
             state['after'] = max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members])
             state['lane'] = 'live' if batch['more'] else 'history'
@@ -302,7 +361,7 @@ class TelegramSource:
 
     async def fetch(self, publication: Publication) -> Material:
         await self.resolve()
-        rows = await self.client.messages(self.account, self.peer, list(publication.members) or [int(publication.id)], **self.scope)
+        rows = await self.client.messages(self.account, self.peer, list(publication.members) or [int(publication.id)])
         teaser = publication.teaser or Material('Публикация недоступна', '')
         if not rows:
             if publication.teaser and publication.teaser.full:
@@ -324,7 +383,7 @@ class TelegramSource:
                 reasons.append('Тип вложения пока не поддерживается')
                 continue
             try:
-                data = await self.client.download(self.account, self.peer, msg['id'], **self.scope)
+                data = await self.client.download(self.account, self.peer, msg['id'])
                 if not data:
                     raise SourceError('Пустое вложение Telegram')
                 attachments.append(Attachment(f"media-{msg['id']}.{media['extension']}", data, media['kind'], media['mime']))

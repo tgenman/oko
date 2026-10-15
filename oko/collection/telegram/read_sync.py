@@ -22,6 +22,8 @@ class ReadSync:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         store.db.executescript('''
+        CREATE TABLE IF NOT EXISTS telegram_read_topics (
+          feed TEXT, topic INTEGER, confirmed INTEGER, PRIMARY KEY(feed,topic));
         CREATE TABLE IF NOT EXISTS telegram_read_members (
           feed TEXT, member INTEGER, eligible INTEGER DEFAULT 0, reason TEXT, missing INTEGER DEFAULT 0,
           PRIMARY KEY(feed,member));
@@ -63,7 +65,7 @@ class ReadSync:
             return None
         profile = self.store.subscriptions.telegram.profile(binding['role'])
         return dict(account=profile['account'] if profile else config['telegram_account'], peer=config['telegram_peer'],
-                    username=config.get('telegram_username'), topic_id=config.get('telegram_topic'), since=state['since'],
+                    username=config.get('telegram_username'), since=state['since'],
                     initial=state['initial'], read_history=config['read_history'], auto_read=config['auto_read'],
                     eligible=[r[0] for r in self.store.db.execute(
                         "SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1 AND missing=0 AND (?=1 OR reason='viewed') ORDER BY member", (feed, config['auto_read']))])
@@ -114,12 +116,15 @@ class ReadSync:
         missing: tuple[int, ...] = ()
         if window is not None:
             ids = window['ids']
+            read_ids = set(window.get('read_ids', []))
+            if not read_ids <= set(ids):
+                raise SourceError('Неверная серверная граница прочитанного Telegram')
             if ids != sorted(set(ids)) or any(not confirmed < m <= until for m in ids) or (window['more'] and not ids):
                 raise SourceError('Неполная или неверная проверка истории Telegram')
             verified = ids[-1] if window['more'] else until
             missing = tuple(sorted(m for m in eligible if confirmed < m <= verified and m not in ids))
             for member in ids:
-                if member in eligible or (request['read_history'] and member <= initial):
+                if member in eligible or member in read_ids or (request['read_history'] and member <= initial):
                     candidate = member
                 else:
                     waiting = ('Старая непрочитанная история до импорта' if member <= initial
@@ -128,6 +133,18 @@ class ReadSync:
             if not waiting and window['more']:
                 waiting = 'Продолжение проверки истории Telegram'
         return ReadPlan(initial, confirmed, until, candidate, waiting, missing)
+
+    def confirmed(self, feed: str) -> int:
+        row = self.store.db.execute('SELECT confirmed FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
+        return int(row[0] or 0) if row else 0
+
+    def topic_confirmed(self, feed: str, topic: int) -> int:
+        row = self.store.db.execute('SELECT confirmed FROM telegram_read_topics WHERE feed=? AND topic=?', (feed, topic)).fetchone()
+        return int(row[0]) if row else 0
+
+    def topic_completed(self, feed: str, topic: int, confirmed: int) -> None:
+        with self.store.db:
+            self.store.db.execute("INSERT INTO telegram_read_topics VALUES (?,?,?) ON CONFLICT(feed,topic) DO UPDATE SET confirmed=MAX(confirmed,excluded.confirmed)", (feed, topic, confirmed))
 
     def completed(self, job: 'Job', plan: ReadPlan, confirmed: int, now: float) -> None:
         with self.store.db:

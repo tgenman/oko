@@ -1,4 +1,4 @@
-"""Forum selection and message scope at the external Telethon boundary."""
+"""Internal forum read protocol and message scope at the external Telethon boundary."""
 from typing import Any
 
 
@@ -19,33 +19,6 @@ async def topic_info(client: Any, entity: Any, topic_id: int) -> Any:
     if topic is None:
         raise ValueError('topic unavailable')
     return topic
-
-
-async def list_topics(client: Any, entity: Any) -> list[dict[str, Any]]:
-    from telethon import functions
-    if not getattr(entity, 'forum', False):
-        return []
-    offset_date, offset_id, offset_topic = None, 0, 0
-    topics: dict[int, dict[str, Any]] = {}
-    while True:
-        result = await client(functions.messages.GetForumTopicsRequest(peer=entity,
-            offset_date=offset_date, offset_id=offset_id, offset_topic=offset_topic, limit=100))
-        if not result.topics:
-            break
-        for topic in result.topics:
-            if hasattr(topic, 'title'):
-                topics[topic.id] = dict(id=topic.id, title=topic.title)
-        last = result.topics[-1]
-        if last.id == offset_topic:
-            raise ValueError('topic pagination stalled')
-        offset_topic, offset_id = last.id, last.top_message
-        offset_date = last.date if result.order_by_create_date else next(
-            (m.date for m in result.messages if m.id == last.top_message), None)
-        if offset_date is None:
-            raise ValueError('topic pagination unavailable')
-        if len(topics) >= result.count:
-            break
-    return sorted(topics.values(), key=lambda t: (t['id'] != 1, t['title'].casefold(), t['id']))
 
 
 async def history(client: Any, entity: Any, topic_id: int | None, **params: Any) -> tuple[list[Any], list[Any]]:

@@ -40,69 +40,33 @@ test('Telegram accounts are selectable and incomplete or pending connection is d
   } finally {await r.close();}
 });
 
-test('forum selection resets on peer change and stale topics cannot attach to a new peer', async () => {
+test('forum is connected as one stream without topic selection', async () => {
   const r = await reader();
   try {
     await r.page.addInitScript(() => {
-      const t = readerTransport;
-      t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      t.replies.set('/api/v3/processors/llamacpp', {body: null});
-      t.replies.set('/api/telegram/accounts', {body: ['personal']});
-      t.held.set('/api/telegram/topics', true);
-    });
-    await r.start([]);
-    await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab', {name: 'Telegram', exact: true}).click();
-    await expect(r.page.locator('#telegram-account')).toHaveValue('personal');
-    await r.page.locator('#telegram-peer').fill('@first');
-    await r.page.locator('#telegram-topics').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/topics'));
-    await expect(r.page.locator('#telegram-add')).toBeDisabled();
-    await r.page.locator('#telegram-peer').fill('@second');
-    await r.page.evaluate(() => readerTransport.release('/api/telegram/topics', [{id: 20, title: 'Старая тема'}]));
-    await expect(r.page.locator('#telegram-topic-label')).toBeHidden();
-    await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/telegram/topics', {body: [{id: 1, title: 'Общее'}, {id: 30, title: 'Новости'}]});
+      readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
+      readerTransport.replies.set('/api/telegram/accounts', {body:['personal']});
       readerTransport.held.set('/api/telegram/connect', true);
     });
-    await r.page.locator('#telegram-topics').click();
-    await expect(r.page.locator('#telegram-topic option')).toHaveCount(3);
-    await expect(r.page.locator('#telegram-add')).toBeDisabled();
-    await r.page.locator('#telegram-topic').selectOption('30');
-    if (process.env.OKO_BROWSER_SCREENSHOT) await r.page.locator('#telegram-connection').screenshot({path: process.env.OKO_BROWSER_SCREENSHOT});
-    await r.page.locator('#telegram-add').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/connect'));
-    await expect(r.page.locator('#telegram-peer')).toBeDisabled();
-    const request = await r.page.evaluate(() => readerTransport.requests.filter(r => r.url === '/api/telegram/connect'));
-    assert.equal(request.length, 1);
-    assert.deepEqual(request[0].body, {account: 'personal', peer: '@second', folder: 'Telegram', auto_read: false, topic_id: 30, initial_history: {mode: 'count', count: '20'}});
-    await r.page.evaluate(() => readerTransport.release('/api/telegram/connect', {id: 'topic30'}));
-    await expect(r.page.locator('#telegram-peer')).toHaveValue('');
-    await expect(r.page.locator('#telegram-add')).toBeDisabled();
-    await expect(r.page.locator('#telegram-topic-label')).toBeHidden();
-    assert.deepEqual(r.errors, []);
-  } finally {await r.close();}
-});
-
-test('ordinary channel stays connectable after checking its empty topic list', async () => {
-  const r = await reader();
-  try {
-    await r.page.addInitScript(() => {
-      const t = readerTransport;
-      t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
-      t.replies.set('/api/v3/processors/llamacpp', {body: null});
-      t.replies.set('/api/telegram/accounts', {body: ['personal']});
-      t.replies.set('/api/telegram/topics', {body: []});
-    });
     await r.start([]);
     await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab', {name: 'Telegram', exact: true}).click();
-    await r.page.locator('#telegram-peer').fill('@channel');
-    await r.page.locator('#telegram-topics').click();
-    await expect(r.page.locator('#telegram-message')).toHaveText('Это канал или обычная группа — тему выбирать не нужно.');
-    await expect(r.page.locator('#telegram-topic-label')).toBeHidden();
+    await r.page.getByRole('tab', {name:'Telegram', exact:true}).click();
+    await r.page.locator('#telegram-peer').fill('@forum');
+    await expect(r.page.locator('#telegram-topics')).toHaveCount(0);
+    await expect(r.page.locator('#telegram-topic')).toHaveCount(0);
     await expect(r.page.locator('#telegram-add')).toBeEnabled();
-    assert.deepEqual(r.errors, []);
+    if (process.env.OKO_BROWSER_SCREENSHOT) {
+      await r.page.screenshot({path:process.env.OKO_BROWSER_SCREENSHOT});
+      await r.page.setViewportSize({width:390,height:844});
+      await r.page.screenshot({path:process.env.OKO_BROWSER_SCREENSHOT.replace('.png','-mobile.png')});
+    }
+    await r.page.locator('#telegram-add').click();
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/connect'));
+    const requests = await r.page.evaluate(() => readerTransport.requests.filter(r => r.url==='/api/telegram/connect'));
+    assert.deepEqual(requests[0].body, {account:'personal',peer:'@forum',folder:'Telegram',auto_read:false,initial_history:{mode:'count',count:'20'}});
+    await r.page.evaluate(() => readerTransport.release('/api/telegram/connect',{id:'forum'}));
+    await expect(r.page.locator('#telegram-peer')).toHaveValue('');
+    assert.deepEqual(r.errors,[]);
   } finally {await r.close();}
 });
 

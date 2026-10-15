@@ -255,7 +255,7 @@ class Store:
             "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if ai_only:
             query += " AND kind IN ('filter','theses')"
@@ -265,6 +265,8 @@ class Store:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
+        if not include_deletions:
+            query += " AND kind NOT IN ('delete','feed-delete')"
         query += " AND NOT (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed WHERE h.paused=1 OR (h.scan_complete=0 AND json_extract(h.selection,'$.mode')='count')))"
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
@@ -386,7 +388,7 @@ class Store:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?))', (feed, feed))
             self.db.execute('DELETE FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?)', (feed, feed))
             self.db.execute('DELETE FROM items WHERE feed_id=?', (feed,))
-            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
+            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state', 'telegram_read_topics'):
                 self.db.execute(f'DELETE FROM {table} WHERE feed=?', (feed,))
             self.db.execute("DELETE FROM settings WHERE scope='feed' AND owner=?", (feed,))
             self.db.execute('DELETE FROM state WHERE key IN (?,?,?)', ('cursor:'+feed, 'cursor:telegram:'+feed, 'feed-status:'+feed))
@@ -410,10 +412,21 @@ class Store:
             self.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
                             (now + delay, error, code or job.kind, job.id, job.generation))
 
-    def interrupted(self) -> None:
+    def restore_telegram_wait(self, feed: str, deadline: float) -> None:
         with self.db:
-            self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
-            self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
+            self.db.execute("""UPDATE jobs SET next=? WHERE status='pending' AND problem_code LIKE '%:FloodWaitError'
+              AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))""", (deadline, feed, feed))
+
+    def interrupted(self, feeds: set[str] | None = None) -> None:
+        selection = "status='running'"
+        params: tuple[str, ...] = ()
+        if feeds is not None:
+            placeholders = ','.join('?' for _ in feeds) or "''"
+            selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})))"
+            params = (*feeds, *feeds)
+        with self.db:
+            self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
+            self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
 
     def material(self, item: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()

@@ -44,7 +44,6 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('POST', '/api/tabs/{tab}/heartbeat'): models.Ok,
     ('GET', '/api/telegram/accounts'): list[str],
     ('POST', '/api/telegram/connect'): models.SubscriptionFeed,
-    ('POST', '/api/telegram/topics'): list[models.TelegramTopic],
     ('GET', '/api/youtube'): models.YouTube,
     ('PUT', '/api/youtube'): models.YouTube,
 }
@@ -62,6 +61,5 @@ REQUESTS: dict[tuple[str, str], Any] = {
     ('PUT', '/api/processors/llamacpp'): models.ProcessorConfig,
     ('PATCH', '/api/settings/{scope}/{owner}'): models.Overrides,
     ('POST', '/api/telegram/connect'): models.ConnectTelegram,
-    ('POST', '/api/telegram/topics'): models.TelegramPeer,
     ('PUT', '/api/youtube'): models.YouTubeSettings,
 }

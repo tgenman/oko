@@ -25,6 +25,7 @@ class FakeClient:
     def __init__(self, session, *args, **kwargs):
         self.session = SimpleNamespace(filename=session)
         self.read = {1: 0, 20: 0, 30: 0}
+        if os.environ.get('SDK_WHOLE_FORUM'): self.read[50] = 0
         self.entity = types.Channel(id=1234567890, title='Forum', photo=types.ChatPhotoEmpty(),
                                    date=now, megagroup=True, forum=True, username='forum', access_hash=1)
     async def connect(self): pass
@@ -42,7 +43,7 @@ class FakeClient:
         self.log(op=name, topics=getattr(request, 'topics', None),
                  topic=getattr(request, 'msg_id', None), maximum=getattr(request, 'read_max_id', None))
         def topic(id):
-            return SimpleNamespace(id=id, title={1:'General',20:'Engineering',30:'News'}[id],
+            return SimpleNamespace(id=id, title={1:'General',20:'Engineering',30:'News',50:'New'}[id],
                                    top_message=150+id, read_inbox_max_id=self.read[id], date=now)
         if name == 'GetForumTopicsRequest':
             # Server pages can be shorter than the requested limit.

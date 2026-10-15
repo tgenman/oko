@@ -116,7 +116,7 @@ def test_private_group_access_forum_and_account_errors_are_explicit(tmp_path: Pa
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=Peers()), headers=HEADERS) as client:
         client.post('/api/tabs/test/heartbeat')
         assert connect_request(client, json=dict(account='fixture', peer='@denied', folder='Личное', auto_read=False)).json()['detail'] == 'Нет доступа к Telegram-источнику'
-        assert connect_request(client, json=dict(account='fixture', peer='@forum', topic_id=1, folder='Личное', auto_read=False)).status_code == 400
+        assert connect_request(client, json=dict(account='fixture', peer='@forum', topic_id=1, folder='Личное', auto_read=False)).status_code == 422
         assert client.get('/api/subscriptions').json()['feeds'] == []
         feed = connect(client, '-12345', 'Личное')
         assert feed['telegram_peer'] == -12345
@@ -254,14 +254,14 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
         client.post('/api/tabs/test/heartbeat')
         connect(client)
         for _ in range(100):
-            partial = root / 'staging' / '_telegram' / 'media.bin'
+            partial = root / 'staging' / '_telegram' / '10001' / 'media.bin'
             if partial.exists() and partial.stat().st_size:
                 break
             time.sleep(.02)
         assert partial.read_bytes() == b'partial-download'
         card = client.get('/api/cards').json()[0]
         assert card['members'] == [11, 12] and card['title'] == 'Album'
-        downloading = bridge.process
+        downloading = bridge.workers[10001].process
         client.post('/api/materials/' + card['id'] + '/viewed')
         assert downloading is not None and downloading.returncode is not None
         # A read acknowledgement may start a new worker, but the interrupted

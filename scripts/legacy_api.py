@@ -5,12 +5,14 @@ from pathlib import Path
 
 def document(path: Path) -> dict:
     value = json.loads(path.read_text())
-    for route in ('/api/import', '/api/import/preview'):
+    for route in ('/api/import', '/api/import/preview', '/api/telegram/topics'):
         value['paths'].pop(route, None)
     schemas = value['components']['schemas']
-    removed = {name for name in schemas if name.startswith('Import')}
+    removed = {name for name in schemas if name.startswith('Import') or name == 'TelegramTopic'}
     for name in removed:
         del schemas[name]
+    schemas['ConnectTelegram']['properties'].pop('topic_id', None)
+    schemas['SubscriptionFeed']['properties'].pop('telegram_topic', None)
     def prune(node):
         if isinstance(node, dict):
             for key, child in node.items():

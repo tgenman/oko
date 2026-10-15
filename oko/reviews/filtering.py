@@ -24,6 +24,9 @@ class Filters:
         if not row or not store.path(item).is_file():
             return None
         settings = store.subscriptions.effective('feed', row['feed_id'])
+        # Retired public metadata must not invalidate already accepted results.
+        # This null field was part of the persisted processing signature.
+        settings['feed']['telegram_topic'] = None
         if not settings['effective']['prompt_filters']['value'].strip():
             return None
         config = store.processor_config()

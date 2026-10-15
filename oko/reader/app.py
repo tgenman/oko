@@ -21,7 +21,7 @@ from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.codex import CodexClient
 from oko.processing.execution import CodexSettings
 from oko.storage.store import Store
-from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
+from oko.collection.telegram.source import TelegramClient, ConnectTelegram
 from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, Overrides, FeedPatch
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.actions import action_context
@@ -310,11 +310,6 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     @app.get('/api/telegram/accounts', response_model=RESPONSES[('GET', '/api/telegram/accounts')], response_model_exclude_unset=True)
     async def telegram_accounts() -> list[str]:
         return await runtime.telegram_accounts()
-
-    @app.post('/api/telegram/topics', response_model=RESPONSES[('POST', '/api/telegram/topics')], response_model_exclude_unset=True)
-    async def telegram_topics(body: Annotated[wire.TelegramPeer, BeforeValidator(normalize(TelegramPeer))]) -> list[dict[str, Any]]:
-        value = to_domain(TelegramPeer, body)
-        return await runtime.telegram_topics(value)
 
     @app.post('/api/telegram/connect', response_model=RESPONSES[('POST', '/api/telegram/connect')], response_model_exclude_unset=True)
     async def telegram_connect(body: Annotated[wire.ConnectTelegram, BeforeValidator(normalize(ConnectTelegram))]) -> dict[str, Any]:

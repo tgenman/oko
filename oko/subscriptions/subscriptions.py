@@ -130,6 +130,7 @@ class Subscriptions:
         query = 'SELECT * FROM feeds' + (' WHERE id=?' if identity is not None else '') + ' ORDER BY rowid'
         for row in self.db.execute(query, (identity,) if identity is not None else ()):
             feed = dict(row)
+            feed.pop('telegram_topic', None)
             feed['original_urls'] = json.loads(feed['original_urls'])
             binding = self.telegram.binding(feed['id'])
             if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':

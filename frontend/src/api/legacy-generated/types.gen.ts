@@ -355,10 +355,6 @@ export type ConnectTelegram = {
      * Peer
      */
     peer: string;
-    /**
-     * Topic Id
-     */
-    topic_id?: number | null;
 };
 
 export type DiagnosticClear = {
@@ -1487,10 +1483,6 @@ export type SubscriptionFeed = {
      */
     telegram_peer?: number | null;
     /**
-     * Telegram Topic
-     */
-    telegram_topic?: number | null;
-    /**
      * Telegram Username
      */
     telegram_username?: string | null;
@@ -1567,11 +1559,6 @@ export type TelegramRead = {
      * Waiting
      */
     waiting: string;
-};
-
-export type TelegramTopic = {
-    id: number;
-    title: string;
 };
 
 /**
@@ -3830,57 +3817,6 @@ export type TelegramConnectResponses = {
 };
 
 export type TelegramConnectResponse = TelegramConnectResponses[keyof TelegramConnectResponses];
-
-export type TelegramTopicsData = {
-    body: TelegramPeer;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/telegram/topics';
-};
-
-export type TelegramTopicsErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type TelegramTopicsError = TelegramTopicsErrors[keyof TelegramTopicsErrors];
-
-export type TelegramTopicsResponses = {
-    /**
-     * Successful operation
-     */
-    200: Array<TelegramTopic>;
-};
-
-export type TelegramTopicsResponse = TelegramTopicsResponses[keyof TelegramTopicsResponses];
 
 export type YoutubeSettingsData = {
     body?: never;

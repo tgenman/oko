@@ -21,6 +21,8 @@ def _hash(value: Any) -> str:
 
 def _legacy_settings(store: 'Store', feed: str) -> dict[str, Any]:
     settings = store.subscriptions.effective('feed', feed)
+    # Reconstruct the historical signature, including retired null metadata.
+    settings['feed']['telegram_topic'] = None
     settings['effective'].update({k: dict(value=v, scope='default', owner=None) for k, v in _REMOVED.items()})
     for scope, owner in [('oko', 'global'), ('folder', settings['feed']['folder_id']), ('feed', feed)]:
         for row in store.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (scope, owner)):
