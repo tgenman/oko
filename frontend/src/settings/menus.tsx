@@ -1,6 +1,6 @@
 import {mountSurface} from '../renderer';
 import type {ReaderApi} from '../api/reader';
-import type {Status,SourceStatus} from '../api/generated/types.gen';
+import type {Status,SourceStatus} from '../api/legacy-generated/types.gen';
 import {Models} from './models';
 import {YouTubeSettings,YouTubeSummary} from './youtube';
 import {MenusOwner,type DialogName,type Discard} from './owner';

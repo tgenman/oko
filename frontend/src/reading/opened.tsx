@@ -1,6 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {material as readMaterial,previousVersion,regenerate,retryMaterial,retryTheses,retryFilter,restoreFilter,viewed} from '../api/generated/sdk.gen';
-import type {Card,Material,Version,Previous,Point,Attachment} from '../api/generated/types.gen';
+import {material as readMaterial,previousVersion,regenerate,retryMaterial,retryTheses,retryFilter,restoreFilter,viewed} from '../api/legacy-generated/sdk.gen';
+import type {Card,Material,Version,Previous,Point,Attachment} from '../api/legacy-generated/types.gen';
 import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {reportError} from '../status/debug';

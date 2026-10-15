@@ -1,4 +1,4 @@
-import type {History} from '../api/generated/types.gen';
+import type {History} from '../api/legacy-generated/types.gen';
 export function historyProgress(history: History | null | undefined) {
   if (!history) return '';
   const progress = history.mode === 'count' ? `Загружено ${history.loaded} из ${history.count_text || history.count}` : `Загружено ${history.loaded} публикаций с ${(history.date||'').split('-').reverse().join('.')}`;

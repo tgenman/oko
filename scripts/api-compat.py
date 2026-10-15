@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 from api import contract
+from candidate import context
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCUMENTATION = {'description', 'summary', 'title', 'example', 'examples', 'externalDocs', '$comment'}
@@ -51,10 +52,22 @@ def main():
     parser.add_argument('--baseline', type=Path, default=ROOT / 'api/baseline.json')
     parser.add_argument('--review', type=Path)
     args = parser.parse_args()
+    candidate = context(ROOT)
+    if candidate and args.spec.resolve().is_relative_to(ROOT.parent / 'tmp') and args.baseline.resolve().is_relative_to(ROOT.parent / 'tmp'):
+        candidate = None  # Explicit synthetic documents still use the strict gate.
+    if candidate and (args.command != 'check' or args.spec.resolve() != ROOT / 'api/openapi.yaml' or args.baseline.resolve() != ROOT / 'api/baseline.json'):
+        parser.exit(1, 'Candidate context cannot approve/update a baseline or select different contract bytes.\n')
     current = contract(args.spec)
     previous = contract(args.baseline)
     modified = changes(semantic(previous), semantic(current))
     if args.command == 'check':
+        if candidate:
+            status = 'PENDING_REVIEW' if modified else 'PASS'
+            Path(candidate['compatibility_report']).write_text(json.dumps(dict(status=status, changes=modified,
+                before=semantic(previous), after=semantic(current), from_digest=digest(previous), to_digest=digest(current),
+                source_digest=candidate['source_digest']), ensure_ascii=False, indent=2) + '\n')
+            print(f'{status}: candidate compatibility evidence saved; artifacts remain UNREVIEWED')
+            return
         if modified:
             parser.exit(1, 'Potential incompatible wire changes require semantic review and an explicit baseline update:\n'
                         + '\n'.join(modified[:40]) + ('\n... additional changes omitted' if len(modified) > 40 else '')

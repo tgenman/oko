@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { mountSurface } from '../renderer';
 import type { ReaderApi } from '../api/reader';
-import { debugBrowser, debugEntries, clearDebug } from '../api/generated/sdk.gen';
-import type { DiagnosticEntry, BrowserError } from '../api/generated/types.gen';
+import { debugBrowser, debugEntries, clearDebug } from '../api/legacy-generated/sdk.gen';
+import type { DiagnosticEntry, BrowserError } from '../api/legacy-generated/types.gen';
 type Pending = Required<Omit<BrowserError, 'first_at' | 'occurred_at'>> & {
     first_at: string;
     occurred_at: string;

@@ -1,6 +1,6 @@
 import {useEffect,useLayoutEffect} from 'react';
-import {previewCompletion,completeFolder} from '../api/generated/sdk.gen';
-import type {CompletionPreview,CompletionConflict} from '../api/generated/types.gen';
+import {previewCompletion,completeFolder} from '../api/legacy-generated/sdk.gen';
+import type {CompletionPreview,CompletionConflict} from '../api/legacy-generated/types.gen';
 import {ReaderError,type ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {reportError} from '../status/debug';

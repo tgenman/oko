@@ -1,6 +1,6 @@
 import {useLayoutEffect} from 'react';
-import {navigation} from '../api/generated/sdk.gen';
-import type {Navigation,SourceStatus,Feed} from '../api/generated/types.gen';
+import {navigation} from '../api/legacy-generated/sdk.gen';
+import type {Navigation,SourceStatus,Feed} from '../api/legacy-generated/types.gen';
 import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {createStore,useStore,saved,save,host} from './store';

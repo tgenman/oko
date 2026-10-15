@@ -1,3 +1,5 @@
+import {ReaderError} from './api/errors';
+import type {ClientSession} from './api/generated/types.gen';
 import type {ReaderApi} from './api/reader';
 
 export type ReaderMessage = string | {kind:'folder-viewed'; folder:string};
@@ -13,7 +15,9 @@ type Options = {
 // Owns browser resources, not UI drafts or server execution. Disposing a React
 // subscription never means closing the reader lease or stopping server work.
 export function createReaderSession(options: Options) {
-  const tab = crypto.randomUUID();
+  let session: ClientSession | undefined;
+  let creating: Promise<ClientSession> | undefined;
+  let closed = false;
   let active = false, generation = 0, refreshSequence = 0;
   let heartbeatTimer: number | undefined, refreshTimer: number | undefined;
   let bus: BroadcastChannel | undefined;
@@ -34,9 +38,27 @@ export function createReaderSession(options: Options) {
   }
   async function beat(stamp: number): Promise<void> {
     if (!active || stamp !== generation) return;
-    try {await options.api.heartbeat(tab);}
-    catch(error) {if (active && stamp === generation) options.onUnavailable(error);}
-    if (active && stamp === generation) heartbeatTimer = window.setTimeout(() => void beat(stamp),2000);
+    let delay = 2000;
+    try {
+      const status = await options.api.lifetime();
+      if (!active || stamp !== generation) return;
+      if (status.lifetime.kind === 'explicit') return;
+      delay = status.lifetime.renew_after_seconds * 1000;
+      if (session) {
+        try {session = await options.api.renewSession(session.id);}
+        catch (error) {
+          if (!(error instanceof ReaderError) || error.code !== 'client_session_expired') throw error;
+          session = undefined;
+        }
+      }
+      if (!session) {
+        creating ??= options.api.createSession().finally(() => {creating=undefined;});
+        session = await creating;
+      }
+      delay = session.renew_after_seconds * 1000;
+      if (closed) {void options.api.closeSession(session.id).catch(options.onCloseError);session=undefined;}
+    } catch(error) {if (active && stamp === generation) options.onUnavailable(error);}
+    if (active && stamp === generation) heartbeatTimer = window.setTimeout(() => void beat(stamp),delay);
   }
   function dispose() {
     active = false;
@@ -48,7 +70,9 @@ export function createReaderSession(options: Options) {
     window.removeEventListener('pageshow',pageshow);
   }
   function pagehide() {
-    void options.api.close(tab).catch(options.onCloseError);
+    closed = true;
+    if (session) void options.api.closeSession(session.id).catch(options.onCloseError);
+    session = undefined;
     options.onClosed();
     dispose();
     // A cached document still needs its restoration hook after ordinary
@@ -60,6 +84,7 @@ export function createReaderSession(options: Options) {
     start() {
       if (active) return;
       active = true;
+      closed = false;
       const stamp = ++generation;
       bus = new BroadcastChannel('oko-reader');
       bus.onmessage = event => {

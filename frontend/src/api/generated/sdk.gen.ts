@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AbandonProblemData, AbandonProblemErrors, AbandonProblemResponses, AddFeedData, AddFeedErrors, AddFeedResponses, AttachmentData, AttachmentErrors, AttachmentResponses, CardsData, CardsErrors, CardsResponses, ClearDebugData, ClearDebugErrors, ClearDebugResponses, CloseTabData, CloseTabErrors, CloseTabResponses, CodexCheckData, CodexCheckErrors, CodexCheckResponses, CodexModelsData, CodexModelsErrors, CodexModelsResponses, CodexSaveData, CodexSaveErrors, CodexSaveResponses, CodexStateData, CodexStateErrors, CodexStateResponses, CollectData, CollectErrors, CollectResponses, CompleteFolderData, CompleteFolderErrors, CompleteFolderResponses, DebugBrowserData, DebugBrowserErrors, DebugBrowserResponses, DebugEntriesData, DebugEntriesErrors, DebugEntriesResponses, EffectiveSettingsData, EffectiveSettingsErrors, EffectiveSettingsResponses, FeedPatchData, FeedPatchErrors, FeedPatchResponses, FoldersData, FoldersErrors, FoldersResponses, HeartbeatData, HeartbeatErrors, HeartbeatResponses, HistoryCancelData, HistoryCancelErrors, HistoryCancelResponses, HistoryPauseData, HistoryPauseErrors, HistoryPauseResponses, HistoryStartData, HistoryStartErrors, HistoryStartResponses, ImageData, ImageErrors, ImageResponses, ImportPreviewData, ImportPreviewErrors, ImportPreviewResponses, ImportSubscriptionsData, ImportSubscriptionsErrors, ImportSubscriptionsResponses, MaterialData, MaterialErrors, MaterialResponses, NavigationData, NavigationErrors, NavigationResponses, PreviewCompletionData, PreviewCompletionErrors, PreviewCompletionResponses, PreviousMediaData, PreviousMediaErrors, PreviousMediaResponses, PreviousVersionData, PreviousVersionErrors, PreviousVersionResponses, ProcessorCheckData, ProcessorCheckErrors, ProcessorCheckResponses, ProcessorConfigData, ProcessorConfigErrors, ProcessorConfigResponses, ProcessorSaveData, ProcessorSaveErrors, ProcessorSaveResponses, RegenerateData, RegenerateErrors, RegenerateResponses, ReportReaderActionData, ReportReaderActionErrors, ReportReaderActionResponses, RestoreFilterData, RestoreFilterErrors, RestoreFilterResponses, RetryFilterData, RetryFilterErrors, RetryFilterResponses, RetryMaterialData, RetryMaterialErrors, RetryMaterialResponses, RetryThesesData, RetryThesesErrors, RetryThesesResponses, SettingsPatchData, SettingsPatchErrors, SettingsPatchResponses, StatusData, StatusErrors, StatusResponses, StopData, StopErrors, StopResponses, SubscriptionListData, SubscriptionListErrors, SubscriptionListResponses, TelegramAccountsData, TelegramAccountsErrors, TelegramAccountsResponses, TelegramConnectData, TelegramConnectErrors, TelegramConnectResponses, TelegramTopicsData, TelegramTopicsErrors, TelegramTopicsResponses, VerifyFeedData, VerifyFeedErrors, VerifyFeedResponses, ViewedData, ViewedErrors, ViewedResponses, YoutubeConfigureData, YoutubeConfigureErrors, YoutubeConfigureResponses, YoutubeSettingsData, YoutubeSettingsErrors, YoutubeSettingsResponses } from './types.gen';
+import type { AbandonProblemData, AbandonProblemErrors, AbandonProblemResponses, AddFeedData, AddFeedErrors, AddFeedResponses, AttachmentData, AttachmentErrors, AttachmentResponses, CardsData, CardsErrors, CardsResponses, ClearDiagnosticsData, ClearDiagnosticsErrors, ClearDiagnosticsResponses, CloseClientSessionData, CloseClientSessionErrors, CloseClientSessionResponses, CodexCheckData, CodexCheckErrors, CodexCheckResponses, CodexModelsData, CodexModelsErrors, CodexModelsResponses, CodexSaveData, CodexSaveErrors, CodexSaveResponses, CodexStateData, CodexStateErrors, CodexStateResponses, CollectData, CollectErrors, CollectResponses, CommandReceiptData, CommandReceiptErrors, CommandReceiptResponses, CompleteFolderData, CompleteFolderErrors, CompleteFolderResponses, CreateClientSessionData, CreateClientSessionErrors, CreateClientSessionResponses, DiagnosticEntriesData, DiagnosticEntriesErrors, DiagnosticEntriesResponses, EffectiveSettingsData, EffectiveSettingsErrors, EffectiveSettingsResponses, FeedPatchData, FeedPatchErrors, FeedPatchResponses, FoldersData, FoldersErrors, FoldersResponses, HistoryCancelData, HistoryCancelErrors, HistoryCancelResponses, HistoryPauseData, HistoryPauseErrors, HistoryPauseResponses, HistoryStartData, HistoryStartErrors, HistoryStartResponses, ImageData, ImageErrors, ImageResponses, MaterialData, MaterialErrors, MaterialResponses, ObserveCommandData, ObserveCommandErrors, ObserveCommandResponses, PreviewCompletionData, PreviewCompletionErrors, PreviewCompletionResponses, PreviousMediaData, PreviousMediaErrors, PreviousMediaResponses, PreviousVersionData, PreviousVersionErrors, PreviousVersionResponses, ProcessorCheckData, ProcessorCheckErrors, ProcessorCheckResponses, ProcessorConfigData, ProcessorConfigErrors, ProcessorConfigResponses, ProcessorSaveData, ProcessorSaveErrors, ProcessorSaveResponses, ReadingCompositionData, ReadingCompositionErrors, ReadingCompositionResponses, RegenerateData, RegenerateErrors, RegenerateResponses, RemoveFeedData, RemoveFeedErrors, RemoveFeedResponses, RenewClientSessionData, RenewClientSessionErrors, RenewClientSessionResponses, ReportClientDiagnosticData, ReportClientDiagnosticErrors, ReportClientDiagnosticResponses, RestoreFilterData, RestoreFilterErrors, RestoreFilterResponses, RetryFilterData, RetryFilterErrors, RetryFilterResponses, RetryMaterialData, RetryMaterialErrors, RetryMaterialResponses, RetryThesesData, RetryThesesErrors, RetryThesesResponses, SettingsPatchData, SettingsPatchErrors, SettingsPatchResponses, StatusData, StatusErrors, StatusResponses, StopData, StopErrors, StopResponses, SubscriptionListData, SubscriptionListErrors, SubscriptionListResponses, TelegramConnectData, TelegramConnectErrors, TelegramConnectResponses, TelegramProfileSaveData, TelegramProfileSaveErrors, TelegramProfileSaveResponses, TelegramProfilesData, TelegramProfilesErrors, TelegramProfilesResponses, VerifyFeedData, VerifyFeedErrors, VerifyFeedResponses, ViewedData, ViewedErrors, ViewedResponses, YoutubeConfigureData, YoutubeConfigureErrors, YoutubeConfigureResponses, YoutubeSettingsData, YoutubeSettingsErrors, YoutubeSettingsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -21,38 +21,80 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 /**
  * Cards
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read ordered publication cards for optional folder/feed filters. Preserve hidden-material and sort semantics; no grouped events or digests. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const cards = <ThrowOnError extends boolean = true>(options?: Options<CardsData, ThrowOnError>) => (options?.client ?? client).get<CardsResponses, CardsErrors, ThrowOnError>({ url: '/api/cards', ...options });
+export const cards = <ThrowOnError extends boolean = true>(options?: Options<CardsData, ThrowOnError>) => (options?.client ?? client).get<CardsResponses, CardsErrors, ThrowOnError>({ url: '/api/v3/cards', ...options });
+
+/**
+ * Create client session
+ *
+ * Create fresh presence under client_presence only. The new opaque ID has a lease and renew interval; it neither authenticates nor executes a business command. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const createClientSession = <ThrowOnError extends boolean = true>(options?: Options<CreateClientSessionData, ThrowOnError>) => (options?.client ?? client).post<CreateClientSessionResponses, CreateClientSessionErrors, ThrowOnError>({ url: '/api/v3/client-sessions', ...options });
+
+/**
+ * Close client session
+ *
+ * Close presence idempotently. Repeating an absent ID succeeds without extending the last-client departure time. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const closeClientSession = <ThrowOnError extends boolean = true>(options: Options<CloseClientSessionData, ThrowOnError>) => (options.client ?? client).delete<CloseClientSessionResponses, CloseClientSessionErrors, ThrowOnError>({ url: '/api/v3/client-sessions/{identity}', ...options });
+
+/**
+ * Renew client session
+ *
+ * Renew a currently live presence ID using the monotonic host clock. Expired IDs return 410 and cannot be revived; explicitly create a new session. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const renewClientSession = <ThrowOnError extends boolean = true>(options: Options<RenewClientSessionData, ThrowOnError>) => (options.client ?? client).put<RenewClientSessionResponses, RenewClientSessionErrors, ThrowOnError>({ url: '/api/v3/client-sessions/{identity}', ...options });
 
 /**
  * Collect
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Schedule collection of admissible sources; acknowledgement does not promise completed downloads. Repeated commands are not execution-deduplicated. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const collect = <ThrowOnError extends boolean = true>(options?: Options<CollectData, ThrowOnError>) => (options?.client ?? client).post<CollectResponses, CollectErrors, ThrowOnError>({ url: '/api/collect', ...options });
+export const collect = <ThrowOnError extends boolean = true>(options?: Options<CollectData, ThrowOnError>) => (options?.client ?? client).post<CollectResponses, CollectErrors, ThrowOnError>({ url: '/api/v3/collect', ...options });
 
 /**
- * Clear debug
+ * Observe command
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Record failed or unknown client observation against typed command context. Repeated observation delivery is safe; confirmed server outcomes cannot be overwritten. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const clearDebug = <ThrowOnError extends boolean = true>(options?: Options<ClearDebugData, ThrowOnError>) => (options?.client ?? client).delete<ClearDebugResponses, ClearDebugErrors, ThrowOnError>({ url: '/api/debug', ...options });
+export const observeCommand = <ThrowOnError extends boolean = true>(options: Options<ObserveCommandData, ThrowOnError>) => (options.client ?? client).post<ObserveCommandResponses, ObserveCommandErrors, ThrowOnError>({
+    url: '/api/v3/command-observations',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
- * Debug entries
+ * Command receipt
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Reconcile an outcome without executing a command. An unknown ID returns unknown, creates no command and never proves the request was absent. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const debugEntries = <ThrowOnError extends boolean = true>(options?: Options<DebugEntriesData, ThrowOnError>) => (options?.client ?? client).get<DebugEntriesResponses, DebugEntriesErrors, ThrowOnError>({ url: '/api/debug', ...options });
+export const commandReceipt = <ThrowOnError extends boolean = true>(options: Options<CommandReceiptData, ThrowOnError>) => (options.client ?? client).get<CommandReceiptResponses, CommandReceiptErrors, ThrowOnError>({ url: '/api/v3/commands/{identity}', ...options });
 
 /**
- * Debug browser
+ * Clear diagnostics
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Clear only the diagnostic journal; report a persistence failure without claiming successful removal. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const debugBrowser = <ThrowOnError extends boolean = true>(options: Options<DebugBrowserData, ThrowOnError>) => (options.client ?? client).post<DebugBrowserResponses, DebugBrowserErrors, ThrowOnError>({
-    url: '/api/debug',
+export const clearDiagnostics = <ThrowOnError extends boolean = true>(options?: Options<ClearDiagnosticsData, ThrowOnError>) => (options?.client ?? client).delete<ClearDiagnosticsResponses, ClearDiagnosticsErrors, ThrowOnError>({ url: '/api/v3/diagnostics', ...options });
+
+/**
+ * Diagnostic entries
+ *
+ * Read grouped masked diagnostics without starting work. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const diagnosticEntries = <ThrowOnError extends boolean = true>(options?: Options<DiagnosticEntriesData, ThrowOnError>) => (options?.client ?? client).get<DiagnosticEntriesResponses, DiagnosticEntriesErrors, ThrowOnError>({ url: '/api/v3/diagnostics', ...options });
+
+/**
+ * Report client diagnostic
+ *
+ * Append a masked client diagnostic. Persistence failure is an explicit success-envelope variant, not a false accepted receipt. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const reportClientDiagnostic = <ThrowOnError extends boolean = true>(options: Options<ReportClientDiagnosticData, ThrowOnError>) => (options.client ?? client).post<ReportClientDiagnosticResponses, ReportClientDiagnosticErrors, ThrowOnError>({
+    url: '/api/v3/diagnostics',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -63,10 +105,10 @@ export const debugBrowser = <ThrowOnError extends boolean = true>(options: Optio
 /**
  * Add feed
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Create a single RSS/YouTube subscription using its verified candidate token. Omitted initial_history means count 20; explicit null is invalid. Preserve source uniqueness and perform no OPML import. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const addFeed = <ThrowOnError extends boolean = true>(options: Options<AddFeedData, ThrowOnError>) => (options.client ?? client).post<AddFeedResponses, AddFeedErrors, ThrowOnError>({
-    url: '/api/feeds',
+    url: '/api/v3/feeds',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -77,10 +119,10 @@ export const addFeed = <ThrowOnError extends boolean = true>(options: Options<Ad
 /**
  * Verify feed
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Verify one RSS/YouTube URL and return a new candidate token or the existing subscription. Verification itself does not create a subscription. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const verifyFeed = <ThrowOnError extends boolean = true>(options: Options<VerifyFeedData, ThrowOnError>) => (options.client ?? client).post<VerifyFeedResponses, VerifyFeedErrors, ThrowOnError>({
-    url: '/api/feeds/verify',
+    url: '/api/v3/feeds/verify',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -89,12 +131,19 @@ export const verifyFeed = <ThrowOnError extends boolean = true>(options: Options
 });
 
 /**
+ * Remove feed
+ *
+ * Prohibit work and remove the local subscription, content, versions, media, processing, settings and jobs through resumable cleanup. Deleting remains visible in the catalogue; repeats return current progress. No viewed, Telegram leave/delete/read ack. Claims remain reserved until completion; re-add gets a new ID. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const removeFeed = <ThrowOnError extends boolean = true>(options: Options<RemoveFeedData, ThrowOnError>) => (options.client ?? client).delete<RemoveFeedResponses, RemoveFeedErrors, ThrowOnError>({ url: '/api/v3/feeds/{identity}', ...options });
+
+/**
  * Feed patch
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Patch source configuration after resource-dependent admission. The five non-null fields reject null. Telegram access/profile/account/peer are immutable; web never accepts auto_read/read_history. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const feedPatch = <ThrowOnError extends boolean = true>(options: Options<FeedPatchData, ThrowOnError>) => (options.client ?? client).patch<FeedPatchResponses, FeedPatchErrors, ThrowOnError>({
-    url: '/api/feeds/{identity}',
+    url: '/api/v3/feeds/{identity}',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -105,17 +154,17 @@ export const feedPatch = <ThrowOnError extends boolean = true>(options: Options<
 /**
  * History cancel
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Cancel existing archive work, preserving collected publications. Late results cannot restart the cancelled generation. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const historyCancel = <ThrowOnError extends boolean = true>(options: Options<HistoryCancelData, ThrowOnError>) => (options.client ?? client).delete<HistoryCancelResponses, HistoryCancelErrors, ThrowOnError>({ url: '/api/feeds/{identity}/history', ...options });
+export const historyCancel = <ThrowOnError extends boolean = true>(options: Options<HistoryCancelData, ThrowOnError>) => (options.client ?? client).delete<HistoryCancelResponses, HistoryCancelErrors, ThrowOnError>({ url: '/api/v3/feeds/{identity}/history', ...options });
 
 /**
  * History pause
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Pause or resume the existing archive run with a strict boolean. Archive pause does not stop live collection or delete collected material. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const historyPause = <ThrowOnError extends boolean = true>(options: Options<HistoryPauseData, ThrowOnError>) => (options.client ?? client).patch<HistoryPauseResponses, HistoryPauseErrors, ThrowOnError>({
-    url: '/api/feeds/{identity}/history',
+    url: '/api/v3/feeds/{identity}/history',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -126,10 +175,10 @@ export const historyPause = <ThrowOnError extends boolean = true>(options: Optio
 /**
  * History start
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Start an explicit count-only YouTube archive backfill. A selection is required; exact decimal count is preserved without rounding. No Telegram backfill operation is introduced. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const historyStart = <ThrowOnError extends boolean = true>(options: Options<HistoryStartData, ThrowOnError>) => (options.client ?? client).post<HistoryStartResponses, HistoryStartErrors, ThrowOnError>({
-    url: '/api/feeds/{identity}/history',
+    url: '/api/v3/feeds/{identity}/history',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -140,17 +189,17 @@ export const historyStart = <ThrowOnError extends boolean = true>(options: Optio
 /**
  * Folders
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read ordered folders and counts of individual source publications. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const folders = <ThrowOnError extends boolean = true>(options?: Options<FoldersData, ThrowOnError>) => (options?.client ?? client).get<FoldersResponses, FoldersErrors, ThrowOnError>({ url: '/api/folders', ...options });
+export const folders = <ThrowOnError extends boolean = true>(options?: Options<FoldersData, ThrowOnError>) => (options?.client ?? client).get<FoldersResponses, FoldersErrors, ThrowOnError>({ url: '/api/v3/folders', ...options });
 
 /**
  * Complete folder
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Complete the exact folder composition identified by the token, including hidden publications. Composition changes return a fresh preview without completing the old composition. Success deletes completed local content and permits safe Telegram read acknowledgement. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const completeFolder = <ThrowOnError extends boolean = true>(options: Options<CompleteFolderData, ThrowOnError>) => (options.client ?? client).post<CompleteFolderResponses, CompleteFolderErrors, ThrowOnError>({
-    url: '/api/folders/{folder}/completion',
+    url: '/api/v3/folders/{folder}/completion',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -161,157 +210,108 @@ export const completeFolder = <ThrowOnError extends boolean = true>(options: Opt
 /**
  * Preview completion
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Capture the exact current reading composition into a completion token without deleting or marking anything viewed. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const previewCompletion = <ThrowOnError extends boolean = true>(options: Options<PreviewCompletionData, ThrowOnError>) => (options.client ?? client).post<PreviewCompletionResponses, PreviewCompletionErrors, ThrowOnError>({ url: '/api/folders/{folder}/completion/preview', ...options });
-
-/**
- * Import subscriptions
- *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
- */
-export const importSubscriptions = <ThrowOnError extends boolean = true>(options: Options<ImportSubscriptionsData, ThrowOnError>) => (options.client ?? client).post<ImportSubscriptionsResponses, ImportSubscriptionsErrors, ThrowOnError>({
-    url: '/api/import',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
- * Import preview
- *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
- */
-export const importPreview = <ThrowOnError extends boolean = true>(options: Options<ImportPreviewData, ThrowOnError>) => (options.client ?? client).post<ImportPreviewResponses, ImportPreviewErrors, ThrowOnError>({
-    url: '/api/import/preview',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
+export const previewCompletion = <ThrowOnError extends boolean = true>(options: Options<PreviewCompletionData, ThrowOnError>) => (options.client ?? client).post<PreviewCompletionResponses, PreviewCompletionErrors, ThrowOnError>({ url: '/api/v3/folders/{folder}/completion/preview', ...options });
 
 /**
  * Material
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read one publication and its typed pending/available content. Fetch retries do not hide saved incomplete text; caption state belongs only to YouTube and provenance belongs to results. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const material = <ThrowOnError extends boolean = true>(options: Options<MaterialData, ThrowOnError>) => (options.client ?? client).get<MaterialResponses, MaterialErrors, ThrowOnError>({ url: '/api/materials/{item}', ...options });
+export const material = <ThrowOnError extends boolean = true>(options: Options<MaterialData, ThrowOnError>) => (options.client ?? client).get<MaterialResponses, MaterialErrors, ThrowOnError>({ url: '/api/v3/materials/{item}', ...options });
 
 /**
  * Restore filter
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Restore publication visibility and filtered fragments without completing reading or creating a viewed acknowledgement. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const restoreFilter = <ThrowOnError extends boolean = true>(options: Options<RestoreFilterData, ThrowOnError>) => (options.client ?? client).post<RestoreFilterResponses, RestoreFilterErrors, ThrowOnError>({ url: '/api/materials/{item}/filter/restore', ...options });
+export const restoreFilter = <ThrowOnError extends boolean = true>(options: Options<RestoreFilterData, ThrowOnError>) => (options.client ?? client).post<RestoreFilterResponses, RestoreFilterErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/filter/restore', ...options });
 
 /**
  * Retry filter
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Schedule an admissible filtering retry with current settings. Preserve prior accepted filtering while a fresh attempt runs. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const retryFilter = <ThrowOnError extends boolean = true>(options: Options<RetryFilterData, ThrowOnError>) => (options.client ?? client).post<RetryFilterResponses, RetryFilterErrors, ThrowOnError>({ url: '/api/materials/{item}/filter/retry', ...options });
+export const retryFilter = <ThrowOnError extends boolean = true>(options: Options<RetryFilterData, ThrowOnError>) => (options.client ?? client).post<RetryFilterResponses, RetryFilterErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/filter/retry', ...options });
 
 /**
  * Image
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Return saved image bytes for the current publication. Names are opaque single segments; do not construct local file paths. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const image = <ThrowOnError extends boolean = true>(options: Options<ImageData, ThrowOnError>) => (options.client ?? client).get<ImageResponses, ImageErrors, ThrowOnError>({ url: '/api/materials/{item}/images/{name}', ...options });
+export const image = <ThrowOnError extends boolean = true>(options: Options<ImageData, ThrowOnError>) => (options.client ?? client).get<ImageResponses, ImageErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/images/{name}', ...options });
 
 /**
  * Attachment
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Return saved attachment bytes with actual MIME type and content disposition; preserve audio/video/circle/file playback. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const attachment = <ThrowOnError extends boolean = true>(options: Options<AttachmentData, ThrowOnError>) => (options.client ?? client).get<AttachmentResponses, AttachmentErrors, ThrowOnError>({ url: '/api/materials/{item}/media/{name}', ...options });
+export const attachment = <ThrowOnError extends boolean = true>(options: Options<AttachmentData, ThrowOnError>) => (options.client ?? client).get<AttachmentResponses, AttachmentErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/media/{name}', ...options });
 
 /**
  * Regenerate
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Schedule regeneration of applicable publication results. Keep previously accepted results during a new attempt and discard stale generations. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const regenerate = <ThrowOnError extends boolean = true>(options: Options<RegenerateData, ThrowOnError>) => (options.client ?? client).post<RegenerateResponses, RegenerateErrors, ThrowOnError>({ url: '/api/materials/{item}/regenerate', ...options });
+export const regenerate = <ThrowOnError extends boolean = true>(options: Options<RegenerateData, ThrowOnError>) => (options.client ?? client).post<RegenerateResponses, RegenerateErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/regenerate', ...options });
 
 /**
  * Retry material
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Schedule another content fetch for the identified publication. Preserve any saved incomplete copy while retrying and do not mark viewed. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const retryMaterial = <ThrowOnError extends boolean = true>(options: Options<RetryMaterialData, ThrowOnError>) => (options.client ?? client).post<RetryMaterialResponses, RetryMaterialErrors, ThrowOnError>({ url: '/api/materials/{item}/retry', ...options });
+export const retryMaterial = <ThrowOnError extends boolean = true>(options: Options<RetryMaterialData, ThrowOnError>) => (options.client ?? client).post<RetryMaterialResponses, RetryMaterialErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/retry', ...options });
 
 /**
  * Retry theses
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Schedule an admissible theses retry for the identified publication; it does not mark the publication viewed. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const retryTheses = <ThrowOnError extends boolean = true>(options: Options<RetryThesesData, ThrowOnError>) => (options.client ?? client).post<RetryThesesResponses, RetryThesesErrors, ThrowOnError>({ url: '/api/materials/{item}/theses/retry', ...options });
+export const retryTheses = <ThrowOnError extends boolean = true>(options: Options<RetryThesesData, ThrowOnError>) => (options.client ?? client).post<RetryThesesResponses, RetryThesesErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/theses/retry', ...options });
 
 /**
  * Previous version
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read a saved author version by positive decimal version number. The previous version is not substituted for current content. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const previousVersion = <ThrowOnError extends boolean = true>(options: Options<PreviousVersionData, ThrowOnError>) => (options.client ?? client).get<PreviousVersionResponses, PreviousVersionErrors, ThrowOnError>({ url: '/api/materials/{item}/versions/{number}', ...options });
+export const previousVersion = <ThrowOnError extends boolean = true>(options: Options<PreviousVersionData, ThrowOnError>) => (options.client ?? client).get<PreviousVersionResponses, PreviousVersionErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/versions/{number}', ...options });
 
 /**
  * Previous media
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Return saved image/media bytes of a specific author version; kind is images/media and number must be at least one. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const previousMedia = <ThrowOnError extends boolean = true>(options: Options<PreviousMediaData, ThrowOnError>) => (options.client ?? client).get<PreviousMediaResponses, PreviousMediaErrors, ThrowOnError>({ url: '/api/materials/{item}/versions/{number}/{kind}/{name}', ...options });
+export const previousMedia = <ThrowOnError extends boolean = true>(options: Options<PreviousMediaData, ThrowOnError>) => (options.client ?? client).get<PreviousMediaResponses, PreviousMediaErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/versions/{number}/{kind}/{name}', ...options });
 
 /**
  * Viewed
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Explicitly complete the whole identified publication reading composition, deleting its local available content and permitting safe read acknowledgement. A repeat may return 404; never automatically replay after unknown outcome. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const viewed = <ThrowOnError extends boolean = true>(options: Options<ViewedData, ThrowOnError>) => (options.client ?? client).post<ViewedResponses, ViewedErrors, ThrowOnError>({ url: '/api/materials/{item}/viewed', ...options });
-
-/**
- * Navigation
- *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
- */
-export const navigation = <ThrowOnError extends boolean = true>(options?: Options<NavigationData, ThrowOnError>) => (options?.client ?? client).get<NavigationResponses, NavigationErrors, ThrowOnError>({ url: '/api/navigation', ...options });
-
-/**
- * Report reader action
- *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
- */
-export const reportReaderAction = <ThrowOnError extends boolean = true>(options: Options<ReportReaderActionData, ThrowOnError>) => (options.client ?? client).post<ReportReaderActionResponses, ReportReaderActionErrors, ThrowOnError>({
-    url: '/api/problems/actions',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
+export const viewed = <ThrowOnError extends boolean = true>(options: Options<ViewedData, ThrowOnError>) => (options.client ?? client).post<ViewedResponses, ViewedErrors, ThrowOnError>({ url: '/api/v3/materials/{item}/viewed', ...options });
 
 /**
  * Abandon problem
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Abandon an eligible unsuccessful editing problem. This does not cancel or undo a committed command. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const abandonProblem = <ThrowOnError extends boolean = true>(options: Options<AbandonProblemData, ThrowOnError>) => (options.client ?? client).post<AbandonProblemResponses, AbandonProblemErrors, ThrowOnError>({ url: '/api/problems/{identity}/abandon', ...options });
+export const abandonProblem = <ThrowOnError extends boolean = true>(options: Options<AbandonProblemData, ThrowOnError>) => (options.client ?? client).post<AbandonProblemResponses, AbandonProblemErrors, ThrowOnError>({ url: '/api/v3/problems/{identity}/abandon', ...options });
 
 /**
  * Codex state
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read saved configuration separately from processor availability and observed quota; unknown quota is not zero. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const codexState = <ThrowOnError extends boolean = true>(options?: Options<CodexStateData, ThrowOnError>) => (options?.client ?? client).get<CodexStateResponses, CodexStateErrors, ThrowOnError>({ url: '/api/processors/codex', ...options });
+export const codexState = <ThrowOnError extends boolean = true>(options?: Options<CodexStateData, ThrowOnError>) => (options?.client ?? client).get<CodexStateResponses, CodexStateErrors, ThrowOnError>({ url: '/api/v3/processors/codex', ...options });
 
 /**
  * Codex save
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Replace the full filter/theses configuration after validating choices against the current model catalogue. Persist locally; future processing uses the accepted choice. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const codexSave = <ThrowOnError extends boolean = true>(options: Options<CodexSaveData, ThrowOnError>) => (options.client ?? client).put<CodexSaveResponses, CodexSaveErrors, ThrowOnError>({
-    url: '/api/processors/codex',
+    url: '/api/v3/processors/codex',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -322,31 +322,31 @@ export const codexSave = <ThrowOnError extends boolean = true>(options: Options<
 /**
  * Codex check
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Check processor admission and quota without changing settings or starting material processing. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const codexCheck = <ThrowOnError extends boolean = true>(options?: Options<CodexCheckData, ThrowOnError>) => (options?.client ?? client).post<CodexCheckResponses, CodexCheckErrors, ThrowOnError>({ url: '/api/processors/codex/check', ...options });
+export const codexCheck = <ThrowOnError extends boolean = true>(options?: Options<CodexCheckData, ThrowOnError>) => (options?.client ?? client).post<CodexCheckResponses, CodexCheckErrors, ThrowOnError>({ url: '/api/v3/processors/codex/check', ...options });
 
 /**
  * Codex models
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read dynamic supported models, effort choices and fast support; clients do not hard-code the catalogue. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const codexModels = <ThrowOnError extends boolean = true>(options?: Options<CodexModelsData, ThrowOnError>) => (options?.client ?? client).get<CodexModelsResponses, CodexModelsErrors, ThrowOnError>({ url: '/api/processors/codex/models', ...options });
+export const codexModels = <ThrowOnError extends boolean = true>(options?: Options<CodexModelsData, ThrowOnError>) => (options?.client ?? client).get<CodexModelsResponses, CodexModelsErrors, ThrowOnError>({ url: '/api/v3/processors/codex/models', ...options });
 
 /**
  * Processor config
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read an explicitly absent or present local processor configuration. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const processorConfig = <ThrowOnError extends boolean = true>(options?: Options<ProcessorConfigData, ThrowOnError>) => (options?.client ?? client).get<ProcessorConfigResponses, ProcessorConfigErrors, ThrowOnError>({ url: '/api/processors/llamacpp', ...options });
+export const processorConfig = <ThrowOnError extends boolean = true>(options?: Options<ProcessorConfigData, ThrowOnError>) => (options?.client ?? client).get<ProcessorConfigResponses, ProcessorConfigErrors, ThrowOnError>({ url: '/api/v3/processors/llamacpp', ...options });
 
 /**
  * Processor save
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Replace the full processor configuration; validate endpoint and model before accepting the local settings change. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const processorSave = <ThrowOnError extends boolean = true>(options: Options<ProcessorSaveData, ThrowOnError>) => (options.client ?? client).put<ProcessorSaveResponses, ProcessorSaveErrors, ThrowOnError>({
-    url: '/api/processors/llamacpp',
+    url: '/api/v3/processors/llamacpp',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -357,24 +357,31 @@ export const processorSave = <ThrowOnError extends boolean = true>(options: Opti
 /**
  * Processor check
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Probe the configured processor and report execution locality by code, without starting material processing. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const processorCheck = <ThrowOnError extends boolean = true>(options?: Options<ProcessorCheckData, ThrowOnError>) => (options?.client ?? client).post<ProcessorCheckResponses, ProcessorCheckErrors, ThrowOnError>({ url: '/api/processors/llamacpp/check', ...options });
+export const processorCheck = <ThrowOnError extends boolean = true>(options?: Options<ProcessorCheckData, ThrowOnError>) => (options?.client ?? client).post<ProcessorCheckResponses, ProcessorCheckErrors, ThrowOnError>({ url: '/api/v3/processors/llamacpp/check', ...options });
+
+/**
+ * Reading composition
+ *
+ * Read domain membership, counts and order for publication reading. This is a subject projection with no layout or navigation commands. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const readingComposition = <ThrowOnError extends boolean = true>(options?: Options<ReadingCompositionData, ThrowOnError>) => (options?.client ?? client).get<ReadingCompositionResponses, ReadingCompositionErrors, ThrowOnError>({ url: '/api/v3/reading-composition', ...options });
 
 /**
  * Effective settings
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read effective settings and explicit overrides. Scope is oko/folder/feed; oko requires owner global, folder/feed require an existing resource. Feed metadata exists only in the feed snapshot. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const effectiveSettings = <ThrowOnError extends boolean = true>(options: Options<EffectiveSettingsData, ThrowOnError>) => (options.client ?? client).get<EffectiveSettingsResponses, EffectiveSettingsErrors, ThrowOnError>({ url: '/api/settings/{scope}/{owner}', ...options });
+export const effectiveSettings = <ThrowOnError extends boolean = true>(options: Options<EffectiveSettingsData, ThrowOnError>) => (options.client ?? client).get<EffectiveSettingsResponses, EffectiveSettingsErrors, ThrowOnError>({ url: '/api/v3/settings/{scope}/{owner}', ...options });
 
 /**
  * Settings patch
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Patch the five publication settings. An omitted property keeps its override, null removes its override and a value sets it. No client presence is needed for this local settings write. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const settingsPatch = <ThrowOnError extends boolean = true>(options: Options<SettingsPatchData, ThrowOnError>) => (options.client ?? client).patch<SettingsPatchResponses, SettingsPatchErrors, ThrowOnError>({
-    url: '/api/settings/{scope}/{owner}',
+    url: '/api/v3/settings/{scope}/{owner}',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -385,52 +392,31 @@ export const settingsPatch = <ThrowOnError extends boolean = true>(options: Opti
 /**
  * Status
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client presence or start external work. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const status = <ThrowOnError extends boolean = true>(options?: Options<StatusData, ThrowOnError>) => (options?.client ?? client).get<StatusResponses, StatusErrors, ThrowOnError>({ url: '/api/status', ...options });
+export const status = <ThrowOnError extends boolean = true>(options?: Options<StatusData, ThrowOnError>) => (options?.client ?? client).get<StatusResponses, StatusErrors, ThrowOnError>({ url: '/api/v3/status', ...options });
 
 /**
  * Stop
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Accept the global prohibition of new work and begin shutdown. The response may precede process exit; losing it does not prove the instance remained running. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const stop = <ThrowOnError extends boolean = true>(options?: Options<StopData, ThrowOnError>) => (options?.client ?? client).post<StopResponses, StopErrors, ThrowOnError>({ url: '/api/stop', ...options });
+export const stop = <ThrowOnError extends boolean = true>(options?: Options<StopData, ThrowOnError>) => (options?.client ?? client).post<StopResponses, StopErrors, ThrowOnError>({ url: '/api/v3/stop', ...options });
 
 /**
  * Subscription list
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read saved folders and source subscriptions, including deleting entries and unconfirmed legacy client bindings without inventing identity. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const subscriptionList = <ThrowOnError extends boolean = true>(options?: Options<SubscriptionListData, ThrowOnError>) => (options?.client ?? client).get<SubscriptionListResponses, SubscriptionListErrors, ThrowOnError>({ url: '/api/subscriptions', ...options });
-
-/**
- * Close tab
- *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
- */
-export const closeTab = <ThrowOnError extends boolean = true>(options: Options<CloseTabData, ThrowOnError>) => (options.client ?? client).post<CloseTabResponses, CloseTabErrors, ThrowOnError>({ url: '/api/tabs/{tab}/close', ...options });
-
-/**
- * Heartbeat
- *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
- */
-export const heartbeat = <ThrowOnError extends boolean = true>(options: Options<HeartbeatData, ThrowOnError>) => (options.client ?? client).post<HeartbeatResponses, HeartbeatErrors, ThrowOnError>({ url: '/api/tabs/{tab}/heartbeat', ...options });
-
-/**
- * Telegram accounts
- *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
- */
-export const telegramAccounts = <ThrowOnError extends boolean = true>(options?: Options<TelegramAccountsData, ThrowOnError>) => (options?.client ?? client).get<TelegramAccountsResponses, TelegramAccountsErrors, ThrowOnError>({ url: '/api/telegram/accounts', ...options });
+export const subscriptionList = <ThrowOnError extends boolean = true>(options?: Options<SubscriptionListData, ThrowOnError>) => (options?.client ?? client).get<SubscriptionListResponses, SubscriptionListErrors, ThrowOnError>({ url: '/api/v3/subscriptions', ...options });
 
 /**
  * Telegram connect
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Create one whole-source Telegram subscription after verifying the chosen web/client binding. Omitted access means web; omitted initial_history means count 20. No topics, joins, alternate-account fallback, account replacement or hidden upsert. Access and real source identity are immutable. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const telegramConnect = <ThrowOnError extends boolean = true>(options: Options<TelegramConnectData, ThrowOnError>) => (options.client ?? client).post<TelegramConnectResponses, TelegramConnectErrors, ThrowOnError>({
-    url: '/api/telegram/connect',
+    url: '/api/v3/telegram/connect',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -439,12 +425,19 @@ export const telegramConnect = <ThrowOnError extends boolean = true>(options: Op
 });
 
 /**
- * Telegram topics
+ * Telegram profiles
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Read the personal and collection roles and opaque references to existing configurations. This read does not verify an account and never discloses session secrets or file paths. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const telegramTopics = <ThrowOnError extends boolean = true>(options: Options<TelegramTopicsData, ThrowOnError>) => (options.client ?? client).post<TelegramTopicsResponses, TelegramTopicsErrors, ThrowOnError>({
-    url: '/api/telegram/topics',
+export const telegramProfiles = <ThrowOnError extends boolean = true>(options?: Options<TelegramProfilesData, ThrowOnError>) => (options?.client ?? client).get<TelegramProfilesResponses, TelegramProfilesErrors, ThrowOnError>({ url: '/api/v3/telegram/profiles', ...options });
+
+/**
+ * Telegram profile save
+ *
+ * Verify a real account through an existing opaque configuration reference before binding the role. The same PUT rechecks the same account. Failed verification never persists a new unverified binding; dependent feeds prohibit real-account replacement. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ */
+export const telegramProfileSave = <ThrowOnError extends boolean = true>(options: Options<TelegramProfileSaveData, ThrowOnError>) => (options.client ?? client).put<TelegramProfileSaveResponses, TelegramProfileSaveErrors, ThrowOnError>({
+    url: '/api/v3/telegram/profiles/{role}',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -455,17 +448,17 @@ export const telegramTopics = <ThrowOnError extends boolean = true>(options: Opt
 /**
  * Youtube settings
  *
- * Read the current reader snapshot. Optional properties remain absent when not supplied.
+ * Read public YouTube transport settings and admission state without returning credentials. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const youtubeSettings = <ThrowOnError extends boolean = true>(options?: Options<YoutubeSettingsData, ThrowOnError>) => (options?.client ?? client).get<YoutubeSettingsResponses, YoutubeSettingsErrors, ThrowOnError>({ url: '/api/youtube', ...options });
+export const youtubeSettings = <ThrowOnError extends boolean = true>(options?: Options<YoutubeSettingsData, ThrowOnError>) => (options?.client ?? client).get<YoutubeSettingsResponses, YoutubeSettingsErrors, ThrowOnError>({ url: '/api/v3/youtube', ...options });
 
 /**
  * Youtube configure
  *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
+ * Patch YouTube transport settings. Omitted credentials remain unchanged; keep, clear and replace are explicit disjoint operations. Malformed structure is 422; a structurally valid impossible configuration is 400. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const youtubeConfigure = <ThrowOnError extends boolean = true>(options: Options<YoutubeConfigureData, ThrowOnError>) => (options.client ?? client).put<YoutubeConfigureResponses, YoutubeConfigureErrors, ThrowOnError>({
-    url: '/api/youtube',
+export const youtubeConfigure = <ThrowOnError extends boolean = true>(options: Options<YoutubeConfigureData, ThrowOnError>) => (options.client ?? client).patch<YoutubeConfigureResponses, YoutubeConfigureErrors, ThrowOnError>({
+    url: '/api/v3/youtube',
     ...options,
     headers: {
         'Content-Type': 'application/json',

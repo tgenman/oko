@@ -1,6 +1,6 @@
 import type { ReaderApi } from '../api/reader';
-import type { Problem, ProblemAction, ProblemObject, ProblemSnapshot, ReportAction } from '../api/generated/types.gen';
-import { reportReaderAction, abandonProblem } from '../api/generated/sdk.gen';
+import type { Problem, ProblemAction, ProblemObject, ProblemSnapshot, ReportAction } from '../api/legacy-generated/types.gen';
+import { reportReaderAction, abandonProblem } from '../api/legacy-generated/sdk.gen';
 export type VisibleProblem = Problem & {
     saved?: boolean;
 };

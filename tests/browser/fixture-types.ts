@@ -1,4 +1,4 @@
-import type {Card, Material, Status, Subscriptions, Navigation, EffectiveSettings, YouTube, DiagnosticJournal, CodexState, ProcessorConfig, History} from '../../frontend/src/api/generated/types.gen';
+import type {Card, Material, Status, Subscriptions, Navigation, EffectiveSettings, YouTube, DiagnosticJournal, CodexState, ProcessorConfig, History} from '../../frontend/src/api/legacy-generated/types.gen';
 
 // Scenarios deliberately omit optional fields and inject malformed HTTP replies.
 // Keep those payloads unknown at the transport boundary; successful snapshots

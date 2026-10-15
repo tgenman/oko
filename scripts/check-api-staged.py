@@ -10,8 +10,9 @@ import sys
 import tempfile
 import tomllib
 
-INPUTS = ('api/', 'scripts/api', 'scripts/generate', 'scripts/check-api-staged.py',
-          'frontend/src/api/generated/', 'oko/reader/generated/', 'package.json', 'package-lock.json',
+INPUTS = ('api/', 'scripts/candidate', 'scripts/api', 'scripts/generate', 'scripts/check-api-staged.py',
+          'frontend/src/api/generated/', 'frontend/src/api/legacy-generated/',
+          'oko/reader/generated/', 'oko/reader/legacy_generated/', 'package.json', 'package-lock.json',
           'pyproject.toml', 'poetry.lock')
 
 
@@ -99,9 +100,14 @@ def main():
         node = shutil.which(os.environ.get('OKO_NODE', 'node'))
         if not node:
             raise ValueError('API index checks require Node')
+        from candidate import staged_context
+        inherited = staged_context(root, stage)
+        environment = {**os.environ, 'OKO_PYTHON': python}
+        if inherited:
+            environment['OKO_CANDIDATE_CONTEXT'] = str(inherited)
         print('CHECK exact staged API contract and generated libraries', flush=True)
         return subprocess.run([node, '--import', 'tsx', str(stage / 'scripts/generate-api.mts'), 'check'], cwd=stage,
-                              env={**os.environ, 'OKO_PYTHON': python}).returncode
+                              env=environment).returncode
 
 
 if __name__ == '__main__':
