@@ -179,3 +179,51 @@ def test_topic_autoread_and_rebinding_do_not_affect_other_topics(tmp_path: Path)
             time.sleep(.02)
         assert tg.confirmations == [(20, 120)]
         assert len(client.get('/api/cards').json()) == 2
+
+
+def test_whole_forum_worker_keeps_general_new_deleted_topics_and_refuses_broad_ack(tmp_path, monkeypatch):
+    """SDK request safety, not evidence of Telegram server acknowledgement effects."""
+    import asyncio
+    import json
+    import pytest
+    from oko.collection.contracts import SourceError
+    from oko.collection.telegram.source import LocalTelegram
+    from tests.support.telegram_forum_sdk import forum_sdk
+    env, trace = forum_sdk(tmp_path, monkeypatch)
+    monkeypatch.setenv('SDK_WHOLE_FORUM', '1')
+
+    async def check():
+        worker = LocalTelegram(env, tmp_path / 'data')
+        try:
+            # Until #19 supplies a proven safe frontier, production refuses
+            # whole-forum operations rather than falling through to broad ack.
+            with pytest.raises(SourceError, match='Нет доступа'):
+                await worker.acknowledge('fixture', -1001234567890, 144)
+            # Topic-specific General still uses explicit ReadDiscussion, never
+            # a higher global frontier that would cross unprocessed messages.
+            await worker.acknowledge('fixture', -1001234567890, 131, topic_id=1)
+        finally:
+            await worker.close()
+    asyncio.run(check())
+    calls = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert not any(c['op'] == 'BROAD_ACK' for c in calls)
+    assert [(c['topic'], c['maximum']) for c in calls if c['op'] == 'ReadDiscussionRequest'] == [(1, 131)]
+
+    # Probe the external SDK seam in a subprocess with the real installed SDK
+    # requests and only its network client replaced. No account is contacted.
+    import subprocess
+    import sys
+    probe = subprocess.run([sys.executable, '-c', """
+import asyncio, json
+from telethon import TelegramClient
+from oko.collection.telegram.topics import history
+async def main():
+    client = TelegramClient('fixture.session', 1, 'fixture')
+    entity = await client.get_entity('@forum')
+    first, selected = await history(client, entity, None, limit=100, reverse=True, offset_id=0)
+    assert len(first) == len(selected) == 100
+    second, selected = await history(client, entity, None, limit=100, reverse=True, offset_id=130)
+    print(json.dumps([m.id for m in selected]))
+asyncio.run(main())
+"""], capture_output=True, text=True, check=True, timeout=10)
+    assert json.loads(probe.stdout) == [131, 140, 141, 142, 143, 144]
