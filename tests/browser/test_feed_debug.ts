@@ -10,8 +10,8 @@ test('add URL uses one form and automatically shows YouTube connection', async (
       const t = readerTransport;
       const feed = {id: 'youtube', title: '3Blue1Brown', kind: 'youtube', transport: 'youtube', folder_id: 'f', original_urls: ['https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw'], importance: 'normal', initial_days: 1};
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
-      t.replies.set('/api/feeds', {body: feed});
-      t.replies.set('/api/feeds/verify', {body: {url: feed.original_urls[0], title: '3Blue1Brown', kind: 'youtube', verification: 'checked', existing: null}});
+      t.replies.set('/api/v3/feeds', {body: feed});
+      t.replies.set('/api/v3/feeds/verify', {body: {url: feed.original_urls[0], title: '3Blue1Brown', kind: 'youtube', verification: 'checked', existing: null}});
       t.replies.set('/api/v3/settings/feed/youtube', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
     await r.page.locator('#add-open').click();
@@ -24,13 +24,13 @@ test('add URL uses one form and automatically shows YouTube connection', async (
     await expect(r.page.locator('#feeds-dialog')).toBeVisible();
     await expect(r.page.locator('#rss-url')).toHaveValue('');
     await expect(r.page.locator('#feed-options')).toContainText('YouTube подключён');
-    const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/feeds' && r.method === 'POST'));
+    const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/feeds' && r.method === 'POST'));
     await r.page.keyboard.press('Escape');
     await r.page.locator('#add-open').click();
     await expect(r.page.locator('#rss-url')).toHaveValue('');
     await expect(r.page.locator('#rss-url')).toBeEnabled();
     await expect(r.page.locator('#rss-checked-fields')).toBeHidden();
-    expect(request!.body).toEqual({url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw', title: '3Blue1Brown', folder: 'Учёба', verification: 'checked', initial_history: {mode: 'count', count: 20, date: null, timezone: await r.page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)}});
+    expect(request!.body).toEqual({url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw', title: '3Blue1Brown', folder: 'Учёба', verification: 'checked', initial_history: {mode: 'count', count: '20'}});
   } finally { await r.close(); }
 });
 
@@ -63,29 +63,29 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
       t.replies.set('/api/v3/processors/llamacpp', {body: null});
-      t.held.set('/api/feeds/verify', true);
+      t.held.set('/api/v3/feeds/verify', true);
     });
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/old');
     await r.page.locator('#rss-check').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/feeds/verify'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/feeds/verify'));
     await r.page.locator('#rss-url').fill('https://source.test/new');
-    await r.page.evaluate(() => readerTransport.release('/api/feeds/verify', {url: 'https://source.test/old', title: 'Old', verification: 'old', existing: null}));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/feeds/verify', {url: 'https://source.test/old', title: 'Old', verification: 'old', existing: null}));
     await expect(r.page.locator('#rss-add')).toBeDisabled();
     await expect(r.page.locator('#rss-checked-fields')).toBeHidden();
-    await r.page.evaluate(() => readerTransport.replies.set('/api/feeds/verify', {status: 400, body: {detail: 'Неверный RSS/Atom'}}));
+    await r.page.evaluate(() => readerTransport.replies.set('/api/v3/feeds/verify', {status: 400, body: {detail: 'Неверный RSS/Atom'}}));
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-message')).toHaveText('Неверный RSS/Atom');
     await r.page.evaluate(() => {
       const feed = {id: 'existing', title: 'Старое имя', kind: 'rss', transport: 'rss', importance: 'high', initial_days: 7, folder_id: 'f'};
-      readerTransport.replies.set('/api/feeds/verify', {body: {existing: feed}});
+      readerTransport.replies.set('/api/v3/feeds/verify', {body: {existing: feed}});
       readerTransport.replies.set('/api/subscriptions', {body: {feeds: [feed], folders: [{id: 'f', title: 'Старая папка'}]}});
       readerTransport.replies.set('/api/v3/settings/feed/existing', {body: {...readerTransport.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#feeds-dialog')).toBeVisible();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: Старое имя');
-    expect(await r.page.evaluate(() => readerTransport.requests.filter(r => r.url === '/api/feeds' && r.method === 'POST').length)).toBe(0);
+    expect(await r.page.evaluate(() => readerTransport.requests.filter(r => r.url === '/api/v3/feeds' && r.method === 'POST').length)).toBe(0);
   } finally { await r.close(); }
 });
 
@@ -179,8 +179,8 @@ test('adding a feed selects existing folders or keeps a new folder draft across 
     await r.page.evaluate(() => {
       const t = readerTransport;
       t.replies.set('/api/subscriptions', {body: {folders: [{id:'science',title:'Наука'}], feeds:[]}});
-      t.replies.set('/api/feeds/verify', {body: {url:'https://source.test/feed',title:'Источник',kind:'rss',verification:'checked'}});
-      t.replies.set('/api/feeds', {status:400,body:{detail:'Тестовый отказ'}});
+      t.replies.set('/api/v3/feeds/verify', {body: {url:'https://source.test/feed',title:'Источник',kind:'rss',verification:'checked'}});
+      t.replies.set('/api/v3/feeds', {status:400,body:{detail:'Тестовый отказ'}});
       t.replies.set('/api/telegram/accounts', {body:['personal']});
       t.replies.set('/api/telegram/connect', {status:400,body:{detail:'Тестовый отказ'}});
     });
@@ -194,7 +194,7 @@ test('adding a feed selects existing folders or keeps a new folder draft across 
         await expect(r.page.locator('#telegram-account')).toHaveValue('personal');
         await r.page.locator('#telegram-peer').fill('@channel');
       }
-      const endpoint = prefix === 'rss' ? '/api/feeds' : '/api/telegram/connect';
+      const endpoint = prefix === 'rss' ? '/api/v3/feeds' : '/api/telegram/connect';
       await r.page.locator('#' + prefix + '-folder').selectOption('Наука');
       await expect(r.page.locator('#' + prefix + '-folder-new')).toBeHidden();
       await r.page.locator('#' + prefix + '-add').click();

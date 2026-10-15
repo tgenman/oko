@@ -21,10 +21,10 @@ def response(request):
     if request.url.host == 'www.youtube.com':
         assert request.url.path == '/feeds/videos.xml'
         return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>Synthetic channel</title></feed>')
-    assert request.url.host in ('a.test', 'b.test', 'empty.test'), request.url
+    assert request.url.host in ('a.test', 'b.test', 'empty.test', 'source.test'), request.url
     if request.url.path == '/image.png':
         return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
-    if request.url.path == '/feed':
+    if request.url.path == '/feed' or request.url.host == 'source.test':
         date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
         item = '' if request.url.host == 'empty.test' else f'<item><guid>article</guid><title>Статья {request.url.host}</title><link>https://{request.url.host}/article</link><pubDate>{date}</pubDate><description>Анонс библиотеки.</description></item>'
         return httpx.Response(200, text=f'<rss version="2.0"><channel><title>Синтетический источник</title>{item}</channel></rss>')

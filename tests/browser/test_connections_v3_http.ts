@@ -1,0 +1,32 @@
+import {test} from 'node:test';
+import {expect} from 'playwright/test';
+import {productionReader} from './http-reader';
+import {artifactPath} from './artifacts';
+import {feedOptions} from './settings-actions';
+
+test('single RSS connection sends an exact history count and displays the persisted v3 state', {timeout:20000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ await page.goto(origin+'/#token='+token);
+ await page.locator('#add-open').click();
+ await expect(page.getByRole('tab')).toHaveCount(2);
+ await page.locator('#rss-url').fill('https://a.test/feed');
+ await page.locator('#rss-check').click();
+ await expect(page.locator('#rss-add')).toBeEnabled();
+ await page.locator('#rss-history-count').fill('9007199254740993');
+ const request=page.waitForRequest(r=>r.url().endsWith('/api/v3/feeds')&&r.method()==='POST');
+ await page.locator('#rss-add').click();
+ expect((await request).postDataJSON().initial_history).toEqual({mode:'count',count:'9007199254740993'});
+ await expect(page.locator('#feeds-dialog')).toBeVisible();
+ await feedOptions(page);
+ await expect(page.locator('#history-progress')).toContainText('9007199254740993');
+ await expect(page.locator('#history-progress')).toContainText('Начальная история завершена');
+ await page.setViewportSize({width:1400,height:950});
+ await page.screenshot({path:artifactPath('connections-v3-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ expect((await page.locator('#feed-options').boundingBox())!.width).toBeGreaterThan(280);
+ await page.locator('#feed-options').screenshot({path:artifactPath('connections-v3-mobile.png')});
+ const checked=await api('v3/feeds/verify','POST',{url:'https://a.test/feed'});
+ expect(checked.state).toBe('existing');
+ if(checked.state==='existing')expect(checked.existing_feed.history.state).toBe('complete');
+});

@@ -1,3 +1,4 @@
+from tests.support.subscriptions import add_sources
 import base64
 from datetime import datetime, timezone
 
@@ -9,10 +10,7 @@ PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAACJ0lEQVR4
 
 
 def subscribe(client):
-    opml = f'<opml><body><outline text="Наука"><outline text="Канал" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}"/></outline></body></opml>'
-    first = client.post('/api/import', json={'opml': opml}).json()['feeds'][0]
-    again = client.post('/api/import', json={'opml': opml}).json()['feeds']
-    assert len(again) == 1 and again[0]['id'] == first['id']
+    first = add_sources(client, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Канал', 'Наука')]).json()['feeds'][0]
     return first['id']
 
 

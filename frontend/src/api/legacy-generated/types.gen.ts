@@ -429,7 +429,7 @@ export type EffectiveValues = {
 };
 
 export type Error = {
-    detail: string | CompletionConflict | ImportConflict;
+    detail: string | CompletionConflict;
 };
 
 /**
@@ -759,43 +759,6 @@ export type HistoryPause = {
      * Paused
      */
     paused: boolean;
-};
-
-export type ImportConflict = {
-    conflicts: Array<{
-        folders: Array<string>;
-        identity: string;
-    }>;
-};
-
-export type ImportFeed = {
-    connection: string;
-    folders: Array<string>;
-    identity: string;
-    kind: 'rss' | 'telegram' | 'youtube' | 'unresolved';
-    original_urls: Array<string>;
-    title: string;
-};
-
-export type ImportPreview = {
-    feeds: Array<ImportFeed>;
-    folders: Array<string>;
-};
-
-/**
- * ImportRequest
- */
-export type ImportRequest = {
-    /**
-     * Choices
-     */
-    choices?: {
-        [key: string]: string;
-    };
-    /**
-     * Opml
-     */
-    opml: string;
 };
 
 /**
@@ -2411,108 +2374,6 @@ export type PreviewCompletionResponses = {
 };
 
 export type PreviewCompletionResponse = PreviewCompletionResponses[keyof PreviewCompletionResponses];
-
-export type ImportSubscriptionsData = {
-    body: ImportRequest;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/import';
-};
-
-export type ImportSubscriptionsErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type ImportSubscriptionsError = ImportSubscriptionsErrors[keyof ImportSubscriptionsErrors];
-
-export type ImportSubscriptionsResponses = {
-    /**
-     * Successful operation
-     */
-    200: Subscriptions;
-};
-
-export type ImportSubscriptionsResponse = ImportSubscriptionsResponses[keyof ImportSubscriptionsResponses];
-
-export type ImportPreviewData = {
-    body: ImportRequest;
-    headers?: {
-        /**
-         * Client command identity. Missing/invalid values receive a server-generated identity; echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/import/preview';
-};
-
-export type ImportPreviewErrors = {
-    /**
-     * Invalid business request
-     */
-    400: Error;
-    /**
-     * Invalid host, origin or bearer session
-     */
-    403: Error;
-    /**
-     * Conflict, stopped reader, expired context or changed composition
-     */
-    409: Error;
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-    /**
-     * Unexpected reader failure, see diagnostics
-     */
-    500: Error;
-    /**
-     * Store or deletion currently unavailable
-     */
-    503: Error;
-};
-
-export type ImportPreviewError = ImportPreviewErrors[keyof ImportPreviewErrors];
-
-export type ImportPreviewResponses = {
-    /**
-     * Successful operation
-     */
-    200: ImportPreview;
-};
-
-export type ImportPreviewResponse = ImportPreviewResponses[keyof ImportPreviewResponses];
 
 export type MaterialData = {
     body?: never;

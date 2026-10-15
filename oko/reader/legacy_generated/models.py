@@ -260,39 +260,6 @@ class HistoryPause(WireModel):
     paused: StrictBool = Field(..., title="Paused")
 
 
-class Conflict(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    folders: list[StrictStr]
-    identity: StrictStr
-
-
-class ImportConflict(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    conflicts: list[Conflict]
-
-
-class ImportFeed(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    connection: StrictStr
-    folders: list[StrictStr]
-    identity: StrictStr
-    kind: Literal["rss", "telegram", "youtube", "unresolved"]
-    original_urls: list[StrictStr]
-    title: StrictStr
-
-
-class ImportPreview(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    feeds: list[ImportFeed]
-    folders: list[StrictStr]
-
-
-class ImportRequest(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    choices: dict[str, StrictStr] | MISSING = Field(default=MISSING, title="Choices")
-    opml: StrictStr = Field(..., max_length=2000000, title="Opml")
-
-
 class Count(RootModel[StrictInt]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictInt = Field(
@@ -634,7 +601,7 @@ class ConnectTelegram(WireModel):
 
 class Error(WireModel):
     model_config = ConfigDict(extra="forbid")
-    detail: StrictStr | CompletionConflict | ImportConflict
+    detail: StrictStr | CompletionConflict
 
 
 class HTTPValidationError(WireModel):

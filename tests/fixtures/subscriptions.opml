@@ -1,8 +1,0 @@
-<opml version="2.0"><body>
-<outline text="2 Технологии">
- <outline text="Новости" xmlUrl="https://rsshub.example/telegram/channel/example_channel"/>
- <outline text="Дубль" xmlUrl="https://rsshub.example/telegram/channel/example_channel"/>
- <outline text="Статьи" xmlUrl="https://example.org/rss"/>
-</outline>
-<outline text="3 Политика"><outline text="Новости" xmlUrl="https://t.me/example_channel"/></outline>
-</body></opml>

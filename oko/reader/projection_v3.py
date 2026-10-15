@@ -124,22 +124,25 @@ def history(value: previous.InitialHistoryStatus) -> wire.FeedHistoryState:
             retry_at=timestamp(value.discovery_retry_at) if isinstance(value.discovery_retry_at, float) and value.discovery_retry_at else None)
             if isinstance(value.discovery_error, str) and value.discovery_error else None)
     state: wire.HistoryNotStarted | wire.HistoryCancelled | wire.HistoryComplete | wire.HistoryPaused | wire.HistoryWaiting | wire.HistoryFetching | wire.HistoryDiscovering
-    if not isinstance(value.run, str) or not value.run:
+    # Older RSS selections have no persisted run; expose stable identity without a read-side write.
+    import hashlib
+    run = value.run if isinstance(value.run, str) and value.run else 'legacy-' + hashlib.sha256((value.feed_id + selection.model_dump_json()).encode()).hexdigest()[:24]
+    if value.state == 'pending' and not value.paused and not (isinstance(value.run, str) and value.run):
         state = wire.HistoryNotStarted(state='not_started', selection=selection, progress=progress)
     elif value.state == 'cancelled':
-        state = wire.HistoryCancelled(state='cancelled', outcome='cancelled', run=value.run, selection=selection, progress=progress)
+        state = wire.HistoryCancelled(state='cancelled', outcome='cancelled', run=run, selection=selection, progress=progress)
     elif value.state == 'done':
-        state = wire.HistoryComplete(state='complete', run=value.run, selection=selection, progress=progress)
+        state = wire.HistoryComplete(state='complete', run=run, selection=selection, progress=progress)
     elif value.paused:
-        state = wire.HistoryPaused(state='paused', paused_phase='fetching' if value.frozen else 'discovering', run=value.run, selection=selection, progress=progress)
+        state = wire.HistoryPaused(state='paused', paused_phase='waiting' if value.waiting is True else 'fetching' if value.frozen else 'discovering' if (isinstance(value.run, str) and value.run) or value.available or (isinstance(value.requests, int) and value.requests) else 'not_started', run=run, selection=selection, progress=progress)
     elif value.state == 'waiting':
         state = wire.HistoryWaiting(state='waiting', reason=wire.WaitingReason('retry_scheduled'),
             retry_at=timestamp(value.discovery_retry_at) if isinstance(value.discovery_retry_at, float) and value.discovery_retry_at else None,
-            run=value.run, selection=selection, progress=progress)
+            run=run, selection=selection, progress=progress)
     elif value.frozen:
-        state = wire.HistoryFetching(state='fetching', run=value.run, selection=selection, progress=progress)
+        state = wire.HistoryFetching(state='fetching', run=run, selection=selection, progress=progress)
     else:
-        state = wire.HistoryDiscovering(state='discovering', run=value.run, selection=selection, progress=progress)
+        state = wire.HistoryDiscovering(state='discovering', run=run, selection=selection, progress=progress)
     return wire.FeedHistoryState(feed_id=wire.FeedId(value.feed_id), history=wire.HistoryState(state))
 
 

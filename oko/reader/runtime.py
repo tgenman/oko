@@ -25,7 +25,7 @@ from oko.reviews.coordination import PreparedWork
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram, TelegramPeer
-from oko.subscriptions.subscriptions import AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, identify
+from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, identify
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions
 from oko.collection.youtube.history import HistoryClient
 from oko.subscriptions.history import InitialHistory
@@ -36,8 +36,9 @@ T = TypeVar('T')
 
 
 class ActionError(Exception):
-    def __init__(self, kind: Literal['conflict', 'invalid', 'missing', 'unavailable'], detail: str | dict[str, Any], *, expected: bool = False) -> None:
+    def __init__(self, kind: Literal['conflict', 'invalid', 'missing', 'unavailable'], detail: str | dict[str, Any], *, expected: bool = False, code: str | None = None) -> None:
         self.kind, self.detail = kind, detail
+        self.code = code
         self.diagnostic_skip = expected
         super().__init__(str(detail))
 
@@ -399,17 +400,6 @@ class Runtime:
                 self._sync_sources()
             return result
 
-    async def import_subscriptions(self, body: ImportRequest) -> dict[str, Any]:
-        async with self._actions:
-            try:
-                result = self.require_store().subscriptions.import_opml(body)
-            except ValueError as error:
-                record_caught('runtime.import_subscriptions')
-                raise ActionError('invalid', str(error)) from None
-            if 'conflicts' in result:
-                raise ActionError('conflict', result)
-            return result
-
     async def add_feed(self, body: AddFeed) -> dict[str, Any]:
         async with self._actions:
             try:
@@ -418,7 +408,7 @@ class Runtime:
                     raise ActionError('conflict', 'Откройте читатель для добавления фида', expected=True)
                 url = normalized(body.url)
                 if self._feed_checks.get(body.verification) != url:
-                    raise ValueError('Сначала проверьте текущий URL фида')
+                    raise ActionError('invalid', 'Сначала проверьте текущий URL фида', expected=True, code='verification_expired')
                 return current.subscriptions.add_feed(body.model_copy(update={'url': url}))
             except ValueError as error:
                 record_caught('runtime.add_feed')
@@ -454,7 +444,7 @@ class Runtime:
                 raise
             raise ActionError('conflict', 'Проверка фида прервана; повторите действие', expected=True) from None
         except (SourceError, TimeoutError, httpx.InvalidURL) as error:
-            raise ActionError('invalid', error.label if isinstance(error, SourceError) else 'Неверный URL фида' if isinstance(error, httpx.InvalidURL) else 'Проверка фида не завершилась за 25 секунд') from error
+            raise ActionError('invalid', error.label if isinstance(error, SourceError) else 'Неверный URL фида' if isinstance(error, httpx.InvalidURL) else 'Проверка фида не завершилась за 25 секунд', code='source_unavailable' if isinstance(error, (SourceError, TimeoutError)) else None) from error
         finally:
             if task:
                 self._requests.discard(task)

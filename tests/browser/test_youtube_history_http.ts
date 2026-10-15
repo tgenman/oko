@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import {feedOptions} from './settings-actions.ts';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
@@ -7,7 +8,7 @@ test('real HTTP settings load three YouTube materials and keep viewed IDs on a s
   const {page,api,origin,token}=await productionReader(t);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await api('settings/oko/global','PATCH',{theses:false});
-  const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Видео" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa"/></outline></body></opml>'});
+  const plan=await addSources(api, [["https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa", "Видео", "Наука"]]);
   const feed=plan.feeds[0];
   await page.goto(origin+'/#token='+token);
   await page.locator('#feeds-open').click();

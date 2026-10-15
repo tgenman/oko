@@ -6,18 +6,11 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit, parse_qs
-import xml.etree.ElementTree as ET
 
 from oko.collection.telegram.source import ConnectTelegram
 from oko.subscriptions.history import History, InitialHistory
 
 from pydantic import BaseModel, ConfigDict, Field
-
-
-class ImportRequest(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    opml: str = Field(max_length=2_000_000)
-    choices: dict[str, str] = Field(default_factory=dict)
 
 
 class FeedURL(BaseModel):
@@ -61,10 +54,6 @@ def key(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:32]
 
 
-def folder_path(parts: list[str]) -> str:
-    return ' / '.join(part.replace('\\', '\\\\').replace('/', '\\/') for part in parts)
-
-
 def identify(url: str) -> tuple[str, str, str]:
     """Only exact recognisable routes merge; ambiguous routes remain unconnected."""
     parsed = urlsplit(url)
@@ -88,48 +77,6 @@ def identify(url: str) -> tuple[str, str, str]:
         return 'youtube:' + channel[0], 'youtube', 'needs_connection'
     canonical = urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, parsed.query, ''))
     return 'rss:' + canonical, 'rss', 'needs_connection'
-
-
-def preview(opml: str) -> dict[str, Any]:
-    # ElementTree does not fetch external entities. Reject declarations also to
-    # avoid entity expansion and make the accepted format unambiguous.
-    if re.search(r'<!\s*(DOCTYPE|ENTITY)', opml, re.I):
-        raise ValueError('OPML с объявлениями сущностей не поддерживается')
-    try:
-        root = ET.fromstring(opml)
-    except ET.ParseError:
-        raise ValueError('Некорректный OPML') from None
-    body = root.find('body')
-    if root.tag != 'opml' or body is None:
-        raise ValueError('Нужен документ OPML с body')
-    feeds: dict[str, dict[str, Any]] = {}
-    folders: list[str] = []
-
-    def walk(parent: ET.Element, path: list[str], depth: int) -> None:
-        if depth > 30:
-            raise ValueError('Слишком много вложенных папок')
-        for outline in parent.findall('outline'):
-            title = outline.get('text') or outline.get('title') or 'Без названия'
-            url = outline.get('xmlUrl')
-            if url:
-                identity, kind, connection = identify(url)
-                folder = folder_path(path) or 'Без папки'
-                if folder not in folders:
-                    folders.append(folder)
-                feed = feeds.setdefault(identity, dict(identity=identity, title=title, kind=kind,
-                                                       connection=connection, original_urls=[], folders=[]))
-                if url not in feed['original_urls']:
-                    feed['original_urls'].append(url)
-                if folder not in feed['folders']:
-                    feed['folders'].append(folder)
-            else:
-                folder = folder_path([*path, title])
-                if folder not in folders:
-                    folders.append(folder)
-                walk(outline, [*path, title], depth + 1)
-
-    walk(body, [], 0)
-    return dict(folders=folders, feeds=list(feeds.values()))
 
 
 class Subscriptions:
@@ -224,43 +171,6 @@ class Subscriptions:
                 feed[field] = None if feed[field] is None else bool(feed[field])
             result.append(feed)
         return result
-
-    def import_opml(self, request: ImportRequest) -> dict[str, Any]:
-        plan = preview(request.opml)
-        existing = {f['identity']: f for f in self.feeds()}
-        folder_titles = {f['id']: f['title'] for f in self.folders()}
-        selected: dict[str, str] = {}
-        conflicts = []
-        for feed in plan['feeds']:
-            identity = feed['identity']
-            old = existing.get(identity)
-            options = list(feed['folders'])
-            if old and folder_titles[old['folder_id']] not in options:
-                options.append(folder_titles[old['folder_id']])
-            choice = request.choices.get(identity)
-            if len(options) > 1 and choice not in options:
-                conflicts.append(dict(identity=identity, folders=options))
-            elif choice is not None and choice not in options:
-                raise ValueError('Выбранная папка отсутствует в импорте')
-            else:
-                selected[identity] = choice or options[0]
-        if conflicts:
-            return dict(conflicts=conflicts)
-        with self.db:
-            for title in plan['folders']:
-                self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)',
-                                (key('folder:' + title), title, len(self.folders())))
-            for feed in plan['feeds']:
-                identity = feed['identity']
-                old = existing.get(identity)
-                urls = list(dict.fromkeys((old['original_urls'] if old else []) + feed['original_urls']))
-                folder = self.db.execute('SELECT id FROM folders WHERE title=?', (selected[identity],)).fetchone()[0]
-                self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport)
-                VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(identity) DO UPDATE SET
-                folder_id=excluded.folder_id,original_urls=excluded.original_urls''',
-                                (key(identity), identity, feed['title'], feed['kind'], folder,
-                                 json.dumps(urls), feed['connection'], feed['kind'] if feed['kind'] in ('rss', 'youtube') else None))
-        return dict(folders=self.folders(), feeds=self.feeds())
 
     def add_feed(self, body: AddFeed) -> dict[str, Any]:
         identity, kind, connection = identify(body.url)
