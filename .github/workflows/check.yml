@@ -20,8 +20,8 @@ jobs:
         env:
           OKO_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: |
-          poetry run node --import tsx scripts/generate-api.mts check --fresh
-          poetry run ./scripts/check contracts build syntax lint types diff entrypoint
+          node --import tsx scripts/generate-api.mts check --fresh
+          ./scripts/check contracts build syntax lint types diff entrypoint
       - uses: actions/upload-artifact@v4
         with:
           name: checked-frontend
@@ -68,12 +68,12 @@ jobs:
       - if: matrix.suite == 'browser'
         run: npx playwright install --with-deps chromium
       - if: matrix.suite != 'tools'
-        run: poetry run ./scripts/check ${{ matrix.suite }}
+        run: ./scripts/check ${{ matrix.suite }}
       - if: matrix.suite == 'tools' && steps.selection.outputs.required == 'true'
         name: Test development tools only when their inputs changed
         env:
           CHECK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: poetry run ./scripts/check tools --if-changed --base "$CHECK_BASE"
+        run: ./scripts/check tools --if-changed --base "$CHECK_BASE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

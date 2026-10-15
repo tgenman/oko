@@ -56,7 +56,7 @@ def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path)
     # Commit an invalid predecessor so both later staged versions are changes.
     source.write_text('// predecessor to repair\n')
     assert run('git', 'init', '-q', cwd=tmp_path).returncode == 0
-    assert run('git', 'add', 'api', 'scripts', 'frontend', 'oko', 'package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock', cwd=tmp_path).returncode == 0
+    assert run('git', 'add', 'api', 'scripts', 'frontend', 'oko', 'package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock', cwd=tmp_path).returncode == 0
     assert run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-qm', 'fixture', cwd=tmp_path).returncode == 0
     source.write_text(valid + '// staged drift\n')
     assert run('git', 'add', str(source), cwd=tmp_path).returncode == 0

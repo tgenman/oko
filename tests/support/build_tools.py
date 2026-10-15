@@ -30,7 +30,7 @@ def api_repository(root: Path) -> None:
     document['paths']['/api/blob'] = {'get': {'operationId': 'blob', 'responses': {'200': binary_response}}}
     for name in ('openapi.yaml', 'baseline.json'):
         (root / 'api' / name).write_text(json.dumps(document, ensure_ascii=False))
-    for name in ('package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock'):
+    for name in ('package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock'):
         shutil.copy2(ROOT / name, root / name)
     (root / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
 
