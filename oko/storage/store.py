@@ -468,9 +468,18 @@ class Store:
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
         if not want_captions:
             return
-        for row in self.db.execute('SELECT id FROM items WHERE feed_id=? AND viewed=0 AND complete=1', (feed,)).fetchall():
-            material = self.material(row['id'])
-            if material and material.get('captions') == 'not_requested' and not material.get('loading'):
+        # This runs in the reader loop. Admission needs only the saved caption
+        # state, not a reader material with filters, theses and provenance.
+        rows = self.db.execute("""SELECT id FROM items WHERE feed_id=? AND viewed=0 AND complete=1
+            AND NOT EXISTS (SELECT 1 FROM jobs WHERE kind='fetch' AND item=items.id AND status IN ('pending','running'))""", (feed,)).fetchall()
+        for row in rows:
+            try:
+                with self.path(row['id']).open() as source:
+                    header = json.loads(source.readline())
+            except (OSError, ValueError):
+                record_caught('store.prepare_youtube')
+                continue
+            if header.get('captions') == 'not_requested':
                 self.retry_material(row['id'])
 
     def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True, event_origins: dict[str, Any] | None = None) -> None:

@@ -34,7 +34,9 @@ class Events:
         feeds = {f['id']: f for f in store.subscriptions.feeds()}
         folders: dict[str, list[dict[str, Any]]] = {}
         covered = represented_originals(store.digests.views())
-        for row in store.db.execute('SELECT id FROM items WHERE viewed=0 AND complete=1 ORDER BY published,id').fetchall():
+        for row in store.db.execute("""SELECT id FROM items WHERE viewed=0 AND complete=1
+                AND NOT EXISTS (SELECT 1 FROM jobs WHERE kind='fetch' AND item=items.id AND status IN ('pending','running'))
+                ORDER BY published,id""").fetchall():
             if row['id'] in covered:
                 continue
             material = store.material(row['id'])
@@ -167,6 +169,12 @@ class Events:
             self.store.db.execute('DELETE FROM state WHERE key=?', ('event-retry:' + job.item,))
 
     def views(self) -> list[dict[str, Any]]:
+        # Candidate discovery reads every publication. A reader only needs it
+        # when an accepted result (including one retained during retry) exists.
+        if not self.store.db.execute("""SELECT 1 FROM jobs WHERE kind='events' AND
+                (status='done' OR EXISTS (SELECT 1 FROM state WHERE key='event-retry:' || jobs.item))
+                LIMIT 1""").fetchone():
+            return []
         views = []
         feeds = {f['id']: f for f in self.store.subscriptions.feeds()}
         for batch, candidate in self.candidates().items():

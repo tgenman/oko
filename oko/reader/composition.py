@@ -67,8 +67,11 @@ class ReadingComposition:
         views = self._views()
         covered = represented_originals(views)
         cards = []
-        for row in self._store.db.execute('SELECT id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall():
+        for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall():
             if row['id'] in covered:
+                continue
+            owner = feeds.get(row['feed_id'])
+            if owner is None or (folder is not None and owner['folder_id'] != folder) or (feed is not None and row['feed_id'] != feed):
                 continue
             material = self._store.material(row['id'])
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):

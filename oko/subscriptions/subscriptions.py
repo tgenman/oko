@@ -212,9 +212,10 @@ class Subscriptions:
             return (0, int(prefix[1])) if prefix else (1, folder['position'])
         return sorted(folders, key=order)
 
-    def feeds(self) -> list[dict[str, Any]]:
+    def feeds(self, identity: str | None = None) -> list[dict[str, Any]]:
         result = []
-        for row in self.db.execute('SELECT * FROM feeds ORDER BY rowid'):
+        query = 'SELECT * FROM feeds' + (' WHERE id=?' if identity is not None else '') + ' ORDER BY rowid'
+        for row in self.db.execute(query, (identity,) if identity is not None else ()):
             feed = dict(row)
             feed['original_urls'] = json.loads(feed['original_urls'])
             feed['initial_history'] = self.history.status(feed['id'])
@@ -314,7 +315,7 @@ class Subscriptions:
                     overrides[row['field']] = value
         result = dict(effective=values, overrides=overrides)
         if scope == 'feed':
-            result['feed'] = next(f for f in self.feeds() if f['id'] == owner)
+            result['feed'] = self.feeds(owner)[0]
         return result
 
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> dict[str, Any]:
