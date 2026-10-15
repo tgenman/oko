@@ -31,8 +31,6 @@
     "build:check": "node --import tsx scripts/build-frontend.mts --check",
     "api:generate": "node --import tsx scripts/generate-api.mts generate",
     "api:check": "node --import tsx scripts/generate-api.mts check",
-    "api:compat": "node --import tsx scripts/generate-api.mts compat",
-    "api:baseline": "node --import tsx scripts/generate-api.mts baseline",
     "api:lint": "node --import tsx scripts/generate-api.mts validate",
     "api:docs": "node --import tsx scripts/generate-api.mts docs",
     "typecheck:browser": "tsc -p tsconfig.browser-tests.json",

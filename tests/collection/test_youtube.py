@@ -34,7 +34,8 @@ class YouTubeTranscriptApi:
     monkeypatch.setenv('PYTHONPATH', str(package.parent) + os.pathsep + os.environ.get('PYTHONPATH', ''))
     with TestClient(create_app(tmp_path / 'data', token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=LocalCaptions()), headers=HEADERS) as client:
         feed = subscribe(client)
-        client.patch('/api/feeds/' + feed, json={'importance': 'high'})
+        # Default theses already requests captions. Changing importance here
+        # can cancel the job started by the v3 connection and defer its retry.
         client.post('/api/tabs/reader/heartbeat')
         material = wait(client, lambda m: m.get('captions') == 'available')
         assert material['text'] == 'Текст через настоящий worker.'

@@ -1,15 +1,22 @@
-import {execFileSync} from 'node:child_process';
-import {existsSync} from 'node:fs';
-// Schemas are exported from the server's wire types, never handwritten here.
+import {readFileSync} from 'node:fs';
 import * as path from 'node:path';
 import Ajv from 'ajv/dist/2020';
+import type {ValidateFunction} from 'ajv';
 import addFormats from 'ajv-formats';
+
+// Read generated OpenAPI bytes directly: no Python startup or duplicate copies
+// of components for each response. Compile only contracts used by this file.
 const root = path.resolve(__dirname, '../..');
-const venv = path.join(root, '.venv/bin/python');
-const schemas: Record<string, object> = JSON.parse(execFileSync(process.env.OKO_PYTHON || (existsSync(venv) ? venv : 'python3'), ['-m', 'oko.reader.contracts'], {cwd:root, encoding:'utf8'}));
 const ajv = new Ajv({allErrors:true,strict:false});
 addFormats(ajv);
-const validators = Object.fromEntries(Object.entries(schemas).map(([name,schema]) => [name, ajv.compile(schema)]));
+const routes: Record<string, string> = {
+  navigation: '/api/navigation', cards: '/api/cards',
+  material: '/api/materials/{item}', version: '/api/materials/{item}/versions/{number}', status: '/api/status',
+  navigation_v3: '/api/v3/reading-composition', cards_v3: '/api/v3/cards',
+  material_v3: '/api/v3/materials/{item}', version_v3: '/api/v3/materials/{item}/versions/{number}',
+};
+const loaded = new Set<string>();
+const validators = new Map<string, ValidateFunction>();
 function contractFor(url: string, method = 'GET') {
   if (method !== 'GET') return null;
   const pathname = new URL(url, 'http://localhost').pathname;
@@ -25,7 +32,24 @@ function contractFor(url: string, method = 'GET') {
   return null;
 }
 function validate(name: string, body: unknown) {
-  const check = validators[name];
+  let check = validators.get(name);
+  if (!check) {
+    const route = routes[name];
+    if (!route) throw new Error(`Unknown fixture contract: ${name}`);
+    const library = name.endsWith('_v3') ? 'generated' : 'legacy_generated';
+    if (!loaded.has(library)) {
+      const document = JSON.parse(readFileSync(path.join(root, 'oko/reader', library, 'openapi.json'), 'utf8'));
+      // OpenAPI metadata is not JSON Schema. Expose only schemas and the exact
+      // response schemas, preserving their local #/components references.
+      ajv.addSchema({components: document.components, responses: Object.fromEntries(
+        Object.entries(routes).filter(([alias]) => alias.endsWith('_v3') === name.endsWith('_v3'))
+          .map(([alias, url]) => [alias, document.paths[url].get.responses['200'].content['application/json'].schema]),
+      )}, library);
+      loaded.add(library);
+    }
+    check = ajv.compile({$ref: `${library}#/responses/${name}`});
+    validators.set(name, check);
+  }
   if (!check(body)) throw new Error(`${name} contract: ${ajv.errorsText(check.errors, {dataVar:'response'})}`);
 }
 export {contractFor, validate};
