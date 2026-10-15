@@ -40,12 +40,12 @@ test('reader card appearance preserves the compact layout, metadata and real pre
   const r = await reader();
   try {
     await r.page.setViewportSize({width:1440,height:900});
-    await r.page.addInitScript(()=>readerTransport.replies.set('/api/sample-preview',{
+    await r.page.addInitScript(()=>readerTransport.replies.set('/api/v3/materials/one/images/image-1.png',{
       mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='}));
     await r.start([
-      material('one',{title:'Кто быстрее?',snippet:'Три одинаковые бутылки скатываются с горки: одна заполнена водой, в другой вода и воздух.',changed:true,feed_title:'GetAClass — Физика в опытах и экспериментах',published:1802341800,images:['/api/sample-preview']}),
+      material('one',{title:'Кто быстрее?',snippet:'Три одинаковые бутылки скатываются с горки: одна заполнена водой, в другой вода и воздух.',changed:true,feed_title:'GetAClass — Физика в опытах и экспериментах',published:1802341800,images:['/api/v3/materials/one/images/image-1.png']}),
       material('two',{title:'We Finally Know More About Humanity’s First Civilization',snippet:'IT’S HERE! The 12,027 Calendar just dropped on the kurzgesagt shop.',changed:true,feed_title:'Kurzgesagt – In a Nutshell',published:1801991220}),
-      material('three',{title:'AI Just Crossed the Terrifying Line — Now What?',snippet:'In July of 2026, 700 AI agents hacked the infrastructure of Hugging Face.',complete:false,changed:true,feed_title:'Kurzgesagt – In a Nutshell',published:1801731480}),
+      material('three',{title:'AI Just Crossed the Terrifying Line — Now What?',snippet:'In July of 2026, 700 AI agents hacked the infrastructure of Hugging Face.',complete:true,loading:true,changed:true,feed_title:'Kurzgesagt – In a Nutshell',published:1801731480}),
     ]);
     await r.page.locator('[data-card="one"]').click();
     await expect(r.page.locator('[data-card="one"] img')).toBeVisible();

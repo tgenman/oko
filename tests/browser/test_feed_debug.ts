@@ -39,7 +39,7 @@ test('debug toggle shows server traceback and caught browser errors are sent whi
   try {
     await r.start([]);
     await r.api('debug', 'POST', {source:'collector', message:'broken source', traceback:'RuntimeError at discover', error_type:'RuntimeError', location:'discover:42'});
-    await r.page.evaluate(() => readerTransport.replies.set('/api/collect', {status: 500, body: {detail: 'collection failed'}}));
+    await r.page.evaluate(() => readerTransport.replies.set('/api/v3/collect', {status: 500, body: {detail: 'collection failed'}}));
     await expect(r.page.locator('#debug-panel')).toBeHidden();
     await r.page.locator('#collect').click();
     await r.page.waitForFunction(() => readerTransport.requests.some(r => r.url === '/api/v3/diagnostics' && r.method === 'POST' && r.body!.message === 'collection failed'));

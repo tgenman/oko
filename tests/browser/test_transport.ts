@@ -113,7 +113,7 @@ test('reader shows malformed responses and failed diagnostics retry only the ori
   const r = await reader();
   try {
     await r.start([material('one')]);
-    await r.page.route('**/api/collect', route => route.fulfill({status:200,contentType:'text/html',body:'<html>broken reply</html>'}));
+    await r.page.route('**/api/v3/collect', route => route.fulfill({status:200,contentType:'text/html',body:'<html>broken reply</html>'}));
     await r.page.route('**/api/v3/diagnostics', route => route.request().method() === 'POST'
       ? route.fulfill({status:503,contentType:'text/html',body:'<html>offline</html>'}) : route.continue());
     await r.page.locator('#collect').click();

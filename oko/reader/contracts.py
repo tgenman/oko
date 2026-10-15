@@ -25,10 +25,14 @@ def schemas() -> dict[str, Any]:
               'material': '/api/materials/{item}',
               'version': '/api/materials/{item}/versions/{number}',
               'status': '/api/status'}
-    return {name: dict(document['paths'][route]['get']['responses']['200']['content']['application/json']['schema'],
+    result = {name: dict(document['paths'][route]['get']['responses']['200']['content']['application/json']['schema'],
                        components=document['components'],
                        **{'$schema': 'https://json-schema.org/draft/2020-12/schema'})
             for name, route in routes.items()}
+    document = json.loads((Path(__file__).parent / 'generated/openapi.json').read_text())
+    for name, route in {'navigation_v3':'/api/v3/reading-composition', 'cards_v3':'/api/v3/cards', 'material_v3':'/api/v3/materials/{item}', 'version_v3':'/api/v3/materials/{item}/versions/{number}'}.items():
+        result[name] = dict(document['paths'][route]['get']['responses']['200']['content']['application/json']['schema'], components=document['components'], **{'$schema':'https://json-schema.org/draft/2020-12/schema'})
+    return result
 
 
 if __name__ == '__main__':

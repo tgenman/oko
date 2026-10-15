@@ -9,10 +9,10 @@ test('feed selection finishes while an older refresh is still in flight', async 
    window.refreshProbe={enabled:false,oldStarted:false,feedRequests:0};
    window.fetch=async(url,options)=>{
     const key=String(url),probe=window.refreshProbe;
-    if(probe.enabled&&key.startsWith('/api/cards')&&!key.includes('feed=')&&!probe.oldStarted){
+    if(probe.enabled&&key.startsWith('/api/v3/cards')&&!key.includes('feed=')&&!probe.oldStarted){
      probe.oldStarted=true;
      await new Promise(resolve=>setTimeout(resolve,200));
-    }else if(probe.enabled&&key.startsWith('/api/cards')&&key.includes('feed=')){
+    }else if(probe.enabled&&key.startsWith('/api/v3/cards')&&key.includes('feed=')){
      probe.feedRequests++;
      await new Promise(resolve=>setTimeout(resolve,900));
     }
@@ -22,7 +22,7 @@ test('feed selection finishes while an older refresh is still in flight', async 
   await r.start([material('one')]);
   await r.page.evaluate(()=>{
    const t=readerTransport;
-   t.replies.set('/api/cards?sort=newest&feed=feed',{body:t.replies.get('/api/cards')!.body});
+   t.replies.set('/api/v3/cards?sort=newest&feed=feed',{body:t.replies.get('/api/v3/cards')!.body});
    window.refreshProbe.enabled=true;
   });
   await r.page.waitForFunction(()=>window.refreshProbe.oldStarted);

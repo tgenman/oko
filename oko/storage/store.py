@@ -333,6 +333,7 @@ class Store:
                 self.read_sync.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
                 self.subscriptions.history.viewed(member)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
+                self.db.execute('DELETE FROM retained_theses WHERE item=?', (member,))
                 self.filters.forget(member)
                 self.youtube.reset(member)
                 self.versions.forget(member)
@@ -371,7 +372,7 @@ class Store:
         if not row:
             return None
         if not row['complete']:
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title='Материал загружается', text='', complete=False)
+            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title='Материал загружается', text='', complete=False, source_order=row['source_order'], members=json.loads(row['members']), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()))
         try:
             header, text = self.path(item).read_text().split('\n\n', 1)
             filtered = self.filters.read(item)

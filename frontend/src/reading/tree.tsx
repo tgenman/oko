@@ -1,6 +1,8 @@
 import {useLayoutEffect} from 'react';
-import {navigation} from '../api/legacy-generated/sdk.gen';
-import type {Navigation,SourceStatus,Feed} from '../api/legacy-generated/types.gen';
+import {readingComposition} from '../api/generated/sdk.gen';
+import type {ReadingComposition,SubscriptionFeed} from '../api/generated/types.gen';
+import type {SourceStatus} from '../api/legacy-generated/types.gen';
+export type Navigation={folders:ReadingComposition['folders'];feeds:(SubscriptionFeed&{count:number})[];count:number};
 import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {createStore,useStore,saved,save,host} from './store';
@@ -10,7 +12,7 @@ export function SourceIcon({kind}:{kind:string}) {
   return <span className={'source-icon '+kind} aria-hidden="true">{kind==='folder'?<svg viewBox="0 0 512 512" fill="currentColor"><path d="M496 152a56 56 0 0 0-56-56H220.11a23.9 23.9 0 0 1-13.31-4L179 73.41A55.77 55.77 0 0 0 147.89 64H72a56 56 0 0 0-56 56v48a8 8 0 0 0 8 8h464a8 8 0 0 0 8-8ZM16 392a56 56 0 0 0 56 56h368a56 56 0 0 0 56-56V216a8 8 0 0 0-8-8H24a8 8 0 0 0-8 8Z"/></svg>:kind==='rss'?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><circle cx="5" cy="19" r="1.5" fill="currentColor"/><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/></svg>:kind==='youtube'?'▶':kind==='telegram'?'➤':'◷'}</span>;
 }
 function Title({title,kind,count}:{title:string;kind:string;count?:number}) {return <><SourceIcon kind={kind}/><span className="tree-title">{title}</span>{count!==undefined&&<span className="tree-count">{count||''}</span>}</>;}
-const feedIcon=(feed:Feed)=>['youtube','telegram'].includes(feed.kind)?feed.kind:'rss';
+const feedIcon=(feed:SubscriptionFeed)=>['youtube','telegram'].includes(feed.kind)?feed.kind:'rss';
 export function createReadingTree({readerApi,onSelect,onFeedSettings,onWarning}:{readerApi:ReaderApi;onSelect:(selection:Selection)=>void;onFeedSettings:(id:string,trigger:HTMLElement)=>void;onWarning:()=>void}) {
   let collapsed:Record<string,boolean>={};
   try {const value:unknown=JSON.parse(saved('oko-reading-collapsed','{}'));if(value&&typeof value==='object'&&!Array.isArray(value))collapsed=value as Record<string,boolean>;}catch{}
@@ -37,7 +39,7 @@ export function createReadingTree({readerApi,onSelect,onFeedSettings,onWarning}:
   mountSurface(host('reading-nav'),<Tree/>);resize(store.get().width);
   return {
     get selection(){return store.get().selection;},
-    async load(){return (await navigation({client:readerApi.client})).data;},
+    async load():Promise<Navigation>{const value=(await readingComposition({client:readerApi.client})).data;return {...value,feeds:value.feeds.map(entry=>({...entry.feed,count:entry.count}))};},
     update(catalog:Navigation,sources:SourceStatus[]=[]) {
       const state=store.get();let selection=state.selection,changed=false,moved=false,collapsed=state.collapsed;
       if(selection.kind==='feed') {const feed=catalog.feeds.find(feed=>feed.id===selection.id);if(!feed){selection=catalog.folders.some(folder=>folder.id===selection.folder)?{kind:'folder',id:selection.folder!}:{kind:'all',id:null};changed=true;}else if(feed.folder_id!==selection.folder){selection={...selection,folder:feed.folder_id};collapsed={...collapsed,[feed.folder_id]:false};save('oko-reading-collapsed',JSON.stringify(collapsed));moved=true;}}

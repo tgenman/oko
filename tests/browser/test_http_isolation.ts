@@ -11,7 +11,7 @@ test('HTTP scenarios isolate storage, settings, authentication and journals whil
   const [a,b]=await Promise.all([productionReader(t),productionReader(t)]);
   assert.notEqual(a.origin,b.origin);
   assert.notEqual(a.token,b.token);
-  assert.equal((await fetch(b.origin+'/api/cards',{headers:{Authorization:'Bearer '+a.token}})).status,403);
+  assert.equal((await fetch(b.origin+'/api/v3/cards',{headers:{Authorization:'Bearer '+a.token}})).status,403);
   const originalSettings=await b.api('settings/oko/global');
   await a.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'scenario A'});
   await a.api('debug','POST',{source:'browser',message:'only A'});

@@ -1,10 +1,10 @@
 import {createClient} from './legacy-generated/client';
-import {status, collect} from './legacy-generated/sdk.gen';
-import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop} from './generated/sdk.gen';
+import {status} from './legacy-generated/sdk.gen';
+import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop, collect} from './generated/sdk.gen';
 import type {CommandContext,RuntimeStatus} from './generated/types.gen';
 import type {Status} from './legacy-generated/types.gen';
 import {ReaderError,decodeJson} from './errors';
-import {isBinaryOperation} from './legacy-generated/media.gen';
+import {isBinaryOperation} from './generated/media.gen';
 export {ReaderError} from './errors';
 
 export type ActionRecord = {id:string};
@@ -52,7 +52,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         tracker?.failed(record,error);
         if (onError && !['/api/debug','/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {
           if (error instanceof Error) {
-            Object.assign(error,{materialIds:url.pathname.startsWith('/api/materials/') ? [url.pathname.split('/')[3]] : []});
+            Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : []});
             reported.add(error);
           }
           onError(error,request.method+' '+url.pathname);
@@ -82,7 +82,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
     async createSession() {return (await createClientSession({client})).data;},
     async renewSession(identity: string) {return (await renewClientSession({client, path:{identity}})).data;},
     async closeSession(identity: string) {return (await closeClientSession({client, path:{identity}, keepalive:true})).data;},
-    async collect(actionId?: string) {return (await collect({client, headers:actionId ? {'X-Oko-Action':actionId} : {}})).data;},
+    async collect() {return this.command({operation:'collect',target:{scope:'all'}},async headers=>(await collect({client,headers})).data);},
     async stop(actionId?: string) {return (await stop({client, headers:actionId ? {'X-Oko-Action':actionId} : {}})).data;},
   };
 }

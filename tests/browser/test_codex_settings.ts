@@ -83,9 +83,9 @@ test('ready material displays old model and offers explicit recreation', async (
     await expect(r.page.locator('#processing-provenance')).toContainText('old-model');
     await expect(r.page.locator('#processing-provenance')).toContainText('high');
     await expect(r.page.locator('#processing-provenance')).toContainText('Fast выключен');
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/materials/one/regenerate',{body:{ok:true}}));
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/one/regenerate',{body:{ok:true}}));
     await r.page.locator('#regenerate').click();
-    await r.page.waitForFunction(()=>readerTransport.requests.some(c=>c.url==='/api/materials/one/regenerate'&&c.method==='POST'));
+    await r.page.waitForFunction(()=>readerTransport.requests.some(c=>c.url==='/api/v3/materials/one/regenerate'&&c.method==='POST'));
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
