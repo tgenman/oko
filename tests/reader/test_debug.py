@@ -1,3 +1,4 @@
+from tests.support.subscriptions import saved_sources
 import time
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -146,11 +147,12 @@ def test_handled_api_errors_record_once_and_disk_failure_does_not_break_reader(t
 
 
 def test_same_source_error_in_two_feeds_is_not_merged(tmp_path):
+    saved_sources(tmp_path, [('https://source.test/one', 'A', 'Без папки'), ('https://source.test/two', 'B', 'Без папки')])
     import httpx
     def reply(request):
         return httpx.Response(500)
     with TestClient(create_app(tmp_path, token='test-secret', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        client.post('/api/import', json={'opml': '<opml><body><outline text="A" xmlUrl="https://source.test/one"/><outline text="B" xmlUrl="https://source.test/two"/></body></opml>'})
+        client.get('/api/subscriptions')
         client.post('/api/tabs/reader/heartbeat')
         for _ in range(100):
             groups = client.get('/api/debug').json()['groups']

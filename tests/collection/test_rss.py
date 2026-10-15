@@ -1,4 +1,6 @@
 from tests.support.rss import rss, import_feed, wait_cards
+from tests.support.subscriptions import saved_sources
+from tests.support.reader import wait_for
 from pathlib import Path
 import time
 from datetime import datetime, timezone
@@ -42,8 +44,8 @@ def test_incomplete_article_can_be_retried_without_losing_excerpt(tmp_path: Path
         if request.url.path == '/feed':
             return httpx.Response(200, text=rss())
         return httpx.Response(200, text='<article>Восстановленная статья</article>') if available else httpx.Response(403)
+    saved_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
-        import_feed(client)
         client.post('/api/tabs/test/heartbeat')
         card = wait_cards(client)[0]
         material = client.get('/api/materials/' + card['id']).json()
@@ -73,10 +75,9 @@ def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: 
             return httpx.Response(503)
         return httpx.Response(200, text='<article>Полный текст</article>')
     kwargs = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response))
+    saved_sources(tmp_path, [('https://source.test/'+path, path, 'Новости') for path in ('feed', 'atom', 'denied', 'limited', 'down')])
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         client.patch('/api/settings/oko/global', json={'theses': False})
-        for path in ('feed', 'atom', 'denied', 'limited', 'down'):
-            import_feed(client, 'https://source.test/' + path)
         client.post('/api/tabs/test/heartbeat')
         cards = wait_cards(client, 2)
         assert {c['title'] for c in cards} == {'Atom', 'Заголовок'}
@@ -134,9 +135,10 @@ def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path
 def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
     def response(request):
         return httpx.Response(200, text=rss() if '/telegram/' in request.url.path else '<article>Текст</article>')
+    saved_sources(tmp_path, [('https://source.test/telegram/channel/example', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
-        # Explicit RSS fallback on a Telegram source can be revoked.
-        feed = import_feed(client, 'https://source.test/telegram/channel/example')
+        # An old saved Telegram RSS fallback can be revoked.
+        feed = client.get('/api/subscriptions').json()['feeds'][0]
         client.patch('/api/feeds/' + feed['id'], json={'transport': 'rss'})
         client.post('/api/tabs/test/heartbeat')
         wait_cards(client)
@@ -250,13 +252,15 @@ def test_reused_guid_cannot_replace_saved_teaser_with_another_url(tmp_path: Path
         nonlocal reads
         if request.url.path == '/feed':
             reads += 1
-            body = rss(url='https://source.test/old') if reads == 1 else rss(url='https://source.test/new').replace('Заголовок', 'Другой заголовок').replace('Анонс статьи', 'Другой анонс')
+            body = rss(url='https://source.test/old') if reads <= 2 else rss(url='https://source.test/new').replace('Заголовок', 'Другой заголовок').replace('Анонс статьи', 'Другой анонс')
             return httpx.Response(200, text=body)
         return httpx.Response(404)
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
         import_feed(client)
         client.post('/api/tabs/test/heartbeat')
         card = wait_cards(client)[0]
+        client.post('/api/collect')
+        wait_for(client, lambda: reads >= 3 and all(job['status'] == 'done' for job in client.get('/api/status').json()['jobs'] if job['kind'] == 'discover'))
         material = client.get('/api/materials/' + card['id']).json()
         assert material['title'] == 'Заголовок' and material['text'] == 'Анонс статьи'
         assert material['url'] == 'https://source.test/old'

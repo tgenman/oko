@@ -143,6 +143,10 @@ def action_error(error: ActionError, context: wire.CommandContext, identity: str
     if error.kind == 'missing' and isinstance(value, (wire.CommandViewed, wire.CommandRegenerate, wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandRestoreFilter, wire.CommandCompleteFolder)):
         resource = wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=value.folder_id) if isinstance(value, wire.CommandCompleteFolder) else wire.MaterialResource(kind='material', material_id=value.material_id))
         return ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), details=wire.ResourceNotFoundErrorDetails(resource=resource), diagnostic_id=None, command_id=command_id)))
+    if isinstance(value, wire.CommandAddFeed) and error.code == 'verification_expired':
+        return ApiError(409, wire.ErrorEnvelope(wire.VerificationExpiredError(code='verification_expired', message=str(error.detail), details=None, diagnostic_id=None, command_id=command_id)))
+    if isinstance(value, (wire.CommandAddFeed, wire.CommandYoutubeConfigure)) and error.kind == 'invalid':
+        return ApiError(400, wire.ErrorEnvelope(wire.SourceConnectionInvalidError(code='source_connection_invalid', message=str(error.detail), details=wire.SourceConnectionInvalidErrorDetails(reason='invalid_configuration'), diagnostic_id=None, command_id=command_id)))
     if error.kind == 'unavailable':
         return ApiError(503, wire.ErrorEnvelope(wire.StorageUnavailableError(code='storage_unavailable', message=str(error.detail), details=wire.StorageUnavailableErrorDetails(retry_at=None), diagnostic_id=None, command_id=command_id)))
     if isinstance(context.root, wire.CommandCodexSave) and error.kind == 'invalid':

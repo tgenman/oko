@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AbandonProblemData, AbandonProblemErrors, AbandonProblemResponses, AddFeedData, AddFeedErrors, AddFeedResponses, AttachmentData, AttachmentErrors, AttachmentResponses, CardsData, CardsErrors, CardsResponses, ClearDebugData, ClearDebugErrors, ClearDebugResponses, CloseTabData, CloseTabErrors, CloseTabResponses, CodexCheckData, CodexCheckErrors, CodexCheckResponses, CodexModelsData, CodexModelsErrors, CodexModelsResponses, CodexSaveData, CodexSaveErrors, CodexSaveResponses, CodexStateData, CodexStateErrors, CodexStateResponses, CollectData, CollectErrors, CollectResponses, CompleteFolderData, CompleteFolderErrors, CompleteFolderResponses, DebugBrowserData, DebugBrowserErrors, DebugBrowserResponses, DebugEntriesData, DebugEntriesErrors, DebugEntriesResponses, EffectiveSettingsData, EffectiveSettingsErrors, EffectiveSettingsResponses, FeedPatchData, FeedPatchErrors, FeedPatchResponses, FoldersData, FoldersErrors, FoldersResponses, HeartbeatData, HeartbeatErrors, HeartbeatResponses, HistoryCancelData, HistoryCancelErrors, HistoryCancelResponses, HistoryPauseData, HistoryPauseErrors, HistoryPauseResponses, HistoryStartData, HistoryStartErrors, HistoryStartResponses, ImageData, ImageErrors, ImageResponses, ImportPreviewData, ImportPreviewErrors, ImportPreviewResponses, ImportSubscriptionsData, ImportSubscriptionsErrors, ImportSubscriptionsResponses, MaterialData, MaterialErrors, MaterialResponses, NavigationData, NavigationErrors, NavigationResponses, PreviewCompletionData, PreviewCompletionErrors, PreviewCompletionResponses, PreviousMediaData, PreviousMediaErrors, PreviousMediaResponses, PreviousVersionData, PreviousVersionErrors, PreviousVersionResponses, ProcessorCheckData, ProcessorCheckErrors, ProcessorCheckResponses, ProcessorConfigData, ProcessorConfigErrors, ProcessorConfigResponses, ProcessorSaveData, ProcessorSaveErrors, ProcessorSaveResponses, RegenerateData, RegenerateErrors, RegenerateResponses, ReportReaderActionData, ReportReaderActionErrors, ReportReaderActionResponses, RestoreFilterData, RestoreFilterErrors, RestoreFilterResponses, RetryFilterData, RetryFilterErrors, RetryFilterResponses, RetryMaterialData, RetryMaterialErrors, RetryMaterialResponses, RetryThesesData, RetryThesesErrors, RetryThesesResponses, SettingsPatchData, SettingsPatchErrors, SettingsPatchResponses, StatusData, StatusErrors, StatusResponses, StopData, StopErrors, StopResponses, SubscriptionListData, SubscriptionListErrors, SubscriptionListResponses, TelegramAccountsData, TelegramAccountsErrors, TelegramAccountsResponses, TelegramConnectData, TelegramConnectErrors, TelegramConnectResponses, TelegramTopicsData, TelegramTopicsErrors, TelegramTopicsResponses, VerifyFeedData, VerifyFeedErrors, VerifyFeedResponses, ViewedData, ViewedErrors, ViewedResponses, YoutubeConfigureData, YoutubeConfigureErrors, YoutubeConfigureResponses, YoutubeSettingsData, YoutubeSettingsErrors, YoutubeSettingsResponses } from './types.gen';
+import type { AbandonProblemData, AbandonProblemErrors, AbandonProblemResponses, AddFeedData, AddFeedErrors, AddFeedResponses, AttachmentData, AttachmentErrors, AttachmentResponses, CardsData, CardsErrors, CardsResponses, ClearDebugData, ClearDebugErrors, ClearDebugResponses, CloseTabData, CloseTabErrors, CloseTabResponses, CodexCheckData, CodexCheckErrors, CodexCheckResponses, CodexModelsData, CodexModelsErrors, CodexModelsResponses, CodexSaveData, CodexSaveErrors, CodexSaveResponses, CodexStateData, CodexStateErrors, CodexStateResponses, CollectData, CollectErrors, CollectResponses, CompleteFolderData, CompleteFolderErrors, CompleteFolderResponses, DebugBrowserData, DebugBrowserErrors, DebugBrowserResponses, DebugEntriesData, DebugEntriesErrors, DebugEntriesResponses, EffectiveSettingsData, EffectiveSettingsErrors, EffectiveSettingsResponses, FeedPatchData, FeedPatchErrors, FeedPatchResponses, FoldersData, FoldersErrors, FoldersResponses, HeartbeatData, HeartbeatErrors, HeartbeatResponses, HistoryCancelData, HistoryCancelErrors, HistoryCancelResponses, HistoryPauseData, HistoryPauseErrors, HistoryPauseResponses, HistoryStartData, HistoryStartErrors, HistoryStartResponses, ImageData, ImageErrors, ImageResponses, MaterialData, MaterialErrors, MaterialResponses, NavigationData, NavigationErrors, NavigationResponses, PreviewCompletionData, PreviewCompletionErrors, PreviewCompletionResponses, PreviousMediaData, PreviousMediaErrors, PreviousMediaResponses, PreviousVersionData, PreviousVersionErrors, PreviousVersionResponses, ProcessorCheckData, ProcessorCheckErrors, ProcessorCheckResponses, ProcessorConfigData, ProcessorConfigErrors, ProcessorConfigResponses, ProcessorSaveData, ProcessorSaveErrors, ProcessorSaveResponses, RegenerateData, RegenerateErrors, RegenerateResponses, ReportReaderActionData, ReportReaderActionErrors, ReportReaderActionResponses, RestoreFilterData, RestoreFilterErrors, RestoreFilterResponses, RetryFilterData, RetryFilterErrors, RetryFilterResponses, RetryMaterialData, RetryMaterialErrors, RetryMaterialResponses, RetryThesesData, RetryThesesErrors, RetryThesesResponses, SettingsPatchData, SettingsPatchErrors, SettingsPatchResponses, StatusData, StatusErrors, StatusResponses, StopData, StopErrors, StopResponses, SubscriptionListData, SubscriptionListErrors, SubscriptionListResponses, TelegramAccountsData, TelegramAccountsErrors, TelegramAccountsResponses, TelegramConnectData, TelegramConnectErrors, TelegramConnectResponses, TelegramTopicsData, TelegramTopicsErrors, TelegramTopicsResponses, VerifyFeedData, VerifyFeedErrors, VerifyFeedResponses, ViewedData, ViewedErrors, ViewedResponses, YoutubeConfigureData, YoutubeConfigureErrors, YoutubeConfigureResponses, YoutubeSettingsData, YoutubeSettingsErrors, YoutubeSettingsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -164,34 +164,6 @@ export const completeFolder = <ThrowOnError extends boolean = true>(options: Opt
  * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
  */
 export const previewCompletion = <ThrowOnError extends boolean = true>(options: Options<PreviewCompletionData, ThrowOnError>) => (options.client ?? client).post<PreviewCompletionResponses, PreviewCompletionErrors, ThrowOnError>({ url: '/api/folders/{folder}/completion/preview', ...options });
-
-/**
- * Import subscriptions
- *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
- */
-export const importSubscriptions = <ThrowOnError extends boolean = true>(options: Options<ImportSubscriptionsData, ThrowOnError>) => (options.client ?? client).post<ImportSubscriptionsResponses, ImportSubscriptionsErrors, ThrowOnError>({
-    url: '/api/import',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
- * Import preview
- *
- * Local bearer session required. Successful mutations may finish after client cancellation; X-Oko-Action identifies the attempt.
- */
-export const importPreview = <ThrowOnError extends boolean = true>(options: Options<ImportPreviewData, ThrowOnError>) => (options.client ?? client).post<ImportPreviewResponses, ImportPreviewErrors, ThrowOnError>({
-    url: '/api/import/preview',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
 
 /**
  * Material

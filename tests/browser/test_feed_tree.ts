@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import {test} from 'node:test';
 import {reader, expect} from './support.ts';
 import * as fs from 'node:fs';
@@ -11,7 +12,7 @@ test('feed settings independently expand folders and return to the selected obje
   const r = await reader();
   try {
     await r.page.setViewportSize({width:1280,height:900});
-    const data = await r.api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа — длинное название источника для двух строк" xmlUrl="https://source.test/a"/><outline text="Бета" xmlUrl="https://source.test/b"/></outline><outline text="Физика"><outline text="Гамма" xmlUrl="https://source.test/c"/></outline></body></opml>'});
+    const data = await addSources(r.api, [["https://source.test/a", "Альфа — длинное название источника для двух строк", "Наука"], ["https://source.test/b", "Бета", "Наука"], ["https://source.test/c", "Гамма", "Физика"]]);
     await r.start([]);
     await r.page.evaluate(() => readerTransport.native.add('/api/subscriptions'));
     await r.page.locator('#feeds-open').click();
@@ -83,7 +84,7 @@ test('empty feed settings offer addition and catalog refresh reveals newly impor
     await r.page.locator('#feeds-open').click();
     await expect(r.page.locator('#feed-tree')).toHaveText('Фидов пока нет. Добавьте источник.');
     await r.page.locator('#feeds-close').click();
-    await r.api('import','POST',{opml:'<opml><body><outline text="Учёба"><outline text="Новый источник" xmlUrl="https://source.test/new"/></outline></body></opml>'});
+    await addSources(r.api, [["https://source.test/new", "Новый источник", "Учёба"]]);
     await r.page.locator('#feeds-open').click();
     await expect(r.page.locator('#feed-tree').getByRole('button',{name:'Новый источник',exact:true})).toBeVisible();
     await r.page.locator('#feed-tree').getByRole('button',{name:'Свернуть Учёба',exact:true}).focus();

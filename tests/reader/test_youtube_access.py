@@ -1,3 +1,4 @@
+from tests.support.subscriptions import add_sources
 import asyncio
 import json
 import stat
@@ -55,7 +56,7 @@ def app(root, clock, captions):
 
 def add(client, channel=CHANNEL):
     url = f'https://www.youtube.com/feeds/videos.xml?channel_id={channel}' if channel.startswith('UC') else channel
-    response = client.post('/api/import', json={'opml': f'<opml><body><outline text="Тема"><outline text="Источник" xmlUrl="{url}"/></outline></body></opml>'})
+    response = add_sources(client, [(f'{url}', 'Источник', 'Тема')])
     assert response.status_code == 200, response.text
     feed = next(f for f in response.json()['feeds'] if url in f['original_urls'])
     if channel.startswith('UC'):

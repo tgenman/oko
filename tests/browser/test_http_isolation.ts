@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader.ts';
@@ -15,13 +16,13 @@ test('HTTP scenarios isolate storage, settings, authentication and journals whil
   const originalSettings=await b.api('settings/oko/global');
   await a.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'scenario A'});
   await a.api('debug','POST',{source:'browser',message:'only A'});
-  await a.api('import','POST',{opml:'<opml><body><outline text="A" xmlUrl="https://a.test/feed"/></body></opml>'});
+  await addSources(a.api, [["https://a.test/feed", "A", "Без папки"]]);
   assert.deepEqual(await b.api('settings/oko/global'),originalSettings);
   assert.deepEqual(await b.api('cards'),[]);
   assert.deepEqual((await b.api('navigation')).feeds,[]);
   assert.deepEqual((await b.api('debug')).groups,[]);
   assert.ok((await a.api('navigation')).feeds.length);
-  assert.equal((await a.api('debug')).groups[0].message,'only A');
+  assert.ok((await a.api('debug')).groups.some(group=>group.message==='only A'));
   await a.close();
   await a.close();
   await expect.poll(()=>isClosed(a.origin)).toBe(true);

@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import type {Browser} from 'playwright';
 import type {ApiReply} from './fixture-types.ts';
 import {artifactPath} from './artifacts.ts';
@@ -69,6 +70,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     assert.equal((await api('youtube')).has_password, true);
     assert.ok(!JSON.stringify(await api('youtube')).includes('fixture-'));
     await page.locator('#youtube-username').fill('draft-user');
+    await page.locator('#youtube-password').fill('fixture-password');
     await page.locator('#youtube-mode').selectOption('direct');
     await expect(page.locator('#youtube-address')).not.toBeVisible();
     await page.locator('#youtube-save').click();
@@ -82,7 +84,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await page.locator('#youtube-mode').selectOption('direct');
     await page.locator('#youtube-save').click();
     await expect.poll(async () => (await api('youtube')).mode).toBe('direct');
-    const plan = await api('import', 'POST', {opml:'<opml><body><outline text="YouTube" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa"/></body></opml>'});
+    const plan = await addSources(api, [["https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa", "YouTube", "Без папки"]]);
     await api('feeds/' + plan.feeds[0].id, 'PATCH', {importance:'high'});
     await expect.poll(async () => (await api('youtube')).paused).toBe(true);
     await expect(page.locator('#youtube-pause')).toContainText('Получение субтитров приостановлено');
@@ -119,18 +121,18 @@ test('YouTube connection errors preserve input and late loads cannot replace a r
     await r.page.locator('#youtube-mode').selectOption('direct');
     await r.page.locator('#youtube-mode').selectOption('proxy');
     await expect(r.page.locator('#youtube-password')).toHaveValue('draft-password');
-    await r.page.evaluate(() => readerTransport.replies.set('PUT /api/youtube', {status:500, body:{detail:'Ошибка записи подключения'}}));
+    await r.page.evaluate(() => readerTransport.replies.set('PATCH /api/v3/youtube', {status:500, body:{detail:'Ошибка записи подключения'}}));
     await r.page.locator('#youtube-save').click();
     await expect(r.page.locator('#youtube-message')).toContainText('Ошибка записи подключения');
     await expect(r.page.locator('#youtube-password')).toHaveValue('draft-password');
     await r.page.locator('#settings-close').click();
-    await r.page.evaluate(() => readerTransport.held.set('/api/youtube', true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/youtube', true));
     await r.page.locator('#settings-open').click();
-    await expect.poll(() => r.page.evaluate(() => readerTransport.pending.has('/api/youtube'))).toBe(true);
+    await expect.poll(() => r.page.evaluate(() => readerTransport.pending.has('/api/v3/youtube'))).toBe(true);
     await r.page.locator('#settings-close').click();
     await r.page.evaluate(() => {
-      window.lateYouTubeReply = readerTransport.pending.get('/api/youtube')!;
-      readerTransport.pending.delete('/api/youtube'); readerTransport.held.delete('/api/youtube');
+      window.lateYouTubeReply = readerTransport.pending.get('/api/v3/youtube')!;
+      readerTransport.pending.delete('/api/v3/youtube'); readerTransport.held.delete('/api/v3/youtube');
     });
     await r.page.locator('#settings-open').click();
     await r.page.locator('[data-settings-target="youtube"]').click();

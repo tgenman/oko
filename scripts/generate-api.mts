@@ -25,7 +25,7 @@ if (['validate','docs'].includes(command)) {
 }
 if (!['generate','check'].includes(command)) throw new Error('Expected generate or check');
 const cacheInputs = ['api', 'scripts/api.py', 'scripts/api-compat.py', 'scripts/api-cache.mts',
-  'scripts/api-templates', 'scripts/generate-api.mts', 'scripts/generate_api.py', 'scripts/candidate.py',
+  'scripts/api-templates', 'scripts/generate-api.mts', 'scripts/generate_api.py', 'scripts/legacy_api.py', 'scripts/candidate.py',
   'pyproject.toml', 'poetry.lock', '.oko-candidate.json',
   'frontend/src/api/generated', 'frontend/src/api/legacy-generated',
   'oko/reader/generated', 'oko/reader/legacy_generated'];
@@ -58,7 +58,7 @@ async function files(directory: string, prefix=''): Promise<Map<string, Buffer>>
   return result;
 }
 try {
-  const bundle = legacy ? await readFile(path.join(root,'api/baseline.json')) : canonicalBytes;
+  const bundle = legacy ? execFileSync(python,[path.join(root,'scripts/legacy_api.py'),path.join(root,'api/baseline.json')]) : canonicalBytes;
   const digest = createHash('sha256').update(bundle).digest('hex');
   const source = path.join(temporary,'openapi.json');
   await writeFile(source,bundle);

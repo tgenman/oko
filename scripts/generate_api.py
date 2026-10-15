@@ -116,7 +116,11 @@ def strict_format_types(output: Path) -> None:
 
 
 def generate(schema: Path, output: Path) -> None:
-    document = yaml.safe_load(schema.read_text())
+    if schema.resolve() == ROOT / 'api/baseline.json':
+        from legacy_api import document as legacy_document
+        document = legacy_document(schema)
+    else:
+        document = yaml.safe_load(schema.read_text())
     canonical = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n'
     digest = hashlib.sha256(canonical.encode()).hexdigest()
     output.mkdir(parents=True, exist_ok=True)

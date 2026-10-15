@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
@@ -7,7 +8,7 @@ import {validate} from './contracts';
 test('v3 reading uses real media and reconciles a lost viewed response without replay', {timeout:25000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
-  await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа" xmlUrl="https://a.test/feed"/><outline text="Бета" xmlUrl="https://b.test/feed"/></outline></body></opml>'});
+  await addSources(api, [["https://a.test/feed", "Альфа", "Наука"], ["https://b.test/feed", "Бета", "Наука"]]);
   const invalid:string[]=[];
   page.on('response',async response=>{
     if(!response.ok())return;
@@ -54,7 +55,7 @@ test('v3 reading uses real media and reconciles a lost viewed response without r
 test('unconfirmed commands for two materials remain separate and do not replay', {timeout:20000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
-  await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа" xmlUrl="https://a.test/feed"/><outline text="Бета" xmlUrl="https://b.test/feed"/></outline></body></opml>'});
+  await addSources(api, [["https://a.test/feed", "Альфа", "Наука"], ["https://b.test/feed", "Бета", "Наука"]]);
   let sent=0;
   await page.route('**/api/v3/command-observations',route=>route.abort());
   await page.route('**/api/v3/materials/*/viewed',route=>{sent++;return route.abort();});

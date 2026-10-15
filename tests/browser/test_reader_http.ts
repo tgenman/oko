@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader.ts';
@@ -7,7 +8,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
  const {page, api, origin, token} = await productionReader(t);
   assert.equal((await fetch(origin+'/api/v3/cards')).status,403);
   await api('settings/oko/global','PATCH',{theses:false,processor:'llamacpp'});
-  const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа" xmlUrl="https://a.test/feed"/><outline text="Бета" xmlUrl="https://b.test/feed"/><outline text="Пустой" xmlUrl="https://empty.test/feed"/></outline></body></opml>'});
+  const plan=await addSources(api, [["https://a.test/feed", "Альфа", "Наука"], ["https://b.test/feed", "Бета", "Наука"], ["https://empty.test/feed", "Пустой", "Наука"]]);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await page.goto(origin+'/#token='+token);
   await expect.poll(async()=>{const cards=await api('cards'); return cards.length===2&&cards.every(c=>c.complete&&!c.loading);},{timeout:15000}).toBe(true);

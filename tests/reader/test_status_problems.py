@@ -1,3 +1,4 @@
+from tests.support.subscriptions import add_sources
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
@@ -135,7 +136,7 @@ def test_shared_youtube_pause_across_feeds_is_one_problem(tmp_path):
                    wall_clock=lambda:wall[0], youtube_captions=Captions())
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         for channel in (CHANNEL,'UC'+'b'*22):
-            result=client.post('/api/import',json={'opml':f'<opml><body><outline text="Science" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id={channel}"/></body></opml>'})
+            result=add_sources(client, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={channel}', 'Science', 'Без папки')])
             assert result.status_code==200
             client.patch('/api/feeds/'+result.json()['feeds'][-1]['id'],json={'importance':'high'})
         client.post('/api/tabs/reader/heartbeat')
@@ -263,7 +264,7 @@ def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
     with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
         client.patch('/api/settings/oko/global',json={'theses':False,'prompt_filters':''})
         for channel in (CHANNEL,'UC'+'b'*22):
-            response=client.post('/api/import',json={'opml':f'<opml><body><outline text="Topic"><outline text="Source" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id={channel}"/></outline></body></opml>'})
+            response=add_sources(client, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={channel}', 'Source', 'Topic')])
             assert response.status_code==200
             for feed in response.json()['feeds']:
                 client.patch('/api/feeds/'+feed['id'],json={'importance':'high'})

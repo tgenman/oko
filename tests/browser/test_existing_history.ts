@@ -10,7 +10,7 @@ test('legacy feed shows only known history settings and saving does not change i
       const t = readerTransport;
       const feed = {id: 'legacy', title: 'Старый фид', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal', initial_days: 7, initial_history: null};
       t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
-      t.replies.set('/api/feeds/verify', {body: {url: feed.original_urls[0], title: feed.title, kind: 'rss', verification: 'checked', existing: feed}});
+      t.replies.set('/api/v3/feeds/verify', {body: {url: feed.original_urls[0], title: feed.title, kind: 'rss', verification: 'checked', existing: feed}});
       t.replies.set('/api/v3/settings/feed/legacy', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
       t.replies.set('/api/v3/feeds/legacy', {body: feed});
     });
