@@ -1,3 +1,4 @@
+from tests.support.subscriptions import saved_sources
 from tests.support.telegram import Telegram, connect, settled
 from pathlib import Path
 import pytest
@@ -159,11 +160,12 @@ def test_late_video_after_viewed_cannot_publish_or_leave_files(tmp_path: Path):
 
 
 def test_imported_telegram_feed_connects_without_duplicate_and_preserves_read_settings(tmp_path: Path):
+    saved_sources(tmp_path, [('https://rsshub.test/telegram/channel/fixture', 'Канал', 'Новости')])
     class Imported(Telegram):
         async def info(self, account, peer):
             return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False, username='fixture')
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=Imported()), headers=HEADERS) as client:
-        imported = client.post('/api/import', json={'opml': '<opml><body><outline text="Новости"><outline text="Канал" xmlUrl="https://rsshub.test/telegram/channel/fixture"/></outline></body></opml>'}).json()['feeds'][0]
+        imported = client.get('/api/subscriptions').json()['feeds'][0]
         client.post('/api/tabs/test/heartbeat')
         feed = connect(client)
         assert feed['id'] == imported['id']
@@ -269,6 +271,7 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
 
 
 def test_switching_rss_transport_keeps_telegram_cursor_separate(tmp_path: Path):
+    saved_sources(tmp_path, [('https://source.test/telegram/channel/fixture', 'Источник', 'Новости')])
     import httpx
     from datetime import datetime, timezone
     from email.utils import format_datetime
@@ -279,7 +282,7 @@ def test_switching_rss_transport_keeps_telegram_cursor_separate(tmp_path: Path):
     xml = f'<rss><channel><item><guid>rss-11</guid><link>https://source.test/old</link><title>RSS-текст</title><description>Анонс</description><pubDate>{date}</pubDate></item></channel></rss>'
     transport = httpx.MockTransport(lambda req: httpx.Response(200, text=xml if '/telegram/' in req.url.path else '<article>Статья</article>'))
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=Imported(), rss_enabled=True, rss_transport=transport), headers=HEADERS) as client:
-        feed = client.post('/api/import', json={'opml': '<opml><body><outline text="Новости"><outline xmlUrl="https://source.test/telegram/channel/fixture"/></outline></body></opml>'}).json()['feeds'][0]
+        feed = client.get('/api/subscriptions').json()['feeds'][0]
         client.patch('/api/feeds/' + feed['id'], json={'transport': 'rss'})
         client.post('/api/tabs/test/heartbeat')
         settled(client)
@@ -481,6 +484,7 @@ def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path
 
 
 def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_username(tmp_path: Path):
+    saved_sources(tmp_path, [('https://rsshub.test/telegram/channel/fixture', 'Источник', 'Новости')])
     class FormerPublic(Telegram):
         private = False
         async def info(self, account, peer):
@@ -493,7 +497,7 @@ def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_us
             return [dict(id=11, date=time.time()-60, text='Теперь приватный' if self.private else 'Публичный', group=None, media=None)]
     tg = FormerPublic()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
-        client.post('/api/import', json={'opml': '<opml><body><outline text="Новости"><outline xmlUrl="https://rsshub.test/telegram/channel/fixture"/></outline></body></opml>'})
+        client.get('/api/subscriptions')
         client.post('/api/tabs/test/heartbeat')
         feed = connect(client)
         item = settled(client)[0]['id']

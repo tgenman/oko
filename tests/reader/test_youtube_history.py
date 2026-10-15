@@ -1,3 +1,4 @@
+from tests.support.subscriptions import add_sources
 import time
 import pytest
 import httpx
@@ -42,8 +43,8 @@ def wait_history(client, feed, predicate):
 
 
 def import_channel(client):
-    opml = f'<opml><body><outline text="Channel" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}"/></body></opml>'
-    feed = client.post('/api/import', json={'opml': opml}).json()['feeds'][0]['id']
+    feed = add_sources(client, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Channel', 'Без папки')]).json()['feeds'][0]['id']
+    client.delete('/api/v3/feeds/'+feed+'/history')
     # Do not request captions in this enumeration/material-history scenario.
     client.patch('/api/settings/feed/' + feed, json={'theses': False})
     return feed
@@ -65,7 +66,7 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
         assert [c['title'] for c in cards[:3]] == ['Video 60', 'Video 59', 'Video 58']
         assert all(not c['published_known'] for c in cards)
         assert len(history.calls) == 1
-        assert len([u for u in requests if '/feeds/videos.xml' in u]) <= 4
+        assert len([u for u in requests if '/feeds/videos.xml' in u]) <= 5  # includes one explicit verification request
         viewed = cards[0]['id']
         assert client.post('/api/materials/' + viewed + '/viewed').status_code == 200
     with reader(tmp_path, history, requests) as client:

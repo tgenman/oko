@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import {test} from 'node:test';
 import {reader, expect} from './support.ts';
 import {editSetting, settingsHome} from './settings-actions.ts';
@@ -34,7 +35,7 @@ test('compact settings navigate to reading and persist only explicitly through H
 test('folder field resets preserve other overrides and new drafts', async () => {
   const r = await reader();
   try {
-    const plan = await r.api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Источник" xmlUrl="https://source.test/feed"/></outline></body></opml>'});
+    const plan = await addSources(r.api, [["https://source.test/feed", "Источник", "Наука"]]);
     const folder = plan.folders[0], feed = plan.feeds[0];
     await r.api('settings/oko/global','PATCH',{prompt_theses:'Global prompt'});
     await r.api(`settings/folder/${folder.id}`,'PATCH',{prompt_theses:'Folder prompt',originals:false});

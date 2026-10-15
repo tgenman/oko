@@ -48,78 +48,6 @@ test('three menus keep reading position and addition tabs, Escape restores openi
 });
 
 
-test('completed OPML import does not reopen a menu closed while import was pending', async () => {
-  const r = await reader();
-  try {
-    await r.start([material('one', {text: 'Продолжить чтение. '.repeat(3000)})]);
-    await objects(r);
-    await r.page.locator('#cards button').click();
-    await expect(r.page.locator('#title')).toHaveText('one');
-    await r.page.locator('main > article').evaluate(n => n.scrollTop = 450);
-    await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab', {name:'Импорт OPML',exact:true}).click();
-    await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/import/preview',{body:{folders:[],feeds:[]}});
-      readerTransport.held.set('/api/import',true);
-    });
-    await r.page.locator('#opml-file').setInputFiles({name:'example.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body/></opml>')});
-    await r.page.getByRole('button',{name:'Импортировать',exact:true}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/import'));
-    await r.page.keyboard.press('Escape');
-    await r.page.evaluate(() => readerTransport.release('/api/import',{}));
-    await expect(r.page.locator('#import-plan')).toContainText('Подписки импортированы');
-    await expect(r.page.locator('dialog[open]')).toHaveCount(0);
-    await expect(r.page.locator('#add-open')).toBeFocused();
-    await expect(r.page.locator('#title')).toHaveText('one');
-    expect(await r.page.locator('main > article').evaluate(n => n.scrollTop)).toBe(450);
-    await r.page.locator('#add-open').click();
-    await expect(r.page.locator('#import-confirm')).toBeHidden();
-    expect(await r.page.locator('#opml-file').evaluate(n => (n as HTMLInputElement).files!.length)).toBe(0);
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
-});
-
-test('completed OPML import preserves a newer settings menu, drafts and selected feed while updating subscriptions', async () => {
-  const r = await reader();
-  try {
-    await r.start([]); await objects(r);
-    await r.page.locator('#feeds-open').click();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await editSetting(r.page, 'prompt_theses');
-    await r.page.locator('#setting-prompt_theses').fill('Черновик фида');
-    await r.page.locator('#feeds-close').click();
-    await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
-    await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/import/preview',{body:{folders:[],feeds:[]}});
-      readerTransport.held.set('/api/import',true);
-    });
-    await r.page.locator('#opml-file').setInputFiles({name:'example.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body/></opml>')});
-    await r.page.getByRole('button',{name:'Импортировать',exact:true}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/import'));
-    await r.page.keyboard.press('Escape');
-    await r.page.locator('#settings-open').click();
-    await editSetting(r.page, 'prompt_theses');
-    await r.page.locator('#setting-prompt_theses').fill('Черновик Око');
-    await r.page.evaluate(() => {
-      const subscriptions = readerTransport.replies.get('/api/subscriptions')!.body;
-      subscriptions!.feeds.push({...subscriptions!.feeds[0],id:'imported',title:'Импортированный'});
-      readerTransport.release('/api/import',{});
-    });
-    await expect(r.page.locator('#import-plan')).toContainText('Подписки импортированы');
-    await expect(r.page.locator('#settings-dialog')).toBeVisible();
-    await expect(r.page.locator('dialog[open]')).toHaveCount(1);
-    await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик Око');
-    await expect(r.page.locator('#setting-prompt_theses')).toBeFocused();
-    await r.page.keyboard.press('Escape');
-    await r.page.locator('#feeds-open').click();
-    await expect(r.page.locator('#owner-heading')).toHaveText('Фид: one');
-    await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик фида');
-    await expect(r.page.locator('#feed-tree').getByRole('button', {name:'Импортированный',exact:true})).toBeVisible();
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
-});
-
 test('object and global drafts are independent, field save preserves other unsaved changes and close never saves', async () => {
   const r = await reader();
   try {
@@ -249,25 +177,6 @@ test('late subscription and settings responses cannot replace newer object selec
   } finally {await r.close();}
 });
 
-test('OPML returns to the feed list without changing reading', async () => {
-  const r = await reader();
-  try {
-    await r.start([]); await objects(r);
-    await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
-    await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/import/preview',{body:{folders:[{title:'Учёба'}],feeds:[]}});
-      readerTransport.replies.set('/api/import',{body:{}});
-    });
-    await r.page.locator('#opml-file').setInputFiles({name:'example.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body/></opml>')});
-    await r.page.getByRole('button',{name:'Импортировать',exact:true}).click();
-    await expect(r.page.locator('#feeds-dialog')).toBeVisible();
-    await expect(r.page.locator('#feed-list')).toBeVisible();
-    await expect(r.page.locator('#feed-detail')).toBeHidden();
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
-});
-
 test('feed inherited fields show their owner and resetting only one override preserves other drafts', async () => {
   const r = await reader();
   try {
@@ -367,22 +276,22 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
   try {
     await r.start([]); await objects(r);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/feeds/verify',{body:{url:'https://source.test/new',title:'Новый фид',kind:'rss',verification:'verified'}});
-      readerTransport.held.set('/api/feeds', true);
+      readerTransport.replies.set('/api/v3/feeds/verify',{body:{url:'https://source.test/new',title:'Новый фид',kind:'rss',verification:'verified'}});
+      readerTransport.held.set('/api/v3/feeds', true);
     });
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/new');
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-title')).toHaveValue('Новый фид');
     await r.page.locator('#rss-add').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/feeds'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/feeds'));
     await r.page.keyboard.press('Escape');
     await r.page.locator('#add-open').click();
     await r.page.evaluate(() => {
       const data = readerTransport.replies.get('/api/subscriptions')!.body;
       const feed = {...data!.feeds[0],id:'new',title:'Новый фид'};
       data!.feeds.push(feed);
-      readerTransport.release('/api/feeds',feed);
+      readerTransport.release('/api/v3/feeds',feed);
     });
     await expect(r.page.locator('#rss-url')).toHaveValue('');
     await expect(r.page.locator('#add-dialog')).toBeVisible();
@@ -463,15 +372,15 @@ test('a completed RSS addition preserves changes typed after submission', async 
   try {
     await r.start([]); await objects(r);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/feeds/verify',{body:{url:'https://source.test/new',title:'Sent A',kind:'rss',verification:'verified'}});
-      readerTransport.held.set('/api/feeds',true);
+      readerTransport.replies.set('/api/v3/feeds/verify',{body:{url:'https://source.test/new',title:'Sent A',kind:'rss',verification:'verified'}});
+      readerTransport.held.set('/api/v3/feeds',true);
     });
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/new');
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-title')).toHaveValue('Sent A');
     await r.page.locator('#rss-add').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/feeds'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/feeds'));
     await r.page.locator('#rss-title').fill('Draft B');
     await r.page.locator('#rss-history-count').fill('13');
     await r.page.keyboard.press('Escape');
@@ -480,7 +389,7 @@ test('a completed RSS addition preserves changes typed after submission', async 
     await r.page.evaluate(() => {
       const catalog=readerTransport.replies.get('/api/subscriptions')!.body;
       const feed={...catalog!.feeds[0],id:'new',title:'Sent A'};
-      catalog!.feeds.push(feed);readerTransport.release('/api/feeds',feed);
+      catalog!.feeds.push(feed);readerTransport.release('/api/v3/feeds',feed);
     });
     await r.page.waitForFunction(previous => readerTransport.requests.filter(request => request.url==='/api/subscriptions').length>previous,refreshes);
     await expect(r.page.locator('#rss-title')).toHaveValue('Draft B');
@@ -493,36 +402,4 @@ test('a completed RSS addition preserves changes typed after submission', async 
     }
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
-});
-
-test('OPML preview rejects an older file response and resolves real HTTP folder conflicts', async () => {
-  const r=await reader();let delayed: Route | null | undefined;
-  try {
-    await r.start([]);
-    await r.page.evaluate(() => {
-      for(const route of ['/api/import/preview','/api/import','/api/subscriptions'])readerTransport.native.add(route);
-    });
-    await r.page.route('**/api/import/preview',async route=>{
-      if(route.request().postDataJSON().opml.includes('Old file'))delayed=route;
-      else await route.continue();
-    });
-    await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
-    await r.page.locator('#opml-file').setInputFiles({name:'old.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body><outline text="Old file" xmlUrl="https://source.test/old"/></body></opml>')});
-    await expect.poll(()=>Boolean(delayed)).toBe(true);
-    await r.page.locator('#opml-file').setInputFiles({name:'new.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body><outline text="A"><outline text="New file" xmlUrl="https://source.test/new"/></outline><outline text="B"><outline text="New file" xmlUrl="https://source.test/new"/></outline></body></opml>')});
-    await expect(r.page.locator('#import-plan')).toContainText('Папок: 2; источников: 1');
-    await delayed!.fulfill({status:200,contentType:'application/json',body:JSON.stringify({folders:['Old file'],feeds:[]})});delayed=null;
-    await expect(r.page.locator('#import-plan')).toContainText('Папок: 2; источников: 1');
-    await r.page.locator('#import-confirm').click();
-    await expect(r.page.locator('#import-plan')).toContainText('Выберите одну папку для каждого конфликта');
-    await r.page.locator('#import-plan select').selectOption('B');
-    await r.page.locator('#import-confirm').click();
-    await expect(r.page.locator('#feeds-dialog')).toBeVisible();
-    const catalog=await r.api('subscriptions');
-    expect(catalog.feeds).toHaveLength(1);
-    expect(catalog.feeds[0].title).toBe('New file');
-    expect(catalog.folders.find(folder=>folder.id===catalog.feeds[0].folder_id)!.title).toBe('B');
-    expect(r.errors).toEqual([]);
-  }finally{if(delayed)await (delayed as Route).abort();await r.close();}
 });

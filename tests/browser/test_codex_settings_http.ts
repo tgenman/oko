@@ -1,3 +1,4 @@
+import {addSources} from './connections';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader.ts';
@@ -7,7 +8,7 @@ test('production HTTP saves choices, reads provenance and recreates material fro
   const {page,api,origin,token}=await productionReader(t);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
-  const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Статьи" xmlUrl="https://a.test/feed"/></outline></body></opml>'});
+  const plan=await addSources(api, [["https://a.test/feed", "Статьи", "Наука"]]);
   const feed=plan.feeds[0];
   await page.goto(origin+'/#token='+token);
   await page.locator('#settings-open').click();

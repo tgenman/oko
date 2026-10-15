@@ -24,7 +24,7 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     t.replies.set('/api/telegram/accounts',{body:['synthetic']});
     t.replies.set('/api/telegram/topics',{body:[{id:1,title:'Общее'},{id:30,title:'Наука'}]});
     t.replies.set('/api/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
-    t.replies.set('/api/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
+    t.replies.set('/api/v3/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
     t.replies.set('/api/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
     t.replies.set('/api/v3/materials/source/versions/1',{body:{title:'Предыдущая версия',text:'Ранее сохранённый текст',full:true,reason:'',images:[],attachments:[]}});
     t.held.set('/api/v3/materials/pending',true);
@@ -61,7 +61,7 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await r.page.locator('#rss-url').fill('https://example.org/feed.xml');await r.page.locator('#rss-check').focus();await shot('rss-ready','#add-dialog');
    await r.page.locator('#rss-check').click();await expect(r.page.locator('#rss-checked-fields')).toBeVisible();await shot('rss-checked','#add-dialog');
    await r.page.locator('#rss-history-mode').selectOption('date');await shot('rss-date','#add-dialog');
-   await r.page.locator('#rss-url').fill('https://example.org/error');await r.page.evaluate(()=>readerTransport.replies.set('/api/feeds/verify',{status:400,body:{detail:'Синтетическая ошибка проверки фида. '+ 'Длинное пояснение '.repeat(8)}}));
+   await r.page.locator('#rss-url').fill('https://example.org/error');await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/verify',{status:400,body:{detail:'Синтетическая ошибка проверки фида. '+ 'Длинное пояснение '.repeat(8)}}));
    await r.page.locator('#rss-check').click();await expect(r.page.locator('#rss-message')).toContainText('Синтетическая ошибка');await shot('rss-error','#add-dialog');
    await r.page.locator('#add-telegram-tab').click();await expect(r.page.locator('#telegram-account')).toHaveValue('synthetic');
    await r.page.locator('#telegram-peer').fill('@synthetic');
@@ -71,7 +71,6 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await r.page.locator('#telegram-auto').check();
    await expect.poll(()=>r.page.locator('#telegram-auto').evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(52, 199, 89)');
    await shot('telegram','#add-dialog');
-   await r.page.locator('#add-opml-tab').click();await r.page.locator('#opml-file').setInputFiles({name:'sample.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body/></opml>')});await expect(r.page.locator('#import-confirm')).toBeVisible();await shot('opml','#add-dialog');
    await r.page.locator('#add-close').click();await expect(r.page.locator('#add-open')).toBeFocused();
    for(const id of ['plain','video','theses','hidden','media']){
     await r.page.locator('[data-card="'+id+'"]').click();await expect(r.page.locator('#material')).toBeVisible();

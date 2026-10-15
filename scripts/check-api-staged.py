@@ -9,7 +9,7 @@ import sys
 import tempfile
 import tomllib
 
-INPUTS = ('api/', 'scripts/api', 'scripts/generate', 'scripts/check-api-staged.py',
+INPUTS = ('api/', 'scripts/api', 'scripts/generate', 'scripts/legacy_api.py', 'scripts/check-api-staged.py',
           'frontend/src/api/generated/', 'frontend/src/api/legacy-generated/',
           'oko/reader/generated/', 'oko/reader/legacy_generated/', 'package.json', 'package-lock.json',
           'pyproject.toml', 'poetry.lock')

@@ -22,7 +22,7 @@ from oko.processing.codex import CodexClient
 from oko.processing.execution import CodexSettings
 from oko.storage.store import Store
 from oko.collection.telegram.source import TelegramClient, ConnectTelegram, TelegramPeer
-from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, ImportRequest, Overrides, FeedPatch, preview
+from oko.subscriptions.subscriptions import Subscriptions, AddFeed, FeedURL, Overrides, FeedPatch
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.actions import action_context
 from oko.reader.lifetime import Lifetime
@@ -326,14 +326,6 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         config = subscriptions()
         return dict(folders=config.folders(), feeds=config.feeds())
 
-    @app.post('/api/import/preview', response_model=RESPONSES[('POST', '/api/import/preview')], response_model_exclude_unset=True)
-    async def import_preview(body: Annotated[wire.ImportRequest, BeforeValidator(normalize(ImportRequest))]) -> dict[str, Any]:
-        value = to_domain(ImportRequest, body)
-        try:
-            return preview(value.opml)
-        except ValueError as error:
-            raise HTTPException(400, str(error)) from None
-
     @app.post('/api/feeds', response_model=RESPONSES[('POST', '/api/feeds')], response_model_exclude_unset=True)
     async def add_feed(body: Annotated[wire.AddFeed, BeforeValidator(normalize(AddFeed))]) -> dict[str, Any]:
         value = to_domain(AddFeed, body)
@@ -343,11 +335,6 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def verify_feed(body: Annotated[wire.FeedURL, BeforeValidator(normalize(FeedURL))]) -> dict[str, Any]:
         value = to_domain(FeedURL, body)
         return await runtime.verify_feed(value)
-
-    @app.post('/api/import', response_model=RESPONSES[('POST', '/api/import')], response_model_exclude_unset=True)
-    async def import_subscriptions(body: Annotated[wire.ImportRequest, BeforeValidator(normalize(ImportRequest))]) -> dict[str, Any]:
-        value = to_domain(ImportRequest, body)
-        return await runtime.import_subscriptions(value)
 
     @app.get('/api/youtube', response_model=RESPONSES[('GET', '/api/youtube')], response_model_exclude_unset=True)
     async def youtube_settings() -> dict[str, Any]:

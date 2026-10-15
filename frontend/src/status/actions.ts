@@ -49,6 +49,9 @@ export function createReaderActions({ readerApi, onChanged }: {
         }
         else if(context.operation==='complete_folder')path='folders/'+context.folder_id+'/completion';
         else if(context.operation==='collect')path='collect';
+        else if(context.operation==='youtube_configure'){path='youtube';method='PATCH';}
+        else if(context.operation==='add_feed')path='feeds';
+        else if(context.operation==='history_start'||context.operation==='history_pause'||context.operation==='history_cancel'){path='feeds/'+context.feed_id+'/history';method=context.operation==='history_start'?'POST':context.operation==='history_pause'?'PATCH':'DELETE';}
         const request:Request={id:crypto.randomUUID(),context,method,path:'/api/'+path,fields,result:'unknown',sequence:++sequence,key:method+':/api/'+path+':'+(fields.length===1?fields[0]:'')};
         latest.set(request.key,request.sequence);
         commandIds.set(request.key,request.id);
@@ -81,8 +84,8 @@ export function createReaderActions({ readerApi, onChanged }: {
             action = { kind: 'feed-settings', id: request.path.split('/').at(-1) };
         else if (request.path === '/api/collect')
             action = { kind: 'collect' };
-        else if (/^\/api\/(feeds|telegram|import)/.test(request.path))
-            action = { kind: 'add', page: request.path.includes('/import') ? 'opml' : request.path.includes('/telegram') ? 'telegram' : 'rss' };
+        else if (/^\/api\/(feeds|telegram)/.test(request.path))
+            action = { kind: 'add', page: request.path.includes('/telegram') ? 'telegram' : 'rss' };
         if (unknown && action && !['settings', 'feed-settings', 'material', 'add'].includes(action.kind))
             action = null;
         return { id: 'local-' + request.id, request_id: request.id, operation: request.key, code: unknown ? 'action-unknown' : 'action-failed', section: unknown ? 'wait' : 'action',

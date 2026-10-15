@@ -1,3 +1,4 @@
+from tests.support.subscriptions import saved_sources
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.telegram import Telegram
@@ -34,16 +35,16 @@ def test_readding_rss_preserves_history_and_settings(tmp_path):
 
 
 def test_legacy_opml_history_remains_unconfigured_and_settings_survive_restart(tmp_path):
-    opml = '<opml><body><outline text="Старые"><outline text="Лента" xmlUrl="https://example.org/feed.xml"/></outline></body></opml>'
+    saved_sources(tmp_path, [('https://example.org/feed.xml', 'Лента', 'Старые')])
     with client_for(tmp_path) as client:
-        response = client.post('/api/import', json={'opml': opml})
+        response = client.get('/api/subscriptions')
         assert response.status_code == 200
         feed = client.get('/api/subscriptions').json()['feeds'][0]
         assert feed['initial_history'] is None
         assert feed['initial_days'] == 1
         client.patch('/api/feeds/' + feed['id'], json={'importance': 'high', 'initial_days': 7})
         before = client.get('/api/subscriptions').json()
-        assert client.post('/api/import', json={'opml': opml}).status_code == 200
+        assert client.get('/api/subscriptions').status_code == 200
         assert client.get('/api/subscriptions').json() == before
     with client_for(tmp_path) as client:
         assert client.get('/api/subscriptions').json() == before
@@ -53,6 +54,7 @@ def test_legacy_opml_history_remains_unconfigured_and_settings_survive_restart(t
 
 
 def test_legacy_cursor_does_not_replay_older_posts_on_restart(tmp_path):
+    saved_sources(tmp_path, [('https://legacy.test/feed', 'Legacy', 'Без папки')])
     import time
     from email.utils import formatdate
     import httpx
@@ -65,7 +67,7 @@ def test_legacy_cursor_does_not_replay_older_posts_on_restart(tmp_path):
     def open_reader():
         return TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
     with open_reader() as client:
-        client.post('/api/import', json={'opml': '<opml><body><outline text="Legacy" xmlUrl="https://legacy.test/feed"/></body></opml>'})
+        client.get('/api/subscriptions')
         client.post('/api/tabs/reader/heartbeat')
         for _ in range(100):
             cards = client.get('/api/cards').json()

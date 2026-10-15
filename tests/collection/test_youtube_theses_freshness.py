@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
+from tests.support.subscriptions import saved_sources
 from oko.collection.contracts import Material, Publication
 from oko.storage.store import Store
 from tests.support.reader import HEADERS, wait_for
@@ -112,8 +113,9 @@ def test_changed_caption_text_requires_new_theses(tmp_path):
             return Material('Video', self.text, captions='available')
 
     # Synthetic revisions exercise text freshness without querying real subtitles.
+    saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'a'*22, 'Video', 'Видео')])
     with TestClient(create_app(tmp_path, token='test'), headers=HEADERS) as client:
-        feed = subscribe(client)
+        feed = client.get('/api/subscriptions').json()['feeds'][0]['id']
     source, calls = SavedCaptions(), []
     with TestClient(create_app(tmp_path, token='test', source=source, source_feed=feed,
                                ai_transport=model_transport(calls)), headers=HEADERS) as client:

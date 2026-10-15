@@ -41,7 +41,9 @@ def test_legacy_contract_covers_real_reader_routes_and_responses(tmp_path):
         validate_reply(spec, '/api/settings/{scope}/{owner}', 'patch', response)
 
 
-def test_real_settings_import_diagnostics_and_exact_history_obey_contract(tmp_path):
+def test_real_settings_diagnostics_and_exact_history_obey_contract(tmp_path):
+    from tests.support.subscriptions import saved_sources
+    saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=synthetic','Synthetic','Без папки')])
     spec = bundled()
     headers = {'Authorization':'Bearer synthetic'}
     with TestClient(create_app(tmp_path, token='synthetic')) as client:
@@ -53,12 +55,7 @@ def test_real_settings_import_diagnostics_and_exact_history_obey_contract(tmp_pa
         assert response.status_code == 200
         validate_reply(spec, '/api/debug', 'post', response)
         assert response.json()['entry']['message'] == 'example'
-        opml = '<opml><body><outline text="Synthetic" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=synthetic"/></body></opml>'
-        for path in ['/api/import/preview', '/api/import']:
-            response = client.post(path,json={'opml':opml},headers=headers)
-            assert response.status_code == 200
-            validate_reply(spec,path,'post',response)
-        feed = response.json()['feeds'][0]['id']
+        feed = client.get('/api/subscriptions', headers=headers).json()['feeds'][0]['id']
         response = client.post(f'/api/feeds/{feed}/history',json={'mode':'count','count':'9007199254740993'},headers=headers)
         assert response.status_code == 200
         validate_reply(spec,'/api/feeds/{identity}/history','post',response)

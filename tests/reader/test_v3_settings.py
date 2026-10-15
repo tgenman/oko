@@ -1,3 +1,4 @@
+from tests.support.subscriptions import saved_sources
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
@@ -187,8 +188,9 @@ def test_concurrent_reuse_of_correlation_cannot_change_context(tmp_path):
 
 
 def test_imported_telegram_without_access_stays_unconfigured_and_patch_is_atomic(tmp_path):
+    saved_sources(tmp_path, [('https://t.me/example_channel', 'Saved', 'Без папки')])
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        imported = client.post('/api/import', json={'opml': '<opml><body><outline text="Saved" xmlUrl="https://t.me/example_channel"/></body></opml>'})
+        imported = client.get('/api/subscriptions')
         assert imported.status_code == 200, imported.text
         feed = imported.json()['feeds'][0]
         path = '/api/v3/settings/feed/' + feed['id']
@@ -222,9 +224,11 @@ def test_late_diagnostic_for_viewed_material_is_forgotten(tmp_path):
 
 
 def test_receipt_keeps_confirmed_outcome_of_retired_operation(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        reply = client.post('/api/import', json={'opml': '<opml><body/></opml>'}, headers={'X-Oko-Action': 'old-import'})
-        assert reply.status_code == 200
+    from oko.storage.store import Store
+    store=Store(tmp_path, lambda _:None)
+    store.problems.action_started('old-import', dict(identity='POST:/api/import:', title='Import', objects=[], action=None), 1.0)
+    store.problems.action_finished('old-import', True, 2.0)
+    store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
         reply = client.get('/api/v3/commands/old-import')
         assert reply.status_code == 200, reply.text
@@ -234,8 +238,9 @@ def test_receipt_keeps_confirmed_outcome_of_retired_operation(tmp_path):
 
 
 def test_feed_settings_preserve_configured_history_on_read_and_patch(tmp_path):
+    saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=synthetic', 'History', 'Без папки')])
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        result = client.post('/api/import', json={'opml': '<opml><body><outline text="History" xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=synthetic"/></body></opml>'})
+        result = client.get('/api/subscriptions')
         identity = result.json()['feeds'][0]['id']
         assert client.post('/api/feeds/' + identity + '/history', json={'mode': 'count', 'count': '20'}).status_code == 200
         path = '/api/v3/settings/feed/' + identity

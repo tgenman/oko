@@ -28,7 +28,24 @@ async function reader() {
       const aliases = new Map<string, string>();
       // Transitional v2 scenario snapshots are adapted only in this synthetic
       // transport. Production HTTP acceptance verifies the real v3 envelopes.
+      const history=(value:unknown):unknown=>{
+        if(!value||typeof value!=='object')return {state:'absent',legacy_since:null};
+        if('selection' in value||('state' in value&&value.state==='absent'))return value;
+        const h=value as import('../../frontend/src/api/legacy-generated/types.gen').History;
+        const selection=h.mode==='date'?{mode:'date',date:h.date,timezone:h.timezone}:{mode:'count',count:h.count_text||String(h.count)};
+        const progress={loaded:h.loaded||0,viewed:h.viewed||0,incomplete:h.incomplete||0,available:h.available||0,retrying:h.retrying||0,unavailable:h.unavailable||0,requests:h.requests||0,errors:(h.errors||[]).map(e=>({material_id:e.item,code:'source_unavailable',message:e.message})),scan_complete:!!h.scan_complete,manifest_complete:!!h.frozen,warnings:h.warnings||[],discovery_problem:h.discovery_error?{code:'source_unavailable',message:h.discovery_error,retry_at:h.discovery_retry_at?new Date(h.discovery_retry_at*1000).toISOString():null}:null};
+        const state=h.state==='done'?'complete':h.state==='pending'?'not_started':h.state==='selecting'?'discovering':h.state==='loading'?'fetching':h.state;
+        return {state,selection,progress,...(state==='not_started'?{}:{run:h.run||'fixture-run'}),...(state==='paused'?{paused_phase:h.frozen?'fetching':'discovering'}:{}),...(state==='waiting'?{reason:'retry_scheduled',retry_at:null}:{}),...(state==='cancelled'?{outcome:'cancelled'}:{})};
+      };
+      const youtube=(value:unknown)=>{const v=value as import('../../frontend/src/api/legacy-generated/types.gen').YouTube|undefined;return {mode:v?.mode||'direct',address:v?.address||'',has_username:!!v?.has_username,has_password:!!v?.has_password,admission:v?.paused?'paused':v?.next_at?'waiting':'ready',retry_at:v?.next_at?new Date(v.next_at*1000).toISOString():null,strikes:v?.strikes||0,reason:v?.reason?'youtube_rate_limited':null};};
       const v3Reply=(url:string,method:string,body:unknown):unknown=>{
+        if(url==='/api/v3/status'){
+          const v=body as import('../../frontend/src/api/legacy-generated/types.gen').Status;
+          return {api_version:'3.0.0',lifetime:{kind:'client_presence',lease_seconds:60,grace_seconds:60,renew_after_seconds:20},initial_histories:(v.initial_histories||[]).map(h=>({feed_id:h.feed_id,history:history(h)})),youtube:youtube(v.youtube)};
+        }
+        if(url==='/api/v3/youtube'&&body&&typeof body==='object'&&!('admission' in body))return youtube(body);
+        if(url==='/api/v3/feeds/verify'&&body&&typeof body==='object'&&!('state' in body)){const v=body as import('../../frontend/src/api/legacy-generated/types.gen').FeedVerification;return v.existing?{state:'existing',existing_feed:v.existing}:{state:'new',verification:v.verification,candidate:{url:v.url,title:v.title,kind:v.kind}};}
+        if(url.startsWith('/api/v3/feeds/')&&url.endsWith('/history')&&body&&typeof body==='object'&&!('history' in body))return {feed_id:url.split('/')[4],history:history(body)};
         if(url==='/api/v3/processors/llamacpp'&&method==='GET'&&body===null)return {configuration:null};
         if(!body||typeof body!=='object')return body;
         if(url.startsWith('/api/v3/settings/')&&'effective' in body&&'overrides' in body&&!('scope' in body)){
@@ -37,7 +54,8 @@ async function reader() {
             if(!item||typeof item!=='object'||!('value' in item)||!('scope' in item))return [key,item];
             return [key,{value:item.value,origin:{scope:item.scope,...(item.scope==='default'?{}:{owner:'owner' in item?item.owner:'global'})}}];
           }));
-          return {scope,owner,effective,overrides:body.overrides};
+          const feed=('feed' in body?body.feed:null)||replies.get('/api/subscriptions')?.body?.feeds.find(f=>f.id===owner);
+          return {scope,owner,effective,overrides:body.overrides,...(scope==='feed'&&feed&&typeof feed==='object'?{feed:{...feed,history:'initial_history' in feed&&feed.initial_history?history(feed.initial_history):{state:'absent',legacy_since:'legacy_since' in feed&&typeof feed.legacy_since==='number'?new Date(feed.legacy_since*1000).toISOString():null}}}:{})};
         }
         if(url==='/api/v3/processors/llamacpp'&&method==='GET'&&!('configuration' in body))return {configuration:body};
         if(url==='/api/v3/processors/llamacpp/check'&&'local' in body&&'model' in body&&'models' in body)return {locality:body.local?'local':'remote',model:body.model,models:body.models};
@@ -70,7 +88,7 @@ async function reader() {
         if (window.readerTransport.native.has(key)) return nativeFetch(url, options);
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
         const method = options?.method || 'GET', pathname = key.split('?')[0];
-        const reply = replies.get(method + ' ' + key) || replies.get(key) || replies.get(method + ' ' + pathname) || replies.get(pathname);
+        const reply = (key==='/api/v3/status'?replies.get('/api/status'):undefined) || replies.get(method + ' ' + key) || replies.get(key) || replies.get(method + ' ' + pathname) || replies.get(pathname);
         if (reply) {
           for (const [route, next] of reply.next || []) replies.set(route, next);
           if (reply.base64) return new Response(Uint8Array.from(atob(reply.base64), c => c.charCodeAt(0)), {headers: {'Content-Type': reply.mime || 'application/octet-stream'}});
@@ -91,7 +109,7 @@ async function reader() {
         t.replies.set('/api/v3/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
         t.replies.set('/api/v3/reading-composition', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0}], count:0}});
         t.replies.set('/api/v3/processors/codex', {body:{config:null}});
-        t.replies.set('/api/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
+        t.replies.set('/api/v3/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
         t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});
         const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', processor: 'codex'};
         t.replies.set('/api/v3/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
