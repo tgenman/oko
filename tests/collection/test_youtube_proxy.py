@@ -84,7 +84,7 @@ def server(*, tls=None, outcome='ok', retry_after='120', caption_origin='http://
             self.wfile.write(raw)
 
     instance = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread = threading.Thread(target=instance.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     thread.start()
     try:
         yield f'http://127.0.0.1:{instance.server_port}', calls

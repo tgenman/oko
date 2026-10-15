@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -21,7 +20,8 @@ def probe():
 
 
 def documents(tmp_path):
-    value = yaml.safe_load((ROOT / 'api/openapi.yaml').read_text())
+    from tests.support.build_tools import api_document
+    value = api_document()
     value['components']['schemas']['GovernanceProbe'] = probe()
     spec, baseline = tmp_path / 'spec.json', tmp_path / 'baseline.json'
     for path in (spec, baseline):
@@ -84,10 +84,8 @@ def test_missing_and_dynamic_remote_references_fail_before_validation(tmp_path):
 
 
 def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path):
-    for directory in ('api', 'scripts', 'frontend/src/api/generated', 'oko/reader/generated'):
-        shutil.copytree(ROOT / directory, tmp_path / directory)
-    for name in ('package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock'):
-        shutil.copy2(ROOT / name, tmp_path / name)
+    from tests.support.build_tools import api_repository
+    api_repository(tmp_path)
     # This is a synthetic release repository for the staged-governance test.
     # Its initial reviewed fixture is its own contract, including when the
     # surrounding suite checks an unreviewed migration candidate.
@@ -95,7 +93,6 @@ def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path)
     fixture['components']['schemas']['GovernanceProbe'] = probe()
     for filename in ('openapi.yaml', 'baseline.json'):
         (tmp_path / 'api' / filename).write_text(json.dumps(fixture))
-    (tmp_path / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
     assert run('node', '--import', 'tsx', 'scripts/generate-api.mts', 'generate', cwd=tmp_path).returncode == 0
     assert run('git', 'init', '-q', cwd=tmp_path).returncode == 0
     assert run('git', 'add', 'api', 'scripts', 'frontend', 'oko', 'package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock', cwd=tmp_path).returncode == 0

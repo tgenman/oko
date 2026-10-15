@@ -164,6 +164,12 @@ def execute(command, env, report=None, **output):
             finish_output()
 
 
+def syntax_commands(node, paths):
+    typed = [str(path) for path in paths if Path(path).suffix in ('.ts', '.tsx', '.cts', '.mts')]
+    commands = [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/check-ts.cts'), *typed]] if typed else []
+    return commands + [[node, '--check', str(path)] for path in paths if str(path) not in typed]
+
+
 def executable(value, name):
     found = shutil.which(value)
     if not found:
@@ -313,8 +319,8 @@ def main():
                 raise RuntimeError('Browser dependencies unavailable. See tests/browser/README.md.\n' + probe_text)
             env['OKO_BROWSER_EXECUTABLE'] = probe_text.strip()
         commands = {
-            'build': [[node, str(ROOT / 'node_modules/typescript/bin/tsc'), '--noEmit'], [node, '--import', 'tsx', str(ROOT / 'scripts/build-frontend.mts')], [node, '--import', 'tsx', str(ROOT / 'scripts/build-frontend.mts'), '--check']],
-            'syntax': [([node, '--require', 'tsx/cjs', str(ROOT / 'scripts/check-ts.cts'), str(path)] if Path(path).suffix in ('.ts', '.tsx', '.cts', '.mts') else [node, '--check', str(path)]) for path in (selected_files['syntax'] or sorted(path for path in (ROOT / 'frontend').rglob('*') if path.suffix in ('.js', '.mjs', '.ts', '.tsx')))],
+            'build': [[node, '--import', 'tsx', str(ROOT / 'scripts/build-frontend.mts')], [node, '--import', 'tsx', str(ROOT / 'scripts/build-frontend.mts'), '--check']],
+            'syntax': syntax_commands(node, selected_files['syntax'] or sorted(path for path in (ROOT / 'frontend').rglob('*') if path.suffix in ('.js', '.mjs', '.ts', '.tsx'))),
             'lint': [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/lint-js.cts'), *dict.fromkeys(selected_files['lint'])]],
             'tooling-types': [[node, str(ROOT / 'node_modules/typescript/bin/tsc'), '-p', str(ROOT / 'tsconfig.tooling.json')]],
             'browser-types': [[node, str(ROOT / 'node_modules/typescript/bin/tsc'), '-p', str(ROOT / 'tsconfig.browser-tests.json')]],
@@ -338,6 +344,8 @@ def main():
         if ('syntax' in names and not commands['syntax']) or ('browser' in names and not list((ROOT / 'tests/browser').glob('test_*.ts'))):
             raise RuntimeError('Required UI modules or browser tests are missing.')
         for current in names:
+            if current == 'python-tests' and 'http' in names and not selected_files['python-tests']:
+                commands[current][0].extend('--ignore=' + name for name in commands['http'][0][4:])
             if current in ('build','syntax','lint','http','browser','python-tests') and results.get('tooling-types', '').startswith('FAIL'):
                 report.output(f'{current} skipped because tooling types failed.\n')
                 continue

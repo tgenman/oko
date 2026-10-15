@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check exact staged Python/JavaScript/TypeScript bytes, including partial staging."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ import sys
 def main():
     failed = subprocess.run(['git', 'diff', '--cached', '--check']).returncode != 0
     names = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'])
+    typed_inputs = []
     for raw in names.split(b'\0'):
         if not raw:
             continue
@@ -33,14 +35,17 @@ def main():
                 return 1
             print(f'CHECK staged {name}', flush=True)
             if typescript:
-                if subprocess.run([node, '--require', 'tsx/cjs', str(Path(__file__).with_name('check-ts.cts')), '--stdin', name], input=content).returncode:
-                    failed = True
+                typed_inputs.append(dict(name=name, source=content.decode('utf-8')))
                 continue
             mode = 'commonjs' if name.endswith('.cjs') else 'module'
             if subprocess.run([node, '--check', '--input-type=' + mode], input=content).returncode:
                 failed = True
             elif subprocess.run([node, '--require', 'tsx/cjs', str(Path(__file__).with_name('lint-js.cts')), '--stdin', name], input=content).returncode:
                 failed = True
+    if typed_inputs:
+        if subprocess.run([node, '--require', 'tsx/cjs', str(Path(__file__).with_name('check-ts.cts')), '--stdin-files'],
+                          input=json.dumps(typed_inputs).encode('utf-8')).returncode:
+            failed = True
     failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check_test_contracts.py')), '--staged']).returncode != 0 or failed
     failed = subprocess.run([sys.executable, str(Path(__file__).with_name('check-api-staged.py'))]).returncode != 0 or failed
     if any(os.fsdecode(name).endswith(('.ts', '.tsx', '.cts', '.mts')) or os.fsdecode(name) in ('tsconfig.browser-tests.json', 'tsconfig.tooling.json', 'tsconfig.json', 'package.json', 'package-lock.json') for name in names.split(b'\0') if name):

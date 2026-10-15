@@ -9,34 +9,62 @@ concurrency:
   group: checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  check:
-    name: Full checks
+  build:
+    name: Build and static checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        id: python
+      - uses: ./.github/actions/setup
+      - name: Regenerate and compare API without cached evidence
+        run: poetry run npm run api:check -- --fresh
+      - run: poetry run ./scripts/check contracts build syntax lint types browser-types diff entrypoint
+      - uses: actions/upload-artifact@v4
         with:
-          python-version: '3.11'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - name: Install pinned Poetry outside the project environment
-        run: |
-          python -m venv "$RUNNER_TEMP/oko-poetry"
-          "$RUNNER_TEMP/oko-poetry/bin/python" -m pip install 'poetry==2.5.1'
-          echo "$RUNNER_TEMP/oko-poetry/bin" >> "$GITHUB_PATH"
-      - run: poetry env use '${{ steps.python.outputs.python-path }}'
-      - run: poetry check --lock --strict
-      - run: poetry sync --no-interaction
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: poetry run ./scripts/check all
+          name: checked-frontend
+          path: oko/frontend_build/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: check-reports
+          name: check-reports-build
           path: .scratch/check-runs/
           if-no-files-found: ignore
+  tests:
+    name: ${{ matrix.suite }} checks
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [python, browser]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: checked-frontend
+          path: oko/frontend_build/
+      - name: Verify downloaded asset integrity and source freshness
+        run: npm run build:check
+      - if: matrix.suite == 'browser'
+        run: npx playwright install --with-deps chromium
+      - run: poetry run ./scripts/check ${{ matrix.suite }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-reports-${{ matrix.suite }}
+          path: .scratch/check-runs/
+          if-no-files-found: ignore
+  check:
+    name: Full checks
+    if: always()
+    needs: [build, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every check group to succeed
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.tests.result }}
+        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success

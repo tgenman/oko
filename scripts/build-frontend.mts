@@ -1,10 +1,11 @@
+import {validateAssets} from './frontend-assets.mts';
 import type {BinaryLike} from 'node:crypto';
-import {build} from 'vite';
+import {cached, fingerprint, remember, toolchain} from './api-cache.mts';
 import {createHash} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import {resolve, relative, join} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import ts from 'typescript';
+
 
 const root = resolve(import.meta.dirname, '..');
 const output = join(root, 'oko/frontend_build');
@@ -30,10 +31,28 @@ async function sourceDigest() {
   }
   return hash.digest('hex');
 }
+async function checkAssets(expected?: string) {
+  await validateAssets(output, await sourceDigest(), digest(await fs.readFile(join(root, 'oko/reader/generated/openapi.json'))), expected);
+}
 async function compile() {
-  execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'-p',join(root,'tsconfig.tooling.json')],{cwd:root,stdio:'inherit'});
+  // Vite defaults this variable during build; normalize it before fingerprinting.
+  process.env.NODE_ENV ??= 'production';
   execFileSync(process.execPath,['--import','tsx',join(root,'scripts/generate-api.mts'),'check'],{stdio:'inherit'});
+  const key = async () => fingerprint(root, ['frontend', 'api/openapi.yaml', 'oko/reader/generated', 'scripts',
+    'tsconfig.json', 'tsconfig.tooling.json', 'vite.config.mts', 'eslint.config.ts'], await toolchain(root));
+  const checked = await key();
+  if (await cached(root, 'frontend', checked)) {
+    try {
+      await checkAssets(checked);
+      if (checked !== await key()) throw new Error('Build inputs changed during checking');
+      console.log('Frontend build cache hit (types and asset integrity verified)');
+      return;
+    } catch { /* Rebuild missing, stale or damaged output from verified sources. */ }
+  }
+  execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'-p',join(root,'tsconfig.tooling.json')],{cwd:root,stdio:'inherit'});
   execFileSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'--noEmit'],{cwd:root,stdio:'inherit'});
+  const {build} = await import('vite');
+  const {default: ts} = await import('typescript');
   const before = await sourceDigest();
   const stage = join(output, '.stage-' + process.pid);
   await fs.mkdir(output,{recursive:true});
@@ -62,7 +81,7 @@ async function compile() {
     const transport = bundles.flatMap(bundle=>'output' in bundle ? bundle.output : []).find(chunk=>chunk.type==='chunk' && chunk.isEntry && chunk.name==='transport')?.fileName;
     if (!transport) throw new Error('Transport entry missing from the frontend bundle');
     await fs.writeFile(join(stage,'transport.js'),'export * from "/'+transport+'";\n');
-    if (before !== await sourceDigest()) throw new Error('Sources changed during build; retry');
+    if (before !== await sourceDigest() || checked !== await key()) throw new Error('Sources changed during build; retry');
     const assets: Record<string,string> = {};
     for (const file of await files(stage)) assets[relative(stage,file).split('\\').join('/')] = digest(await fs.readFile(file));
     const generation = digest(JSON.stringify(assets));
@@ -70,18 +89,28 @@ async function compile() {
     await fs.mkdir(join(output,'generations'),{recursive:true});
     try {await fs.rename(stage,target);} catch(error) {
       if (!['EEXIST','ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code || '')) throw error;
+      // A content-addressed directory may have been damaged after publication.
+      // Repair individual files atomically; valid generations are never removed.
+      for (const [name, hash] of Object.entries(assets)) {
+        let valid = false;
+        try {valid = digest(await fs.readFile(join(target, name))) === hash;} catch { /* missing asset */ }
+        if (!valid) {
+          await fs.mkdir(join(target, name, '..'), {recursive: true});
+          await fs.rename(join(stage, name), join(target, name));
+        }
+      }
       await fs.rm(stage,{recursive:true,force:true});
     }
     const temporary = join(output,'.current-' + process.pid);
     const contract = digest(await fs.readFile(join(root,'oko/reader/generated/openapi.json')));
-    await fs.writeFile(temporary,JSON.stringify({version:1,source:before,generation,contract,assets},null,2)+'\n');
+    await fs.writeFile(temporary,JSON.stringify({version:1,source:before,generation,contract,assets,check:checked},null,2)+'\n');
     await fs.rename(temporary,join(output,'current.json'));
+    await checkAssets();
+    await remember(root, 'frontend', checked);
   } finally {await fs.rm(stage,{recursive:true,force:true});}
 }
 if (process.argv.includes('--check')) {
-  const manifest = JSON.parse(await fs.readFile(join(output,'current.json'),'utf8'));
-  if (manifest.source !== await sourceDigest()) throw new Error('Frontend build is stale. Run npm run build');
-  for (const [name,hash] of Object.entries(manifest.assets)) if (digest(await fs.readFile(join(output,'generations',manifest.generation,name))) !== hash) throw new Error('Frontend asset corrupt: '+name);
+  await checkAssets();
 } else {
   await compile();
   if (process.argv.includes('--watch')) {
@@ -91,12 +120,14 @@ if (process.argv.includes('--check')) {
       while(pending) {pending=false; try {await compile();} catch(error) {console.error(error instanceof Error ? error.message : String(error));}}
       active=false;
     };
-    let seen = await sourceDigest();
+    const watchDigest = () => fingerprint(root, [...inputs, 'api', 'scripts', 'oko/reader/generated',
+      'oko/reader/legacy_generated', 'node_modules/.package-lock.json']);
+    let seen = await watchDigest();
     // Poll content rather than relying on platform-specific recursive watchers.
     // This also observes atomic file replacements used by editors.
     setInterval(async () => {
       try {
-        const next = await sourceDigest();
+        const next = await watchDigest();
         if(next !== seen) {seen=next; await rebuild();}
       } catch(error) {console.error(error instanceof Error ? error.message : String(error));}
     },250);

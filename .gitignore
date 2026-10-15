@@ -17,3 +17,5 @@ oko/frontend_build/
 /.idea/oko.iml
 /.idea/vcs.xml
 /.idea/misc.xml
+
+.scratch/check-cache/
