@@ -273,8 +273,13 @@ class Store:
         if not row:
             return None
         with self.db:
-            self.db.execute('UPDATE execution_settings SET generation=generation+1 WHERE job=? AND generation=?', (row['id'], row['generation']))
-            self.db.execute("UPDATE jobs SET status='running',attempt=attempt+1,generation=generation+1 WHERE id=?", (row['id'],))
+            # SQLite may reuse an INTEGER PRIMARY KEY after feed cleanup. Keep
+            # dispatch generations monotonic even when every old job was removed.
+            sequence = self.db.execute("SELECT value FROM state WHERE key='job-dispatch-generation'").fetchone()
+            generation = max(row['generation'], int(sequence[0]) if sequence else 0) + 1
+            self.db.execute("INSERT INTO state VALUES ('job-dispatch-generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(generation),))
+            self.db.execute('UPDATE execution_settings SET generation=? WHERE job=? AND generation=?', (generation, row['id'], row['generation']))
+            self.db.execute("UPDATE jobs SET status='running',attempt=attempt+1,generation=? WHERE id=?", (generation, row['id']))
         current = self.db.execute('SELECT * FROM jobs WHERE id=?', (row['id'],)).fetchone()
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
@@ -282,8 +287,8 @@ class Store:
         self.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
 
     def valid(self, job: Job) -> bool:
-        row = self.db.execute('SELECT status,generation FROM jobs WHERE id=?', (job.id,)).fetchone()
-        return bool(row and row['status'] == 'running' and row['generation'] == job.generation)
+        row = self.db.execute('SELECT status,generation,kind,item FROM jobs WHERE id=?', (job.id,)).fetchone()
+        return bool(row and row['status'] == 'running' and row['generation'] == job.generation and row['kind'] == job.kind and row['item'] == job.item)
 
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()

@@ -370,3 +370,55 @@ def test_failed_or_redirected_preview_never_creates_a_binding(tmp_path):
             assert response.status_code == 503 and response.json()['code'] == 'source_unavailable'
             assert not client.get('/api/v3/subscriptions').json()['feeds']
     assert len(calls) == 2 and all(url.startswith('https://t.me/') for url in calls)
+
+
+
+def test_late_discovery_cannot_complete_a_recreated_feed_job(tmp_path):
+    import asyncio
+    import threading
+    import time
+    import httpx
+    from email.utils import formatdate
+    from tests.support.feed_url import verify, add
+    old_started, new_started = threading.Event(), threading.Event()
+    old_release, new_release = threading.Event(), threading.Event()
+    calls = 0
+    stamp = formatdate(time.time(), usegmt=True)
+    async def reply(request):
+        nonlocal calls
+        if request.url.path == '/feed.xml':
+            calls += 1
+            count = calls
+            if count in (2,4):
+                (old_started if count == 2 else new_started).set()
+                event = old_release if count == 2 else new_release
+                deadline = time.monotonic() + 3
+                while not event.is_set() and time.monotonic() < deadline:
+                    try:
+                        await asyncio.sleep(.005)
+                    except asyncio.CancelledError:
+                        pass
+                if not event.is_set():
+                    raise TimeoutError('synthetic wait expired')
+            title = 'Late old' if count == 2 else 'Current'
+            return httpx.Response(200, text=f'<rss><channel><title>RSS</title><item><guid>1</guid><link>https://example.org/article</link><title>{title}</title><pubDate>{stamp}</pubDate></item></channel></rss>')
+        return httpx.Response(200, text='<article>Current text</article>')
+    try:
+        with TestClient(create_app(tmp_path, token='test', api_only=True, rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+            first = add(client, verify(client), initial_history={'mode':'count','count':1}).json()['id']
+            assert old_started.wait(2)
+            assert client.delete('/api/v3/feeds/'+first).status_code == 200
+            for _ in range(100):
+                if not client.get('/api/v3/subscriptions').json()['feeds']: break
+                time.sleep(.02)
+            add(client, verify(client), initial_history={'mode':'count','count':1})
+            assert new_started.wait(2)
+            old_release.set()
+            time.sleep(.1)
+            assert not client.get('/api/cards').json()
+            new_release.set()
+            from tests.support.telegram import settled
+            assert settled(client)[0]['title'] == 'Current'
+    finally:
+        old_release.set()
+        new_release.set()
