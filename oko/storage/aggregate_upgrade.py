@@ -90,14 +90,22 @@ def remove_aggregates(store: 'Store') -> None:
             _relabel(store, item, 'filter', old_filter, current_filter)
         filtered = store.filters.read(item)
         current = store.processing.theses.signature(item)
-        if current is None:
-            continue
         version = store.content_version(item)
         filter_input = filtered
         if settings['feed']['kind'] == 'youtube':
-            text = store.path(item).read_text().split('\n\n', 1)[1]
+            raw, text = store.path(item).read_text().split('\n\n', 1)
+            if json.loads(raw).get('captions') != 'available' or not store.subscriptions.youtube_theses(row['feed_id']):
+                continue
             version = hashlib.sha256(text.encode()).hexdigest()
             filter_input = {}
+            # Caption results remain stored while a filter is pending or hidden.
+            # Migrate their freshness without changing their reading admission.
+            values = store.subscriptions.effective('feed', row['feed_id'])['effective']
+            current = _hash([version, {}, row['members'], store.settings_version(),
+                             {k: v['value'] for k, v in values.items()},
+                             settings['feed']['public_ai'], local])
+        if current is None:
+            continue
         old = _hash([version, filter_input, row['members'], store.settings_version(),
                      {k: v['value'] for k, v in settings['effective'].items()},
                      settings['feed']['public_ai'], local])

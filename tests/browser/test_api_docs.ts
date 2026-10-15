@@ -26,7 +26,7 @@ test('standalone Swagger displays the complete contract without reader calls or 
     const response = await page.goto(origin + '/docs');
     assert.match(response!.headers()['content-security-policy'], /script-src 'self'/);
     await page.locator('.opblock').last().waitFor();
-    assert.equal(await page.locator('.opblock').count(), 50);
+    assert.equal(await page.locator('.opblock').count(), 49);
     await page.locator('.opblock-summary').filter({hasText: '/api/status'}).click();
     assert.equal(await page.getByRole('button', {name:'Try it out'}).count(), 0);
     assert.equal(await page.getByRole('button', {name:/Authorize/}).count(), 0);

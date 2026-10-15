@@ -35,7 +35,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
       assert.equal(response.status, 200, await response.clone().text()); return response.json();
     }
     await expect.poll(async () => {try {return (await fetch(origin)).status;} catch {return 0;}}, {timeout:10000}).toBe(200);
-    await api('settings/oko/global', 'PATCH', {theses:false, digests:false});
+    await api('settings/oko/global', 'PATCH', {theses:false});
     browser = await chromium.launch({headless:true, executablePath:process.env.OKO_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
     const page = await browser.newPage(), errors: string[] = [];
     page.setDefaultTimeout(5000); page.setDefaultNavigationTimeout(10000);

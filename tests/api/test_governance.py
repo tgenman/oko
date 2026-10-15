@@ -53,13 +53,14 @@ def test_baseline_update_requires_version_and_semantic_review(tmp_path):
     review = tmp_path / 'review.md'
     review.write_text('Semantic review: title is now an integer; all clients migrate together.\n')
     assert compat('baseline', spec, baseline, '--review', str(review)).returncode != 0
-    value['info']['version'] = '2.0.0'
+    next_version = str(int(value['info']['version'].split('.')[0]) + 1) + '.0.0'
+    value['info']['version'] = next_version
     spec.write_text(json.dumps(value))
     assert compat('baseline', spec, baseline).returncode != 0
     assert compat('baseline', spec, baseline, '--review', str(review)).returncode == 0
     assert json.loads(baseline.read_text()) == value
     evidence = json.loads(baseline.with_suffix('.review.json').read_text())
-    assert evidence['to_version'] == '2.0.0'
+    assert evidence['to_version'] == next_version
     assert 'all clients migrate' in evidence['semantic_review']
     assert compat('check', spec, baseline).returncode == 0
 
@@ -120,10 +121,11 @@ def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path)
     failed = run(sys.executable, 'scripts/check-api-staged.py', cwd=tmp_path)
     assert failed.returncode != 0
     assert 'semantic review evidence' in failed.stdout + failed.stderr
-    value['info']['version'] = '2.0.0'
+    next_version = str(int(value['info']['version'].split('.')[0]) + 1) + '.0.0'
+    value['info']['version'] = next_version
     spec.write_text(json.dumps(value))
     review = tmp_path / 'semantic-review.md'
-    review.write_text('Title changes to integer; version 2.0.0 requires client migration.\n')
+    review.write_text(f'Title changes to integer; version {next_version} requires client migration.\n')
     assert run('node', '--import', 'tsx', 'scripts/generate-api.mts', 'baseline', '--review', str(review), cwd=tmp_path).returncode == 0
     assert run('node', '--import', 'tsx', 'scripts/generate-api.mts', 'generate', cwd=tmp_path).returncode == 0
     assert run('git', 'add', 'api', 'oko/reader/generated', 'frontend/src/api/generated', cwd=tmp_path).returncode == 0

@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
@@ -60,3 +61,44 @@ def test_upgrade_preserves_youtube_caption_theses_after_metadata_revision(tmp_pa
                 assert response.status_code == 200
                 assert response.content == bytes.fromhex(contents)
         assert calls == []
+
+
+@pytest.mark.parametrize('filter_state', ['pending', 'hidden'])
+def test_upgrade_preserves_caption_theses_while_filter_blocks_reading(tmp_path, filter_state):
+    from tests.support.models import model_transport
+    from tests.support.reader import wait_for
+
+    fixture = json.loads((Path(__file__).parents[1] / 'fixtures/legacy-youtube-reader.json').read_text())
+    with sqlite3.connect(tmp_path / 'state.sqlite') as db:
+        db.executescript(fixture['sql'])
+        if filter_state == 'pending':
+            db.execute("UPDATE jobs SET status='pending',next=0 WHERE kind='filter'")
+    for name, contents in fixture['files'].items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(bytes.fromhex(contents))
+    if filter_state == 'hidden':
+        for path in tmp_path.glob('content/**/filter.md'):
+            raw, text = path.read_text().split('\n\n', 1)
+            header = json.loads(raw)
+            header['result'] = dict(hidden=True, reason='Synthetic hidden material', removed=[])
+            path.write_text(json.dumps(header) + '\n\n' + text)
+    calls = []
+    native = model_transport([])
+    def response(request):
+        if request.url.path != '/v1/chat/completions':
+            return native.handler(request)
+        task = json.loads(json.loads(request.content)['messages'][1]['content'])
+        calls.append(task['operation'])
+        if task['operation'] != 'filter':
+            return native.handler(request)
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(dict(hidden=False, reason='', removed=[]))}}]})
+    with TestClient(create_app(tmp_path, token='test', ai_transport=httpx.MockTransport(response)), headers={'Authorization': 'Bearer test'}) as client:
+        expected = fixture['expected']
+        if filter_state == 'hidden':
+            assert client.post('/api/materials/' + expected['id'] + '/filter/restore').status_code == 200
+        client.post('/api/tabs/test/heartbeat')
+        material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + expected['id']).json()).get('theses') else None)
+        assert material['theses'] == expected['theses']
+        assert material['provenance'] == expected['provenance']
+        assert calls == (['filter'] if filter_state == 'pending' else [])

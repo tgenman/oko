@@ -36,7 +36,7 @@ test('installed reader and Swagger use local packaged resources, explicit bearer
     page.on('request',request=>requests.push(request.url()));
     await page.goto(origin+'/docs');
     await page.locator('.opblock').last().waitFor();
-    assert.equal(await page.locator('.opblock').count(),50);
+    assert.equal(await page.locator('.opblock').count(),49);
     assert(!requests.some(url=>new URL(url).pathname.startsWith('/api/')));
     assert(requests.every(url=>url.startsWith(origin+'/')));
     let status=await(await fetch(origin+'/api/status',{headers:{Authorization:'Bearer synthetic'}})).json();
