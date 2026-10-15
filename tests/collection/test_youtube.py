@@ -115,6 +115,8 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
     captions, ai = Missing(), []
     wall, tick = [time.time()], [100.]
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, ai_transport=model_transport(ai), wall_clock=lambda: wall[0], clock=lambda: tick[0], lease=600), headers=HEADERS) as client:
+        # Connecting starts collection; disable unrelated processing beforehand.
+        assert client.patch('/api/settings/oko/global', json={'theses': False}).status_code == 200
         feed = subscribe(client)
         client.patch('/api/settings/feed/' + feed, json={'theses': False})
         client.post('/api/tabs/reader/heartbeat')
