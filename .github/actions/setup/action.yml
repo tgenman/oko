@@ -11,22 +11,16 @@ runs:
       with:
         node-version: '22'
         cache: npm
-    - name: Install pinned Poetry outside the project environment
-      shell: bash
-      run: |
-        python -m venv "$RUNNER_TEMP/oko-poetry"
-        "$RUNNER_TEMP/oko-poetry/bin/python" -m pip install 'poetry==2.5.1'
-        echo "$RUNNER_TEMP/oko-poetry/bin" >> "$GITHUB_PATH"
-    - uses: actions/cache@v4
+    - name: Install pinned uv and restore its package cache
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
-        path: .venv
-        key: python-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-poetry-2.5.1-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
-    - name: Synchronize dependencies even on a cache hit
+        version: '0.11.28'
+        enable-cache: true
+        cache-dependency-glob: |
+          pyproject.toml
+          uv.lock
+    - name: Synchronize dependencies from the checked lock
       shell: bash
-      env:
-        POETRY_VIRTUALENVS_IN_PROJECT: 'true'
       run: |
-        poetry env use '${{ steps.python.outputs.python-path }}'
-        poetry check --lock --strict
-        poetry sync --no-interaction
+        uv sync --locked --python '${{ steps.python.outputs.python-path }}'
         npm ci

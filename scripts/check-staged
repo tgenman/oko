@@ -16,7 +16,7 @@ def main():
         ['git', 'diff', '--cached', '--name-only', '--no-renames', '-z']).split(b'\0') if name]
     relevant = any(name.endswith(('.py', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.cts', '.mts', '.json'))
                    or name.startswith(('scripts/', 'api/')) or name in
-                   ('package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock',
+                   ('package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock',
                     'tsconfig.json', 'tsconfig.tooling.json', 'tsconfig.browser-tests.json')
                    for name in changed)
     if not relevant:

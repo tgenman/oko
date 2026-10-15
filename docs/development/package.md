@@ -4,7 +4,7 @@
 
 ```sh
 npm run build
-poetry run python -m oko --demo
+uv run --locked python -m oko --demo
 ```
 
 В работающем Око `/docs` показывает Swagger, `/openapi.json` — canonical contract. Кнопка Authorize принимает token локальной сессии; после неё Try it out → Execute отправляет запрос. Авторизация находится в памяти страницы и пропадает после загрузки нового документа. Swagger не получает token автоматически и не создаёт reader lease. Поэтому прежняя остановка Око без живой вкладки читателя действует и при открытой документации.

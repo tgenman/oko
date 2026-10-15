@@ -594,6 +594,13 @@ def test_tool_selection_covers_branch_index_worktree_untracked_and_deleted(tmp_p
     git('mv', 'scripts/check', 'moved-outside-tools.py')
     assert scope(checkout, 'HEAD') == (True, ['scripts/check'])
     git('commit', '-qm', 'move')
+    lock = checkout / 'uv.lock'
+    lock.write_text('version = 1\n')
+    assert scope(checkout, 'HEAD') == (True, ['uv.lock'])
+    git('add', 'uv.lock')
+    lock.unlink()
+    assert scope(checkout, 'HEAD') == (True, ['uv.lock'])
+    git('reset', '-q', 'HEAD', '--', 'uv.lock')
     (checkout / 'scripts/new-tool').write_text('new')
     assert scope(checkout, 'HEAD')[0]
     assert scope(checkout, 'missing-reference')[0]
