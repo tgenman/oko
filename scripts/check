@@ -197,7 +197,7 @@ def checkout_state(excluded):
     return result
 
 
-TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_candidate_checks.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
                'tests/support/', 'frontend/src/api/generated/', 'frontend/src/api/legacy-generated/',
                'oko/reader/generated/', 'oko/reader/legacy_generated/',
@@ -386,11 +386,6 @@ def parallel_tests(names, commands, environment, report, results, match=None):
             report.output('Tests changed checkout files:\n' + ''.join('  ' + name + '\n' for name in changed))
 
 
-def _candidate_parent(path):
-    path = path.resolve()
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -404,7 +399,6 @@ def main():
     parser.add_argument('--match', help='Regex selecting browser scenarios by name (requires browser checks)')
     parser.add_argument('--files', nargs='+', help='Explicit browser/Python test files or JavaScript files for lint/syntax; put check sets before this option')
     parser.add_argument('--report-dir', type=Path, default=ROOT / '.scratch/check-runs', help='Parent directory for separate full logs and JSON reports for each run')
-    parser.add_argument('--candidate', type=Path, help='Check an unpublished OpenAPI candidate in an isolated copy of this working tree')
     parser.add_argument('--browser-workers', type=int, choices=(2, 4), default=2, help='Concurrent browser files (bounded to 2 or 4)')
     parser.add_argument('--tools-needed', action='store_true', help='Print tool-change selection and exit before setting up runtimes')
     parser.add_argument('--base', help='Git revision for tool-change selection; default: merge-base with origin/main')
@@ -412,41 +406,10 @@ def main():
     args = parser.parse_args()
     if args.if_changed and args.sets != ['tools']:
         parser.error('--if-changed requires the tools group alone')
-    candidate_context = None
-    if args.candidate or (ROOT / '.oko-candidate.json').exists() or (os.environ.get('OKO_CANDIDATE_CONTEXT') and (ROOT / 'scripts/candidate.py').exists()):
-        from candidate import context, prepare
-        candidate_context = context(ROOT)
-    if args.candidate:
-        context(ROOT)  # Validate a parent context before synthetic nested runs.
-        directory = Path(tempfile.mkdtemp(prefix='candidate-', dir=_candidate_parent(args.report_dir)))
-        candidate_path, _ = prepare(ROOT, directory, args.candidate.resolve())
-        temporary = directory / 'tmp'
-        temporary.mkdir()
-        environment = dict(os.environ, OKO_CANDIDATE_CONTEXT=str(candidate_path), TMPDIR=str(temporary.resolve()))
-        arguments = iter(sys.argv[1:])
-        forwarded = []
-        for argument in arguments:
-            if argument == '--candidate':
-                next(arguments)
-            elif not argument.startswith('--candidate='):
-                forwarded.append(argument)
-        command = [sys.executable, str(directory / 'tree/scripts/check'), *forwarded]
-        process = subprocess.Popen(command, cwd=directory / 'tree', env=environment, start_new_session=True)
-        try:
-            return process.wait()
-        except KeyboardInterrupt:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            return 130
     env = os.environ.copy()
     started = time.monotonic()
     names = list(dict.fromkeys(name for selected in args.sets for name in groups.get(selected, [selected])))
-    scope_root = Path(candidate_context['source_root']) if candidate_context else ROOT
-    tools_required, tool_inputs = tool_changes(scope_root, args.base)
+    tools_required, tool_inputs = tool_changes(ROOT, args.base)
     if args.tools_needed:
         print('true' if tools_required else 'false')
         return 0
@@ -484,13 +447,6 @@ def main():
     if 'lifecycle' in args.sets and not {'ui','all','browser'} & set(args.sets) and not selected_files['browser']:
         selected_files['browser'] = [str(ROOT / 'tests/browser/test_ui_lifecycle.ts')]
     report = Report(args.report_dir.resolve(), names, selected_files)
-    if candidate_context:
-        names.insert(0, 'compatibility')
-        if set(names) - {'compatibility', 'diff', 'staged'}:
-            names.insert(1, 'api-generate')
-            names.insert(2, 'api-drift')
-        report.data['suites'] = {name: dict(status='NOT RUN', commands=[], failures=[]) for name in names}
-        report.data['candidate'] = dict(candidate_context, full_check='all' in args.sets)
     report.data['browser_name_pattern'] = args.match
     report.data['tool_selection'] = dict(required=tools_required, inputs=tool_inputs, base=args.base)
     if ('all' in args.sets and not args.files) or args.if_changed:
@@ -534,7 +490,7 @@ def main():
             'browser': [[node, '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts'))))]],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
-        if candidate_context or {'contracts', 'http', 'python-tests', 'tool-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):
+        if {'contracts', 'http', 'python-tests', 'tool-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):
             default_python = str(ROOT / '.venv/bin/python') if (ROOT / '.venv/bin/python').exists() else 'python3'
             python = executable(env.get('OKO_PYTHON', default_python), 'Python')
             env['OKO_PYTHON'] = python
@@ -544,10 +500,6 @@ def main():
                              'tool-tests': [[python, '-m', 'pytest', '-q', *dict.fromkeys(selected_files['tool-tests'] or TOOL_TESTS)]],
                              'types': [[python, '-m', 'mypy', 'oko', 'tests/support/codex.py', 'tests/support/app.py']],
                              'entrypoint': [[python, '-m', 'oko', '--help']]})
-        if candidate_context:
-            commands.update({'compatibility': [[python, str(ROOT / 'scripts/api-compat.py'), 'check']],
-                'api-generate': [[env.get('OKO_NODE', 'node'), '--import', 'tsx', str(ROOT / 'scripts/generate-api.mts'), 'generate']],
-                'api-drift': [[env.get('OKO_NODE', 'node'), '--import', 'tsx', str(ROOT / 'scripts/generate-api.mts'), 'check']]})
         if ('syntax' in names and not commands['syntax']) or ('browser' in names and not list((ROOT / 'tests/browser').glob('test_*.ts'))):
             raise RuntimeError('Required UI modules or browser tests are missing.')
         if 'python-tests' in commands and not selected_files['python-tests']:
@@ -600,12 +552,6 @@ def main():
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
                 else:
                     results[current] = f'PASS ({time.monotonic() - tick:.2f}s)'
-            if current == 'compatibility' and results[current].startswith('PASS') and candidate_context:
-                compatibility_bytes = Path(candidate_context['compatibility_report']).read_bytes()
-                (report.directory / 'compatibility.json').write_bytes(compatibility_bytes)
-                compatibility = json.loads(compatibility_bytes)
-                if compatibility['status'] == 'PENDING_REVIEW':
-                    results[current] = 'PENDING_REVIEW'
             if baseline is not None:
                 after = checkout_state(report.directory)
                 changed = sorted(name for name in baseline.keys() | after.keys() if baseline.get(name) != after.get(name))
@@ -613,7 +559,7 @@ def main():
                 if changed:
                     report.output('Tests changed checkout files:\n' + ''.join('  ' + name + '\n' for name in changed))
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
-        exit_code = int(any(not (value.startswith('PASS') or value == 'PENDING_REVIEW') for value in results.values()))
+        exit_code = int(any(not value.startswith('PASS') for value in results.values()))
     except KeyboardInterrupt:
         if current and results[current] == 'NOT RUN':
             results[current] = 'INTERRUPTED'

@@ -146,7 +146,7 @@ node --require tsx/cjs --require ./scripts/register-browser-typescript.cts --tes
 
 ## React / API-first
 
-Полный контракт: api/openapi.yaml. Команды api:lint, api:generate, api:check, api:compat и standalone api:docs описаны в [API README](../../api/README.md). Generated libs проверяются без записи в checkout. Swagger browser-проверки и проверки wheel удалены; источники и модели в оставшихся сценариях только синтетические. Историческое описание TypedDict wire export выше относится к версии до React-переноса.
+Полный контракт: api/openapi.yaml. Команды api:lint, api:generate, api:check и standalone api:docs описаны в [API README](../../api/README.md). Generated libs проверяются без записи в checkout. Swagger browser-проверки и проверки wheel удалены; источники и модели в оставшихся сценариях только синтетические. Историческое описание TypedDict wire export выше относится к версии до React-переноса.
 
 ## TypeScript в браузерных тестах
 
@@ -182,7 +182,7 @@ node --require tsx/cjs --require ./scripts/register-browser-typescript.cts --tes
 Успешные проверки API и сборки сохраняют локальные записи в игнорируемом `.scratch/check-cache/`.
 Повторное использование требует тех же байтов входов, состава generated-файлов, версий инструментов
 и влияющего окружения (служебные npm/runner/shell поля исключены). Проверяются добавления и удаления, не только даты изменения. Ключ API включает baseline,
-генераторы, шаблоны и candidate marker; контекст кандидата проверяется до обращения к кэшу.
+генераторы и шаблоны.
 Сбой не сохраняется. Отсутствующий или повреждённый кэш вызывает обычную проверку.
 
 Сборка связывает manifest с ключом проверенных входов и проверяет целостность текущего поколения,

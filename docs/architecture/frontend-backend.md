@@ -6,7 +6,7 @@ React + strict TypeScript находятся в frontend/src; Vite собира�
 
 Редактируемый HTTP-контракт — [OpenAPI](../../api/openapi.yaml). Generated Python DTO используются в входных и выходных handlers; доменная валидация и Runtime/Store сохраняют прежние обязанности. Generated TypeScript SDK задаёт операции. APIreader настраивает отдельный Fetch client и учитывает исходы команд; общие errors/transport сохраняют diagnostic headers, unknown network outcomes и bearer только своего origin. Binary operations выводятся из canonical metadata и читаются как Blob, а media links используют авторизованный raw fetch.
 
-[API-first policy](../../api/README.md) задаёт проверку drift, совместимости и reviewed baseline. Browser snapshots получают schema2020-12 из canonical bundle и используют Ajv8; ручных wire-схем нет. Standalone Swagger не создаёт Runtime. Встроенные docs поставляются локально, требуют явного Authorize для Try и не создают reader lease.
+[API-first policy](../../api/README.md) задаёт валидацию схемы и проверку актуальности generated-библиотек. Browser snapshots получают schema2020-12 из canonical bundle и используют Ajv8; ручных wire-схем нет. Standalone Swagger не создаёт Runtime. Встроенные docs поставляются локально, требуют явного Authorize для Try и не создают reader lease.
 
 Python static delivery проверяет content hashes, ревизию контракта и freshness checkout до Runtime. Assets находятся в immutable generations с atomic pointer; старые chunks остаются доступны открытым вкладкам при watch rebuild. Читатель запускается [из checkout](../development/package.md); сборка установочного пакета временно удалена.
 
