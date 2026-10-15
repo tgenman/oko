@@ -45,7 +45,7 @@ test('reading tree has separate trailing disclosure controls and usable two-line
   try {
     await r.page.setViewportSize({width:1280,height:900});
     await r.start([]);
-    await r.page.evaluate(() => readerTransport.replies.set('/api/navigation',{body:{count:79,folders:[{id:'f',title:'Наука',count:52},{id:'p',title:'Физика',count:27}],feeds:[{id:'long',title:'Kurzgesagt — In a Nutshell, научный канал',kind:'youtube',folder_id:'f',count:26}]}}));
+    await r.page.evaluate(() => readerTransport.replies.set('/api/v3/reading-composition',{body:{count:79,folders:[{id:'f',title:'Наука',count:52},{id:'p',title:'Физика',count:27}],feeds:[{id:'long',title:'Kurzgesagt — In a Nutshell, научный канал',kind:'youtube',folder_id:'f',count:26}]}}));
     const folder = r.page.locator('#folders [data-folder="f"]');
     await expect(folder).toContainText('Наука');
     const toggle = r.page.locator('#folders').getByRole('button',{name:'Свернуть Наука',exact:true});
@@ -67,7 +67,7 @@ test('reading tree has separate trailing disclosure controls and usable two-line
     await r.page.locator('#folders').getByRole('button',{name:'Раскрыть Наука',exact:true}).click();
     await r.page.setViewportSize({width:1280,height:900});
     await r.page.screenshot({path:artifactPath('feed-tree-reading-desktop.png')});
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/navigation',{body:{count:0,folders:[],feeds:[]}}));
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/reading-composition',{body:{count:0,folders:[],feeds:[]}}));
     await expect(r.page.locator('#folders [data-folder]')).toHaveCount(0);
     await expect(r.page.locator('#all-folders')).toHaveAttribute('aria-pressed','true');
     expect(r.errors).toEqual([]);

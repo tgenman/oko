@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 test('production HTTP reader keeps folder/feed membership, previews, theses and viewed actions', {timeout:45000}, async t => {
  const {page, api, origin, token} = await productionReader(t);
-  assert.equal((await fetch(origin+'/api/cards')).status,403);
+  assert.equal((await fetch(origin+'/api/v3/cards')).status,403);
   await api('settings/oko/global','PATCH',{theses:false,processor:'llamacpp'});
   const plan=await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа" xmlUrl="https://a.test/feed"/><outline text="Бета" xmlUrl="https://b.test/feed"/><outline text="Пустой" xmlUrl="https://empty.test/feed"/></outline></body></opml>'});
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));

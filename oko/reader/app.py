@@ -161,7 +161,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             except ValueError:
                 pass
         action = action_context(request.method, request.url.path, fields)
-        material_path = re.match(r'/api/materials/([\w-]+)(?:/|$)', request.url.path)
+        material_path = re.match(r'/api/(?:v3/)?materials/([\w-]+)(?:/|$)', request.url.path)
         material_context = diagnostic_materials.set((material_path[1],) if material_path else ())
         if action:
             await runtime.action_started(action_id, action)

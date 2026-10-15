@@ -218,7 +218,9 @@ class Problems:
             if len(before) != len(body['objects']):
                 if not body['objects']:
                     body['action'] = None
-                self.db.execute("UPDATE reader_action_results SET body=?,result='abandoned' WHERE id=?", (json.dumps(body), row['id']))
+                # Typed receipts retain confirmed execution facts after content cleanup.
+                result = row['result'] if body.get('command_context') else 'abandoned'
+                self.db.execute("UPDATE reader_action_results SET body=?,result=? WHERE id=?", (json.dumps(body), result, row['id']))
 
     def reconcile(self, candidates: list[dict[str, Any]], now: float) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""

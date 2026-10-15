@@ -1,19 +1,19 @@
 import {useEffect,useLayoutEffect} from 'react';
-import {previewCompletion,completeFolder} from '../api/legacy-generated/sdk.gen';
-import type {CompletionPreview,CompletionConflict} from '../api/legacy-generated/types.gen';
+import {previewCompletion,completeFolder} from '../api/generated/sdk.gen';
+import type {CompletionPreview} from '../api/generated/types.gen';
 import {ReaderError,type ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {reportError} from '../status/debug';
 import {createStore,useStore,host,errorMessage} from './store';
 
 type CompletionState={open:boolean;folder:string|null;preview:CompletionPreview|null;message:string;busy:boolean;generation:number};
-function conflict(error:unknown):CompletionConflict|null {
-  if(!(error instanceof ReaderError)||!error.detail||typeof error.detail!=='object')return null;
+function conflict(error:unknown):{message:string;preview:CompletionPreview}|null {
+  if(!(error instanceof ReaderError)||error.code!=='composition_changed'||!error.detail||typeof error.detail!=='object')return null;
   const detail=error.detail;
-  if(!('message'in detail)||typeof detail.message!=='string'||!('preview'in detail)||!detail.preview||typeof detail.preview!=='object')return null;
+  if(!('preview'in detail)||!detail.preview||typeof detail.preview!=='object')return null;
   const preview=detail.preview;
-  if(!('cards'in preview)||typeof preview.cards!=='number'||!('originals'in preview)||typeof preview.originals!=='number'||!('token'in preview)||typeof preview.token!=='string')return null;
-  return {message:detail.message,preview:{cards:preview.cards,originals:preview.originals,token:preview.token}};
+  if(!('cards_count'in preview)||typeof preview.cards_count!=='number'||!('publications_count'in preview)||typeof preview.publications_count!=='number'||!('token'in preview)||typeof preview.token!=='string')return null;
+  return {message:error.message,preview:{cards_count:preview.cards_count,publications_count:preview.publications_count,token:preview.token}};
 }
 export function createFolderActions({readerApi,getFolder,isStopped,onRefresh,onCompleted}:{readerApi:ReaderApi;getFolder:()=>string|null;isStopped:()=>boolean;onRefresh:()=>void;onCompleted:(folder:string)=>void}) {
   const completion=createStore<CompletionState>({open:false,folder:null,preview:null,message:'',busy:false,generation:0});
@@ -28,14 +28,14 @@ export function createFolderActions({readerApi,getFolder,isStopped,onRefresh,onC
   async function confirmCompletion() {
     const state=completion.get();if(!state.folder||!state.preview||state.busy||!completionActive(state))return;
     completion.set({...state,busy:true,message:''});
-    try {await completeFolder({client:readerApi.client,path:{folder:state.folder},body:{token:state.preview.token}});onCompleted(state.folder);if(completionActive(state))closeCompletion();onRefresh();}
+    try {await readerApi.command({operation:'complete_folder',folder_id:state.folder},headers=>completeFolder({client:readerApi.client,headers,path:{folder:state.folder!},body:{token:state.preview!.token}}));onCompleted(state.folder);if(completionActive(state))closeCompletion();onRefresh();}
     catch(error){reportError(error,'Завершение папки');const changed=conflict(error);if(!changed)onCompleted(state.folder);onRefresh();if(completionActive(state))completion.set({...completion.get(),message:changed?.message||errorMessage(error),preview:changed?.preview||state.preview,busy:false});}
   }
   function Completion() {
     const state=useStore(completion);
     useLayoutEffect(()=>{const dialog=host('completion-dialog') as HTMLDialogElement;if(state.open&&!dialog.open)dialog.showModal();else if(!state.open&&dialog.open)dialog.close();},[state.open]);
     useEffect(()=>{const dialog=host('completion-dialog');const close=()=>{if(!(dialog as HTMLDialogElement).open&&completion.get().open)closeCompletion();};dialog.addEventListener('close',close);return()=>dialog.removeEventListener('close',close);},[]);
-    return <><h1 id="completion-heading">Завершить разбор папки</h1><p id="completion-count">{state.preview?`Карточек: ${state.preview.cards}. Исходных публикаций: ${state.preview.originals}.`:'Подсчёт…'}</p><p>Удалятся тексты, медиа и тезисы всей папки, включая скрытые материалы. Другие папки останутся.</p><button id="completion-confirm" disabled={isStopped()||state.busy||!state.preview?.originals} onClick={()=>void confirmCompletion()}>Подтвердить просмотр</button><button id="completion-close" onClick={closeCompletion}>Отмена</button><p id="completion-message" role="status">{state.message}</p></>;
+    return <><h1 id="completion-heading">Завершить разбор папки</h1><p id="completion-count">{state.preview?`Карточек: ${state.preview.cards_count}. Исходных публикаций: ${state.preview.publications_count}.`:'Подсчёт…'}</p><p>Удалятся тексты, медиа и тезисы всей папки, включая скрытые материалы. Другие папки останутся.</p><button id="completion-confirm" disabled={isStopped()||state.busy||!state.preview?.publications_count} onClick={()=>void confirmCompletion()}>Подтвердить просмотр</button><button id="completion-close" onClick={closeCompletion}>Отмена</button><p id="completion-message" role="status">{state.message}</p></>;
   }
   mountSurface(host('completion-dialog'),<Completion/>);
   return {

@@ -14,8 +14,8 @@ import {initializeReaderShell,mountSurface,setRenderReporter} from './renderer';
 import {useState} from 'react';
 import {ReaderShell} from './shell';
 import {errorMessage} from './api/errors';
-import {regenerate,retryMaterial,retryTheses,retryFilter} from './api/legacy-generated/sdk.gen';
-import type {Navigation} from './api/legacy-generated/types.gen';
+import {regenerate,retryMaterial,retryTheses,retryFilter} from './api/generated/sdk.gen';
+import type {Navigation} from './reading/tree';
 import type {ReaderMessage} from './reader-session';
 initializeReaderShell(<ReaderShell/>);
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
@@ -56,10 +56,10 @@ statusPanel = createStatusPanel({debug, actions,onAvailability:available=>{comma
       const ids=problem.objects.filter(object=>object.kind==='material').map(object=>object.id);
       for(const id of ids.length?ids:target.id?[target.id]:[]) {
         const options={client:readerApi.client,path:{item:id}};
-        if(target.kind==='retry')await retryMaterial(options);
-        else if(target.kind==='theses-retry')await retryTheses(options);
-        else if(target.kind==='filter-retry')await retryFilter(options);
-        else if(target.kind==='regenerate')await regenerate(options);
+        if(target.kind==='retry')await readerApi.command({operation:'retry_material',material_id:id},headers=>retryMaterial({...options,headers}));
+        else if(target.kind==='theses-retry')await readerApi.command({operation:'retry_theses',material_id:id},headers=>retryTheses({...options,headers}));
+        else if(target.kind==='filter-retry')await readerApi.command({operation:'retry_filter',material_id:id},headers=>retryFilter({...options,headers}));
+        else if(target.kind==='regenerate')await readerApi.command({operation:'regenerate',material_id:id},headers=>regenerate({...options,headers}));
       }
     }
     refresh();

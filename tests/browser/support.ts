@@ -1,3 +1,4 @@
+import {installReadingFixtures} from './reading-fixtures';
 import type {FixtureMaterial, ReplyMap} from './fixture-types.ts';
 import {productionReader} from './http-reader.ts';
 import {expect} from 'playwright/test';
@@ -14,6 +15,7 @@ async function reader() {
         try {validate(name, body);} catch (error) {if (record) schemaFailures.push(error instanceof Error ? error.message : String(error)); throw error;}
       }
     });
+    await context.addInitScript(installReadingFixtures);
     await context.addInitScript(() => {
       // External transport adapter deliberately ignores cancellation: a late
       // response must be harmless even when abort cannot stop its delivery.
@@ -50,6 +52,7 @@ async function reader() {
         return body;
       };
       const response = async (url: string, method: string, body: unknown, status = 200) => {
+        body=window.readingFixtureReply(url,method,body,status);
         if(status>=200&&status<300)body=v3Reply(url,method,body);
         await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
         return new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
@@ -85,18 +88,18 @@ async function reader() {
       await target.addInitScript(materials => {
         const t = window.readerTransport;
         t.replies.set('/api/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
-        t.replies.set('/api/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
-        t.replies.set('/api/navigation', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0}], count:0}});
+        t.replies.set('/api/v3/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
+        t.replies.set('/api/v3/reading-composition', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0}], count:0}});
         t.replies.set('/api/v3/processors/codex', {body:{config:null}});
         t.replies.set('/api/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
         t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});
         const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', processor: 'codex'};
         t.replies.set('/api/v3/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
-        t.replies.set('/api/cards', {body: materials.map(({text, description, display_text, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
+        t.replies.set('/api/v3/cards', {body: materials.map(({text, description, display_text, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
         for (const material of materials) {
           const {snippet, feed_title, ...opened} = material;
-          t.replies.set('/api/materials/' + material.id, {body: opened});
-          for (const version of material.previous || []) t.aliases.set(version.url, 'version');
+          t.replies.set('/api/v3/materials/' + material.id, {body: opened});
+          for (const version of material.previous || []) t.aliases.set(version.url, 'version_v3');
         }
       }, materials);
       await target.goto(origin + '/#token=' + token);

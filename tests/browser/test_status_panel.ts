@@ -213,7 +213,7 @@ test('viewing in another tab removes expanded and stale problem references',asyn
     const problem: Problem={...modelProblem,id:'source',code:'material-incomplete',section:'object',objects:[{kind:'material',id:'one',label:'Заголовок удаляемого материала'}],action:{kind:'material',id:'one'}};
     await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');await r.page.locator('#status-toggle').click();await r.page.locator('.status-details summary').click();
     await other.locator('#cards button').click();
-    await other.evaluate(()=>readerTransport.replies.set('POST /api/materials/one/viewed',{body:{ok:true},next:[['/api/cards',{body:[]}]]}));
+    await other.evaluate(()=>readerTransport.replies.set('POST /api/v3/materials/one/viewed',{body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
     await other.getByRole('button',{name:'Просмотрено',exact:true}).click();
     await expect(r.page.locator('#status-toggle')).toHaveText('Состояние');
     await expect(r.page.locator('#status-panel')).not.toContainText('Заголовок удаляемого материала');

@@ -1,4 +1,4 @@
-from tests.support.filters import FilterSource, transport
+from tests.support.filters import FilterSource, transport, setup_filters
 import json
 from pathlib import Path
 import httpx
@@ -7,13 +7,6 @@ from tests.support.app import create_app
 from oko.collection.contracts import Material
 from tests.support.reader import HEADERS, wait_for
 
-
-def setup_filters(client):
-    client.patch('/api/settings/oko/global', json={'theses': False, 'prompt_filters': '', 'processor': 'llamacpp'})
-    client.post('/api/tabs/reader/heartbeat')
-    wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 3 and all(x['complete'] for x in c))
-    client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-    client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'prompt_filters': 'Убирай рекламу. Сохраняй законы.'})
 
 
 def test_hidden_ads_and_clean_view_preserve_original_and_restore_same_version(tmp_path: Path):

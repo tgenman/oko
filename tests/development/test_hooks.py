@@ -1,4 +1,4 @@
-"""Exercise installed hooks in an isolated Git repository, including partial staging."""
+"""Exercise manual index checks in an isolated Git repository, including partial staging."""
 import os
 from pathlib import Path
 import shutil
@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def repo(tmp_path):
-    for directory in ('scripts', '.githooks'):
+    for directory in ('scripts',):
         shutil.copytree(ROOT / directory, tmp_path / directory)
     shutil.copy(ROOT / 'eslint.config.ts', tmp_path / 'eslint.config.ts')
     if (ROOT / 'node_modules').exists():
@@ -19,26 +19,25 @@ def repo(tmp_path):
     def run(*args):
         return subprocess.run(args, cwd=tmp_path, env=env, capture_output=True, text=True)
     assert run('git', 'init', '-q').returncode == 0
-    assert run('./scripts/install-hooks').returncode == 0
     return run
 
 
-def test_precommit_checks_index_not_working_copy(tmp_path):
+def test_staged_checks_index_not_working_copy(tmp_path):
     run = repo(tmp_path)
     source = tmp_path / 'example.py'
     source.write_text('def broken(\n')
     assert run('git', 'add', 'example.py').returncode == 0
     source.write_text('value = 1\n')
-    result = run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'invalid')
+    result = run('./scripts/check', 'staged')
     assert result.returncode != 0
-    assert 'example.py' in result.stderr
+    assert 'example.py' in result.stdout + result.stderr
     assert run('git', 'add', 'example.py').returncode == 0
     source.write_text('def broken(\n')
-    result = run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'valid')
+    result = run('./scripts/check', 'staged')
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_precommit_checks_browser_types_from_index_across_imports(tmp_path):
+def test_staged_checks_browser_types_from_index_across_imports(tmp_path):
     run = repo(tmp_path)
     (tmp_path / 'tests/browser').mkdir(parents=True)
     (tmp_path / 'tsconfig.browser-tests.json').write_text(
@@ -49,16 +48,16 @@ def test_precommit_checks_browser_types_from_index_across_imports(tmp_path):
     source.write_text("import {fixture} from './fixture'; fixture(42);\n")
     assert run('git', 'add', 'tests/browser', 'tsconfig.browser-tests.json').returncode == 0
     source.write_text("import {fixture} from './fixture'; fixture('valid');\n")
-    failed = run('git', 'hook', 'run', 'pre-commit')
+    failed = run('./scripts/check', 'staged')
     assert failed.returncode != 0
     assert 'TS2345' in failed.stdout + failed.stderr
     assert run('git', 'add', 'tests/browser/test_fixture.ts').returncode == 0
     source.write_text("import {fixture} from './fixture'; fixture(42);\n")
-    passed = run('git', 'hook', 'run', 'pre-commit')
+    passed = run('./scripts/check', 'staged')
     assert passed.returncode == 0, passed.stdout + passed.stderr
 
 
-def test_precommit_checks_tooling_types_from_exact_index(tmp_path):
+def test_staged_checks_tooling_types_from_exact_index(tmp_path):
     run = repo(tmp_path)
     import json
     names = ['scripts/example.cts', 'scripts/example.mts']
@@ -70,7 +69,7 @@ def test_precommit_checks_tooling_types_from_exact_index(tmp_path):
     assert run('git', 'add', *names, 'tsconfig.tooling.json').returncode == 0
     for name in names:
         (tmp_path / name).write_text('export const count: number = 1;\n')
-    failed = run('git', 'hook', 'run', 'pre-commit')
+    failed = run('./scripts/check', 'staged')
     assert failed.returncode != 0
     for name in names:
         assert name in failed.stdout + failed.stderr
@@ -78,15 +77,9 @@ def test_precommit_checks_tooling_types_from_exact_index(tmp_path):
     assert run('git', 'add', *names).returncode == 0
     for name in names:
         (tmp_path / name).write_text("export const count: number = 'invalid';\n")
-    passed = run('git', 'hook', 'run', 'pre-commit')
+    passed = run('./scripts/check', 'staged')
     assert passed.returncode == 0, passed.stdout + passed.stderr
 
-
-def test_installer_preserves_custom_hooks(tmp_path):
-    run = repo(tmp_path)
-    run('git', 'config', 'core.hooksPath', 'custom-hooks')
-    assert run('./scripts/install-hooks').returncode != 0
-    assert run('git', 'config', '--get', 'core.hooksPath').stdout.strip() == 'custom-hooks'
 
 
 def test_push_does_not_repeat_checks(tmp_path):
@@ -103,46 +96,34 @@ def test_push_does_not_repeat_checks(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which(os.environ.get('OKO_NODE', 'node')) is None,
-                    reason='JavaScript hook integration requires Node; full CI supplies it')
-def test_precommit_rejects_staged_javascript_syntax(tmp_path):
+                    reason='JavaScript index checks require Node; full CI supplies it')
+def test_staged_rejects_staged_javascript_syntax(tmp_path):
     run = repo(tmp_path)
     source = tmp_path / 'example.js'
     source.write_text('export const broken = ;\n')
     assert run('git', 'add', 'example.js').returncode == 0
     source.write_text('export const value = 1;\n')
-    result = run('git', 'hook', 'run', 'pre-commit')
+    result = run('./scripts/check', 'staged')
     assert result.returncode != 0
-    assert 'SyntaxError' in result.stderr
+    assert 'SyntaxError' in result.stdout + result.stderr
     assert run('git', 'add', 'example.js').returncode == 0
-    assert run('git', 'hook', 'run', 'pre-commit').returncode == 0
+    assert run('./scripts/check', 'staged').returncode == 0
 
 
 @pytest.mark.skipif(shutil.which(os.environ.get('OKO_NODE', 'node')) is None,
                     reason='JavaScript hook requires Node')
-def test_precommit_rejects_undefined_staged_name_and_allows_valid_partial_stage(tmp_path):
+def test_staged_rejects_undefined_staged_name_and_allows_valid_partial_stage(tmp_path):
     run = repo(tmp_path)
     source = tmp_path / 'example.js'
     source.write_text('export function render() { return source.description; }\n')
     assert run('git', 'add', 'example.js').returncode == 0
     source.write_text('export function render(source) { return source.description; }\n')
-    result = run('git', 'hook', 'run', 'pre-commit')
+    result = run('./scripts/check', 'staged')
     assert result.returncode != 0 and 'no-undef' in result.stdout + result.stderr
     assert run('git', 'add', 'example.js').returncode == 0
     source.write_text('export function render() { return source.description; }\n')
-    assert run('git', 'hook', 'run', 'pre-commit').returncode == 0
+    assert run('./scripts/check', 'staged').returncode == 0
 
-
-def test_installer_preserves_default_executable_hooks(tmp_path):
-    run = repo(tmp_path)
-    run('git', 'config', '--unset', 'core.hooksPath')
-    hook = tmp_path / '.git/hooks/pre-commit'
-    hook.write_text('#!/bin/sh\nexit 0\n')
-    hook.chmod(0o755)
-    result = run('./scripts/install-hooks')
-    assert result.returncode != 0
-    assert 'Existing executable hook' in result.stderr
-    assert run('git', 'config', '--get', 'core.hooksPath').returncode == 1
-    assert hook.read_text() == '#!/bin/sh\nexit 0\n'
 
 
 def test_batched_index_typescript_checks_last_file_even_if_worktree_is_fixed(tmp_path):
@@ -152,11 +133,11 @@ def test_batched_index_typescript_checks_last_file_even_if_worktree_is_fixed(tmp
     last.write_text('export const broken: = <p>bad</p>;')
     assert run('git', 'add', 'a.ts', 'z.tsx').returncode == 0
     last.write_text('export const value = <p>fixed only in worktree</p>;')
-    failed = run('git', 'hook', 'run', 'pre-commit')
-    assert failed.returncode != 0 and 'z.tsx' in failed.stderr
+    failed = run('./scripts/check', 'staged')
+    assert failed.returncode != 0 and 'z.tsx' in failed.stdout + failed.stderr
     assert run('git', 'add', 'z.tsx').returncode == 0
     last.write_text('export const broken: = <p>bad</p>;')
-    passed = run('git', 'hook', 'run', 'pre-commit')
+    passed = run('./scripts/check', 'staged')
     assert passed.returncode == 0, passed.stdout + passed.stderr
 
 
@@ -165,7 +146,7 @@ def test_document_commit_does_not_scan_python_contracts(tmp_path):
     (tmp_path / 'README.md').write_text('Documentation only\n')
     assert run('git', 'add', 'README.md').returncode == 0
     (tmp_path / 'scripts/check_test_contracts.py').write_text('raise AssertionError("unrelated contracts executed")\n')
-    result = run('git', 'hook', 'run', 'pre-commit')
+    result = run('./scripts/check', 'staged')
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -175,18 +156,18 @@ def test_success_receipt_preserves_partial_index_and_checker_changes(tmp_path):
     source = tmp_path / 'tests/example.py'
     source.write_text('value = 1\n')
     run('git', 'add', 'tests/example.py')
-    assert run('git', 'hook', 'run', 'pre-commit').returncode == 0
+    assert run('./scripts/check', 'staged').returncode == 0
     source.write_text('def broken(\n')  # Same index still valid.
-    hit = run('git', 'hook', 'run', 'pre-commit')
+    hit = run('./scripts/check', 'staged')
     assert hit.returncode == 0 and 'Staged checks cache hit' in hit.stdout + hit.stderr
     run('git', 'add', 'tests/example.py')
     source.write_text('value = 1\n')  # Worktree fix cannot hide the bad index.
-    assert run('git', 'hook', 'run', 'pre-commit').returncode != 0
+    assert run('./scripts/check', 'staged').returncode != 0
     run('git', 'add', 'tests/example.py')
     checker = tmp_path / 'scripts/check_test_contracts.py'
     checker.write_text('raise AssertionError("checker changed")\n')
-    failed = run('git', 'hook', 'run', 'pre-commit')
-    assert failed.returncode != 0 and 'checker changed' in failed.stderr
+    failed = run('./scripts/check', 'staged')
+    assert failed.returncode != 0 and 'checker changed' in failed.stdout + failed.stderr
 
 
 def test_staged_project_selection_follows_cross_project_imports(tmp_path):
@@ -206,7 +187,7 @@ def test_staged_project_selection_follows_cross_project_imports(tmp_path):
     helper.write_text('export const value = 42;\n')
     run('git', 'add', 'scripts/value.ts')
     helper.write_text('export const value = "fixed only in worktree";\n')
-    failed = run('git', 'hook', 'run', 'pre-commit')
+    failed = run('./scripts/check', 'staged')
     assert failed.returncode != 0 and 'TS2322' in failed.stdout + failed.stderr
     assert 'tsconfig.browser-tests.json' in failed.stdout + failed.stderr
 
@@ -225,7 +206,7 @@ def test_staged_extended_config_cannot_be_hidden_by_worktree(tmp_path):
     base.write_text(base.read_text().replace('false', 'true'))
     run('git', 'add', 'tsconfig.base.json')
     base.write_text(base.read_text().replace('true', 'false'))
-    result = run('git', 'hook', 'run', 'pre-commit')
+    result = run('./scripts/check', 'staged')
     assert result.returncode != 0 and 'TS7006' in result.stdout + result.stderr
 
 
@@ -241,6 +222,15 @@ def test_staged_types_ignore_git_smudge_filters(tmp_path):
     source.write_text('export const value: number = INVALID;\n')
     run('git', 'add', '.gitattributes', 'tsconfig.tooling.json', 'scripts/value.ts')
     source.write_text('export const value: number = 1;\n')
-    result = run('git', 'hook', 'run', 'pre-commit')
+    result = run('./scripts/check', 'staged')
     assert result.returncode != 0 and 'Cannot find name' in result.stdout + result.stderr
     assert 'INVALID' in result.stdout + result.stderr
+
+
+def test_commit_does_not_run_index_checks(tmp_path):
+    run = repo(tmp_path)
+    (tmp_path / 'example.py').write_text('def broken(\n')
+    assert run('git', 'add', 'example.py').returncode == 0
+    result = run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'manual checks only')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (ROOT / '.githooks/pre-commit').exists()

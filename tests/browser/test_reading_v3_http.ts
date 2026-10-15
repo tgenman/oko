@@ -1,0 +1,72 @@
+import {test} from 'node:test';
+import {expect} from 'playwright/test';
+import {productionReader} from './http-reader';
+import {artifactPath} from './artifacts';
+import {validate} from './contracts';
+
+test('v3 reading uses real media and reconciles a lost viewed response without replay', {timeout:25000}, async t=>{
+  const {page,api,origin,token}=await productionReader(t);
+  await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+  await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа" xmlUrl="https://a.test/feed"/><outline text="Бета" xmlUrl="https://b.test/feed"/></outline></body></opml>'});
+  const invalid:string[]=[];
+  page.on('response',async response=>{
+    if(!response.ok())return;
+    const path=new URL(response.url()).pathname;
+    const schema=path==='/api/v3/cards'?'cards_v3':path==='/api/v3/reading-composition'?'navigation_v3':/^\/api\/v3\/materials\/[^/]+$/.test(path)?'material_v3':null;
+    if(schema)try{validate(schema,await response.json());}catch(error){invalid.push(String(error));}
+  });
+  await page.goto(origin+'/#token='+token);
+  await expect(page.locator('#cards button')).toHaveCount(2);
+  await page.locator('#cards button').first().click();
+  await expect(page.locator('#text')).toContainText('Открылась библиотека');
+  await expect(page.locator('#images img')).toHaveCount(1);
+  await expect(page.locator('#cards .card-kind').filter({hasText:'Загружается'})).toHaveCount(0);
+  await expect(page.locator('#cards img')).toHaveCount(2);
+  const desktop=artifactPath('reading-v3-desktop.png');
+  await page.screenshot({path:desktop,fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  const mobile=artifactPath('reading-v3-mobile.png');
+  await page.locator('#material').screenshot({path:mobile});
+  console.log('Reading screenshots: '+desktop+' '+mobile);
+  await page.setViewportSize({width:1280,height:900});
+  let sent=0,command='';
+  await page.route('**/api/v3/materials/*/viewed',async route=>{
+    sent++;
+    command=route.request().headers()['x-oko-action'];
+    await route.fetch();
+    await route.abort();
+  });
+  await page.locator('#viewed').click();
+  await expect(page.locator('#cards button')).toHaveCount(1);
+  await page.locator('#cards button').click();
+  await expect(page.locator('#text')).toContainText('Открылась библиотека');
+  await expect.poll(async()=>{
+    if(!command)return '';
+    const response=await page.request.get(origin+'/api/v3/commands/'+command,{headers:{Authorization:'Bearer '+token}});
+    return (await response.json()).outcome;
+  }).toBe('succeeded');
+  await page.locator('#status-toggle').click();
+  await expect(page.locator('#status-panel')).not.toContainText('Результат действия пока неизвестен');
+  expect(sent).toBe(1);
+  expect(invalid).toEqual([]);
+});
+
+test('unconfirmed commands for two materials remain separate and do not replay', {timeout:20000}, async t=>{
+  const {page,api,origin,token}=await productionReader(t);
+  await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+  await api('import','POST',{opml:'<opml><body><outline text="Наука"><outline text="Альфа" xmlUrl="https://a.test/feed"/><outline text="Бета" xmlUrl="https://b.test/feed"/></outline></body></opml>'});
+  let sent=0;
+  await page.route('**/api/v3/command-observations',route=>route.abort());
+  await page.route('**/api/v3/materials/*/viewed',route=>{sent++;return route.abort();});
+  await page.goto(origin+'/#token='+token);
+  await expect(page.locator('#cards button')).toHaveCount(2);
+  for(let i=0;i<2;i++) {
+    await page.locator('#cards button').nth(i).click();
+    await expect(page.locator('#text')).toContainText('Открылась библиотека');
+    await page.locator('#viewed').click();
+    await expect(page.locator('#message')).not.toBeEmpty();
+  }
+  await page.locator('#status-toggle').click();
+  await expect(page.locator('.status-problem').filter({hasText:'Результат действия пока неизвестен'})).toHaveCount(2);
+  expect(sent).toBe(2);
+});

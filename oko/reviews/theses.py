@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 class PublicationTheses:
     def __init__(self, store: 'Store') -> None:
         self.store = store
+        store.db.execute('CREATE TABLE IF NOT EXISTS retained_theses (item TEXT PRIMARY KEY, path TEXT, digest TEXT)')
 
     def signature(self, item: str) -> str | None:
         return self._signature(item)
@@ -116,6 +117,7 @@ class PublicationTheses:
             return False
         self.store.forget_execution('theses', item)
         with self.store.db:
+            self._read(item, retain=True)
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
         return True
 
@@ -126,9 +128,14 @@ class PublicationTheses:
         return dict(row) if row else dict(status='pending', error=None)
 
     def read(self, item: str) -> dict[str, Any] | None:
+        return self._read(item)
+
+    def _read(self, item: str, *, retain: bool = False) -> dict[str, Any] | None:
         row = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
-        if not row or row[0] != 'done':
+        if not row or row[0] not in ('done', 'pending', 'running'):
             return None
+        # Accepted bytes remain readable during an explicit regeneration, but
+        # only while their signature still matches the current inputs.
         signature = self.signature(item)
         paths = [self.store.path(item).parent / 'theses.md']
         feed = self.store.item_feed(item)
@@ -141,9 +148,21 @@ class PublicationTheses:
             if not path.is_file():
                 continue
             try:
-                header = json.loads(path.read_text().split('\n\n', 1)[0])
+                raw = path.read_bytes()
+                header = json.loads(raw.decode().split('\n\n', 1)[0])
                 if header['signature'] == signature:
-                    return Theses.model_validate(header['result']).model_dump()
+                    result = Theses.model_validate(header['result']).model_dump()
+                    relative = str(path.relative_to(self.store.root))
+                    digest = hashlib.sha256(raw).hexdigest()
+                    if row[0] != 'done':
+                        # A moved file alone is not a committed result. Retain
+                        # only bytes observed as accepted before explicit retry.
+                        saved = self.store.db.execute('SELECT path,digest FROM retained_theses WHERE item=?', (item,)).fetchone()
+                        if not saved or (saved['path'], saved['digest']) != (relative, digest):
+                            continue
+                    elif retain:
+                        self.store.db.execute('INSERT INTO retained_theses VALUES (?,?,?) ON CONFLICT(item) DO UPDATE SET path=excluded.path,digest=excluded.digest', (item, relative, digest))
+                    return result
             except (OSError, ValueError, KeyError):
                 record_caught('theses.read')
         return None

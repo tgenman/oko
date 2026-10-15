@@ -2,7 +2,7 @@
 from oko.diagnostics import record_caught
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING
 
 from oko.processing.contracts import FilterResult, ProcessingError, ProcessingRequest, Theses
 from oko.reviews.theses import PublicationTheses
@@ -55,6 +55,12 @@ class PreparedWork:
             self._closed = True
 
 
+@dataclass(frozen=True)
+class ProcessingWait:
+    reason: Literal['processor_not_configured', 'public_ai_not_allowed', 'processor_unavailable', 'retry_scheduled']
+    retry_at: float | None
+
+
 class ProcessingCoordination:
     def __init__(self, store: 'Store') -> None:
         self.store = store
@@ -64,6 +70,19 @@ class ProcessingCoordination:
             'filter': _Operation(store.filters.request, store.filters.signature, self._save_filter, 'Фильтрация', reconcile=True),
             'theses': _Operation(self.theses.request, self.theses.signature, self._save_theses, 'Подготовка тезисов'),
         }
+
+    def waiting(self, item: str, kind: Literal['filter', 'theses'], now: float, wall_now: float) -> ProcessingWait | None:
+        row = self.store.db.execute("SELECT problem_code,error,next FROM jobs WHERE item=? AND kind=? AND status='pending'", (item, kind)).fetchone()
+        if not row or not row['error']:
+            return None
+        reason: Literal['processor_not_configured', 'public_ai_not_allowed', 'processor_unavailable', 'retry_scheduled']
+        if row['problem_code'] == 'processor-config':
+            reason = 'processor_not_configured'
+        elif row['problem_code'] == 'ai-permission':
+            reason = 'public_ai_not_allowed'
+        else:
+            reason = 'retry_scheduled'
+        return ProcessingWait(reason, wall_now + max(0, row['next'] - now) if row['next'] else None)
 
     def sync(self) -> None:
         """One owner of dependency order, also used after accepting a result."""
@@ -77,14 +96,14 @@ class ProcessingCoordination:
             if row:
                 settings = self.store.subscriptions.effective('feed', row['feed_id'])
                 if settings['effective']['processor']['value'] == 'codex' and not settings['feed']['public_ai']:
-                    raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
+                    raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель', code='ai-permission')
         try:
             prepared = operation.request(job)
             if not prepared:
                 raise ProcessingError('Исходник недоступен для обработки')
             request, signature, public_ai = prepared
             if request.processor == 'codex' and not public_ai:
-                raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель')
+                raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель', code='ai-permission')
             request = self._execution_choice(job, signature, request)
             return PreparedWork(self, operation, job, signature, request, public_ai)
         except BaseException:

@@ -4,6 +4,7 @@ Store remains responsible for durable identity/content/recovery. Network waits
 happen outside the action lock; admission, transitions and result commits share it.
 """
 import asyncio
+from oko.reviews.coordination import ProcessingWait
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 import secrets
@@ -579,6 +580,9 @@ class Runtime:
             if not self.require_store().filters.retry(item):
                 raise ActionError('missing', 'Фильтрация не включена')
             await self._cancel()
+
+    def processing_wait(self, item: str, kind: Literal['filter', 'theses']) -> 'ProcessingWait | None':
+        return self.require_store().processing.waiting(item, kind, self._clock(), self._wall_clock())
 
     async def retry_theses(self, item: str) -> None:
         async with self._actions:
