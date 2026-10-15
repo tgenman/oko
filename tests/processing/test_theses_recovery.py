@@ -67,7 +67,7 @@ def test_process_death_after_theses_move_retries_without_publishing_orphan(tmp_p
             self.answer({'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps({'points': [{'text': 'Контент удаляется при просмотре.', 'sources': [{'id': source['id'], 'url': source['url']}]}]})}}]})
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), ModelServer)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     worker.start()
     process = launch(tmp_path, 'after_theses_move', model_origin=f'http://127.0.0.1:{server.server_port}')
     try:

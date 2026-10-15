@@ -38,21 +38,6 @@ def test_precommit_checks_index_not_working_copy(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_precommit_checks_typescript_and_jsx_index_not_working_copy(tmp_path):
-    run = repo(tmp_path)
-    source = tmp_path / 'example.tsx'
-    source.write_text('export const broken: = <p>bad</p>;\n')
-    assert run('git', 'add', 'example.tsx').returncode == 0
-    source.write_text('export const view = <p>good</p>;\n')
-    failed = run('git', 'hook', 'run', 'pre-commit')
-    assert failed.returncode != 0
-    assert 'example.tsx' in failed.stdout + failed.stderr
-    assert run('git', 'add', 'example.tsx').returncode == 0
-    source.write_text('export const broken: = <p>bad</p>;\n')
-    passed = run('git', 'hook', 'run', 'pre-commit')
-    assert passed.returncode == 0, passed.stdout + passed.stderr
-
-
 def test_precommit_checks_browser_types_from_index_across_imports(tmp_path):
     run = repo(tmp_path)
     (tmp_path / 'tests/browser').mkdir(parents=True)
@@ -154,3 +139,18 @@ def test_installer_preserves_default_executable_hooks(tmp_path):
     assert 'Existing executable hook' in result.stderr
     assert run('git', 'config', '--get', 'core.hooksPath').returncode == 1
     assert hook.read_text() == '#!/bin/sh\nexit 0\n'
+
+
+def test_batched_index_typescript_checks_last_file_even_if_worktree_is_fixed(tmp_path):
+    run = repo(tmp_path)
+    first, last = tmp_path / 'a.ts', tmp_path / 'z.tsx'
+    first.write_text('export const value: number = 1;')
+    last.write_text('export const broken: = <p>bad</p>;')
+    assert run('git', 'add', 'a.ts', 'z.tsx').returncode == 0
+    last.write_text('export const value = <p>fixed only in worktree</p>;')
+    failed = run('git', 'hook', 'run', 'pre-commit')
+    assert failed.returncode != 0 and 'z.tsx' in failed.stderr
+    assert run('git', 'add', 'z.tsx').returncode == 0
+    last.write_text('export const broken: = <p>bad</p>;')
+    passed = run('git', 'hook', 'run', 'pre-commit')
+    assert passed.returncode == 0, passed.stdout + passed.stderr

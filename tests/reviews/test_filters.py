@@ -174,7 +174,7 @@ def test_process_death_after_filter_move_does_not_publish_orphan(tmp_path):
             self.rfile.read(int(self.headers['Content-Length']))
             self.answer({'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(dict(hidden=True, reason='Скрыто по правилу пользователя', removed=[]))}}]})
     server = ThreadingHTTPServer(('127.0.0.1', 0), ModelServer)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     worker.start()
     process = launch(tmp_path, 'after_filter_move', model_origin=f'http://127.0.0.1:{server.server_port}')
     try:

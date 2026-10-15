@@ -472,3 +472,27 @@ def test_types_run_before_long_checks_and_failure_skips_them(tmp_path, sets):
     if 'browser' in sets or 'all' in sets:
         assert '\nRUN browser\n' not in result.stdout
         assert 'NOT RUN browser' in result.stdout
+
+
+def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_path):
+    import ast
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'all'], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
+    pytest = [command for command in commands if 'pytest' in command]
+    assert len(pytest) == 2
+    modules = pytest[0][pytest[0].index('-q') + 1:]
+    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in modules}
+    record.write_text('')
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files',
+                             'tests/reader/test_frontend_build.py'], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
+    pytest = next(command for command in commands if 'pytest' in command)
+    assert not any(value.startswith('--ignore=') for value in pytest)
+    assert pytest[-1].endswith('tests/reader/test_frontend_build.py')

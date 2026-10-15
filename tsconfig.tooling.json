@@ -14,7 +14,9 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./.scratch/check-cache/types/tooling.tsbuildinfo"
   },
   "include": [
     "scripts/**/*.ts",

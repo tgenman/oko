@@ -1,0 +1,32 @@
+name: Oko check dependencies
+description: Install pinned tools and synchronize a cached project environment.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      id: python
+      with:
+        python-version: '3.11'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+    - name: Install pinned Poetry outside the project environment
+      shell: bash
+      run: |
+        python -m venv "$RUNNER_TEMP/oko-poetry"
+        "$RUNNER_TEMP/oko-poetry/bin/python" -m pip install 'poetry==2.5.1'
+        echo "$RUNNER_TEMP/oko-poetry/bin" >> "$GITHUB_PATH"
+    - uses: actions/cache@v4
+      with:
+        path: .venv
+        key: python-${{ runner.os }}-${{ runner.arch }}-${{ steps.python.outputs.python-version }}-poetry-2.5.1-${{ hashFiles('poetry.lock', 'pyproject.toml') }}
+    - name: Synchronize dependencies even on a cache hit
+      shell: bash
+      env:
+        POETRY_VIRTUALENVS_IN_PROJECT: 'true'
+      run: |
+        poetry env use '${{ steps.python.outputs.python-path }}'
+        poetry check --lock --strict
+        poetry sync --no-interaction
+        npm ci

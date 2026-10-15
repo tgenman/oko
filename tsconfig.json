@@ -13,7 +13,9 @@
     "noUncheckedIndexedAccess": true,
     "allowJs": false,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./.scratch/check-cache/types/frontend.tsbuildinfo"
   },
   "include": [
     "frontend/**/*"

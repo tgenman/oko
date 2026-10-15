@@ -21,7 +21,9 @@
       "/transport.js": [
         "frontend/src/api/transport.ts"
       ]
-    }
+    },
+    "incremental": true,
+    "tsBuildInfoFile": "./.scratch/check-cache/types/browser.tsbuildinfo"
   },
   "include": [
     "tests/browser/**/*.ts"
