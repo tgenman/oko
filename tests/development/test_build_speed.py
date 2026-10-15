@@ -74,6 +74,8 @@ assert.notEqual(await key(), development);
 const production = await key();
 process.env.npm_lifecycle_event = 'another-command';
 process.env.OKO_TEST_ARTIFACT_DIR = '/another-report';
+process.env.PYTEST_CURRENT_TEST = 'different test (call)';
+process.env.PYTEST_VERSION = 'pytest process marker';
 assert.equal(await key(), production);
 """
     result = run(ROOT, 'node', '--import', 'tsx', '--input-type=module', '-e', code, str(tmp_path), str(ROOT))
@@ -110,3 +112,32 @@ await assert.rejects(validateAssets(root, 'source', 'contract'), /ENOENT/);
 """
     result = run(ROOT, 'node', '--import', 'tsx', '--input-type=module', '-e', code, str(tmp_path))
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_type_receipt_rechecks_extended_config_and_source_errors(tmp_path):
+    import shutil
+    (tmp_path / 'scripts').mkdir()
+    for name in ('api-cache.mts', 'check-types.mts'):
+        shutil.copy2(ROOT / 'scripts' / name, tmp_path / 'scripts' / name)
+    for name in ('package.json', 'package-lock.json'):
+        shutil.copy2(ROOT / name, tmp_path / name)
+    (tmp_path / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
+    (tmp_path / 'frontend').mkdir()
+    source = tmp_path / 'frontend/main.ts'
+    source.write_text('export function value(input) { return input; }\n')
+    base = tmp_path / 'tsconfig.base.json'
+    base.write_text(json.dumps({'compilerOptions': {'noEmit': True, 'types': [], 'skipLibCheck': True, 'strict': False}}))
+    (tmp_path / 'tsconfig.json').write_text(json.dumps({'extends': './tsconfig.base.json', 'files': ['frontend/main.ts']}))
+    command = ('node', '--import', 'tsx', 'scripts/check-types.mts', 'tsconfig.json')
+    first = run(tmp_path, *command)
+    assert first.returncode == 0, first.stdout + first.stderr
+    hit = run(tmp_path, *command)
+    assert hit.returncode == 0 and 'Type check cache hit' in hit.stdout
+    base.write_text(base.read_text().replace('false', 'true'))
+    failed = run(tmp_path, *command)
+    assert failed.returncode != 0 and 'TS7006' in failed.stdout + failed.stderr
+    source.write_text('export function value(input: string) { return input; }\n')
+    assert run(tmp_path, *command).returncode == 0
+    source.write_text('export const value: number = "bad";\n')
+    failed = run(tmp_path, *command)
+    assert failed.returncode != 0 and 'TS2322' in failed.stdout + failed.stderr

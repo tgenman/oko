@@ -599,7 +599,8 @@ def test_tool_selection_covers_branch_index_worktree_untracked_and_deleted(tmp_p
     assert scope(checkout, 'missing-reference')[0]
 
 
-def test_parallel_interruption_reaps_both_groups_and_their_children(tmp_path):
+@pytest.mark.parametrize('shards', [False, True])
+def test_parallel_interruption_reaps_both_groups_and_their_children(tmp_path, shards):
     import json
     import signal
     import time
@@ -607,18 +608,20 @@ def test_parallel_interruption_reaps_both_groups_and_their_children(tmp_path):
     markers = tmp_path / 'markers'
     markers.mkdir()
     env['MARKERS'] = str(markers)
+    if shards:
+        env['CHECK_SHARDS'] = '1'
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', """
-if '--test' in sys.argv or ('pytest' in sys.argv and 'tests/reader/test_web_assets.py' not in sys.argv):
+if '--test' in sys.argv or ('pytest' in sys.argv and (os.environ.get('CHECK_SHARDS') or 'tests/reader/test_web_assets.py' not in sys.argv)):
     import subprocess
     from pathlib import Path
-    name = 'browser' if '--test' in sys.argv else 'python-tests'
+    name = Path(sys.argv[-1]).stem if os.environ.get('CHECK_SHARDS') else ('browser' if '--test' in sys.argv else 'python-tests')
     child_code = 'import os,signal,time; from pathlib import Path; root=Path(os.environ["MARKERS"]); name=' + repr(name) + '; signal.signal(signal.SIGTERM, lambda *_: (root.joinpath(name+"-stopped").write_text("stopped"), exit(0))); root.joinpath(name+"-ready").write_text(str(os.getpid())); time.sleep(60)'
     subprocess.run([sys.executable, '-c', child_code], start_new_session=True)
 sys.exit(0)
 """))
     reports = tmp_path / 'reports'
-    process = subprocess.Popen([sys.executable, str(ROOT / 'scripts/check'), 'all', '--report-dir', str(reports)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.Popen([sys.executable, str(ROOT / 'scripts/check'), 'python' if shards else 'all', '--report-dir', str(reports)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         deadline = time.monotonic() + 10
         while len(list(markers.glob('*-ready'))) < 2 and time.monotonic() < deadline:
@@ -628,8 +631,8 @@ sys.exit(0)
         stdout, stderr = process.communicate(timeout=10)
         assert process.returncode == 130, stdout + stderr
         report = json.loads(next(reports.glob('*/report.json')).read_text())
-        for name in ('browser', 'python-tests'):
-            assert report['suites'][name]['status'] == 'INTERRUPTED'
+        for name in (('test_frontend_build', 'test_web_assets') if shards else ('browser', 'python-tests')):
+            assert report['suites']['python-tests' if shards else name]['status'] == 'INTERRUPTED'
             assert (markers / (name + '-stopped')).read_text() == 'stopped'
             pid = int((markers / (name + '-ready')).read_text())
             with pytest.raises(ProcessLookupError):
@@ -685,3 +688,67 @@ def test_explicit_tools_are_not_duplicated_and_build_precedes_parallel_groups(tm
     last_build = max(i for i, command in enumerate(commands) if any('build-frontend.mts' in arg for arg in command))
     first_test = min(i for i, command in enumerate(commands) if '--test' in command or 'pytest' in command)
     assert last_build < first_test
+
+
+def test_python_shards_cover_each_selected_file_once_and_report_failure(tmp_path):
+    import ast
+    import json
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', """
+if 'pytest' in sys.argv:
+    from pathlib import Path
+    with Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')
+    if any(value.endswith('test_frontend_build.py') for value in sys.argv):
+        print('FAILED tests/reader/test_frontend_build.py::test_fixture')
+        sys.exit(1)
+sys.exit(0)
+"""))
+    files = ['tests/reader/test_web_assets.py', 'tests/reader/test_frontend_build.py']
+    reports = tmp_path / 'reports'
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--report-dir', str(reports),
+                             '--files', *files], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
+    assert len(commands) == 2
+    assert all(command[command.index('-q') + 1:] for command in commands)
+    selected = [value for command in commands for value in command[command.index('-q') + 1:]]
+    assert sorted(selected) == sorted(str(ROOT / name) for name in files)
+    report = json.loads(next(reports.glob('*/report.json')).read_text())
+    group = report['suites']['python-tests']
+    assert len(group['workers']) == 2 and group['status'].startswith('FAIL')
+    assert group['failures'] == ['tests/reader/test_frontend_build.py::test_fixture']
+
+
+def test_ci_tool_selection_does_not_turn_errors_into_skips(tmp_path):
+    import yaml
+    workflow = yaml.safe_load((REPO / '.github/workflows/check.yml').read_text())
+    script = next(step['run'] for step in workflow['jobs']['tests']['steps'] if step.get('id') == 'selection')
+    binary = tmp_path / 'python3'
+    output = tmp_path / 'output'
+    env = {**os.environ, 'PATH': str(tmp_path) + os.pathsep + os.environ['PATH'],
+           'GITHUB_OUTPUT': str(output), 'CHECK_BASE': 'base'}
+    for body, success in [('exit 7', False), ('echo unexpected', False), ('echo true', True), ('echo false', True)]:
+        binary.write_text('#!/bin/sh\n' + body + '\n')
+        binary.chmod(0o755)
+        result = subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
+        assert (result.returncode == 0) == success, result.stdout + result.stderr
+
+
+
+def test_duplicate_tool_file_never_creates_empty_shard(tmp_path):
+    import ast
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    name = 'tests/reader/test_frontend_build.py'
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'tools', '--files', name, name],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
+    selected = [command[command.index('-q') + 1:] for command in commands if 'pytest' in command]
+    assert selected == [[str(ROOT / name)]]
