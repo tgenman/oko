@@ -85,3 +85,40 @@ https://core.telegram.org/method/messages.readDiscussion (проверены 202
 Он фиксирует oracle будущего #20 (сохранить пост/остальные медиа, partial,
 retry недостающего, без fallback); production web adapter ещё не реализован,
 его выполнение этим файлом не доказывается.
+
+### Итог 2026-10-15
+
+Единственный полный запуск `./scripts/check all --candidate api/openapi.yaml`:
+140.34 s, exit 1. API generate/drift, validation, Python/TS types, lint,
+build, HTTP (9 pass), entrypoint, diff — PASS. Browser: 117 pass, 0 fail,
+2 прежних skip. Tools: 115 pass. Python: 362 pass, 3 fail:
+
+1. `test_telegram_html_fixtures` — запуск использовал снимок до исправления
+   oracle: grouped video содержит `src`. Исправлено по фактическому HTML;
+   целевой повтор PASS.
+2. `test_factory_default_empty_history_completes_without_a_real_history_worker`
+   — старый setup через single-feed create уже создаёт initial history;
+   повторный POST истории закономерно даёт 409. Setup переведён на существующий
+   `saved_sources` fixture фида без истории; весь файл теперь PASS. Runtime
+   не изменялся, исходные assertions сохранены.
+3. `test_stop_exits_even_if_source_ignores_cancellation[stop]` — connection
+   refused после запуска тестового процесса. Без изменения сценария оба
+   параметра stop/last-close прошли в двух ограниченных повторах. Причина
+   нестабильности полного параллельного прогона не установлена.
+
+После исправлений:
+```
+.venv/bin/python -m pytest -q tests/development/test_test_environment.py \
+  tests/collection/test_telegram_contracts.py \
+  tests/collection/test_telegram_html_fixtures.py \
+  tests/collection/test_telegram_topics.py tests/api/test_telegram_contract.py \
+  tests/lifecycle/test_process.py::test_stop_exits_even_if_source_ignores_cancellation
+36 passed in 7.55s
+```
+
+Новые decoder/API/HTML tests отдельно: 18 pass. Mypy нового module: PASS.
+Независимое spec и standards ревью e0461da..d15f5c9: 0 замечаний в каждой оси;
+каждый reviewer независимо выполнил 18 новых tests. Итоговый повтор не
+объявляется зелёным полным прогоном. Новых skip нет, старые ускорения и
+удаление hook сохранены; baseline по-прежнему PENDING_REVIEW. Полный JSON:
+`.scratch/check-runs/candidate-1zejuhtx/tree/.scratch/check-runs/20261015T173908Z-de66718d/report.json`.
