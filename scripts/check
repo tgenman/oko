@@ -197,7 +197,7 @@ def main():
               'all': ['contracts', 'build', 'syntax', 'lint', 'types', 'http', 'browser', 'diff', 'python-tests', 'entrypoint'],
               'python': ['contracts', 'python-tests'],
               'lifecycle': ['build', 'syntax', 'lint', 'browser', 'diff']}
-    suites = ('contracts', 'build', 'syntax', 'lint', 'http', 'browser', 'diff', 'types', 'entrypoint', 'staged')
+    suites = ('contracts', 'build', 'syntax', 'lint', 'http', 'browser', 'browser-types', 'diff', 'types', 'entrypoint', 'staged')
     parser.add_argument('sets', nargs='+', choices=(*groups, *suites))
     parser.add_argument('--match', help='Regex selecting browser scenarios by name (requires browser checks)')
     parser.add_argument('--files', nargs='+', help='Explicit browser/Python test files or JavaScript files for lint/syntax; put check sets before this option')
@@ -206,8 +206,10 @@ def main():
     env = os.environ.copy()
     started = time.monotonic()
     names = list(dict.fromkeys(name for selected in args.sets for name in groups.get(selected, [selected])))
+    if 'browser' in names and 'browser-types' not in names:
+        names.insert(names.index('browser'), 'browser-types')
     if {'browser', 'python-tests'} & set(names):
-        early = [name for name in ['contracts','syntax','lint','types'] if name in names]
+        early = [name for name in ['contracts','syntax','lint','types','browser-types'] if name in names]
         names = early + [name for name in names if name not in early]
     if args.match is not None and 'browser' not in names:
         parser.error('--match requires browser checks')
@@ -220,7 +222,7 @@ def main():
         relative = candidate.relative_to(ROOT)
         matched = False
         for name in names:
-            browser = name == 'browser' and relative.parts[:2] == ('tests', 'browser') and candidate.name.startswith('test_') and candidate.suffix == '.cjs' and not node_id
+            browser = name == 'browser' and relative.parts[:2] == ('tests', 'browser') and candidate.name.startswith('test_') and candidate.suffix == '.ts' and not node_id
             python_test = name == 'python-tests' and relative.parts[0] == 'tests' and candidate.suffix == '.py'
             javascript = ((name in ('syntax', 'lint') and candidate.suffix in ('.js', '.cjs', '.mjs')) or (name == 'syntax' and candidate.suffix in ('.ts', '.tsx'))) and not node_id
             if browser or python_test or javascript:
@@ -229,7 +231,7 @@ def main():
         if not matched:
             parser.error(f'File does not match selected checks: {value}')
     if 'lifecycle' in args.sets and not {'ui','all','browser'} & set(args.sets) and not selected_files['browser']:
-        selected_files['browser'] = [str(ROOT / 'tests/browser/test_ui_lifecycle.cjs')]
+        selected_files['browser'] = [str(ROOT / 'tests/browser/test_ui_lifecycle.ts')]
     report = Report(args.report_dir.resolve(), names, selected_files)
     report.data['browser_name_pattern'] = args.match
     results = dict.fromkeys(names, 'NOT RUN')
@@ -238,7 +240,7 @@ def main():
     try:
         if os.name != 'posix':
             raise RuntimeError('This check runner requires a POSIX host (macOS or Linux).')
-        node = executable(env.get('OKO_NODE', 'node'), 'Node') if {'build', 'syntax', 'lint', 'browser'} & set(names) else None
+        node = executable(env.get('OKO_NODE', 'node'), 'Node') if {'build', 'syntax', 'lint', 'browser', 'browser-types'} & set(names) else None
         executable('git', 'Git')
         executable('ps', 'POSIX ps')
         descendants(os.getpid())  # Require process inspection before launching checks.
@@ -266,7 +268,8 @@ def main():
             'build': [[node, str(ROOT / 'node_modules/typescript/bin/tsc'), '--noEmit'], [node, str(ROOT / 'scripts/build-frontend.mjs')], [node, str(ROOT / 'scripts/build-frontend.mjs'), '--check']],
             'syntax': [([node, str(ROOT / 'scripts/check-ts.cjs'), str(path)] if Path(path).suffix in ('.ts', '.tsx') else [node, '--check', str(path)]) for path in (selected_files['syntax'] or sorted(path for path in (ROOT / 'frontend').rglob('*') if path.suffix in ('.js', '.mjs', '.ts', '.tsx')))],
             'lint': [[node, str(ROOT / 'scripts/lint-js.cjs'), *dict.fromkeys(selected_files['lint'])]],
-            'browser': [[node, '--test', '--test-concurrency=2', *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.cjs'))))]],
+            'browser-types': [[node, str(ROOT / 'node_modules/typescript/bin/tsc'), '-p', str(ROOT / 'tsconfig.browser-tests.json')]],
+            'browser': [[node, '--require', str(ROOT / 'scripts/register-browser-typescript.cjs'), '--enable-source-maps', '--test', '--test-concurrency=2', *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts'))))]],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
         if {'contracts', 'http', 'python-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):
@@ -278,7 +281,7 @@ def main():
                              'python-tests': [[python, '-m', 'pytest', '-q', *dict.fromkeys(selected_files['python-tests'])]],
                              'types': [[python, '-m', 'mypy', 'oko', 'tests/support/codex.py', 'tests/support/app.py']],
                              'entrypoint': [[python, '-m', 'oko', '--help']]})
-        if ('syntax' in names and not commands['syntax']) or ('browser' in names and len(commands['browser'][0]) == 3):
+        if ('syntax' in names and not commands['syntax']) or ('browser' in names and not list((ROOT / 'tests/browser').glob('test_*.ts'))):
             raise RuntimeError('Required UI modules or browser tests are missing.')
         for current in names:
             if current in ('browser', 'http', 'python-tests') and results.get('build', '').startswith('FAIL'):
@@ -287,8 +290,8 @@ def main():
             if current in ('browser', 'python-tests') and results.get('types', '').startswith('FAIL'):
                 report.output(f'{current} skipped because types failed.\n')
                 continue
-            if current == 'browser' and any(results.get(name, '').startswith('FAIL') for name in ['syntax','lint']):
-                report.output('Browser skipped because syntax or lint failed.\n')
+            if current == 'browser' and any(results.get(name, '').startswith('FAIL') for name in ['syntax','lint','browser-types']):
+                report.output('Browser skipped because syntax, lint or browser types failed.\n')
                 continue
             report.current = current
             report.output(f'\nRUN {current}\n')

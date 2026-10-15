@@ -53,6 +53,26 @@ def test_precommit_checks_typescript_and_jsx_index_not_working_copy(tmp_path):
     assert passed.returncode == 0, passed.stdout + passed.stderr
 
 
+def test_precommit_checks_browser_types_from_index_across_imports(tmp_path):
+    run = repo(tmp_path)
+    (tmp_path / 'tests/browser').mkdir(parents=True)
+    (tmp_path / 'tsconfig.browser-tests.json').write_text(
+        '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":true},"include":["tests/browser/*.ts"]}')
+    helper = tmp_path / 'tests/browser/fixture.ts'
+    helper.write_text('export function fixture(name: string) { return name; }\n')
+    source = tmp_path / 'tests/browser/test_fixture.ts'
+    source.write_text("import {fixture} from './fixture'; fixture(42);\n")
+    assert run('git', 'add', 'tests/browser', 'tsconfig.browser-tests.json').returncode == 0
+    source.write_text("import {fixture} from './fixture'; fixture('valid');\n")
+    failed = run('git', 'hook', 'run', 'pre-commit')
+    assert failed.returncode != 0
+    assert 'TS2345' in failed.stdout + failed.stderr
+    assert run('git', 'add', 'tests/browser/test_fixture.ts').returncode == 0
+    source.write_text("import {fixture} from './fixture'; fixture(42);\n")
+    passed = run('git', 'hook', 'run', 'pre-commit')
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+
+
 def test_installer_preserves_custom_hooks(tmp_path):
     run = repo(tmp_path)
     run('git', 'config', 'core.hooksPath', 'custom-hooks')

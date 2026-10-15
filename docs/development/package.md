@@ -23,5 +23,5 @@ Smoke поставки устанавливает настоящий wheel че�
 
 ```sh
 python -m pytest tests/api/test_installed_package.py tests/reader/test_frontend_build.py -q
-node --test tests/browser/test_installed_docs.cjs
+node --require ./scripts/register-browser-typescript.cjs --test tests/browser/test_installed_docs.ts
 ```

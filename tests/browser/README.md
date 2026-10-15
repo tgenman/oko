@@ -9,7 +9,7 @@
 ./scripts/check http
 ./scripts/check browser
 ./scripts/check lint
-./scripts/check browser --files tests/browser/test_material_list.cjs tests/browser/test_reader_http.cjs
+./scripts/check browser --files tests/browser/test_material_list.ts tests/browser/test_reader_http.ts
 ./scripts/check python --files tests/development/test_hooks.py
 ```
 
@@ -17,7 +17,7 @@
 
 `ui` включает синтаксис, ESLint `no-undef`, HTTP-проверку выдачи всего графа JavaScript настоящим сервером, браузер и diff. `all` добавляет весь Python-набор, типизацию и CLI. Отдельно доступны `syntax`, `lint`, `http`, `browser`, `python`, `types`, `diff`, `entrypoint`, `staged`; можно указать несколько, повторы выполняются один раз. `python`, `types` и `http` не требуют Node/Playwright. `syntax` и `lint` не требуют браузера. После локального исправления повторяйте затронутый набор; полный прогон обязателен в CI; локальный `all` остаётся доступен для общей проверки по риску изменения.
 
-`--files` идёт после выбранных наборов и задаёт существующие файлы внутри checkout. Для Python поддерживается также `файл.py::имя_теста`. Каждый файл должен соответствовать хотя бы одному выбранному набору; несуществующий путь, путь вне checkout и неподходящий тип завершаются ошибкой до запуска. Повторные пути выполняются один раз. Наборы без подходящих указанных файлов сохраняют полный объём; например, `python types --files tests/development/test_hooks.py` ограничивает pytest, но выполняет всю типизацию. `ui --files tests/browser/test_material_list.cjs` проверяет выбранный JS-файл и браузерный сценарий, HTTP и diff остаются полными. Pre-commit и CI запускают свои обязательные команды без `--files`.
+`--files` идёт после выбранных наборов и задаёт существующие файлы внутри checkout. Для Python поддерживается также `файл.py::имя_теста`. Каждый файл должен соответствовать хотя бы одному выбранному набору; несуществующий путь, путь вне checkout и неподходящий тип завершаются ошибкой до запуска. Повторные пути выполняются один раз. Наборы без подходящих указанных файлов сохраняют полный объём; например, `python types --files tests/development/test_hooks.py` ограничивает pytest, но выполняет всю типизацию. `ui --files tests/browser/test_material_list.ts` проверяет выбранный TS-файл и браузерный сценарий, HTTP и diff остаются полными. Pre-commit и CI запускают свои обязательные команды без `--files`.
 
 ## Проверка переходов и поздних ответов
 
@@ -26,7 +26,7 @@
 ```sh
 ./scripts/check lifecycle
 ./scripts/check lifecycle --match 'a completed field write'
-./scripts/check browser --match 'late.*draft' --files tests/browser/test_ui_lifecycle.cjs
+./scripts/check browser --match 'late.*draft' --files tests/browser/test_ui_lifecycle.ts
 ```
 
 `lifecycle` выполняет синтаксис, lint, пять браузерных регрессий и diff. Эти же сценарии входят в обычные `browser`, `ui` и CI через `all`; дублировать их в других файлах не требуется. Набор использует существующий HTTP-интерфейс читателя с временным хранилищем и синтетическими подключениями.
@@ -45,7 +45,7 @@
 
 ## Артефакты и контроль checkout
 
-Runner перед каждым браузерным и Python-тестовым набором создаёт каталог `artifacts/<набор>` внутри отчёта и передаёт его через `OKO_TEST_ARTIFACT_DIR`. Для снимков браузера используйте `artifactPath('имя.png')` из общего `artifacts.cjs`: файл попадёт в подкаталог текущего процесса, чтобы параллельные файлы не перезаписывали друг друга. При прямом запуске `node --test` без runner helper создаёт каталог в системном temporary directory. Старые сохранённые иллюстрации не являются выходным каталогом тестов.
+Runner перед каждым браузерным и Python-тестовым набором создаёт каталог `artifacts/<набор>` внутри отчёта и передаёт его через `OKO_TEST_ARTIFACT_DIR`. Для снимков браузера используйте `artifactPath('имя.png')` из общего `artifacts.ts`: файл попадёт в подкаталог текущего процесса, чтобы параллельные файлы не перезаписывали друг друга. При прямом запуске `node --require ./scripts/register-browser-typescript.cjs --test` без runner helper создаёт каталог в системном temporary directory. Старые сохранённые иллюстрации не являются выходным каталогом тестов.
 
 Перед и после тестового набора runner сравнивает Git inventory, содержимое и режим файлов checkout, включая неигнорируемые новые файлы и символические ссылки без чтения их целей. Исходные staged/unstaged/untracked правки разрешены: сравнение выполняется с состоянием перед набором, а не с HEAD. Игнорируемые runtime-кэши и собственный каталог отчёта не считаются загрязнением. Изменения других файлов дают FAIL со списком путей и `checkout_changes` в JSON. Guard ничего не удаляет и не восстанавливает. Не редактируйте checkout параллельно с проверкой: такие изменения также попадут в сравнение.
 
@@ -108,7 +108,7 @@ npx playwright install chromium
 
 В UI-сценариях `readerTransport.replies` задаёт статические снимки ответов: точный `METHOD /path?query`, URL либо общий pathname. Ответ с `next: [[route, reply]]` явно задаёт следующий снимок после конкретного запроса. Helper не вычисляет навигацию из подписок, membership карточек, удаление просмотренного или группы ошибок. Сценарий задаёт ожидаемые ответы для выбранных областей сам; стартовый снимок содержит одну папку `f` и один фид `feed` и не выводит их из материалов. Нет подмены ответа — запрос получает настоящий сервер. Задержанный транспорт намеренно игнорирует AbortSignal: поздний ответ должен быть безопасен независимо от отмены.
 
-Это UI-проверки со снимками ответов, а не сквозная проверка всех правил сервера. Правила membership, группировки и viewed проверяет `test_reader_http.cjs` без подмены browser fetch; журнал проверяется через настоящий `/api/debug`, включая повтор доставки и очистку.
+Это UI-проверки со снимками ответов, а не сквозная проверка всех правил сервера. Правила membership, группировки и viewed проверяет `test_reader_http.ts` без подмены browser fetch; журнал проверяется через настоящий `/api/debug`, включая повтор доставки и очистку.
 
 Runner запускает не более двух тестовых файлов одновременно. В каждом файловом процессе Chromium переиспользуется до завершения файла; каждый сценарий получает новый изолированный browser context (cookies, storage, страницы) и временный loopback HTTP-сервер.
 
@@ -116,9 +116,9 @@ Python-процесс также переиспользуется в преде�
 
 Личные источники и AI не вызываются. Canvas WebM проверяет воспроизведение без внешнего файла. Настоящие RSS, Telegram, YouTube и подключения моделей этими тестами не проверяются.
 
-`test_reader_http.cjs` использует ту же изолированную сборку production-приложения через uvicorn и временное хранилище. Браузер получает настоящие `/api/cards`, `/api/navigation`, локальные картинки и ответы действий. Подменены только внешние RSS и обработчик модели на сервере; browser fetch не заменяется. Сценарий проверяет папку, оба участвующих фида и пустой фид, объединение события с сохранением всех источников, счётчики и удаление просмотренного. Runner передаёт выбранный Python через `OKO_PYTHON`; при прямом запуске файла используется `OKO_PYTHON`, существующий `.venv/bin/python` или `python3`. Сервер, браузер и временное хранилище очищаются при завершении и отмене.
+`test_reader_http.ts` использует ту же изолированную сборку production-приложения через uvicorn и временное хранилище. Браузер получает настоящие `/api/cards`, `/api/navigation`, локальные картинки и ответы действий. Подменены только внешние RSS и обработчик модели на сервере; browser fetch не заменяется. Сценарий проверяет папку, оба участвующих фида и пустой фид, объединение события с сохранением всех источников, счётчики и удаление просмотренного. Runner передаёт выбранный Python через `OKO_PYTHON`; при прямом запуске файла используется `OKO_PYTHON`, существующий `.venv/bin/python` или `python3`. Сервер, браузер и временное хранилище очищаются при завершении и отмене.
 
-Отдельный файл можно запустить через `node --test tests/browser/test_opened_material.cjs` с тем же окружением. Для прямого запуска без runner явно задайте `OKO_BROWSER_EXECUTABLE`, если Chrome находится не в стандартном macOS-пути.
+Отдельный файл можно запустить через `node --require ./scripts/register-browser-typescript.cjs --test tests/browser/test_opened_material.ts` с тем же окружением. Для прямого запуска без runner явно задайте `OKO_BROWSER_EXECUTABLE`, если Chrome находится не в стандартном macOS-пути.
 
 ## Контракты ответов читателя
 
@@ -128,10 +128,10 @@ Python-процесс также переиспользуется в преде�
 
 ## Снимок панели для показа результата
 
-`test_status_panel.cjs` сохраняет готовую панель на широком и мобильном экране через общий `artifactPath`. Выполнить только эти два сценария:
+`test_status_panel.ts` сохраняет готовую панель на широком и мобильном экране через общий `artifactPath`. Выполнить только эти два сценария:
 
 ```sh
-node --test --test-name-pattern='missing model opens|panel reorders only' tests/browser/test_status_panel.cjs
+node --require ./scripts/register-browser-typescript.cjs --test --test-name-pattern='missing model opens|panel reorders only' tests/browser/test_status_panel.ts
 ```
 
 Пути `status-panel-desktop.png` и `status-panel-mobile.png` печатаются в выводе. При прямом запуске используется временный каталог либо `OKO_TEST_ARTIFACT_DIR/<pid>/`, если переменная задана. При запуске через runner снимки сохраняются в `artifacts/browser/<pid>/` соответствующего отчёта. Для показа результата используйте эти снимки из уже выполненной проверки; отдельный dev-server или Computer Use не требуется.
@@ -140,10 +140,18 @@ node --test --test-name-pattern='missing model opens|panel reorders only' tests/
 
 ## Сборка интерфейса
 
-Перед запуском из checkout выполните `npm ci` и `npm run build`. `npm run typecheck` отдельно проверяет TypeScript в strict-режиме; JavaScript сохраняется как временный этап миграции без второй копии реализации. `npm run dev` следит за исходниками и публикует новые production assets; читатель продолжает работать на Python origin, без отдельного Vite server и ослабления CSP.
+Перед запуском из checkout выполните `npm ci` и `npm run build`. `npm run typecheck` отдельно проверяет TypeScript в strict-режиме; Браузерные тесты и их поддержка также проверяются в strict-режиме через `tsconfig.browser-tests.json`. `npm run dev` следит за исходниками и публикует новые production assets; читатель продолжает работать на Python origin, без отдельного Vite server и ослабления CSP.
 
 `check ui`, `check lifecycle` и `check all` включают набор `build`: typecheck, сборку и проверку актуальности. Сборка пишет только в игнорируемый `oko/frontend_build/`. HTML и JS/CSS получают согласованные адреса с хешами; watch атомарно меняет указатель поколения и сохраняет старые assets для уже открытых вкладок. Неудачная сборка не публикуется. Обычный `python -m oko` не запускает npm или генераторы: отсутствующая, устаревшая или повреждённая сборка останавливает запуск до создания Runtime и хранилища. В установленной поставке используются подготовленные assets и проверяется их целостность, без доступа к source checkout.
 
 ## React / API-first
 
-Полный контракт: api/openapi.yaml. Команды api:lint, api:generate, api:check, api:compat и standalone api:docs описаны в [API README](../../api/README.md). Generated libs проверяются без записи в checkout. Swagger и installed-wheel проверки находятся в test_api_docs.cjs / test_installed_docs.cjs; источники и модели только синтетические. Историческое описание TypedDict wire export выше относится к версии до React-переноса.
+Полный контракт: api/openapi.yaml. Команды api:lint, api:generate, api:check, api:compat и standalone api:docs описаны в [API README](../../api/README.md). Generated libs проверяются без записи в checkout. Swagger и installed-wheel проверки находятся в test_api_docs.ts / test_installed_docs.ts; источники и модели только синтетические. Историческое описание TypedDict wire export выше относится к версии до React-переноса.
+
+## TypeScript в браузерных тестах
+
+Все сценарии и общая поддержка находятся в `tests/browser/*.ts`. Runner автоматически выполняет `browser-types` перед запуском выбранных сценариев; ошибка типов оставляет браузерный набор `NOT RUN`. `npm run typecheck` проверяет фронтенд и тесты; `npm run typecheck:browser` — только тесты. CI получает эти проверки через `check all`. Pre-commit проверяет синтаксис и типы точного индекса, включая импортируемые помощники, независимо от незакоммиченных исправлений.
+
+Прямой запуск: `node --require ./scripts/register-browser-typescript.cjs --enable-source-maps --test tests/browser/test_opened_material.ts`. Preload использует закреплённый TypeScript и сохраняет динамические `import()` внутри функций, которые Playwright отправляет браузеру. Перед прямым запуском выполните `npm run typecheck:browser`; runner делает это автоматически. Поддерживаются версии Node из `package.json`, включая Node 20.
+
+Фикстуры используют DTO сгенерированного OpenAPI. Подмена транспорта принимает `unknown`, чтобы отрицательные тесты могли отправлять неверные данные; успешные снимки дополнительно проверяются JSON Schema при доставке. Non-null assertions в сценариях сохраняют прежнее требование наличия элемента/запроса после ожидания Playwright и не отключают проверку типов полей.
