@@ -30,7 +30,7 @@ Standards: 0 замечаний. Spec review выявил гонку общег�
 
 ## Снимки
 
-[Добавление](development-flow-add.png) · [Фиды и папки](development-flow-feeds.png) · [Узкий экран](development-flow-mobile.png) · [Настройки Око](development-flow-global.png) · [Подключения моделей](development-flow-models.png)
+[Добавление](development-flow-add.png) · [Фиды и папки](separate-menus-feeds.png) · [Узкий экран](separate-menus-mobile.png) · [Настройки Око](development-flow-global.png) · [Подключения моделей](development-flow-models.png)
 
 ## Границы
 

@@ -88,6 +88,6 @@ SDKbinary test сначала4/5 из-за неполного временног
 
 Независимое re-review на0bd96ac: Standardsfindingзакрыт, обаSpecfindingsзакрыты; дополнительныхfinding вaffectedchangesнет. Desktop/plain, mobileRSS и mobileStatus итоговогоpreparedUI просмотрены, toolbaricons restored, overflow/компоновка и данные сохранены.34surface geometry statesPASS. Installed-wheel/noNode +Swagger explicitAuthorize/memory-onlytoken/nolease/standalone входят вbrowser suite и прошли. Codegen/drift/compatibility/stagedindex guards прошли; normaluser launch не вызываетNode илиgenerators.
 
-Постоянные копии: [initialall](../../docs/verification/react-migration/all-initial.json), [finalUI](../../docs/verification/react-migration/ui-final.json), [affectedmedia](../../docs/verification/react-migration/media-final.json), [desktop](../../docs/verification/react-migration/desktop.png), [mobile](../../docs/verification/react-migration/mobile.png).
+Постоянные копии: [initialall](../../docs/verification/react-migration/all-initial.json), [finalUI](../../docs/verification/react-migration/ui-final.json), [affectedmedia](../../docs/verification/react-migration/media-final.json), [desktop](../../docs/verification/reader-surfaces/surfaces-plain-1440.png), [mobile](../../docs/verification/reader-surfaces/surfaces-rss-checked-390.png).
 
 Все20задач завершены. Веткаcodex/react-typescript-api-first. Пользовательский экземпляр и личныеисточники не запускались; push/deploy не выполнялись. Сохранённыеисторическиеотчёты относятся ксвоимверсиям; этазапись фиксирует миграцию.
