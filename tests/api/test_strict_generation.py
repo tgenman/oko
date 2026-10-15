@@ -7,20 +7,22 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_generated_timestamp_rejects_missing_timezone(tmp_path):
-    document = {
-        'openapi': '3.1.0', 'info': {'title': 'Synthetic wire guarantees', 'version': '3.0.0'},
-        'paths': {},
-        'components': {'schemas': {'EventTime': {
-            'type': 'object', 'additionalProperties': False, 'required': ['occurred_at'],
-            'properties': {'occurred_at': {'type': 'string', 'format': 'date-time'}},
-        }}},
-    }
+def test_generated_formats_and_boolean_constants_do_not_coerce_json(tmp_path):
+    document = {'openapi': '3.1.0', 'info': {'title': 'Strict primitives', 'version': '3.0.0'},
+                'paths': {}, 'components': {'schemas': {
+                    'EventTime': {'type': 'object', 'additionalProperties': False, 'required': ['occurred_at'], 'properties': {'occurred_at': {'type': 'string', 'format': 'date-time'}}},
+                    'Timestamp': {'type': 'string', 'format': 'date-time'},
+                    'NullableTimestamp': {'anyOf': [{'type': 'string', 'format': 'date-time'}, {'type': 'null'}]},
+                    'TimestampList': {'type': 'array', 'items': {'type': 'string', 'format': 'date-time'}},
+                    'BooleanConstant': {'type': 'boolean', 'const': True},
+                    'LocalDate': {'type': 'string', 'format': 'date'},
+                    'Acknowledgement': {'type': 'object', 'additionalProperties': False,
+                                        'required': ['ok'], 'properties': {'ok': {'type': 'boolean', 'const': True}}},
+                }}}
     source = tmp_path / 'wire.json'
     source.write_text(json.dumps(document))
-    output = tmp_path / 'generated'
     generated = subprocess.run([sys.executable, str(ROOT / 'scripts/generate_api.py'), 'generate',
-                                '--schema', str(source), '--output', str(output)],
+                                '--schema', str(source), '--output', str(tmp_path / 'generated')],
                                cwd=ROOT, capture_output=True, text=True)
     assert generated.returncode == 0, generated.stdout + generated.stderr
     probe = subprocess.run([sys.executable, '-c', '''
@@ -37,28 +39,7 @@ except ValidationError:
     pass
 else:
     raise AssertionError('A wire timestamp without timezone was accepted')
-''', str(tmp_path)], cwd=ROOT, capture_output=True, text=True)
-    assert probe.returncode == 0, probe.stdout + probe.stderr
 
-
-def test_generated_formats_and_boolean_constants_do_not_coerce_json(tmp_path):
-    document = {'openapi': '3.1.0', 'info': {'title': 'Strict primitives', 'version': '3.0.0'},
-                'paths': {}, 'components': {'schemas': {
-                    'Timestamp': {'type': 'string', 'format': 'date-time'},
-                    'NullableTimestamp': {'anyOf': [{'type': 'string', 'format': 'date-time'}, {'type': 'null'}]},
-                    'TimestampList': {'type': 'array', 'items': {'type': 'string', 'format': 'date-time'}},
-                    'BooleanConstant': {'type': 'boolean', 'const': True},
-                    'LocalDate': {'type': 'string', 'format': 'date'},
-                    'Acknowledgement': {'type': 'object', 'additionalProperties': False,
-                                        'required': ['ok'], 'properties': {'ok': {'type': 'boolean', 'const': True}}},
-                }}}
-    source = tmp_path / 'wire.json'
-    source.write_text(json.dumps(document))
-    generated = subprocess.run([sys.executable, str(ROOT / 'scripts/generate_api.py'), 'generate',
-                                '--schema', str(source), '--output', str(tmp_path / 'generated')],
-                               cwd=ROOT, capture_output=True, text=True)
-    assert generated.returncode == 0, generated.stdout + generated.stderr
-    probe = subprocess.run([sys.executable, '-c', '''
 import sys
 sys.path.insert(0, sys.argv[1])
 from generated.models import Timestamp, LocalDate, Acknowledgement, NullableTimestamp, TimestampList, BooleanConstant
@@ -108,8 +89,6 @@ def describe(value: CountSelection | DateSelection) -> str:
 selection = CountSelection(mode='count', count='20')
 ''')
     command = [sys.executable, '-m', 'mypy', '--strict', '--no-incremental', '--follow-imports=silent']
-    passed = subprocess.run([*command, str(valid)], cwd=ROOT, capture_output=True, text=True)
-    assert passed.returncode == 0, passed.stdout + passed.stderr
     negative = tmp_path / 'negative.py'
     negative.write_text('''from typing import assert_never
 from generated.models import CountSelection, DateSelection
@@ -126,8 +105,9 @@ def describe(value: CountSelection | DateSelection) -> str:
         return value.count
     assert_never(value)
 ''')
-    failed = subprocess.run([*command, str(negative)], cwd=ROOT, capture_output=True, text=True)
+    failed = subprocess.run([*command, str(valid), str(negative)], cwd=ROOT, capture_output=True, text=True)
     assert failed.returncode != 0
+    assert 'positive.py:' not in failed.stdout, failed.stdout
     for expected in ('Unexpected keyword argument "wrong"', 'Missing named argument "count"',
                      'Argument "count"', 'Incompatible return value type', 'Argument 1 to "assert_never"'):
         assert expected in failed.stdout, failed.stdout + failed.stderr

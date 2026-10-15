@@ -42,7 +42,7 @@ def test_precommit_checks_browser_types_from_index_across_imports(tmp_path):
     run = repo(tmp_path)
     (tmp_path / 'tests/browser').mkdir(parents=True)
     (tmp_path / 'tsconfig.browser-tests.json').write_text(
-        '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":true},"include":["tests/browser/*.ts"]}')
+        '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":true,"types":[]},"include":["tests/browser/*.ts"]}')
     helper = tmp_path / 'tests/browser/fixture.ts'
     helper.write_text('export function fixture(name: string) { return name; }\n')
     source = tmp_path / 'tests/browser/test_fixture.ts'
@@ -58,22 +58,26 @@ def test_precommit_checks_browser_types_from_index_across_imports(tmp_path):
     assert passed.returncode == 0, passed.stdout + passed.stderr
 
 
-@pytest.mark.parametrize('extension', ['cts', 'mts'])
-def test_precommit_checks_tooling_types_from_exact_index(tmp_path, extension):
+def test_precommit_checks_tooling_types_from_exact_index(tmp_path):
     run = repo(tmp_path)
-    name = f'scripts/example.{extension}'
-    (tmp_path / 'tsconfig.tooling.json').write_text(
-        '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":true,"module":"NodeNext"},'
-        '"files":["' + name + '"]}')
-    source = tmp_path / name
-    source.write_text("export const count: number = 'invalid';\n")
-    assert run('git', 'add', name, 'tsconfig.tooling.json').returncode == 0
-    source.write_text('export const count: number = 1;\n')
+    import json
+    names = ['scripts/example.cts', 'scripts/example.mts']
+    (tmp_path / 'tsconfig.tooling.json').write_text(json.dumps({
+        'compilerOptions': {'strict': True, 'noEmit': True, 'skipLibCheck': True,
+                            'module': 'NodeNext', 'types': []}, 'files': names}))
+    for name in names:
+        (tmp_path / name).write_text("export const count: number = 'invalid';\n")
+    assert run('git', 'add', *names, 'tsconfig.tooling.json').returncode == 0
+    for name in names:
+        (tmp_path / name).write_text('export const count: number = 1;\n')
     failed = run('git', 'hook', 'run', 'pre-commit')
     assert failed.returncode != 0
+    for name in names:
+        assert name in failed.stdout + failed.stderr
     assert 'TS2322' in failed.stdout + failed.stderr
-    assert run('git', 'add', name).returncode == 0
-    source.write_text("export const count: number = 'invalid';\n")
+    assert run('git', 'add', *names).returncode == 0
+    for name in names:
+        (tmp_path / name).write_text("export const count: number = 'invalid';\n")
     passed = run('git', 'hook', 'run', 'pre-commit')
     assert passed.returncode == 0, passed.stdout + passed.stderr
 

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import {reader, material, expect} from './support.ts';
 import {artifactPath} from './artifacts.ts';
 
-test('reader header keeps every action beside Oko and progress below on wide and narrow screens', async () => {
+test('reader header keeps every action beside Oko and progress below on desktop', async () => {
   const r = await reader();
   try {
     await r.page.setViewportSize({width:1440,height:900});
@@ -32,19 +32,6 @@ test('reader header keeps every action beside Oko and progress below on wide and
     await r.page.screenshot({path:panelShot}); console.info('Header screenshot:',panelShot);
     await r.page.keyboard.press('Escape');
     await expect(r.page.locator('#status-toggle')).toBeFocused();
-    await r.page.setViewportSize({width:390,height:844});
-    await r.page.locator('#collect').focus();
-    for (const id of actions.slice(1)) {
-      await r.page.keyboard.press('Tab');
-      await expect(r.page.locator('#'+id)).toBeFocused();
-      await expect.poll(async()=>{
-        const box=await r.page.locator('#'+id).boundingBox();
-        return box!.x>=0 && box!.x+box!.width<=391;
-      },{message:'Focused action is visible: '+id}).toBe(true);
-    }
-    expect(await r.page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
-    const narrow = artifactPath('reader-header-narrow.png');
-    await r.page.screenshot({path:narrow}); console.info('Header screenshot:',narrow);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });

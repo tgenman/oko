@@ -5,14 +5,6 @@ from tests.support.app import create_app
 HEADERS = {'Authorization': 'Bearer test-secret'}
 
 
-def test_generated_debug_input_retains_iso_timestamp_normalization(tmp_path):
-    with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
-        for stamp in ['2026-10-14T12:00:00', '2026-10-14T12:00:00Z']:
-            response = client.post('/api/debug', json={'source':'synthetic', 'message':stamp, 'occurred_at':stamp})
-            assert response.status_code == 200
-            assert response.json()['entry']['last_time'].startswith('2026-10-14T12:00:00')
-
-
 def test_clear_debug_is_authorized_persistent_and_accepts_new_errors(tmp_path):
     with TestClient(create_app(tmp_path, token='test-secret'), headers=HEADERS) as client:
         client.post('/api/debug', json={'source': 'browser', 'message': 'old error'})
@@ -253,5 +245,5 @@ def test_browser_iso_timestamps_survive_http_delivery_and_retry(tmp_path):
         assert entry['first_time'] == '2026-10-13T10:00:00+00:00'
         assert entry['last_time'] == '2026-10-13T10:00:01.250000+00:00'
         assert client.post('/api/debug', json=payload).json()['entry']['count'] == 1
-        for invalid in (123, True, 'not-a-date'):
+        for invalid in (123, True, 'not-a-date', '2026-10-14T12:00:00'):
             assert client.post('/api/debug', json={**payload, 'occurred_at': invalid}).status_code == 422

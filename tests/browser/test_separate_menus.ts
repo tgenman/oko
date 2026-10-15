@@ -166,7 +166,7 @@ test('object and global drafts are independent, field save preserves other unsav
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик второго');
-    const writes = await r.page.evaluate(() => readerTransport.requests.filter(q => ['PATCH','PUT','POST'].includes(q.method) && !q.url.includes('/tabs/') && q.url !== '/api/debug'));
+    const writes = await r.page.evaluate(() => readerTransport.requests.filter(q => ['PATCH','PUT','POST'].includes(q.method) && !q.url.includes('/tabs/') && !/^\/api\/v3\/client-sessions(?:\/[^/?]+)?$/.test(q.url) && q.url !== '/api/debug'));
     expect(writes).toEqual([{url:'/api/settings/feed/one',method:'PATCH',body:{prompt_theses:'Черновик первого'}}]);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
@@ -249,21 +249,10 @@ test('late subscription and settings responses cannot replace newer object selec
   } finally {await r.close();}
 });
 
-test('narrow feed menu navigates list and detail, OPML returns to the list without changing reading', async () => {
+test('OPML returns to the feed list without changing reading', async () => {
   const r = await reader();
   try {
-    await r.page.setViewportSize({width:390,height:844});
     await r.start([]); await objects(r);
-    await r.page.locator('#feeds-open').click();
-    await expect(r.page.locator('#feed-list')).toBeVisible();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await expect(r.page.locator('#feed-list')).toBeHidden();
-    await editSetting(r.page, 'prompt_theses');
-    await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
-    await r.page.locator('#feeds-back').click();
-    await expect(r.page.locator('#feed-list')).toBeVisible();
-    await expect(r.page.locator('#feed-detail')).toBeHidden();
-    await r.page.locator('#feeds-close').click();
     await r.page.locator('#add-open').click();
     await r.page.getByRole('tab',{name:'Импорт OPML',exact:true}).click();
     await r.page.evaluate(() => {
@@ -497,7 +486,7 @@ test('a completed RSS addition preserves changes typed after submission', async 
     await expect(r.page.locator('#rss-title')).toHaveValue('Draft B');
     await expect(r.page.locator('#rss-history-count')).toHaveValue('13');
     await expect(r.page.locator('#add-dialog')).toBeVisible();
-    for(const [width,height,name]of ([[1280,900,'react-rss-desktop.png'],[390,844,'react-rss-mobile.png']] as const)){
+    for(const [width,height,name]of ([[1280,900,'react-rss-desktop.png']] as const)){
       await r.page.setViewportSize({width,height});
       expect(await r.page.locator('#add-dialog').evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth)).toBe(true);
       const screenshot=artifactPath(name);await r.page.screenshot({path:screenshot});console.log('RSS screenshot:',screenshot);

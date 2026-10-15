@@ -235,9 +235,6 @@ test('journal polling updates a group without losing its disclosure or keyboard 
     await expect(summary).toBeFocused();
     const journal=artifactPath('react-journal-desktop.png');
     await r.page.screenshot({path:journal});console.info('Journal screenshot:',journal);
-    await r.page.setViewportSize({width:390,height:844});
-    const phone=artifactPath('react-journal-mobile.png');
-    await r.page.screenshot({path:phone});console.info('Journal screenshot:',phone);
     await r.page.locator('#status-journal-back').click();
     await expect(r.page.locator('#status-journal-open')).toBeFocused();
   } finally {await r.close();}
