@@ -1,0 +1,540 @@
+{
+  "started_at": "20261015T063504Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.24s)",
+      "commands": [
+        {
+          "command": [
+            "/repo/.venv/bin/python",
+            "/repo/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "syntax": {
+      "status": "PASS (6.70s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/docs/initializer.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/errors.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/client/client.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/client/index.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/client/types.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/client/utils.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/client.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/auth.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/bodySerializer.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/params.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/pathSerializer.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/queryKeySerializer.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/serverSentEvents.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/types.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/core/utils.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/index.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/media.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/revision.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/sdk.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/generated/types.gen.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/reader.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/api/transport.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/main.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/reader-session.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/reading/folder-actions.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/reading/list.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/reading/opened.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/reading/store.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/reading/tree.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/renderer.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/connections.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/editor.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/history.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/menus.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/models.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/operations.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/owner.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/settings/youtube.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/shell.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/status/actions.ts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/status/debug.tsx"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/check-ts.cjs",
+            "/repo/frontend/src/status/panel.tsx"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "lint": {
+      "status": "PASS (0.39s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/lint-js.cjs"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "types": {
+      "status": "PASS (3.50s)",
+      "commands": [
+        {
+          "command": [
+            "/repo/.venv/bin/python",
+            "-m",
+            "mypy",
+            "oko",
+            "tests/support/codex.py",
+            "tests/support/app.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "build": {
+      "status": "PASS (13.83s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/build-frontend.mjs"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/repo/scripts/build-frontend.mjs",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "http": {
+      "status": "PASS (50.91s)",
+      "commands": [
+        {
+          "command": [
+            "/repo/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/reader/test_web_assets.py",
+            "tests/reader/test_frontend_delivery.py",
+            "tests/reader/test_frontend_build.py",
+            "tests/reader/test_http_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "FAIL (110.85s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--test",
+            "--test-concurrency=2",
+            "/repo/tests/browser/test_api_docs.cjs",
+            "/repo/tests/browser/test_browser_context.cjs",
+            "/repo/tests/browser/test_codex_settings.cjs",
+            "/repo/tests/browser/test_codex_settings_http.cjs",
+            "/repo/tests/browser/test_contracts.cjs",
+            "/repo/tests/browser/test_existing_history.cjs",
+            "/repo/tests/browser/test_feed_debug.cjs",
+            "/repo/tests/browser/test_feed_tree_ios.cjs",
+            "/repo/tests/browser/test_folder_actions.cjs",
+            "/repo/tests/browser/test_history_outcomes.cjs",
+            "/repo/tests/browser/test_history_pause.cjs",
+            "/repo/tests/browser/test_http_isolation.cjs",
+            "/repo/tests/browser/test_initial_history.cjs",
+            "/repo/tests/browser/test_installed_docs.cjs",
+            "/repo/tests/browser/test_material_list.cjs",
+            "/repo/tests/browser/test_opened_material.cjs",
+            "/repo/tests/browser/test_reader_appearance.cjs",
+            "/repo/tests/browser/test_reader_http.cjs",
+            "/repo/tests/browser/test_reader_refresh.cjs",
+            "/repo/tests/browser/test_reader_surfaces.cjs",
+            "/repo/tests/browser/test_reading_tree.cjs",
+            "/repo/tests/browser/test_separate_menus.cjs",
+            "/repo/tests/browser/test_settings_navigation.cjs",
+            "/repo/tests/browser/test_status_panel.cjs",
+            "/repo/tests/browser/test_telegram_connection.cjs",
+            "/repo/tests/browser/test_transport.cjs",
+            "/repo/tests/browser/test_ui_lifecycle.cjs",
+            "/repo/tests/browser/test_youtube_history.cjs",
+            "/repo/tests/browser/test_youtube_history_http.cjs",
+            "/repo/tests/browser/test_youtube_settings.cjs"
+          ],
+          "exit_code": 1
+        }
+      ],
+      "failures": [
+        "production HTTP saves choices, reads provenance and recreates material from the browser",
+        "real HTTP settings load 60 YouTube materials and keep viewed IDs on a second selection"
+      ],
+      "passed_scenarios": 123,
+      "checkout_changes": []
+    },
+    "diff": {
+      "status": "PASS (0.01s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "python-tests": {
+      "status": "INTERRUPTED",
+      "commands": [
+        {
+          "command": [
+            "/repo/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q"
+          ],
+          "exit_code": null
+        }
+      ],
+      "failures": []
+    },
+    "entrypoint": {
+      "status": "NOT RUN",
+      "commands": [],
+      "failures": []
+    }
+  },
+  "browser_name_pattern": null,
+  "exit_code": 130,
+  "duration_seconds": 264.78,
+  "log": "/repo/.scratch/check-runs/20261015T063504Z-6e7e5860/output.log"
+}

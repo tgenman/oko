@@ -1,0 +1,81 @@
+{
+  "started_at": "20261015T063730Z",
+  "selected_files": {
+    "browser": [
+      "/private/tmp/oko-poetry-migration/tests/browser/test_installed_docs.ts"
+    ],
+    "python-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "suites": {
+    "browser-types": {
+      "status": "PASS (1.12s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-poetry-migration/node_modules/typescript/bin/tsc",
+            "-p",
+            "/private/tmp/oko-poetry-migration/tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "build": {
+      "status": "PASS (17.98s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-poetry-migration/node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-poetry-migration/scripts/build-frontend.mjs"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "/private/tmp/oko-poetry-migration/scripts/build-frontend.mjs",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (18.99s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--require",
+            "/private/tmp/oko-poetry-migration/scripts/register-browser-typescript.cjs",
+            "--enable-source-maps",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-poetry-migration/tests/browser/test_installed_docs.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 1,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "exit_code": 0,
+  "duration_seconds": 38.55,
+  "log": "/private/tmp/oko-poetry-migration/.scratch/check-runs/20261015T063730Z-3c5e120c/output.log"
+}

@@ -81,11 +81,11 @@ def test_missing_and_dynamic_remote_references_fail_before_validation(tmp_path):
 def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path):
     for directory in ('api', 'scripts', 'frontend/src/api/generated', 'oko/reader/generated'):
         shutil.copytree(ROOT / directory, tmp_path / directory)
-    for name in ('package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock'):
+    for name in ('package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock'):
         shutil.copy2(ROOT / name, tmp_path / name)
     (tmp_path / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
     assert run('git', 'init', '-q', cwd=tmp_path).returncode == 0
-    assert run('git', 'add', 'api', 'scripts', 'frontend', 'oko', 'package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock', cwd=tmp_path).returncode == 0
+    assert run('git', 'add', 'api', 'scripts', 'frontend', 'oko', 'package.json', 'package-lock.json', 'pyproject.toml', 'poetry.lock', cwd=tmp_path).returncode == 0
     assert run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-qm', 'fixture', cwd=tmp_path).returncode == 0
     source = tmp_path / 'frontend/src/api/generated/revision.ts'
     valid = source.read_text()

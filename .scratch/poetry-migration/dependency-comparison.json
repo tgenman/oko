@@ -1,0 +1,29 @@
+{
+  "runtime_pins_unchanged": true,
+  "retained_package_versions": 67,
+  "changes": {
+    "poetry-core": {
+      "before": [],
+      "after": [
+        "2.5.0"
+      ]
+    },
+    "setuptools": {
+      "before": [
+        "80.9.0"
+      ],
+      "after": []
+    },
+    "wheel": {
+      "before": [
+        "0.45.1"
+      ],
+      "after": []
+    }
+  },
+  "python_range": {
+    "before": ">=3.11",
+    "after": ">=3.11,<3.15",
+    "approval": "Explicit user reply 2026-10-15"
+  }
+}

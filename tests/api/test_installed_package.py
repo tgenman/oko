@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import zipfile
+from email.parser import Parser
 
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -39,6 +40,10 @@ def test_wheel_runs_outside_checkout_without_node(tmp_path):
         names = package.namelist()
         assert any('/docs/swagger-ui-bundle.js' in name for name in names)
         assert 'oko/reader/generated/openapi.json' in names
+        metadata = Parser().parsestr(package.read(next(name for name in names if name.endswith('.dist-info/METADATA'))).decode())
+        assert 'dev' not in metadata.get_all('Provides-Extra', [])
+        requirements = metadata.get_all('Requires-Dist', [])
+        assert not any(name in requirement for requirement in requirements for name in ('pytest', 'poetry-core', 'setuptools', 'datamodel-code-generator'))
     install_wheel(wheels[0], installed)
     script = """
 import json,tempfile
