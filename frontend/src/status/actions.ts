@@ -43,6 +43,12 @@ export function createReaderActions({ readerApi, onChanged }: {
         else if(context.operation==='feed_patch') {path='feeds/'+context.feed_id;method='PATCH';fields=context.fields;}
         else if(context.operation==='codex_save'||context.operation==='processor_save') {path='processors/'+(context.operation==='codex_save'?'codex':'llamacpp');method='PUT';}
         else if(context.operation==='codex_check'||context.operation==='processor_check')path='processors/'+(context.operation==='codex_check'?'codex':'llamacpp')+'/check';
+        else if('material_id' in context) {
+            const suffix={viewed:'viewed',regenerate:'regenerate',retry_material:'retry',retry_theses:'theses/retry',retry_filter:'filter/retry',restore_filter:'filter/restore'}[context.operation];
+            path='materials/'+context.material_id+'/'+suffix;
+        }
+        else if(context.operation==='complete_folder')path='folders/'+context.folder_id+'/completion';
+        else if(context.operation==='collect')path='collect';
         const request:Request={id:crypto.randomUUID(),context,method,path:'/api/'+path,fields,result:'unknown',sequence:++sequence,key:method+':/api/'+path+':'+(fields.length===1?fields[0]:'')};
         latest.set(request.key,request.sequence);
         commandIds.set(request.key,request.id);

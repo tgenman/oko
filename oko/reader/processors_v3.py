@@ -30,12 +30,12 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             raise ApiError(503, wire.ErrorEnvelope(wire.ProcessorUnavailableError(code='processor_unavailable', message=str(error.detail), details=wire.ProcessorUnavailableErrorDetails(retry_at=None), diagnostic_id=None, command_id=None))) from None
         return wire.CodexModelCatalog.model_validate({'models': result})
 
-    @router.put('/api/v3/processors/codex', response_model=wire.CodexConfiguration)
-    async def save(request: Request, body: wire.CodexConfigurationRequest) -> wire.CodexConfiguration:
+    @router.put('/api/v3/processors/codex', response_model=wire.CodexProcessorState)
+    async def save(request: Request, body: wire.CodexConfigurationRequest) -> wire.CodexProcessorState:
         async with track(runtime, request, wire.CommandContext(wire.CommandCodexSave(operation='codex_save'))):
             value = CodexSettings.model_validate(body.model_dump())
             await runtime.configure_codex(value)
-            return wire.CodexConfiguration.model_validate(value.model_dump())
+            return project.codex(previous.CodexState.model_validate(runtime.codex_status()))
 
     @router.post('/api/v3/processors/codex/check', response_model=wire.CodexAvailability)
     async def check(request: Request) -> wire.CodexAvailability:
@@ -48,15 +48,15 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         config = runtime.require_store().processor_config()
         return wire.LocalProcessorState(configuration=wire.LocalProcessorConfiguration.model_validate(config.model_dump()) if config else None)
 
-    @router.put('/api/v3/processors/llamacpp', response_model=wire.LocalProcessorConfiguration)
-    async def local_save(request: Request, body: wire.LocalProcessorConfigurationRequest) -> wire.LocalProcessorConfiguration:
+    @router.put('/api/v3/processors/llamacpp', response_model=wire.LocalProcessorState)
+    async def local_save(request: Request, body: wire.LocalProcessorConfigurationRequest) -> wire.LocalProcessorState:
         async with track(runtime, request, wire.CommandContext(wire.CommandProcessorSave(operation='processor_save'))):
             try:
                 config = ProcessorConfig.model_validate(body.model_dump())
             except ValidationError:
                 raise ApiError(422, invalid('body', 'endpoint')) from None
             await runtime.configure_processor(config)
-            return wire.LocalProcessorConfiguration.model_validate(config.model_dump())
+            return wire.LocalProcessorState(configuration=wire.LocalProcessorConfiguration.model_validate(config.model_dump()))
 
     @router.post('/api/v3/processors/llamacpp/check', response_model=wire.LocalProcessorCheck)
     async def local_check(request: Request) -> wire.LocalProcessorCheck:

@@ -9,16 +9,16 @@ test('switch clears old material immediately and ignores late opening errors', a
     await r.start([material('A'), material('B'), material('C')]);
     await r.page.getByRole('button', {name: /^A/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст A');
-    await r.page.evaluate(() => { readerTransport.held.set('/api/materials/B', true); readerTransport.held.set('/api/materials/C', true); });
+    await r.page.evaluate(() => { readerTransport.held.set('/api/v3/materials/B', true); readerTransport.held.set('/api/v3/materials/C', true); });
     await r.page.getByRole('button', {name: /^B/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/B'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/B'));
     await expect(r.page.locator('#text')).toHaveText('');
     await expect(r.page.locator('#empty')).toHaveText('Загрузка материала…');
     await r.page.getByRole('button', {name: /^C/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/C'));
-    await r.page.evaluate(body => readerTransport.release('/api/materials/C', body), material('C'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/C'));
+    await r.page.evaluate(body => readerTransport.release('/api/v3/materials/C', body), material('C'));
     await expect(r.page.locator('#text')).toHaveText('Текст C');
-    await r.page.evaluate(() => readerTransport.release('/api/materials/B', {detail: 'Поздняя ошибка B'}, 500));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/materials/B', {detail: 'Поздняя ошибка B'}, 500));
     await settle(r.page);
     await expect(r.page.locator('#text')).toHaveText('Текст C');
     assert.deepEqual(r.errors, []);
@@ -29,12 +29,12 @@ test('late success of an old opening cannot replace the selected card', async ()
   const r = await reader();
   try {
     await r.start([material('A'), material('B')]);
-    await r.page.evaluate(() => readerTransport.held.set('/api/materials/A', true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/A', true));
     await r.page.getByRole('button', {name: /^A/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/A'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A'));
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст B');
-    await r.page.evaluate(body => readerTransport.release('/api/materials/A', body), material('A'));
+    await r.page.evaluate(body => readerTransport.release('/api/v3/materials/A', body), material('A'));
     await settle(r.page);
     await expect(r.page.locator('#text')).toHaveText('Текст B');
     assert.deepEqual(r.errors, []);
@@ -48,17 +48,17 @@ async function settle(page: Page) {
 test('previous version and media delivered after switching never reach the new card', async () => {
   const r = await reader();
   try {
-    await r.start([material('A', {images: ['/api/image-A'], previous: [{url: '/api/materials/A/versions/1'}]}), material('B')]);
-    await r.page.evaluate(() => { readerTransport.held.set('/api/image-A', true); readerTransport.held.set('/api/materials/A/versions/1', true); });
+    await r.start([material('A', {images: ['/api/v3/materials/A/images/image-1.png'], previous: [{url: '/api/v3/materials/A/versions/1'}]}), material('B')]);
+    await r.page.evaluate(() => { readerTransport.held.set('/api/v3/materials/A/images/image-1.png', true); readerTransport.held.set('/api/v3/materials/A/versions/1', true); });
     await r.page.getByRole('button', {name: /^A/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/image-A'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/images/image-1.png'));
     await r.page.locator('#versions summary').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/A/versions/1'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/versions/1'));
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст B');
     await r.page.evaluate(() => {
-      readerTransport.release('/api/image-A', 'late image');
-      readerTransport.release('/api/materials/A/versions/1', {title: 'Прежнее A', text: 'СЕКРЕТ ПРЕЖНЕГО A', full:true, reason:'', images: [], attachments:[]});
+      readerTransport.release('/api/v3/materials/A/images/image-1.png', 'late image');
+      readerTransport.release('/api/v3/materials/A/versions/1', {title: 'Прежнее A', text: 'СЕКРЕТ ПРЕЖНЕГО A', full:true, reason:'', images: [], attachments:[]});
     });
     await settle(r.page);
     await expect(r.page.locator('#material')).not.toContainText('СЕКРЕТ');
@@ -96,18 +96,18 @@ const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwM
 test('viewing during media loading stops playback, releases URLs and rejects late media', async () => {
   const r = await reader();
   try {
-    await r.start([material('A', {images: ['/api/image'], attachments: [
-      {url: '/api/video', kind: 'video', mime: 'video/webm'},
-      {url: '/api/circle', kind: 'circle', mime: 'video/webm'},
+    await r.start([material('A', {images: ['/api/v3/materials/A/images/image-2.png'], attachments: [
+      {url: '/api/v3/materials/A/media/media-1.webm', kind: 'video', mime: 'video/webm'},
+      {url: '/api/v3/materials/A/media/media-2.webm', kind: 'circle', mime: 'video/webm'},
     ]})]);
     const base64 = await videoFixture(r.page);
     await r.page.evaluate(({base64, png}) => {
-      readerTransport.replies.set('/api/image', {base64: png, mime: 'image/png'});
-      readerTransport.replies.set('/api/video', {base64, mime: 'video/webm'});
-      readerTransport.held.set('/api/circle', true);
+      readerTransport.replies.set('/api/v3/materials/A/images/image-2.png', {base64: png, mime: 'image/png'});
+      readerTransport.replies.set('/api/v3/materials/A/media/media-1.webm', {base64, mime: 'video/webm'});
+      readerTransport.held.set('/api/v3/materials/A/media/media-2.webm', true);
     }, {base64, png});
     await r.page.getByRole('button', {name: /^A/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/circle'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/media/media-2.webm'));
     await expect(r.page.locator('#images img')).toBeVisible();
     await expect(r.page.locator('#images video').first()).toHaveAttribute('src', /^blob:/);
     await r.page.waitForFunction(() => {
@@ -119,13 +119,13 @@ test('viewing during media loading stops playback, releases URLs and rejects lat
       window.testVideo = document.querySelector<HTMLVideoElement>('#images video')!;
       testVideo.muted = true; testVideo.loop = true; await testVideo.play();
     });
-    await r.page.evaluate(() => readerTransport.replies.set('POST /api/materials/A/viewed', {body:{ok:true},next:[['/api/cards',{body:[]}]]}));
+    await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
     await r.page.getByRole('button', {name: 'Просмотрено', exact: true}).click();
     await expect(r.page.locator('#material')).toBeHidden();
     assert.equal(await r.page.evaluate(() => testVideo.paused && !testVideo.hasAttribute('src')), true);
     assert.equal(await r.page.evaluate(() => browserResources.created.length), 2);
     assert.deepEqual(await r.page.evaluate(() => browserResources.revoked), await r.page.evaluate(() => browserResources.created));
-    await r.page.evaluate(() => readerTransport.release('/api/circle', 'late circle'));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/materials/A/media/media-2.webm', 'late circle'));
     await settle(r.page);
     await expect(r.page.locator('#images')).toBeEmpty();
     assert.equal(await r.page.evaluate(() => browserResources.created.length), 2);
@@ -140,15 +140,15 @@ test('viewing a publication in another tab closes its pending opening but preser
     const unrelated = material('other', {folder_id: 'other-folder'});
     await r.start([source, unrelated]);
     const otherTab = await r.context.newPage(); await r.start([source], otherTab);
-    await r.page.evaluate(() => readerTransport.held.set('/api/materials/source', true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/source', true));
     await r.page.getByRole('button', {name: /^source/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/source'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/source'));
     await otherTab.getByRole('button', {name: /^source/}).click();
     await expect(otherTab.locator('#text')).toHaveText('Текст source');
-    await otherTab.evaluate(() => readerTransport.replies.set('POST /api/materials/source/viewed', {body:{ok:true},next:[['/api/cards',{body:[]}]]}));
+    await otherTab.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/source/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
     await otherTab.getByRole('button', {name: 'Просмотрено', exact: true}).click();
     await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
-    await r.page.evaluate(body => readerTransport.release('/api/materials/source', body), source);
+    await r.page.evaluate(body => readerTransport.release('/api/v3/materials/source', body), source);
     await settle(r.page);
     await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
     await r.page.getByRole('button', {name: /^other/}).click();
@@ -165,15 +165,15 @@ for (const interruption of ['stop', 'connection loss']) {
     const r = await reader();
     try {
       await r.start([material('A')]);
-      await r.page.evaluate(() => readerTransport.held.set('/api/materials/A', true));
+      await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/A', true));
       await r.page.getByRole('button', {name: /^A/}).click();
-      await r.page.waitForFunction(() => readerTransport.pending.has('/api/materials/A'));
+      await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A'));
       if (interruption === 'stop') await r.page.getByRole('button', {name: 'Остановить Око'}).click();
       else {
         await r.page.evaluate(() => readerTransport.replies.set('/api/status', {status: 503, body: {detail: 'Связь потеряна'}}));
       }
       await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
-      await r.page.evaluate(body => readerTransport.release('/api/materials/A', body), material('A'));
+      await r.page.evaluate(body => readerTransport.release('/api/v3/materials/A', body), material('A'));
       await settle(r.page);
       await expect(r.page.locator('#text')).toHaveText('');
       await expect(r.page.locator('#material')).toBeHidden();
@@ -186,7 +186,7 @@ test('title opens original in a new tab and resets for other cards', async () =>
   const r = await reader();
   try {
     await r.context.route('https://example.org/**', route => route.fulfill({body: '<h1>Original</h1>', contentType: 'text/html'}));
-    await r.start([material('A'), material('B', {url: ''})]);
+    await r.start([material('A'), material('B')]);
     await r.page.getByRole('button', {name: /^A/}).click();
     const link = r.page.locator('#title a');
     await expect(link).toHaveAttribute('href', 'https://example.org/A');
@@ -202,7 +202,7 @@ test('title opens original in a new tab and resets for other cards', async () =>
     await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#title')).toHaveText('B');
-    await expect(link).toHaveCount(0);
+    await expect(link).toHaveAttribute('href', 'https://example.org/B');
     assert.deepEqual(r.errors, []);
   } finally { await r.close(); }
 });

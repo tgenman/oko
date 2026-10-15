@@ -13,6 +13,10 @@ const validators = Object.fromEntries(Object.entries(schemas).map(([name,schema]
 function contractFor(url: string, method = 'GET') {
   if (method !== 'GET') return null;
   const pathname = new URL(url, 'http://localhost').pathname;
+  if (pathname === '/api/v3/cards') return 'cards_v3';
+  if (pathname === '/api/v3/reading-composition') return 'navigation_v3';
+  if (/^\/api\/v3\/materials\/[^/]+$/.test(pathname)) return 'material_v3';
+  if (/^\/api\/v3\/materials\/[^/]+\/versions\/\d+$/.test(pathname)) return 'version_v3';
   if (pathname === '/api/cards') return 'cards';
   if (pathname === '/api/navigation') return 'navigation';
   if (pathname === '/api/status') return 'status';

@@ -139,6 +139,12 @@ def action_error(error: ActionError, context: wire.CommandContext, identity: str
     command_id = wire.CommandId(identity)
     if stopped:
         return ApiError(409, wire.ErrorEnvelope(wire.RuntimeStoppedError(code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=command_id)))
+    value = context.root
+    if error.kind == 'missing' and isinstance(value, (wire.CommandViewed, wire.CommandRegenerate, wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandRestoreFilter, wire.CommandCompleteFolder)):
+        resource = wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=value.folder_id) if isinstance(value, wire.CommandCompleteFolder) else wire.MaterialResource(kind='material', material_id=value.material_id))
+        return ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), details=wire.ResourceNotFoundErrorDetails(resource=resource), diagnostic_id=None, command_id=command_id)))
+    if error.kind == 'unavailable':
+        return ApiError(503, wire.ErrorEnvelope(wire.StorageUnavailableError(code='storage_unavailable', message=str(error.detail), details=wire.StorageUnavailableErrorDetails(retry_at=None), diagnostic_id=None, command_id=command_id)))
     if isinstance(context.root, wire.CommandCodexSave) and error.kind == 'invalid':
         return ApiError(400, wire.ErrorEnvelope(wire.ProcessorChoiceInvalidError(code='processor_choice_invalid', message=str(error.detail), details=wire.ProcessorChoiceInvalidErrorDetails(reason='unsupported_choice'), diagnostic_id=None, command_id=command_id)))
     if isinstance(context.root, (wire.CommandCodexSave, wire.CommandCodexCheck, wire.CommandProcessorCheck)):
