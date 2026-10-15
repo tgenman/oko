@@ -14,6 +14,7 @@
 - Фильтрация, тезисы, события, обзоры и актуальность результатов: [согласование обработки](docs/architecture/processing-coordination.md); этапы и восстановление обзора — [прогресс обзора](docs/architecture/digest-progress.md).
 - Состав карточек, завершение чтения папки, скрытые материалы: [состав чтения](docs/architecture/reading-composition.md).
 - Перенос кода, общие контракты, организация тестов: [структура пакетов](docs/architecture/package-layout.md).
+- Фронтенд и его сборка: [React и поставка читателя](docs/architecture/frontend-backend.md). Изменение HTTP API и генерация библиотек: [OpenAPI-контракт](api/README.md).
 
 ## Проверка и данные
 
