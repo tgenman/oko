@@ -3,6 +3,9 @@ import time
 
 class Telegram:
     """Synthetic Telegram network boundary, never a personal account."""
+    async def identity(self, account):
+        return 10001
+
     async def accounts(self):
         return ['fixture']
 
@@ -33,9 +36,27 @@ class Telegram:
 
 
 def connect(client, peer='@fixture', folder='Новости'):
-    response = client.post('/api/telegram/connect', json=dict(account='fixture', peer=peer, folder=folder, auto_read=False))
+    response = connect_request(client, json=dict(account='fixture', peer=peer, folder=folder, auto_read=False))
     assert response.status_code == 200, response.json()
     return response.json()
+
+
+def configure(client, account='fixture'):
+    # Explicit synthetic user action at HTTP, not a default role in production.
+    state = client.get('/api/v3/telegram/profiles').json()['personal']
+    if state['state'] != 'ready' or state.get('configuration_ref') != account:
+        return client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref': account})
+    return None
+
+
+def connect_request(client, *, json):
+    configure(client, json.get('account', 'fixture'))
+    # Preserve existing imported/unconfigured feed IDs through explicit adoption.
+    if 'feed_id' not in json:
+        old = next((f for f in client.get('/api/subscriptions').json()['feeds'] if f['kind'] == 'telegram' and not f.get('telegram_peer')), None)
+        if old:
+            json = dict(json, feed_id=old['id'])
+    return client.post('/api/telegram/connect', json=json)
 
 
 def settled(client, count=1):

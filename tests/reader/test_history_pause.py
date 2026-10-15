@@ -1,3 +1,4 @@
+from tests.support.telegram import connect_request
 import asyncio
 import time
 import httpx
@@ -66,7 +67,7 @@ def test_telegram_paused_history_keeps_live_lane_and_resumes_album_snapshot(tmp_
         return TestClient(create_app(tmp_path, token='test', telegram_client=archive), headers=HEADERS)
     with reader() as client:
         client.post('/api/tabs/reader/heartbeat')
-        feed = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=4))).json()['id']
+        feed = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=4))).json()['id']
         wait_history(client, feed, lambda h: h['available'] == 2)
         assert client.patch('/api/feeds/' + feed + '/history', json={'paused':True}).status_code == 200
     archive.blocked = False

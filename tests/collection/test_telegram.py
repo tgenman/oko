@@ -1,3 +1,4 @@
+from tests.support.telegram import connect_request
 from tests.support.subscriptions import saved_sources
 from tests.support.telegram import Telegram, connect, settled
 from pathlib import Path
@@ -114,16 +115,15 @@ def test_private_group_access_forum_and_account_errors_are_explicit(tmp_path: Pa
             return dict(peer=-12345, title='Приватная группа', kind='group', forum=peer == '@forum')
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=Peers()), headers=HEADERS) as client:
         client.post('/api/tabs/test/heartbeat')
-        assert client.post('/api/telegram/connect', json=dict(account='fixture', peer='@denied', folder='Личное', auto_read=False)).json()['detail'] == 'Нет доступа к Telegram-источнику'
-        assert 'Выберите тему' in client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Личное', auto_read=False)).json()['detail']
+        assert connect_request(client, json=dict(account='fixture', peer='@denied', folder='Личное', auto_read=False)).json()['detail'] == 'Нет доступа к Telegram-источнику'
+        assert connect_request(client, json=dict(account='fixture', peer='@forum', topic_id=1, folder='Личное', auto_read=False)).status_code == 400
         assert client.get('/api/subscriptions').json()['feeds'] == []
         feed = connect(client, '-12345', 'Личное')
         assert feed['telegram_peer'] == -12345
         assert len(client.get('/api/subscriptions').json()['feeds']) == 1
-        duplicate = client.post('/api/telegram/connect', json=dict(account='fixture', peer='-12345', folder='Другое', auto_read=False))
-        assert duplicate.status_code == 200
-        assert duplicate.json()['folder_id'] == feed['folder_id']
-        assert connect(client, '-12345', 'Личное')['id'] == feed['id']
+        duplicate = connect_request(client, json=dict(account='fixture', peer='-12345', folder='Другое', auto_read=False))
+        assert duplicate.status_code == 409
+        assert client.get('/api/subscriptions').json()['feeds'][0]['folder_id'] == feed['folder_id']
         card = settled(client)[0]
         assert card['url'] == 'tg://openmessage?chat_id=12345&message_id=11'
 
@@ -225,6 +225,7 @@ class TelegramClient:
     def __init__(self, session, *args, **kwargs): self.session = session
     async def connect(self): pass
     async def disconnect(self): pass
+    async def get_me(self): return type('User', (), {'id': 10001})()
     async def is_user_authorized(self): return os.environ.get('SDK_FIXTURE_UNAUTHORIZED') != 'yes'
     async def get_entity(self, peer): return Channel()
     async def get_messages(self, entity, **params):
@@ -270,8 +271,11 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
         assert client.get('/api/cards').json() == []
 
 
-def test_switching_rss_transport_keeps_telegram_cursor_separate(tmp_path: Path):
+def test_legacy_rss_content_survives_and_cannot_switch_to_client(tmp_path: Path):
     saved_sources(tmp_path, [('https://source.test/telegram/channel/fixture', 'Источник', 'Новости')])
+    import sqlite3
+    with sqlite3.connect(tmp_path/'state.sqlite') as db:
+        db.execute("UPDATE feeds SET transport='rss'")
     import httpx
     from datetime import datetime, timezone
     from email.utils import format_datetime
@@ -283,12 +287,14 @@ def test_switching_rss_transport_keeps_telegram_cursor_separate(tmp_path: Path):
     transport = httpx.MockTransport(lambda req: httpx.Response(200, text=xml if '/telegram/' in req.url.path else '<article>Статья</article>'))
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=Imported(), rss_enabled=True, rss_transport=transport), headers=HEADERS) as client:
         feed = client.get('/api/subscriptions').json()['feeds'][0]
-        client.patch('/api/feeds/' + feed['id'], json={'transport': 'rss'})
+        assert client.patch('/api/feeds/' + feed['id'], json={'transport': 'telegram'}).status_code == 400
         client.post('/api/tabs/test/heartbeat')
         settled(client)
-        connect(client)
-        cards = settled(client, 2)
-        assert {c['title'] for c in cards} == {'RSS-текст', 'Текст канала'}
+        response = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='New', auto_read=False))
+        assert response.status_code == 409
+        cards = settled(client, 1)
+        assert {c['title'] for c in cards} == {'RSS-текст'}
+        assert client.get('/api/subscriptions').json()['feeds'][0]['transport'] == 'rss'
 
 
 def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Path):
@@ -387,9 +393,9 @@ def test_direct_client_never_logs_in_or_copies_an_unauthorized_session(tmp_path:
     root = tmp_path / 'data'
     with TestClient(create_app(root, token='test-token', telegram_client=LocalTelegram(project / '.env', root)), headers=HEADERS) as client:
         client.post('/api/tabs/test/heartbeat')
-        response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=False))
-        assert response.status_code == 409
-        assert response.json()['detail'] == 'Требуется авторизация существующего Telegram-клиента'
+        response = client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'fixture'})
+        assert response.status_code == 503
+        assert response.json()['code'] == 'profile_unavailable'
         assert client.get('/api/subscriptions').json()['feeds'] == []
         assert not list(root.rglob('*.session')) and not list(root.rglob('*.env'))
 
@@ -401,7 +407,7 @@ def test_direct_client_prefers_existing_string_session_to_stale_file_setting(tmp
     root = tmp_path / 'data'
     with TestClient(create_app(root, token='test-token', telegram_client=LocalTelegram(project / '.env', root)), headers=HEADERS) as client:
         client.post('/api/tabs/test/heartbeat')
-        response = client.post('/api/telegram/connect', json=dict(account='default', peer='@fixture', folder='Новости', auto_read=False))
+        response = connect_request(client, json=dict(account='default', peer='@fixture', folder='Новости', auto_read=False))
         assert response.status_code == 200, response.json()
         assert response.json()['telegram_account'] == 'default'
         assert not list(project.rglob('*.session'))
@@ -502,7 +508,7 @@ def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_us
         feed = connect(client)
         item = settled(client)[0]['id']
         tg.private = True
-        response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='-1001234567890', folder='Новости', auto_read=False, feed_id=feed['id']))
+        response = connect_request(client, json=dict(account='fixture', peer='-1001234567890', folder='Новости', auto_read=False, feed_id=feed['id']))
         assert response.status_code == 200
         assert response.json()['id'] == feed['id']
         client.post('/api/materials/' + item + '/retry')

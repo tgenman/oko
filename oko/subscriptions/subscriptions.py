@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qs
 
 from oko.collection.telegram.source import ConnectTelegram
 from oko.subscriptions.history import History, InitialHistory
+from oko.subscriptions.telegram import TelegramAccess
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -111,6 +112,8 @@ class Subscriptions:
                     db.execute('UPDATE feeds SET telegram_username=? WHERE id=?', (username, row['id']))
                 fault('before_telegram_username_commit')
 
+        self.telegram = TelegramAccess(db)
+
     def connect_telegram(self, body: ConnectTelegram, info: dict[str, Any]) -> dict[str, Any]:
         identity = f"telegram-peer:{body.account}:{info['peer']}" + (f":topic:{body.topic_id}" if body.topic_id else "")
         username_identity = 'telegram:' + str(info.get('username') or '').lower()
@@ -158,6 +161,11 @@ class Subscriptions:
         for row in self.db.execute(query, (identity,) if identity is not None else ()):
             feed = dict(row)
             feed['original_urls'] = json.loads(feed['original_urls'])
+            binding = self.telegram.binding(feed['id'])
+            if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
+                profile = self.telegram.profile(binding['role'])
+                if not profile or profile['state'] != 'ready':
+                    feed['connection'] = 'unavailable'
             feed['initial_history'] = self.history.status(feed['id'])
             if feed['initial_history'] is None:
                 namespace = 'telegram:' if feed['transport'] == 'telegram' else ''
@@ -248,6 +256,11 @@ class Subscriptions:
             self.check_owner('folder', values['folder_id'])
         if any(field in values for field in ('read_history', 'auto_read')) and feed['kind'] != 'telegram':
             raise ValueError('Отметки чтения применимы только к Telegram')
+        binding = self.telegram.binding(feed_id)
+        if feed['kind'] == 'telegram' and 'transport' in values:
+            raise ValueError('Способ доступа неизменяем; удалите фид и добавьте заново')
+        if binding and binding['kind'] == 'web' and set(values).intersection(('auto_read', 'read_history')):
+            raise ValueError('Веб-доступ не поддерживает отметки Telegram')
         transport = values.get('transport')
         if transport == 'telegram' and feed['kind'] != 'telegram':
             raise ValueError('Telegram-источник не распознан')

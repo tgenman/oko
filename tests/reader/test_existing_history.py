@@ -1,3 +1,4 @@
+from tests.support.telegram import connect_request
 from tests.support.subscriptions import saved_sources
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -10,15 +11,14 @@ def test_readding_telegram_opens_existing_without_changing_history_or_settings(t
         client.post('/api/tabs/reader/heartbeat')
         body = dict(account='fixture', peer='@fixture', folder='Старое', auto_read=False,
                     initial_history=dict(mode='count', count=2))
-        first = client.post('/api/telegram/connect', json=body).json()
+        first = connect_request(client, json=body).json()
         client.patch('/api/feeds/' + first['id'], json={'importance': 'high'})
         before = client.get('/api/subscriptions').json()
-        response = client.post('/api/telegram/connect', json={**body, 'folder': 'Новое', 'auto_read': True,
+        response = connect_request(client, json={**body, 'folder': 'Новое', 'auto_read': True,
                     'initial_history': dict(mode='count', count=100)})
-        assert response.status_code == 200, response.text
-        assert response.json()['id'] == first['id']
+        assert response.status_code == 409, response.text
         assert client.get('/api/subscriptions').json() == before
-        configured = client.post('/api/telegram/connect', json={**body, 'feed_id': first['id'], 'auto_read': True})
+        configured = connect_request(client, json={**body, 'feed_id': first['id'], 'auto_read': True})
         assert configured.status_code == 200
         assert configured.json()['auto_read'] is True
 

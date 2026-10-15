@@ -58,7 +58,11 @@ class ReadSync:
         state = self.store.db.execute('SELECT * FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
         if not config or not state or config['transport'] != 'telegram' or config['auto_read'] is None:
             return None
-        return dict(account=config['telegram_account'], peer=config['telegram_peer'],
+        binding = self.store.subscriptions.telegram.binding(feed)
+        if not binding or binding['kind'] != 'client' or config['connection'] == 'deleting':
+            return None
+        profile = self.store.subscriptions.telegram.profile(binding['role'])
+        return dict(account=profile['account'] if profile else config['telegram_account'], peer=config['telegram_peer'],
                     username=config.get('telegram_username'), topic_id=config.get('telegram_topic'), since=state['since'],
                     initial=state['initial'], read_history=config['read_history'], auto_read=config['auto_read'],
                     eligible=[r[0] for r in self.store.db.execute(
@@ -71,7 +75,8 @@ class ReadSync:
         db = self.store.db
         for config in self.store.subscriptions.feeds():
             feed = config['id']
-            if config['transport'] != 'telegram':
+            binding = self.store.subscriptions.telegram.binding(feed)
+            if config['transport'] != 'telegram' or config['connection'] == 'deleting' or not binding or binding['kind'] != 'client':
                 continue
             with db:
                 eligible = {r[0] for r in db.execute('SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1', (feed,))}

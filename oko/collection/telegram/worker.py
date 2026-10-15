@@ -79,7 +79,7 @@ async def main() -> None:
 
     async def entity_for(cl: Any, account: str, peer: str | int) -> Any:
         cache_key = (account, str(peer))
-        if cache_key not in peers:
+        if cache_key not in peers or isinstance(peer, str):
             # Numeric private peers require an existing access_hash. Populate the
             # client's cache once, without exporting dialogs into Oko.
             try:
@@ -117,6 +117,13 @@ async def main() -> None:
                     value: Any = registry.accounts()
                 else:
                     cl = await client_for(body['account'])
+                    if op == 'identity':
+                        user = await cl.get_me()
+                        output.write(json.dumps(dict(value=int(user.id))) + '\n')
+                        output.flush()
+                        continue
+                    if 'expected_user_id' in body and int((await cl.get_me()).id) != body['expected_user_id']:
+                        raise PermissionError('account-identity-mismatch')
                     entity = await entity_for(cl, body['account'], body['peer'])
                     topic_id = body.get('topic_id')
                     if getattr(entity, 'forum', False) and topic_id is None and op not in ('info', 'topics'):
@@ -128,7 +135,8 @@ async def main() -> None:
                     elif op == 'info':
                         topic = await topic_info(cl, entity, topic_id) if topic_id is not None else None
                         value = dict(peer=utils.get_peer_id(entity), title=entity.title + (' · ' + topic.title if topic else ''),
-                                     kind='channel' if getattr(entity, 'broadcast', False) else 'group', forum=bool(getattr(entity, 'forum', False)), topic_id=topic_id, username=getattr(entity, 'username', None))
+                                     kind='channel' if getattr(entity, 'broadcast', False) else 'group', forum=bool(getattr(entity, 'forum', False)), topic_id=topic_id, username=getattr(entity, 'username', None),
+                                     usernames=[u.username for u in (getattr(entity, 'usernames', None) or []) if u.active])
                     elif op == 'history_page':
                         if topic_id is not None:
                             await topic_info(cl, entity, topic_id)
