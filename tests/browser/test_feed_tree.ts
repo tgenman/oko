@@ -14,7 +14,7 @@ test('feed settings independently expand folders and return to the selected obje
     await r.page.setViewportSize({width:1280,height:900});
     const data = await addSources(r.api, [["https://source.test/a", "Альфа — длинное название источника для двух строк", "Наука"], ["https://source.test/b", "Бета", "Наука"], ["https://source.test/c", "Гамма", "Физика"]]);
     await r.start([]);
-    await r.page.evaluate(() => readerTransport.native.add('/api/subscriptions'));
+    await r.page.evaluate(() => readerTransport.native.add('/api/v3/subscriptions'));
     await r.page.locator('#feeds-open').click();
     const tree = r.page.locator('#feed-tree');
     const science = tree.getByRole('button',{name:'Свернуть Наука',exact:true});
@@ -80,7 +80,7 @@ test('empty feed settings offer addition and catalog refresh reveals newly impor
   const r = await reader();
   try {
     await r.start([]);
-    await r.page.evaluate(()=>readerTransport.native.add('/api/subscriptions'));
+    await r.page.evaluate(()=>readerTransport.native.add('/api/v3/subscriptions'));
     await r.page.locator('#feeds-open').click();
     await expect(r.page.locator('#feed-tree')).toHaveText('Фидов пока нет. Добавьте источник.');
     await r.page.locator('#feeds-close').click();

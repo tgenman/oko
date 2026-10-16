@@ -5,6 +5,7 @@ import {createDebugPanel, reportError} from './status/debug';
 import {createOpenedMaterial} from './reading/opened';
 import {createTransport} from './api/transport';
 import {createStatusPanel} from './status/panel';
+import {workText} from './status/recovery';
 import {createReaderActions} from './status/actions';
 import {createFolderActions} from './reading/folder-actions';
 import {createReaderApi} from './api/reader';
@@ -49,17 +50,15 @@ const list = createMaterialList({readerApi,onOpen: card => opened.open(card), on
 const folderActions = createFolderActions({readerApi,getFolder:()=>folderId,isStopped:()=>stopped,onRefresh:refresh,onCompleted:folder=>{contentEpoch++;opened.folderCompleted(folder);if(folderId===folder)list.clear();session.post({kind:'folder-viewed',folder});}});
 list.bindCommands(folderActions);
 const menus = createMenus({api, readerApi, onChanged: () => {contentEpoch++; refresh();}});
-statusPanel = createStatusPanel({debug, actions,onAvailability:available=>{commandsAvailable=available;renderCommands();}, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
-  onMaterial:id=>opened.open({id}), onRetry:async(target,problem)=>{
-    if (target.kind === 'collect') await readerApi.collect();
-    else {
-      const ids=problem.objects.filter(object=>object.kind==='material').map(object=>object.id);
-      for(const id of ids.length?ids:target.id?[target.id]:[]) {
-        const options={client:readerApi.client,path:{item:id}};
-        if(target.kind==='retry')await readerApi.command({operation:'retry_material',material_id:id},headers=>retryMaterial({...options,headers}));
-        else if(target.kind==='theses-retry')await readerApi.command({operation:'retry_theses',material_id:id},headers=>retryTheses({...options,headers}));
-        else if(target.kind==='filter-retry')await readerApi.command({operation:'retry_filter',material_id:id},headers=>retryFilter({...options,headers}));
-        else if(target.kind==='regenerate')await readerApi.command({operation:'regenerate',material_id:id},headers=>regenerate({...options,headers}));
+statusPanel = createStatusPanel({debug, actions,resourceName:resource=>resource.kind==='material'?list.title(resource.material_id):resource.kind==='feed'?readingCatalog.feeds.find(feed=>feed.id===resource.feed_id)?.title:resource.kind==='folder'?readingCatalog.folders.find(folder=>folder.id===resource.folder_id)?.title:undefined,onAvailability:available=>{commandsAvailable=available;renderCommands();}, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
+  onMaterial:id=>opened.open({id}), onRetry:async(target)=>{
+    if(target.kind==='retry_collection')await readerApi.collect(target.target);
+    else if('material_ids'in target){
+      for(const id of target.material_ids){const options={client:readerApi.client,path:{item:id}};
+        if(target.kind==='retry_material')await readerApi.command({operation:'retry_material',material_id:id},headers=>retryMaterial({...options,headers}));
+        else if(target.kind==='regenerate'&&target.result_kind==='theses')await readerApi.command({operation:'regenerate',material_id:id},headers=>regenerate({...options,headers}));
+        else if(target.kind==='retry_theses')await readerApi.command({operation:'retry_theses',material_id:id},headers=>retryTheses({...options,headers}));
+        else if(target.kind==='retry_filter'||target.kind==='regenerate'&&target.result_kind==='filter')await readerApi.command({operation:'retry_filter',material_id:id},headers=>retryFilter({...options,headers}));
       }
     }
     refresh();
@@ -99,26 +98,27 @@ async function updateReader() {
   const epoch = contentEpoch;
   const sequence = ++refreshSequence;
   const debugRevision = debug.revision();
+  const settingsRevision = menus.statusRevision();
   let statusAvailable = false;
   try {
     const state = await readerApi.status();
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     statusAvailable = true;
-    debug.updateStatus(state.debug_count, state.debug_persistence_error, debugRevision);
-    menus.status(state);
-    if (state.stopped) { stopUi('Око остановлено'); return; }
+    debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
+    menus.status(state,settingsRevision);
+    if (state.runtime_state==='stopped') { stopUi('Око остановлено'); return; }
     statusPanel.update(state.problems, state);
     debug.forgetMaterials(state.viewed_ids || []);
     statusPanel.forgetMaterials(state.viewed_ids || []);
     void actions.flush();
-    progress(`${state.stage} · источники ${state.ready_sources}/${state.total_sources}`);
+    progress(`${workText(state)} · источники ${state.ready_sources}/${state.total_sources}`);
     menus.sources(state.sources || []);
     const navigation = await tree.load();
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     readingCatalog = navigation;
     if (tree.update(navigation, state.sources || [])) return;
     list.setArea(tree.selection, navigation);
-    if (state.error) { opened.clear(); list.error(state.error); return; }
+    if (state.runtime_state==='unavailable') { opened.clear(); list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Хранилище недоступно'); return; }
     const params = new URLSearchParams({sort: input('sort').value});
     if (input('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);

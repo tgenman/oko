@@ -42,54 +42,33 @@ class ForumTelegram(Telegram):
         self.confirmations.append((topic_id, max_id))
 
 
-def connect_topic(client, topic_id):
-    response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum',
-                          folder='Форумы', auto_read=False, topic_id=topic_id))
-    assert response.status_code == 200, response.json()
-    return response.json()
-
-
-def test_owned_worker_scopes_sdk_history_media_and_read_requests(tmp_path: Path, monkeypatch):
+def test_owned_worker_collects_all_topics_and_keeps_read_scopes_internal(tmp_path: Path, monkeypatch):
     import asyncio
     import json
-    from oko.collection.contracts import SourceError
     from oko.collection.telegram.source import LocalTelegram
     from tests.support.telegram_forum_sdk import forum_sdk
     env, trace = forum_sdk(tmp_path, monkeypatch)
     async def check():
-        client = LocalTelegram(env, tmp_path / 'data')
+        client = LocalTelegram(env, tmp_path/'data')
         try:
-            assert [t['id'] for t in await client.topics('fixture', '@forum')] == [1, 20, 30]
-            info = await client.info('fixture', '@forum', topic_id=20)
-            assert info['forum'] and info['title'] == 'Forum · Engineering'
-            page = await client.page('fixture', info['peer'], 0, 0, topic_id=20)
-            assert [m['id'] for m in page['messages']] == [140, 141]
-            assert [m['id'] for m in await client.messages('fixture', info['peer'], [131, 140, 142], topic_id=20)] == [140, 141]
-            assert await client.download('fixture', info['peer'], 140, topic_id=20) == b'fixture-image'
-            try:
-                await client.download('fixture', info['peer'], 142, topic_id=20)
-            except SourceError:
-                pass
-            else:
-                raise AssertionError('foreign topic media must be rejected')
-            state = await client.read_state('fixture', info['peer'], time.time(), topic_id=20)
-            assert state == dict(read_max=0, initial=141)
-            assert (await client.read_window('fixture', info['peer'], 0, 141, topic_id=20))['ids'] == [140, 141]
-            await client.acknowledge('fixture', info['peer'], 141, topic_id=20)
-            assert (await client.read_state('fixture', info['peer'], time.time(), topic_id=30))['read_max'] == 0
-            assert (await client.read_state('fixture', info['peer'], time.time(), topic_id=20))['read_max'] == 141
-            general = await client.page('fixture', info['peer'], 0, 0, topic_id=1)
-            assert general['messages'] == [] and general['more'] and general['next_after'] == 130
-            general = await client.page('fixture', info['peer'], general['next_after'], 0, topic_id=1)
-            assert [m['id'] for m in general['messages']] == [131]
-            assert (await client.read_window('fixture', info['peer'], 0, 131, topic_id=1))['ids'] == [131]
+            info = await client.info('fixture', '@forum')
+            first = await client.page('fixture', info['peer'], 0, 0)
+            assert len(first['messages']) == 100
+            second = await client.page('fixture', info['peer'], first['next_after'], 0)
+            assert [m['id'] for m in second['messages']] == [131,140,141,142]
+            assert await client.download('fixture', info['peer'], 140) == b'fixture-image'
+            window = await client.read_window('fixture', info['peer'], 130, 142)
+            assert window['topics'] == {'131':1,'140':20,'141':20,'142':30}
             await client.acknowledge('fixture', info['peer'], 131, topic_id=1)
+            await client.acknowledge('fixture', info['peer'], 141, topic_id=20)
+            window = await client.read_window('fixture', info['peer'], 130, 142)
+            assert window['read_ids'] == [131,140,141]
         finally:
             await client.close()
     asyncio.run(check())
     calls = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert all(c['reply_to'] is None for c in calls if c['op'] == 'history')
     assert not any(c['op'] == 'BROAD_ACK' for c in calls)
-    assert [(c['topic'], c['maximum']) for c in calls if c['op'] == 'ReadDiscussionRequest'] == [(20, 141), (1, 131)]
 
 
 def test_whole_forum_worker_keeps_general_new_deleted_topics_and_refuses_broad_ack(tmp_path, monkeypatch):
@@ -106,8 +85,15 @@ def test_whole_forum_worker_keeps_general_new_deleted_topics_and_refuses_broad_a
     async def check():
         worker = LocalTelegram(env, tmp_path / 'data')
         try:
-            # Until #19 supplies a proven safe frontier, production refuses
-            # whole-forum operations rather than falling through to broad ack.
+            info = await worker.info('fixture', '@forum')
+            page = await worker.page('fixture', info['peer'], 130, 0)
+            assert [m['id'] for m in page['messages']] == [131,140,141,142,143,144]
+            window = await worker.read_window('fixture', info['peer'], 130, 144)
+            assert window['topics']['143'] == 50 and window['topics']['144'] == 60
+            await worker.acknowledge('fixture', info['peer'], 143, topic_id=50)
+            with pytest.raises(SourceError, match='Нет доступа'):
+                await worker.acknowledge('fixture', info['peer'], 144, topic_id=60)
+            # A deleted topic must never widen to a broad acknowledgement.
             with pytest.raises(SourceError, match='Нет доступа'):
                 await worker.acknowledge('fixture', -1001234567890, 144)
             # Topic-specific General still uses explicit ReadDiscussion, never
@@ -118,35 +104,15 @@ def test_whole_forum_worker_keeps_general_new_deleted_topics_and_refuses_broad_a
     asyncio.run(check())
     calls = [json.loads(line) for line in trace.read_text().splitlines()]
     assert not any(c['op'] == 'BROAD_ACK' for c in calls)
-    assert [(c['topic'], c['maximum']) for c in calls if c['op'] == 'ReadDiscussionRequest'] == [(1, 131)]
-
-    # Probe the external SDK seam in a subprocess with the real installed SDK
-    # requests and only its network client replaced. No account is contacted.
-    import subprocess
-    import sys
-    probe = subprocess.run([sys.executable, '-c', """
-import asyncio, json
-from telethon import TelegramClient
-from oko.collection.telegram.topics import history
-async def main():
-    client = TelegramClient('fixture.session', 1, 'fixture')
-    entity = await client.get_entity('@forum')
-    first, selected = await history(client, entity, None, limit=100, reverse=True, offset_id=0)
-    assert len(first) == len(selected) == 100
-    second, selected = await history(client, entity, None, limit=100, reverse=True, offset_id=130)
-    print(json.dumps([m.id for m in selected]))
-asyncio.run(main())
-"""], capture_output=True, text=True, check=True, timeout=10)
-    assert json.loads(probe.stdout) == [131, 140, 141, 142, 143, 144]
-
+    assert [(c['topic'], c['maximum']) for c in calls if c['op'] == 'ReadDiscussionRequest'] == [(50,143),(1,131)]
 
 def test_forum_is_one_binding_and_legacy_topic_creation_is_rejected(tmp_path):
     from tests.support.telegram import configure
     with TestClient(create_app(tmp_path, token='test-token', api_only=True, telegram_client=ForumTelegram()), headers=HEADERS) as client:
         configure(client)
-        response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Forum', auto_read=False, topic_id=20))
-        assert response.status_code == 400
-        assert not client.get('/api/subscriptions').json()['feeds']
+        response = client.post('/api/v3/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Forum', auto_read=False, topic_id=20))
+        assert response.status_code == 422
+        assert not client.get('/api/v3/subscriptions').json()['feeds']
         connected = client.post('/api/v3/telegram/connect', json=dict(source_locator='@forum', folder='Forum', access={'kind':'client','profile':'personal'}))
         assert connected.status_code == 200, connected.text
         feeds = client.get('/api/v3/subscriptions').json()['feeds']

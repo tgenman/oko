@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 import httpx
 from fastapi.testclient import TestClient
 
@@ -29,30 +30,30 @@ def test_youtube_description_survives_restart_without_requesting_captions(tmp_pa
     kwargs = dict(token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=captions)
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         feed = subscribe(client)
-        client.patch('/api/settings/feed/' + feed, json={'theses': False})
-        client.patch('/api/settings/oko/global', json={})
-        client.post('/api/tabs/reader/heartbeat')
-        card = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('captions') == 'not_requested' and not c.get('loading')), None))
+        client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
+        client.patch('/api/v3/settings/oko/global', json={})
+        presence(client, 'reader')
+        card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c['source'].get('captions') == 'not_requested' and not c.get('loading')), None))
         assert card['snippet'] == 'Описание из Atom & детали.'
         assert card['feed_title'] == 'Канал'
         item = card['id']
-        material = client.get('/api/materials/' + item).json()
-        assert material['description'] == 'Описание из Atom & детали.'
-        assert material['text'] == '' and captions.calls == 0
-        client.patch('/api/feeds/' + feed, json={'importance': 'high'})
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('captions') == 'available')
+        material = client.get('/api/v3/materials/' + item).json()
+        assert material['content']['description'] == 'Описание из Atom & детали.'
+        assert material['content']['text'] == '' and captions.calls == 0
+        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['source'].get('captions') == 'available')
         assert captions.calls == 1
 
     description[0] = 'Новое описание из обычного фида.'
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        assert client.get('/api/materials/' + item).json()['description'] == 'Описание из Atom & детали.'
-        client.post('/api/collect')
-        card = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('snippet') == description[0]), None))
+        presence(client, 'reader')
+        assert client.get('/api/v3/materials/' + item).json()['content']['description'] == 'Описание из Atom & детали.'
+        client.post('/api/v3/collect')
+        card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c.get('snippet') == description[0]), None))
         assert card['snippet'] == description[0]
-        material = client.get('/api/materials/' + item).json()
-        assert material['text'] == 'Сохранённые субтитры.'
-        assert material['captions'] == 'available' and captions.calls == 1
+        material = client.get('/api/v3/materials/' + item).json()
+        assert material['content']['text'] == 'Сохранённые субтитры.'
+        assert material['source']['captions'] == 'available' and captions.calls == 1
 
 
 def test_cards_have_plain_bounded_text_and_unknown_dates_are_last(tmp_path):
@@ -70,14 +71,14 @@ def test_cards_have_plain_bounded_text_and_unknown_dates_are_last(tmp_path):
             return Material(publication.id, '<p>Краткий <b>текст</b> &amp; подробности.</p><script>secret()</script><style>secret-style</style>' + 'x' * 700)
 
     with TestClient(create_app(tmp_path, source=Source(), token='test'), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={})
-        client.post('/api/tabs/reader/heartbeat')
-        wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 3 and all(card['complete'] for card in c))
-        newest = client.get('/api/cards?sort=newest').json()
-        oldest = client.get('/api/cards?sort=oldest').json()
+        client.patch('/api/v3/settings/oko/global', json={})
+        presence(client, 'reader')
+        wait_for(client, lambda: len(c := client.get('/api/v3/cards').json()) == 3 and all((card['availability'] == 'available') for card in c))
+        newest = client.get('/api/v3/cards?sort=newest').json()
+        oldest = client.get('/api/v3/cards?sort=oldest').json()
         assert [c['title'] for c in newest] == ['new', 'old', 'unknown']
         assert [c['title'] for c in oldest] == ['old', 'new', 'unknown']
-        assert newest[-1]['published_known'] is False
+        assert newest[-1]['published_at'] is None
         for card in newest:
             assert card['snippet'].startswith('Краткий текст & подробности.')
             assert len(card['snippet']) == 500
@@ -98,16 +99,16 @@ def test_old_video_uses_captions_until_atom_supplies_description(tmp_path):
 
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=captions), headers=HEADERS) as client:
         feed = subscribe(client)
-        client.patch('/api/settings/oko/global', json={})
-        client.patch('/api/feeds/' + feed, json={'importance': 'high'})
-        client.post('/api/tabs/reader/heartbeat')
-        card = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('captions') == 'available' and not c.get('loading')), None))
+        client.patch('/api/v3/settings/oko/global', json={})
+        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
+        presence(client, 'reader')
+        card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c['source'].get('captions') == 'available' and not c.get('loading')), None))
         assert card['snippet'] == 'Сохранённые субтитры.'
         description[0] = 'Добавленное описание.'
-        client.post('/api/collect')
-        wait_for(client, lambda: client.get('/api/cards').json()[0]['snippet'] == description[0])
-        material = client.get('/api/materials/' + card['id']).json()
-        assert material['description'] == description[0] and material['text'] == 'Сохранённые субтитры.'
+        client.post('/api/v3/collect')
+        wait_for(client, lambda: client.get('/api/v3/cards').json()[0]['snippet'] == description[0])
+        material = client.get('/api/v3/materials/' + card['id']).json()
+        assert material['content']['description'] == description[0] and material['content']['text'] == 'Сохранённые субтитры.'
         assert captions.calls == 1
 
 
@@ -115,10 +116,10 @@ def test_snippet_does_not_restore_filtered_fragments(tmp_path):
     from tests.support.filters import FilterSource, transport
 
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport([])), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Убери рекламу'})
-        client.post('/api/tabs/reader/heartbeat')
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards').json()) == 2 and all(card.get('filter', {}).get('status') == 'done' for card in c) else None))
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Убери рекламу'})
+        presence(client, 'reader')
+        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards').json()) == 2 and all(card['filter']['attempt']['state'] == 'ready' for card in c) else None))
         card = next(c for c in cards if c['title'] == 'Материал 1')
         assert card['snippet'] == 'Открылась библиотека.'
-        assert 'Реклама' in client.get('/api/materials/' + card['id']).json()['text']
+        assert 'Реклама' in client.get('/api/v3/materials/' + card['id']).json()['content']['text']

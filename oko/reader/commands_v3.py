@@ -17,26 +17,17 @@ def context_record(context: wire.CommandContext) -> dict[str, object]:
     context = canonical_context(context)
     value = context.root
     identity = context.model_dump_json()
-    action: dict[str, str] | None
-    objects: list[dict[str, str]]
+    objects: list[dict[str, str]] = []
     if isinstance(value, wire.CommandSettingsPatch):
         target = value.target.root
-        keys = [key.root for key in value.keys]
-        action = {'kind': 'settings', 'page': 'field/' + keys[0] if len(keys) == 1 else 'home', 'scope': target.scope, 'id': target.owner if isinstance(target.owner, str) else target.owner.root}
-        objects = [{'kind': 'settings', 'id': action['id']}]
-    elif isinstance(value, wire.CommandFeedPatch):
-        action = {'kind': 'feed-settings', 'id': value.feed_id.root}
+        objects = [{'kind': 'settings', 'id': target.owner if isinstance(target.owner, str) else target.owner.root}]
+    elif isinstance(value, (wire.CommandFeedPatch, wire.CommandRemoveFeed, wire.CommandHistoryPause, wire.CommandHistoryStart, wire.CommandHistoryCancel)):
         objects = [{'kind':'feed', 'id':value.feed_id.root}]
     elif isinstance(value, (wire.CommandCodexSave, wire.CommandCodexCheck, wire.CommandProcessorSave, wire.CommandProcessorCheck)):
-        action = {'kind': 'settings', 'page': 'codex' if isinstance(value, (wire.CommandCodexSave, wire.CommandCodexCheck)) else 'llamacpp'}
         objects = [{'kind': 'settings', 'id': 'global'}]
     elif isinstance(value, (wire.CommandRegenerate, wire.CommandRetryTheses, wire.CommandRetryMaterial, wire.CommandRestoreFilter, wire.CommandRetryFilter, wire.CommandViewed)):
-        action = {'kind':'material', 'id':value.material_id.root}
         objects = [{'kind':'material', 'id':value.material_id.root}]
-    else:
-        action = None
-        objects = []
-    return dict(identity=identity, title='Не удалось выполнить действие', objects=objects, action=action,
+    return dict(identity=identity, title='Не удалось выполнить действие', objects=objects, action=None,
                 discardable=isinstance(value, (wire.CommandSettingsPatch, wire.CommandCodexSave, wire.CommandProcessorSave)), command_context=context.model_dump(mode='json'))
 
 

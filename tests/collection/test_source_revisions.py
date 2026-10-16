@@ -1,4 +1,5 @@
 """Revision lifecycle through the agreed reader API and external HTTP seam."""
+from tests.support.presence import presence, close_presence
 import time
 import httpx
 from fastapi.testclient import TestClient
@@ -20,32 +21,32 @@ def test_rss_edit_keeps_previous_media_and_viewed_identity_never_returns(tmp_pat
         return httpx.Response(200, content=PNG + str(revision[0]).encode(), headers={'Content-Type': 'image/png'})
     options = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'theses': False})
+        client.patch('/api/v3/settings/oko/global', json={'theses': False})
         import_feed(client)
-        client.post('/api/tabs/test/heartbeat')
+        presence(client, 'test')
         item = wait_cards(client)[0]['id']
         revision[0] = 2
-        client.post('/api/collect')
-        current = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == 'Версия 2' else None)
-        assert current['changed'] is True
-        previous = client.get(current['previous'][0]['url']).json()
+        client.post('/api/v3/collect')
+        current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == 'Версия 2' else None)
+        assert current['content']['changed'] is True
+        previous = client.get(current['content']['previous_versions'][0]['url']).json()
         assert previous['text'] == 'Версия 1'
         assert client.get(previous['images'][0]).content == PNG + b'1'
-        assert client.get(current['images'][0]).content == PNG + b'2'
-        client.post('/api/collect')
-        wait_for(client, lambda: client.get('/api/status').json()['stage'] == 'Готово')
-        assert len(client.get('/api/materials/' + item).json()['previous']) == 1
+        assert client.get(current['content']['images'][0]).content == PNG + b'2'
+        client.post('/api/v3/collect')
+        wait_for(client, lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        assert len(client.get('/api/v3/materials/' + item).json()['content']['previous_versions']) == 1
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/materials/' + item).json()['text'] == 'Версия 2'
-        client.post('/api/tabs/test/heartbeat')
-        client.post('/api/materials/' + item + '/viewed')
+        assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Версия 2'
+        presence(client, 'test')
+        client.post('/api/v3/materials/' + item + '/viewed')
         assert client.get(previous['images'][0]).status_code == 404
-        assert client.get(current['previous'][0]['url']).status_code == 404
+        assert client.get(current['content']['previous_versions'][0]['url']).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         revision[0] = 3
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         time.sleep(.15)
-        assert client.get('/api/cards').json() == []
+        assert client.get('/api/v3/cards').json() == []
 
 
 
@@ -60,16 +61,16 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         return httpx.Response(200, text='<article><p>Локальная копия</p></article>')
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         import_feed(client)
-        client.post('/api/tabs/test/heartbeat')
+        presence(client, 'test')
         item = wait_cards(client)[0]['id']
         removed[0] = True
-        client.post('/api/collect')
-        retained = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('source_deleted') else None)
-        assert retained['text'] == 'Локальная копия'
-        assert retained['previous'] == []
-        assert retained['full'] is True
-        client.post('/api/materials/' + item + '/viewed')
-        assert client.get('/api/materials/' + item).status_code == 404
+        client.post('/api/v3/collect')
+        retained = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('source_deleted') else None)
+        assert retained['content']['text'] == 'Локальная копия'
+        assert retained['content']['previous_versions'] == []
+        assert (retained['content']['completeness']['state']=='complete') is True
+        client.post('/api/v3/materials/' + item + '/viewed')
+        assert client.get('/api/v3/materials/' + item).status_code == 404
 
 
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
@@ -87,23 +88,23 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
             raise OSError('interrupted')
     options = dict(source=source, token='test-token')
     with TestClient(create_app(tmp_path, fault=fault, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={})
-        client.post('/api/tabs/test/heartbeat')
+        client.patch('/api/v3/settings/oko/global', json={})
+        presence(client, 'test')
         item = wait_cards(client)[0]['id']
         source.text = 'Вторая версия'
         interrupted[0] = True
-        client.post('/api/collect')
-        wait_for(client, lambda: client.get('/api/status').json()['errors'])
-        assert client.get('/api/materials/' + item).json()['text'] == 'Первая версия'
-        assert client.get('/api/materials/' + item).json()['previous'] == []
+        client.post('/api/v3/collect')
+        wait_for(client, lambda: any(p['code']=='material_save_failed' for p in client.get('/api/v3/status').json()['problems']['current']))
+        assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Первая версия'
+        assert client.get('/api/v3/materials/' + item).json()['content']['previous_versions'] == []
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/materials/' + item).json()['text'] == 'Первая версия'
+        assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Первая версия'
         source.text = 'Третья версия после восстановления'
-        client.post('/api/tabs/test/heartbeat')
-        current = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == source.text else None)
-        assert len(current['previous']) == 1
-        assert client.get(current['previous'][0]['url']).json()['text'] == 'Первая версия'
-        client.post('/api/materials/' + item + '/viewed')
+        presence(client, 'test')
+        current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
+        assert len(current['content']['previous_versions']) == 1
+        assert client.get(current['content']['previous_versions'][0]['url']).json()['text'] == 'Первая версия'
+        client.post('/api/v3/materials/' + item + '/viewed')
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
 
@@ -123,27 +124,27 @@ def test_telegram_rechecks_known_ids_including_media_only_edits_and_deletions(tm
             return self.data
     source = Editable()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={})
-        client.post('/api/tabs/test/heartbeat')
+        client.patch('/api/v3/settings/oko/global', json={})
+        presence(client, 'test')
         connect(client)
         item = settled(client)[0]['id']
         source.text = ''  # A real edit may remove all text.
         source.data = b'edited-image'
-        client.post('/api/collect')
-        edited = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == '' else None)
-        assert client.get(edited['attachments'][0]['url']).content == b'edited-image'
-        previous = client.get(edited['previous'][0]['url']).json()
+        client.post('/api/v3/collect')
+        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == '' else None)
+        assert client.get(edited['content']['attachments'][0]['url']).content == b'edited-image'
+        previous = client.get(edited['content']['previous_versions'][0]['url']).json()
         assert previous['text'] == 'Текст до правки'
         assert client.get(previous['attachments'][0]['url']).content == b'first-image'
         source.data = b'media-only-edit'
-        client.post('/api/collect')
-        edited = wait_for(client, lambda: m if len((m := client.get('/api/materials/' + item).json()).get('previous', [])) == 2 else None)
-        assert client.get(edited['attachments'][0]['url']).content == b'media-only-edit'
+        client.post('/api/v3/collect')
+        edited = wait_for(client, lambda: m if len((m := client.get('/api/v3/materials/' + item).json())['content'].get('previous_versions', [])) == 2 else None)
+        assert client.get(edited['content']['attachments'][0]['url']).content == b'media-only-edit'
         source.missing = True
-        client.post('/api/collect')
-        wait_for(client, lambda: client.get('/api/materials/' + item).json()['source_deleted'])
-        assert client.get(edited['attachments'][0]['url']).content == b'media-only-edit'
-        client.post('/api/materials/' + item + '/viewed')
+        client.post('/api/v3/collect')
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['content']['source_deleted'])
+        assert client.get(edited['content']['attachments'][0]['url']).content == b'media-only-edit'
+        client.post('/api/v3/materials/' + item + '/viewed')
         assert client.get(previous['attachments'][0]['url']).status_code == 404
 
 
@@ -180,19 +181,19 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
             return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(result)}}]})
     source, held = Editable(), Held()
     with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=held), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.post('/api/tabs/test/heartbeat')
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        presence(client, 'test')
         item = wait_cards(client)[0]['id']
         try:
             assert held.started.wait(2)
             source.text = 'Новое утверждение'
-            client.post('/api/collect')
-            current = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == source.text else None)
-            assert current['theses'] is None
+            client.post('/api/v3/collect')
+            current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
+            assert current['theses']['result'] is None
         finally:
             held.release.set()
-        theses = wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        theses = wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
         assert [p['text'] for p in theses['points']] == ['Новое утверждение']
 
 
@@ -206,20 +207,20 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
             return httpx.Response(200, text=xml)
         return httpx.Response(200, content=PREVIEW, headers={'Content-Type': 'image/png'})
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=NoCaptions()), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={})
+        client.patch('/api/v3/settings/oko/global', json={})
         subscribe(client)
-        client.post('/api/tabs/test/heartbeat')
+        presence(client, 'test')
         item = wait_cards(client)[0]['id']
         title[0] = 'Новое название видео'
-        client.post('/api/collect')
-        material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('title') == title[0] else None)
-        assert client.get(material['previous'][0]['url']).json()['title'] == 'О границах модели'
+        client.post('/api/v3/collect')
+        material = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json()).get('title') == title[0] else None)
+        assert client.get(material['content']['previous_versions'][0]['url']).json()['title'] == 'О границах модели'
         present[0] = False
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         time.sleep(.1)
-        retained = client.get('/api/materials/' + item).json()
-        assert retained['title'] == 'Новое название видео' and retained['source_deleted'] is False
-        assert 'не определяются' in client.get('/api/status').json()['sources'][0]['changes']
+        retained = client.get('/api/v3/materials/' + item).json()
+        assert retained['title'] == 'Новое название видео' and retained['content']['source_deleted'] is False
+        assert 'не определяются' in client.get('/api/v3/status').json()['sources'][0]['changes']
 
 
 
@@ -235,22 +236,22 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
             return Material('Новость', self.text)
     source, calls = Editable(), []
     with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'https://remote.test', 'model': 'local:latest', 'local_execution': False})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://remote.test', 'model': 'local:latest', 'local_execution': False})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         feed = 'demo'
-        client.patch('/api/feeds/' + feed, json={'public_ai': True})
-        client.post('/api/tabs/test/heartbeat')
+        client.patch('/api/v3/feeds/' + feed, json={'public_ai': True})
+        presence(client, 'test')
         item = wait_cards(client)[0]['id']
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
-        client.patch('/api/feeds/' + feed, json={'public_ai': False})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
+        client.patch('/api/v3/feeds/' + feed, json={'public_ai': False})
         count = sum(r.url.path == '/v1/chat/completions' for r in calls)
         source.text = 'Правка с закрытым доступом AI'
-        client.post('/api/collect')
-        material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == source.text else None)
-        assert material['theses'] is None
+        client.post('/api/v3/collect')
+        material = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
+        assert material['theses']['result'] is None
         time.sleep(.1)
         assert sum(r.url.path == '/v1/chat/completions' for r in calls) == count
-        assert client.get('/api/materials/' + item).json()['ai']['error']
+        assert client.get('/api/v3/materials/' + item).json()['theses']['diagnostic_message']
 
 
 def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_media(tmp_path):
@@ -268,32 +269,32 @@ def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_med
             return b'saved-image'
     source = Editable()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'theses': False})
-        client.patch('/api/settings/oko/global', json={})
-        client.post('/api/tabs/test/heartbeat')
+        client.patch('/api/v3/settings/oko/global', json={'theses': False})
+        client.patch('/api/v3/settings/oko/global', json={})
+        presence(client, 'test')
         connect(client)
         original = settled(client)[0]
         item = original['id']
         source.fail = True
-        client.post('/api/collect')
-        wait_for(client, lambda: client.get('/api/status').json()['errors'] or client.get('/api/materials/' + item).json()['changed'])
-        retained = client.get('/api/materials/' + item).json()
-        assert retained['version'] == original['version']
-        assert retained['changed'] is False and retained['previous'] == []
-        assert retained['full'] is True
-        assert client.get(retained['attachments'][0]['url']).content == b'saved-image'
-        assert client.get('/api/status').json()['errors'] == ['Ограничение частоты']
+        client.post('/api/v3/collect')
+        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']) or client.get('/api/v3/materials/' + item).json()['content']['changed'])
+        retained = client.get('/api/v3/materials/' + item).json()
+        assert retained['content']['revision_id'] == original['revision_id']
+        assert retained['content']['changed'] is False and retained['content']['previous_versions'] == []
+        assert (retained['content']['completeness']['state']=='complete') is True
+        assert client.get(retained['content']['attachments'][0]['url']).content == b'saved-image'
+        assert [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')] == ['Ограничение частоты']
         source.fail = False
-        client.post('/api/materials/' + item + '/retry')
-        wait_for(client, lambda: not client.get('/api/materials/' + item).json()['loading'])
-        assert client.get('/api/materials/' + item).json()['version'] == original['version']
+        client.post('/api/v3/materials/' + item + '/retry')
+        wait_for(client, lambda: not client.get('/api/v3/materials/' + item).json()['content']['loading'])
+        assert client.get('/api/v3/materials/' + item).json()['content']['revision_id'] == original['revision_id']
         source.text = 'Настоящая правка текста при недоступном вложении'
         source.fail = True
-        client.post('/api/collect')
-        edited = wait_for(client, lambda: m if (m := client.get('/api/materials/' + item).json()).get('text') == source.text else None)
-        assert edited['changed'] is True and edited['full'] is False
-        assert len(edited['previous']) == 1
-        assert client.get(edited['previous'][0]['url']).json()['text'] == 'Неизменный пост'
+        client.post('/api/v3/collect')
+        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
+        assert edited['content']['changed'] is True and (edited['content']['completeness']['state']=='complete') is False
+        assert len(edited['content']['previous_versions']) == 1
+        assert client.get(edited['content']['previous_versions'][0]['url']).json()['text'] == 'Неизменный пост'
 
 
 def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_path):
@@ -309,20 +310,20 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
             return httpx.Response(200, text=feed_xml())
         return httpx.Response(200, content=PREVIEW, headers={'Content-Type': 'image/png'})
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=captions), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={})
+        client.patch('/api/v3/settings/oko/global', json={})
         feed = subscribe(client)
-        client.patch('/api/settings/feed/' + feed, json={'theses': True})
-        client.post('/api/tabs/test/heartbeat')
+        client.patch('/api/v3/settings/feed/' + feed, json={'theses': True})
+        presence(client, 'test')
         original = wait_cards(client)[0]
         item = original['id']
-        assert client.get('/api/materials/' + item).json()['captions'] == 'available'
+        assert client.get('/api/v3/materials/' + item).json()['source']['captions'] == 'available'
         count = captions.calls
-        client.patch('/api/settings/feed/' + feed, json={'theses': False})
-        client.post('/api/collect')
-        wait_for(client, lambda: not client.get('/api/materials/' + item).json().get('loading') and client.get('/api/status').json()['ready_sources'] == 1)
-        retained = client.get('/api/materials/' + item).json()
-        assert retained['text'] == 'Уже сохранённые субтитры'
-        assert retained['captions'] == 'available'
-        assert retained['version'] == original['version']
-        assert retained['changed'] is False and retained['previous'] == []
+        client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
+        client.post('/api/v3/collect')
+        wait_for(client, lambda: not client.get('/api/v3/materials/' + item).json()['content'].get('loading') and client.get('/api/v3/status').json()['ready_sources'] == 1)
+        retained = client.get('/api/v3/materials/' + item).json()
+        assert retained['content']['text'] == 'Уже сохранённые субтитры'
+        assert retained['source']['captions'] == 'available'
+        assert retained['content']['revision_id'] == original['revision_id']
+        assert retained['content']['changed'] is False and retained['content']['previous_versions'] == []
         assert captions.calls == count

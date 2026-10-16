@@ -1,136 +1,45 @@
-import { useState, type ReactNode } from 'react';
-import { mountSurface } from '../renderer';
-import type { Problem, ProblemAction, ProblemSnapshot, Status } from '../api/legacy-generated/types.gen';
-import type { ReaderActions, VisibleProblem } from './actions';
-type Debug = {
-    show(open: boolean): void;
-};
-type Options = {
-    debug: Debug;
-    actions: ReaderActions;
-    onSettings(target: ProblemAction, trigger: HTMLElement): Promise<void>;
-    onMaterial(id: string): void;
-    onRetry(target: ProblemAction, problem: Problem): Promise<void>;
-    onRefresh(): void;
-    onAvailability?(available:boolean):void;
-};
-const names: Record<string, string> = { settings: 'Настроить модель', 'feed-settings': 'Настройки фида', retry: 'Повторить', 'theses-retry': 'Повторить обработку', 'filter-retry': 'Повторить фильтрацию', regenerate: 'Пересоздать тезисы', material: 'Показать материал', objects: 'Показать материалы', collect: 'Обновить источники' };
-const sections = [['action', 'Нужно действие'], ['wait', 'Ожидание и работа'], ['object', 'Проблемы материалов и фидов']] as const;
-const emptySnapshot: ProblemSnapshot = { current: [], recent: [], count: 0, updated_at: 0 };
-function byId(id: string) { return document.getElementById(id)!; }
-// Stable card identity owns disclosure; polling updates props without rebuilding
-// the focused controls. Group membership is explicit presentation state.
-function Card({ problem, disabled, onAction, onMaterial, onDisclosure }: {
-    problem: VisibleProblem;
-    disabled: boolean;
-    onAction(target: ProblemAction, trigger: HTMLElement): void;
-    onMaterial(id: string): void;
-    onDisclosure(open: boolean): void;
-}) {
-    const [expanded, setExpanded] = useState(false);
-    const finished = problem.state === 'finished';
-    const tag = problem.saved === false ? 'Не сохранено' : finished ? problem.outcome === 'irrelevant' ? 'Больше не актуально' : 'Устранено' : problem.state === 'retrying' ? 'Повторяем…' : '';
-    return <div className={'status-problem' + (finished ? ' status-finished' : '')} data-problem-id={problem.id} data-section={problem.section}>
-    <span className="status-icon" aria-hidden="true">{finished ? '✓' : problem.section === 'wait' ? '◷' : '!'}</span><div className="status-problem-content">
-      <small className="status-tag" hidden={!tag}>{tag}</small><h3>{problem.title}</h3><p>{problem.consequence}</p><p className="status-next">{problem.next_step}{problem.next_at ? ' · ' + new Date(problem.next_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</p>
-      <button className="status-action" hidden={!problem.action || finished} disabled={disabled || problem.state === 'retrying'} onClick={event => { const action = problem.action; if (!action)
-        return; if (action.kind === 'objects') {
-        setExpanded(true);
-        onDisclosure(true);
-    }
-    else
-        onAction(action, event.currentTarget); }}>{problem.action?.kind === 'settings' && problem.code !== 'codex-choice' ? 'Открыть настройки' : names[problem.action?.kind || ''] || 'Открыть настройки'}</button>
-      <details className="status-details" open={expanded} onToggle={event => { const open = event.currentTarget.open; if (open !== expanded) {
-        setExpanded(open);
-        onDisclosure(open);
-    } }}><summary>Подробности</summary><p hidden={!problem.reason}>{problem.reason || ''}</p><div>{problem.objects.map(object => <button key={object.kind + ':' + object.id} className="status-object" disabled={disabled || (object.kind !== 'material' && !problem.action)} onClick={event => { if (object.kind === 'material')
-        onMaterial(object.id);
-    else if (problem.action)
-        onAction(problem.action, event.currentTarget); }}>{object.label}</button>)}</div></details>
-    </div></div>;
+import {useState,type ReactNode} from 'react';
+import {mountSurface} from '../renderer';
+import type {AffectedResource,Problem,ProblemSnapshot,RecoveryIntent,RuntimeStatus} from '../api/generated/types.gen';
+import type {ReaderActions,VisibleProblem} from './actions';
+import {problemTitle,recoveryLabel,section,workText,isNavigation} from './recovery';
+type Options={debug:{show(open:boolean):void};actions:ReaderActions;onSettings(target:RecoveryIntent|AffectedResource,trigger:HTMLElement):Promise<void>;onMaterial(id:string):void;onRetry(target:RecoveryIntent,problem:Problem):Promise<void>;onRefresh():void;onAvailability?(available:boolean):void;resourceName?(resource:AffectedResource):string|undefined};
+const sections=[['action','Нужно действие'],['wait','Ожидание и работа'],['object','Проблемы материалов и фидов']]as const;
+const empty:ProblemSnapshot={current:[],recent:[],count:0,updated_at:new Date(0).toISOString()};
+const byId=(id:string)=>document.getElementById(id)!;
+function resourceLabel(resource:AffectedResource):string{switch(resource.kind){case 'material':return 'Материал';case 'feed':return 'Настройки фида';case 'folder':return 'Настройки папки';case 'processor':return resource.processor_id;case 'telegram_profile':return 'Профиль Telegram';case 'settings':return 'Настройки Око';default:return 'Состояние Око';}}
+function resourceKey(r:AffectedResource):string{switch(r.kind){case 'material':return 'material:'+r.material_id;case 'feed':return 'feed:'+r.feed_id;case 'folder':return 'folder:'+r.folder_id;case 'processor':return 'processor:'+r.processor_id;case 'telegram_profile':return 'telegram_profile:'+r.role;case 'settings':return 'settings:'+r.target.scope+'/'+r.target.owner;case 'problem':return 'problem:'+r.problem_id;case 'command':return 'command:'+r.command_id;case 'runtime':return 'runtime';}}
+function Card({problem,disabled,onAction,onResource,onDisclosure,resourceName,commandsAllowed}:{problem:VisibleProblem;disabled:boolean;onAction(target:RecoveryIntent,trigger:HTMLElement):void;onResource(target:AffectedResource,trigger:HTMLElement):void;onDisclosure(open:boolean):void;resourceName?(resource:AffectedResource):string|undefined;commandsAllowed:boolean}){
+ const[expanded,setExpanded]=useState(false),finished=problem.state==='finished',bucket=section(problem);
+ const tag=problem.saved===false?'Не сохранено':finished?problem.outcome==='irrelevant'?'Больше не актуально':'Устранено':problem.state==='retrying'?'Повторяем…':'';
+ return <div className={'status-problem'+(finished?' status-finished':'')} data-problem-id={problem.id} data-section={bucket}><span className="status-icon" aria-hidden="true">{finished?'✓':bucket==='wait'?'◷':'!'}</span><div className="status-problem-content"><small className="status-tag" hidden={!tag}>{tag}</small><h3>{problemTitle(problem)}</h3><p>{problem.consequence}</p><p className="status-next">{problem.code==='command_outcome_unknown'?'Действие не повторяется автоматически.':finished?'':problem.recovery.length?'Выберите действие для восстановления.':'Состояние сохранено; автоматическая смена привязки не выполняется.'}{'retry_at'in problem&&problem.retry_at?' · '+new Date(problem.retry_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):''}</p>
+ {!finished&&problem.recovery.map((intent,index)=><button key={index} className="status-action" disabled={disabled||problem.state==='retrying'||!commandsAllowed&&!isNavigation(intent)} onClick={event=>{if(intent.kind==='inspect_materials'){setExpanded(true);onDisclosure(true);}else onAction(intent,event.currentTarget);}}>{recoveryLabel(intent)}</button>)}
+ <details className="status-details" open={expanded} onToggle={event=>{const open=event.currentTarget.open;if(open!==expanded){setExpanded(open);onDisclosure(open);}}}><summary>Подробности</summary><p>{problem.message}</p><div>{problem.affected.map((resource,index)=><button key={resourceKey(resource)} data-resource-key={resourceKey(resource)} className="status-object" disabled={disabled||['runtime','problem','command'].includes(resource.kind)} onClick={event=>onResource(resource,event.currentTarget)}>{resourceName?.(resource)||resourceLabel(resource)}</button>)}</div></details></div></div>;
 }
-function Recent({count,children}: {count:number;children:ReactNode}) {
-    const [open,setOpen]=useState(false);
-    return <details className="status-recent" hidden={!count} open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
-        <summary>Недавно завершённые · {count}</summary><div>{children}</div>
-    </details>;
-}
-export function createStatusPanel({ debug, actions, onSettings, onMaterial, onRetry, onRefresh,onAvailability }: Options) {
-    const panel = byId('status-panel'), toggle = byId('status-toggle'), body = byId('status-body');
-    const deleted = new Set<string>(), disclosed = new Set<string>(), owners = new Map<string, string>();
-    let snapshot = emptySnapshot, online: boolean | null = null, stopped = false, opener: HTMLElement | null = null, work = '';
-    const debugPanel = byId('debug-panel');
-    byId('status-journal').append(debugPanel);
-    panel.setAttribute('role', 'complementary');
-    function close(restore = true) { panel.hidden = true; toggle.setAttribute('aria-expanded', 'false'); debug.show(false); if (restore && opener?.isConnected)
-        opener.focus({ preventScroll: true }); }
-    function material(id: string) { close(false); onMaterial(id); }
-    async function act(target: ProblemAction, problem: Problem, trigger: HTMLElement) {
-        if (['settings', 'feed-settings', 'add'].includes(target.kind)) {
-            await onSettings(target, trigger);
-            document.querySelector('dialog[open]')?.addEventListener('close', () => { if (!panel.hidden)
-                byId('status-close').focus(); }, { once: true });
-        }
-        else if (target.kind === 'material' && target.id)
-            material(target.id);
-        else
-            try {
-                await onRetry(target, problem);
-            }
-            catch { /* API owner tracks the outcome. */ }
-    }
-    function statePage() { body.hidden = false; byId('status-journal').hidden = true; byId('status-journal-back').hidden = true; debug.show(false); }
-    function journal() { body.hidden = true; byId('status-journal').hidden = false; byId('status-journal-back').hidden = false; debug.show(true); byId('status-journal-back').focus(); }
-    function render() {
-        const shown = actions.merge(snapshot), all = [...shown.current, ...shown.recent], wanted = new Set(all.map(p => p.id));
-        for (const id of owners.keys())
-            if (!wanted.has(id)) {
-                owners.delete(id);
-                disclosed.delete(id);
-            }
-        for (const problem of all) {
-            const previous = owners.get(problem.id);
-            const held = problem.state === 'finished' && disclosed.has(problem.id) && previous && previous !== 'recent';
-            owners.set(problem.id, held ? previous : problem.state === 'finished' ? 'recent' : problem.section);
-        }
-        const grouped = (key: string) => [...owners.keys()].flatMap(id => { const p = all.find(p => p.id === id); return owners.get(id) === key && p ? [p] : []; });
-        mountSurface(toggle, <>{stopped ? 'Око остановлено' : !online ? 'Нет связи с Око' : shown.count ? `Проблемы · ${shown.count}` : 'Состояние'}</>);
-        toggle.classList.toggle('has-problems', shown.count > 0 || !online);
-        mountSurface(byId('status-summary'),<>{stopped ? 'Око остановлено' : !online ? 'Последние известные сведения' : shown.count ? `Требуют внимания: ${shown.count}` : 'Проблем нет · можно читать'}</>);
-        byId('status-connection').hidden = Boolean(online) || stopped;
-        mountSurface(byId('status-connection'), <><p>{snapshot.updated_at ? 'Нет связи с Око · Состояние может быть устаревшим. Последнее обновление: ' + new Date(snapshot.updated_at * 1000).toLocaleTimeString() : 'Состояние Око пока неизвестно. Ожидаем первого ответа.'}</p><button id="status-check-connection" onClick={onRefresh}>Проверить связь</button></>);
-        onAvailability?.(!stopped && Boolean(online));
-        const cards = (key: string) => grouped(key).map(problem => <Card key={problem.id} problem={problem} disabled={stopped || !online} onMaterial={material} onAction={(target, trigger) => { void act(target, problem, trigger); }} onDisclosure={open => { if (open)
-            disclosed.add(problem.id);
-        else {
-            disclosed.delete(problem.id);
-            if (problem.state === 'finished')
-                render();
-        } }}/>);
-        const recent = grouped('recent');
-        mountSurface(body, <><div className="status-empty" hidden={!online || stopped || shown.count !== 0}><div className="status-check">✓</div><h3>Всё в порядке</h3><p>Сейчас ничего не требует вашего внимания.</p></div>{sections.map(([key, label]) => <div key={key} className="status-group" hidden={!grouped(key).length && !(key === 'wait' && work)}><h3>{label}</h3><div>{cards(key)}</div>{key === 'wait' && <p className="status-work">{work}</p>}</div>)}<Recent count={recent.length}>{cards('recent')}</Recent><button id="status-journal-open" className="status-journal-button" onClick={journal}>Журнал диагностики</button></>);
-
-    }
-    function open(trigger = toggle) { opener = trigger; panel.hidden = false; toggle.setAttribute('aria-expanded', 'true'); const current = actions.merge(snapshot).current.slice().sort((a, b) => b.created_at - a.created_at); const previous = new Map(owners); owners.clear(); for (const p of current)
-        owners.set(p.id, previous.get(p.id) || p.section); for (const [id, owner] of previous)
-        if (!owners.has(id))
-            owners.set(id, owner); render(); byId('status-close').focus(); }
-    byId('status-journal-back').onclick = () => { statePage(); byId('status-journal-open').focus(); };
-    toggle.onclick = () => { if (panel.hidden) {
-        statePage();
-        open();
-    }
-    else
-        close(); };
-    byId('status-close').onclick = () => close();
-    document.addEventListener('keydown', event => { if (panel.hidden || document.querySelector('dialog[open]'))
-        return; if (event.key === 'Escape') {
-        event.preventDefault();
-        close();
-    } });
-    const header = document.querySelector('header')!;
-    new ResizeObserver(() => panel.style.setProperty('--reader-header-height', header.getBoundingClientRect().height + 'px')).observe(header);
-    function prune(value: ProblemSnapshot) { const clean = (problem: Problem): Problem => { const objects = problem.objects.filter(o => o.kind !== 'material' || !deleted.has(o.id)); return objects.length !== problem.objects.length && !objects.length ? { ...problem, objects, action: null, state: 'finished', outcome: 'irrelevant' } : { ...problem, objects }; }; const current = value.current.map(clean).filter(p => p.state !== 'finished'); return { ...value, current, recent: value.recent.map(clean), count: current.length }; }
-    render();
-    return { open, redraw: render, forgetMaterials(ids: string[]) { actions.forgetMaterials(ids); ids.forEach(id => deleted.add(id)); snapshot = prune(snapshot); render(); }, discardDraft: (path: string, field: string, method?: string) => actions.discard(path, field, snapshot, method), update(value: ProblemSnapshot | undefined, state: Status) { online = true; snapshot = prune(value || emptySnapshot); work = state.stage === 'Готово' ? '' : `${state.stage} · источники ${state.ready_sources}/${state.total_sources}`; render(); }, unavailable() { online = false; render(); }, stop() { stopped = true; render(); }, refresh: onRefresh };
+function Recent({count,children}:{count:number;children:ReactNode}){const[open,setOpen]=useState(false);return <details className="status-recent" hidden={!count} open={open} onToggle={event=>setOpen(event.currentTarget.open)}><summary>Недавно завершённые · {count}</summary><div>{children}</div></details>;}
+export function createStatusPanel({debug,actions,onSettings,onMaterial,onRetry,onRefresh,onAvailability,resourceName}:Options){
+ const panel=byId('status-panel'),toggle=byId('status-toggle'),body=byId('status-body');
+ const deleted=new Set<string>(),disclosed=new Set<string>(),owners=new Map<string,string>();
+ let snapshot=empty,online:boolean|null=null,stopped=false,commandsAllowed=false,opener:HTMLElement|null=null,work='';
+ byId('status-journal').append(byId('debug-panel'));panel.setAttribute('role','complementary');
+ function close(restore=true){panel.hidden=true;toggle.setAttribute('aria-expanded','false');debug.show(false);if(restore&&opener?.isConnected)opener.focus({preventScroll:true});}
+ function material(id:string){close(false);onMaterial(id);}
+ async function act(target:RecoveryIntent,problem:Problem,trigger:HTMLElement){if(['configure_processor','configure_telegram_profile','change_setting','connect_source'].includes(target.kind)){await onSettings(target,trigger);document.querySelector('dialog[open]')?.addEventListener('close',()=>{if(!panel.hidden)byId('status-close').focus();},{once:true});}else try{await onRetry(target,problem);}catch{/* The command owner tracks its outcome. */}}
+ function resource(target:AffectedResource,trigger:HTMLElement){if(target.kind==='material')material(target.material_id);else void onSettings(target,trigger);}
+ function statePage(){body.hidden=false;byId('status-journal').hidden=true;byId('status-journal-back').hidden=true;debug.show(false);}
+ function journal(){body.hidden=true;byId('status-journal').hidden=false;byId('status-journal-back').hidden=false;debug.show(true);byId('status-journal-back').focus();}
+ function render(){const shown=actions.merge(snapshot),all=[...shown.current,...shown.recent],wanted=new Set(all.map(p=>p.id));for(const id of owners.keys())if(!wanted.has(id)){owners.delete(id);disclosed.delete(id);}for(const p of all){const previous=owners.get(p.id),held=p.state==='finished'&&disclosed.has(p.id)&&previous&&previous!=='recent';owners.set(p.id,held?previous:p.state==='finished'?'recent':section(p));}
+  const grouped=(key:string)=>[...owners.keys()].flatMap(id=>{const p=all.find(p=>p.id===id);return owners.get(id)===key&&p?[p]:[];});
+  mountSurface(toggle,<>{stopped?'Око остановлено':!online?'Нет связи с Око':shown.count?`Проблемы · ${shown.count}`:'Состояние'}</>);toggle.classList.toggle('has-problems',shown.count>0||!online);
+  mountSurface(byId('status-summary'),<>{stopped?'Око остановлено':!online?'Последние известные сведения':shown.count?`Требуют внимания: ${shown.count}`:'Проблем нет · можно читать'}</>);
+  byId('status-connection').hidden=Boolean(online)||stopped;mountSurface(byId('status-connection'),<><p>{Date.parse(snapshot.updated_at)?'Нет связи с Око · Состояние может быть устаревшим. Последнее обновление: '+new Date(snapshot.updated_at).toLocaleTimeString():'Состояние Око пока неизвестно. Ожидаем первого ответа.'}</p><button id="status-check-connection" onClick={onRefresh}>Проверить связь</button></>);onAvailability?.(!stopped&&Boolean(online)&&commandsAllowed);
+  const cards=(key:string)=>grouped(key).map(problem=><Card key={problem.id} problem={problem} disabled={stopped||!online} resourceName={resourceName} commandsAllowed={commandsAllowed} onResource={resource} onAction={(intent,trigger)=>{void act(intent,problem,trigger);}} onDisclosure={open=>{if(open)disclosed.add(problem.id);else{disclosed.delete(problem.id);if(problem.state==='finished')render();}}}/>);
+  const recent=grouped('recent');mountSurface(body,<><div className="status-empty" hidden={!online||stopped||shown.count!==0}><div className="status-check">✓</div><h3>Всё в порядке</h3><p>Сейчас ничего не требует вашего внимания.</p></div>{sections.map(([key,label])=><div key={key} className="status-group" hidden={!grouped(key).length&&!(key==='wait'&&work)}><h3>{label}</h3><div>{cards(key)}</div>{key==='wait'&&<p className="status-work">{work}</p>}</div>)}<Recent count={recent.length}>{cards('recent')}</Recent><button id="status-journal-open" className="status-journal-button" onClick={journal}>Журнал диагностики</button></>);
+ }
+ function open(trigger=toggle){opener=trigger;panel.hidden=false;toggle.setAttribute('aria-expanded','true');const current=actions.merge(snapshot).current.slice().sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at));const previous=new Map(owners);owners.clear();for(const p of current)owners.set(p.id,previous.get(p.id)||section(p));for(const[id,owner]of previous)if(!owners.has(id))owners.set(id,owner);render();byId('status-close').focus();}
+ byId('status-journal-back').onclick=()=>{statePage();byId('status-journal-open').focus();};toggle.onclick=()=>{if(panel.hidden){statePage();open();}else close();};byId('status-close').onclick=()=>close();
+ document.addEventListener('keydown',event=>{if(panel.hidden||document.querySelector('dialog[open]'))return;if(event.key==='Escape'){event.preventDefault();close();}});
+ const header=document.querySelector('header')!;new ResizeObserver(()=>panel.style.setProperty('--reader-header-height',header.getBoundingClientRect().height+'px')).observe(header);
+ function prune(p:Problem):Problem{const affected=p.affected.filter(r=>r.kind!=='material'||!deleted.has(r.material_id));const recovery=p.recovery.flatMap<RecoveryIntent>(r=>{if(!('material_ids'in r))return [r];const material_ids=r.material_ids.filter(id=>!deleted.has(id));return material_ids.length?[{...r,material_ids}]:[];});if(p.affected.length&&!affected.length)return {...p,affected,recovery:[],state:'finished',finished_at:new Date().toISOString(),outcome:'irrelevant'};return {...p,affected,recovery};}
+ render();return {open,redraw:render,forgetMaterials(ids:string[]){actions.forgetMaterials(ids);ids.forEach(id=>deleted.add(id));const current=snapshot.current.map(prune).filter((p):p is ProblemSnapshot['current'][number]=>p.state!=='finished');snapshot={...snapshot,current,recent:snapshot.recent.map(p=>({...p,affected:p.affected.filter(r=>r.kind!=='material'||!deleted.has(r.material_id))})),count:current.length};render();},discardDraft:(path:string,field:string,_method?:string)=>actions.discard(path,field,snapshot),update(value:ProblemSnapshot,state:RuntimeStatus){online=true;commandsAllowed=state.work_allowed;const current=value.current.map(prune).filter((p):p is ProblemSnapshot['current'][number]=>p.state!=='finished');snapshot={...value,current,count:current.length};work=workText(state);if(work==='Готово')work='';render();},unavailable(){online=false;render();},stop(){stopped=true;render();},refresh:onRefresh};
 }

@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from oko.processing.execution import CodexSettings
 from oko.processing.llamacpp import ProcessorConfig
 from oko.reader.generated import models as wire
-from oko.reader.legacy_generated import models as previous
+from oko.reader import snapshots as facts
 from oko.reader import projection_v3 as project
 from oko.reader.runtime import Runtime, ActionError
 
@@ -18,7 +18,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
 
     @router.get('/api/v3/processors/codex', response_model=wire.CodexProcessorState)
     async def state() -> wire.CodexProcessorState:
-        return project.codex(previous.CodexState.model_validate(runtime.codex_status()))
+        return project.codex(facts.CodexState.model_validate(runtime.codex_status()))
 
     @router.get('/api/v3/processors/codex/models', response_model=wire.CodexModelCatalog)
     async def models() -> wire.CodexModelCatalog:
@@ -35,13 +35,13 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         async with track(runtime, request, wire.CommandContext(wire.CommandCodexSave(operation='codex_save'))):
             value = CodexSettings.model_validate(body.model_dump())
             await runtime.configure_codex(value)
-            return project.codex(previous.CodexState.model_validate(runtime.codex_status()))
+            return project.codex(facts.CodexState.model_validate(runtime.codex_status()))
 
     @router.post('/api/v3/processors/codex/check', response_model=wire.CodexAvailability)
     async def check(request: Request) -> wire.CodexAvailability:
         async with track(runtime, request, wire.CommandContext(wire.CommandCodexCheck(operation='codex_check'))):
             await runtime.check_codex()
-            return project.codex(previous.CodexState.model_validate(runtime.codex_status())).availability
+            return project.codex(facts.CodexState.model_validate(runtime.codex_status())).availability
 
     @router.get('/api/v3/processors/llamacpp', response_model=wire.LocalProcessorState)
     async def local_state() -> wire.LocalProcessorState:
@@ -61,7 +61,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.post('/api/v3/processors/llamacpp/check', response_model=wire.LocalProcessorCheck)
     async def local_check(request: Request) -> wire.LocalProcessorCheck:
         async with track(runtime, request, wire.CommandContext(wire.CommandProcessorCheck(operation='processor_check'))):
-            value = previous.ProcessorCheck.model_validate(await runtime.check_processor())
+            value = facts.ProcessorCheck.model_validate(await runtime.check_processor())
             return wire.LocalProcessorCheck(locality='local' if value.local else 'remote', model=value.model, models=value.models)
 
     app.include_router(router)

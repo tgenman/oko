@@ -15,17 +15,17 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     material('video',{title:'Видео с недоступными субтитрами',captions:'unavailable',full:false,reason:'YouTube ограничил получение субтитров',description:'Описание видео\n\n'+('Текст и длинная ссылка https://example.org/'+'example/'.repeat(12)+'\n').repeat(3),text:''}),
     material('theses',{theses:points,provenance:{processor:'codex',model:'synthetic',reasoning_effort:'high',fast:false}}),
     material('hidden',{filter:{status:'done',hidden:true,restored:false,reason:'Синтетический фильтр',removed:[]}}),
-    material('media',{images:['/api/image'],previous:[{url:'/api/v3/materials/source/versions/1'}]}),
+    material('media',{images:['/api/v3/image'],previous:[{url:'/api/v3/materials/source/versions/1'}]}),
     material('pending'),material('failed')
    ]);
    await r.page.evaluate(()=>{
     const t=readerTransport;
-    t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Наука'}],feeds:[]}});
-    t.replies.set('/api/telegram/accounts',{body:['synthetic']});
-    t.replies.set('/api/telegram/topics',{body:[{id:1,title:'Общее'},{id:30,title:'Наука'}]});
-    t.replies.set('/api/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
+    t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Наука'}],feeds:[]}});
+    t.replies.set('/api/v3/telegram/accounts',{body:['synthetic']});
+    t.replies.set('/api/v3/telegram/topics',{body:[{id:1,title:'Общее'},{id:30,title:'Наука'}]});
+    t.replies.set('/api/v3/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
     t.replies.set('/api/v3/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
-    t.replies.set('/api/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
+    t.replies.set('/api/v3/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
     t.replies.set('/api/v3/materials/source/versions/1',{body:{title:'Предыдущая версия',text:'Ранее сохранённый текст',full:true,reason:'',images:[],attachments:[]}});
     t.held.set('/api/v3/materials/pending',true);
     t.replies.set('/api/v3/materials/failed',{status:503,body:{detail:'Синтетическая ошибка открытия'}});
@@ -63,13 +63,10 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await r.page.locator('#rss-history-mode').selectOption('date');await shot('rss-date','#add-dialog');
    await r.page.locator('#rss-url').fill('https://example.org/error');await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/verify',{status:400,body:{detail:'Синтетическая ошибка проверки фида. '+ 'Длинное пояснение '.repeat(8)}}));
    await r.page.locator('#rss-check').click();await expect(r.page.locator('#rss-message')).toContainText('Синтетическая ошибка');await shot('rss-error','#add-dialog');
-   await r.page.locator('#add-telegram-tab').click();await expect(r.page.locator('#telegram-account')).toHaveValue('synthetic');
+   await r.page.locator('#add-telegram-tab').click();await expect(r.page.locator('#telegram-access')).toHaveValue('web');
    await r.page.locator('#telegram-peer').fill('@synthetic');
-   await r.page.locator('#telegram-topics').click();await expect(r.page.locator('#telegram-topic-label')).toBeVisible();
-   await r.page.locator('#telegram-topic').selectOption('30');
-   expect(await r.page.locator('#telegram-auto').evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(209, 209, 214)');
-   await r.page.locator('#telegram-auto').check();
-   await expect.poll(()=>r.page.locator('#telegram-auto').evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(52, 199, 89)');
+   await expect(r.page.locator('#telegram-topic')).toHaveCount(0);
+   await expect(r.page.locator('#telegram-auto')).toBeHidden();
    await shot('telegram','#add-dialog');
    await r.page.locator('#add-close').click();await expect(r.page.locator('#add-open')).toBeFocused();
    for(const id of ['plain','video','theses','hidden','media']){

@@ -2,6 +2,7 @@
 from oko.diagnostics import record_caught
 import hashlib
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from oko.processing.contracts import InputSource, ProcessingRequest, Theses
@@ -117,7 +118,7 @@ class PublicationTheses:
             return False
         self.store.forget_execution('theses', item)
         with self.store.db:
-            self._read(item, retain=True)
+            self._accepted(item, retain=True)
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
         return True
 
@@ -128,9 +129,10 @@ class PublicationTheses:
         return dict(row) if row else dict(status='pending', error=None)
 
     def read(self, item: str) -> dict[str, Any] | None:
-        return self._read(item)
+        accepted = self._accepted(item)
+        return accepted[0] if accepted else None
 
-    def _read(self, item: str, *, retain: bool = False) -> dict[str, Any] | None:
+    def _accepted(self, item: str, *, retain: bool = False) -> tuple[dict[str, Any], Path] | None:
         row = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
         if not row or row[0] not in ('done', 'pending', 'running'):
             return None
@@ -138,6 +140,11 @@ class PublicationTheses:
         # only while their signature still matches the current inputs.
         signature = self.signature(item)
         paths = [self.store.path(item).parent / 'theses.md']
+        saved = self.store.db.execute('SELECT path,digest FROM retained_theses WHERE item=?', (item,)).fetchone()
+        if saved:
+            accepted_path = self.store.root / saved['path']
+            if accepted_path not in paths:
+                paths.append(accepted_path)
         feed = self.store.item_feed(item)
         if feed and self.store.subscriptions.effective('feed', feed)['feed']['kind'] == 'youtube':
             # Metadata revisions share the caption result in its published version.
@@ -154,29 +161,23 @@ class PublicationTheses:
                     result = Theses.model_validate(header['result']).model_dump()
                     relative = str(path.relative_to(self.store.root))
                     digest = hashlib.sha256(raw).hexdigest()
+                    if path != paths[0] and saved and relative == saved['path'] and digest != saved['digest']:
+                        continue
                     if row[0] != 'done':
                         # A moved file alone is not a committed result. Retain
                         # only bytes observed as accepted before explicit retry.
-                        saved = self.store.db.execute('SELECT path,digest FROM retained_theses WHERE item=?', (item,)).fetchone()
                         if not saved or (saved['path'], saved['digest']) != (relative, digest):
                             continue
                     elif retain:
                         self.store.db.execute('INSERT INTO retained_theses VALUES (?,?,?) ON CONFLICT(item) DO UPDATE SET path=excluded.path,digest=excluded.digest', (item, relative, digest))
-                    return result
+                    return result, path
             except (OSError, ValueError, KeyError):
                 record_caught('theses.read')
         return None
 
     def provenance(self, item: str) -> dict[str, Any] | None:
-        if self.read(item) is None:
-            return None
-        signature = self.signature(item)
-        versions = self.store.db.execute('SELECT number FROM content_versions WHERE item=? ORDER BY number DESC', (item,)).fetchall()
-        for version in versions:
-            origin = self.store.derivative_provenance(self.store.versions.path(item, version['number']).parent / 'theses.md', signature)
-            if origin is not None:
-                return origin
-        return None
+        accepted = self._accepted(item)
+        return self.store.derivative_provenance(accepted[1], self.signature(item)) if accepted else None
 
     def save(self, job: 'Job', signature: str, theses: Theses) -> None:
         if not self.store.valid(job) or signature != self.signature(job.item):

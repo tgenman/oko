@@ -53,6 +53,7 @@ RESPONSES: dict[tuple[str, str], Any] = {
 }
 
 REQUESTS: dict[tuple[str, str], Any] = {
+    ('POST', '/api/v3/collect'): models.CollectionTarget,
     ('POST', '/api/v3/command-observations'): models.CommandObservation,
     ('POST', '/api/v3/diagnostics'): models.ClientDiagnosticEvent,
     ('POST', '/api/v3/feeds'): models.AddFeedRequest,

@@ -9,7 +9,7 @@ test('compact settings navigate to reading and persist only explicitly through H
     await r.page.setViewportSize({width:1280,height:900});
     await r.start([]);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.native.add('/api/v3/settings/oko/global');
     });
     await r.page.locator('#settings-open').click();
@@ -41,7 +41,7 @@ test('folder field resets preserve other overrides and new drafts', async () => 
     await r.api(`settings/folder/${folder.id}`,'PATCH',{prompt_theses:'Folder prompt',originals:false});
     await r.start([]);
     await r.page.evaluate(({folder,feed})=>{
-      readerTransport.native.add('/api/subscriptions');
+      readerTransport.native.add('/api/v3/subscriptions');
       for (const path of ['oko/global','folder/'+folder.id,'feed/'+feed.id]) readerTransport.native.add('/api/v3/settings/'+path);
     },{folder,feed});
     await r.page.locator('#feeds-open').click();
@@ -72,7 +72,7 @@ test('prompts, empty filtering save via HTTP without saving adjacent drafts', as
   try {
     await r.start([]);
     await r.page.evaluate(()=>{
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.native.add('/api/v3/settings/oko/global');
     });
     await r.api('settings/oko/global','PATCH',{prompt_filters:'Оставлять важное'});

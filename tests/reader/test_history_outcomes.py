@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 import time
 import httpx
 from fastapi.testclient import TestClient
@@ -16,20 +17,20 @@ def test_initial_history_retry_partial_and_terminal_outcomes_survive_restart(tmp
     with reader() as client:
         feed = add(client, verify(client, 'https://source.test/feed')).json()
         for _ in range(150):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history.get('retrying') == 1 and history.get('unavailable') == 1:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress'].get('retrying') == 1 and history['progress'].get('unavailable') == 1:
                 break
             time.sleep(.02)
-        assert history['retrying'] == 1
-        assert history['unavailable'] == 1
-        assert history['loaded'] == 2
-        assert history['incomplete'] == 1
-        assert history['state'] == 'loading'
-        assert history['errors']
+        assert history['progress']['retrying'] == 1
+        assert history['progress']['unavailable'] == 1
+        assert history['progress']['loaded'] == 2
+        assert history['progress']['incomplete'] == 1
+        assert history['state'] == 'fetching'
+        assert history['progress']['errors']
     with reader() as client:
-        history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-        assert history['retrying'] == history['unavailable'] == 1
-        assert history['loaded'] == 2
+        history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+        assert history['progress']['retrying'] == history['progress']['unavailable'] == 1
+        assert history['progress']['loaded'] == 2
 
 
 def test_temporary_error_retries_and_completes_without_waiting_for_ai(tmp_path):
@@ -44,16 +45,16 @@ def test_temporary_error_retries_and_completes_without_waiting_for_ai(tmp_path):
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), clock=clock), headers=HEADERS) as client:
         feed = add(client, verify(client, 'https://source.test/feed')).json()
         def progress():
-            return client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-        wait_for(client, lambda: progress()['retrying'] == 1)
+            return client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+        wait_for(client, lambda: progress()['progress']['retrying'] == 1)
         assert calls == 1
         clock.now += 1.1
-        history = wait_for(client, lambda: value if (value := progress())['state'] == 'done' else None)
+        history = wait_for(client, lambda: value if (value := progress())['state'] == 'complete' else None)
         assert calls == 2
-        assert history['loaded'] == 1
-        assert history['state'] == 'done'
-        assert history['retrying'] == 0
-        assert history['errors'] == []
+        assert history['progress']['loaded'] == 1
+        assert history['state'] == 'complete'
+        assert history['progress']['retrying'] == 0
+        assert history['progress']['errors'] == []
 
 
 def test_terminal_unavailability_finishes_and_is_not_retried_on_rediscovery(tmp_path):
@@ -69,19 +70,19 @@ def test_terminal_unavailability_finishes_and_is_not_retried_on_rediscovery(tmp_
     with reader() as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':1}).json()
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['state'] == 'done':
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['state'] == 'complete':
                 break
             time.sleep(.01)
-        assert history['state'] == 'done'
-        assert history['loaded'] == 0
-        assert history['unavailable'] == 1
+        assert history['state'] == 'complete'
+        assert history['progress']['loaded'] == 0
+        assert history['progress']['unavailable'] == 1
         assert calls == 1
-        assert client.get('/api/materials/' + client.get('/api/cards').json()[0]['id']).json()['text'] == 'Сохранившийся анонс'
+        assert client.get('/api/v3/materials/' + client.get('/api/v3/cards').json()[0]['id']).json()['content']['text'] == 'Сохранившийся анонс'
     with reader() as client:
-        client.post('/api/tabs/reader/heartbeat')
+        presence(client, 'reader')
         time.sleep(.3)
-        history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-        assert history['unavailable'] == 1
-        assert history['state'] == 'done'
+        history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+        assert history['progress']['unavailable'] == 1
+        assert history['state'] == 'complete'
         assert calls == 1

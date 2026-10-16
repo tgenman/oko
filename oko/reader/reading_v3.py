@@ -2,30 +2,30 @@
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, Request
 from fastapi.responses import Response
 
 from oko.reader import projection_v3 as project
 from oko.reader.api_v3 import ApiError, invalid, no_query, positive_version, scalar_boolean
 from oko.reader.commands_v3 import track
 from oko.reader.generated import models as wire
-from oko.reader.legacy_generated import models as old
+from oko.reader import snapshots as facts
 from oko.reader.runtime import Runtime, ActionError
 from oko.reviews.coordination import ProcessingWait
 
 
 def media_url(value: str) -> wire.MediaUrl:
-    return wire.MediaUrl(value.replace('/api/materials/', '/api/v3/materials/', 1))
+    return wire.MediaUrl(value)
 
 
 def completeness(full: bool, reason: str) -> wire.ContentCompleteness:
     return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='legacy', message=reason))
 
 
-def provenance(value: old.UnknownProvenance | old.CodexProvenance | old.LocalProvenance | None) -> wire.Provenance:
-    if isinstance(value, old.CodexProvenance):
+def provenance(value: facts.UnknownProvenance | facts.CodexProvenance | facts.LocalProvenance | None) -> wire.Provenance:
+    if isinstance(value, facts.CodexProvenance):
         return wire.Provenance(wire.CodexResultProvenance(kind='codex', model=value.model, reasoning_effort=value.reasoning_effort, fast=value.fast))
-    if isinstance(value, old.LocalProvenance) and value.processor == 'llamacpp':
+    if isinstance(value, facts.LocalProvenance) and value.processor == 'llamacpp':
         return wire.Provenance(wire.LocalResultProvenance(kind='local', processor_id='llamacpp', model=wire.LocalModel(wire.KnownLocalModel(state='known', name=value.model) if value.model else wire.UnknownLocalModel(state='unknown'))))
     return wire.Provenance(wire.UnknownResultProvenance(kind='unknown', reason='legacy'))
 
@@ -42,7 +42,7 @@ def attempt(status: str, error: str | None, waiting: ProcessingWait | None = Non
     return wire.UnfinishedProcessingAttempt(wire.ProcessingQueued(state='queued'))
 
 
-def filter_state(value: old.Filter | None, waiting: ProcessingWait | None) -> wire.FilterState:
+def filter_state(value: facts.Filter | None, waiting: ProcessingWait | None) -> wire.FilterState:
     if value is None:
         return wire.FilterState(wire.FilterAttemptState(attempt=attempt('off', None), diagnostic_message=None, result=None))
     message = value.error if isinstance(value.error, str) else None
@@ -52,11 +52,11 @@ def filter_state(value: old.Filter | None, waiting: ProcessingWait | None) -> wi
     return wire.FilterState(wire.FilterAttemptState(attempt=attempt(value.status, message, waiting), diagnostic_message=message, result=None))
 
 
-def theses_state(value: old.Card, waiting: ProcessingWait | None) -> wire.ThesesState:
-    origin = value.provenance if isinstance(value.provenance, (old.CodexProvenance, old.LocalProvenance, old.UnknownProvenance)) else None
-    result = wire.PublicationTheses(points=[wire.ThesesPoint(text=p.text, references=[wire.PublicationReference(material_id=wire.MaterialId(r.id), source_url=wire.SourceUrl(r.url)) for r in p.sources]) for p in value.theses.points], provenance=provenance(origin)) if isinstance(value.theses, old.Summary) else None
-    status = value.ai.status if isinstance(value.ai, old.AI) else 'off'
-    message = value.ai.error if isinstance(value.ai, old.AI) else None
+def theses_state(value: facts.Card, waiting: ProcessingWait | None) -> wire.ThesesState:
+    origin = value.provenance if isinstance(value.provenance, (facts.CodexProvenance, facts.LocalProvenance, facts.UnknownProvenance)) else None
+    result = wire.PublicationTheses(points=[wire.ThesesPoint(text=p.text, references=[wire.PublicationReference(material_id=wire.MaterialId(r.id), source_url=wire.SourceUrl(r.url)) for r in p.sources]) for p in value.theses.points], provenance=provenance(origin)) if isinstance(value.theses, facts.Summary) else None
+    status = value.ai.status if isinstance(value.ai, facts.AI) else 'off'
+    message = value.ai.error if isinstance(value.ai, facts.AI) else None
     if status == 'done' and result is not None:
         return wire.ThesesState(wire.ThesesReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
     return wire.ThesesState(wire.ThesesAttemptState(attempt=attempt(status, message, waiting), diagnostic_message=message, result=result))
@@ -79,7 +79,7 @@ class Common(TypedDict):
     theses: wire.ThesesState
 
 
-def common(runtime: Runtime, value: old.Card, feed: wire.SubscriptionFeed) -> Common:
+def common(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed) -> Common:
     current = runtime.require_store()
     source: wire.DemoSourceReference | wire.RssSourceReference | wire.YoutubeSourceReference | wire.TelegramSourceReference
     fid, url = wire.FeedId(value.feed_id), wire.SourceUrl(value.url)
@@ -92,12 +92,12 @@ def common(runtime: Runtime, value: old.Card, feed: wire.SubscriptionFeed) -> Co
         source = wire.DemoSourceReference(kind='demo', feed_id=fid, source_url=url)
     else:
         source = wire.RssSourceReference(kind='rss', feed_id=fid, source_url=url)
-    filtered = filter_state(value.filter if isinstance(value.filter, old.Filter) else None, runtime.processing_wait(value.id, 'filter'))
+    filtered = filter_state(value.filter if isinstance(value.filter, facts.Filter) else None, runtime.processing_wait(value.id, 'filter'))
     if filtered.root.result is not None:
         saved = current.derivative_provenance(current.path(value.id).parent / 'filter.md', current.filters.signature(value.id))
         if saved:
             from pydantic import TypeAdapter
-            origin: old.CodexProvenance | old.LocalProvenance | old.UnknownProvenance = TypeAdapter(old.CodexProvenance | old.LocalProvenance | old.UnknownProvenance).validate_python(saved)
+            origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
             filtered.root.result.provenance = provenance(origin)
     return Common(id=wire.MaterialId(value.id), title=value.title, feed_id=fid, feed_title=value.feed_title,
         folder_id=wire.FolderId(value.folder_id), importance=wire.Importance(value.importance),
@@ -107,11 +107,11 @@ def common(runtime: Runtime, value: old.Card, feed: wire.SubscriptionFeed) -> Co
         filter=filtered, theses=theses_state(value, runtime.processing_wait(value.id, 'theses')))
 
 
-def attachments(values: list[old.Attachment]) -> list[wire.Attachment]:
+def attachments(values: list[facts.Attachment]) -> list[wire.Attachment]:
     return [wire.Attachment(kind=a.kind, mime=a.mime, url=media_url(a.url)) for a in values]
 
 
-def card(runtime: Runtime, value: old.Card, feed: wire.SubscriptionFeed) -> wire.ReadingCard:
+def card(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed) -> wire.ReadingCard:
     current = runtime.require_store()
     shared = common(runtime, value, feed)
     if not value.complete:
@@ -127,7 +127,7 @@ def card(runtime: Runtime, value: old.Card, feed: wire.SubscriptionFeed) -> wire
         previous_versions=[previous_reference(p) for p in value.previous] if isinstance(value.previous, list) else []))
 
 
-def previous_reference(value: old.Previous) -> wire.PreviousVersionReference:
+def previous_reference(value: facts.Previous) -> wire.PreviousVersionReference:
     if not isinstance(value.number, int) or not isinstance(value.version, str):
         raise ValueError('Previous version lacks its identity')
     return wire.PreviousVersionReference(number=value.number, revision_id=wire.RevisionId(value.version), url=media_url(value.url))
@@ -144,7 +144,7 @@ def identity(value: str) -> wire.MaterialId:
         raise ApiError(422, invalid('path', 'item')) from None
 
 
-def preview(value: old.CompletionPreview) -> wire.CompletionPreview:
+def preview(value: facts.CompletionPreview) -> wire.CompletionPreview:
     return wire.CompletionPreview(cards_count=value.cards, publications_count=value.originals, token=value.token)
 
 
@@ -152,11 +152,12 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     router = APIRouter(dependencies=[Depends(no_query)])
 
     def feeds() -> dict[str, wire.SubscriptionFeed]:
-        return {v['id']: project.subscription(old.SubscriptionFeed.model_validate(v)) for v in runtime.require_store().subscriptions.feeds()}
+        saved = runtime.require_store().subscriptions
+        return {v['id']: project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds()}
 
     def composition() -> wire.ReadingComposition:
         current = runtime.require_store()
-        value = old.Navigation.model_validate(current.reading.navigation())
+        value = facts.Navigation.model_validate(current.reading.navigation())
         owners = feeds()
         return wire.ReadingComposition(count=value.count, folders=[wire.ReadingFolder(id=wire.FolderId(f.id), title=f.title, position=f.position if isinstance(f.position, int) else 0, count=f.count) for f in value.folders], feeds=[wire.NavigationFeed(feed=owners[f.id], count=f.count) for f in value.feeds])
 
@@ -185,7 +186,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                 except ValueError:
                     raise ApiError(422, invalid('query', key)) from None
         current = runtime.require_store()
-        values = [old.Card.model_validate(v) for v in current.reading.cards(scalar_boolean(request, 'show_hidden'), folder, feed)]
+        values = [facts.Card.model_validate(v) for v in current.reading.cards(scalar_boolean(request, 'show_hidden'), folder, feed)]
         if sort == 'importance':
             values.sort(key=lambda c: (-{'normal':0, 'elevated':1, 'high':2}[c.importance], -c.published, c.id))
         else:
@@ -200,7 +201,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         raw = current.reading.material(item)
         if raw is None:
             raise missing(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=identity(item))))
-        value = old.Material.model_validate(raw)
+        value = facts.Material.model_validate(raw)
         owner = feeds()[value.feed_id]
         from oko.reader.composition import snippet
         data = value.model_dump(exclude_unset=True)
@@ -208,7 +209,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             data.pop(key, None)
         data.update(feed_title=owner.root.title, folder_id=owner.root.folder_id.root, importance=owner.root.importance.root,
                     snippet=snippet(value.description if isinstance(value.description, str) and value.description else value.display_text if isinstance(value.display_text, str) else value.text), published_known=value.published_known is not False)
-        entry = old.Card.model_validate(data)
+        entry = facts.Card.model_validate(data)
         shared, projected = common(runtime, entry, owner), card(runtime, entry, owner).root
         if isinstance(projected, wire.PendingReadingCard):
             return wire.ReadableMaterial(wire.PendingReadableMaterial(**shared, availability='pending', content=wire.PendingPublicationContent(availability='pending', loading=projected.loading)))
@@ -228,7 +229,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         raw = current.versions.read(item, n)
         if raw is None:
             raise ApiError(404, wire.ErrorEnvelope(wire.VersionUnavailableError(code='version_unavailable', message='Версия недоступна', details=wire.VersionUnavailableErrorDetails(material_id=identity(item), number=n), command_id=None, diagnostic_id=None)))
-        value = old.Version.model_validate(raw)
+        value = facts.Version.model_validate(raw)
         revision = current.versions.fingerprint(current.versions.path(item, n).parent)
         return wire.PublicationVersion(number=n, revision_id=wire.RevisionId(revision), title=value.title, text=value.text,
             completeness=completeness(value.full, value.reason), images=[media_url(url) for url in value.images], attachments=attachments(value.attachments))
@@ -237,7 +238,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         identity(item)
         current = runtime.require_store()
         raw = current.versions.read(item, number) if number is not None else current.material(item)
-        material = old.Version.model_validate(raw) if number is not None and raw else old.Material.model_validate(raw) if raw else None
+        material = facts.Version.model_validate(raw) if number is not None and raw else facts.Material.model_validate(raw) if raw else None
         images = material.images if material and isinstance(material.images, list) else []
         attached = material.attachments if material and isinstance(material.attachments, list) else []
         path = (current.versions.path(item, number) if number is not None else current.path(item)).parent / name
@@ -267,7 +268,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         except ValueError:
             raise ApiError(422, invalid('path', 'folder')) from None
         try:
-            return preview(old.CompletionPreview.model_validate(await runtime.preview_completion(folder)))
+            return preview(facts.CompletionPreview.model_validate(await runtime.preview_completion(folder)))
         except ActionError as error:
             if error.kind == 'missing':
                 raise missing(wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=wire.FolderId(folder)))) from None
@@ -281,15 +282,23 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                 await runtime.complete_folder(folder, body.token)
             except ActionError as error:
                 if error.kind == 'conflict':
-                    value = old.CompletionConflict.model_validate(error.detail)
+                    value = facts.CompletionConflict.model_validate(error.detail)
                     raise ApiError(409, wire.ErrorEnvelope(wire.CompositionChangedError(code='composition_changed', message=value.message, details=wire.CompositionChangedErrorDetails(preview=preview(value.preview)), command_id=wire.CommandId(request.state.command_id), diagnostic_id=None))) from None
                 raise
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     @router.post('/api/v3/collect', response_model=wire.CommandAcknowledgement)
-    async def collect(request: Request) -> wire.CommandAcknowledgement:
-        async with track(runtime, request, wire.CommandContext(wire.CommandCollect(operation='collect', target=wire.CollectionTarget(wire.AllCollectionTarget(scope='all'))))):
-            await runtime.collect()
+    async def collect(request: Request, body: wire.CollectionTarget = Body(default=wire.CollectionTarget(wire.AllCollectionTarget(scope='all')))) -> wire.CommandAcknowledgement:
+        async with track(runtime, request, wire.CommandContext(wire.CommandCollect(operation='collect',target=body))):
+            feed = body.root.feed_id.root if isinstance(body.root,wire.FeedCollectionTarget) else None
+            try:
+                await runtime.collect(feed)
+            except ActionError as error:
+                if feed and error.kind=='missing':
+                    raise missing(wire.AffectedResource(wire.FeedResource(kind='feed',feed_id=wire.FeedId(feed)))) from None
+                if feed and error.code=='deletion_in_progress':
+                    raise ApiError(409,wire.ErrorEnvelope(wire.DeletionInProgressError(code='deletion_in_progress',message='Фид удаляется',details=wire.DeletionInProgressErrorDetails(feed_id=wire.FeedId(feed)),command_id=None,diagnostic_id=None))) from None
+                raise
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     # Each route supplies its domain intent explicitly; no path/body inference.

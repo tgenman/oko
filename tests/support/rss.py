@@ -9,15 +9,15 @@ def rss(url='https://source.test/article', guid='one', days=0):
 
 
 def import_feed(client, url='https://source.test/feed'):
-    client.patch('/api/settings/oko/global', json={})
+    client.patch('/api/v3/settings/oko/global', json={})
     from tests.support.subscriptions import add_source
     return add_source(client, url, 'Источник', 'Новости')
 
 
 def wait_cards(client, count=1):
     for _ in range(200):
-        cards = client.get('/api/cards').json()
-        if len(cards) == count and all(c['complete'] and not c.get('loading') for c in cards):
+        cards = client.get('/api/v3/cards').json()
+        if len(cards) == count and all((c['availability'] == 'available') and not c.get('loading') for c in cards):
             return cards
         time.sleep(.02)
-    raise AssertionError(client.get('/api/status').json())
+    raise AssertionError(client.get('/api/v3/status').json())

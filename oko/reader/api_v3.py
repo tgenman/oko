@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from oko.diagnostics import Journal
 from oko.reader import projection_v3 as project
-from oko.reader.legacy_generated import models as previous
+from oko.reader import snapshots as facts
 from oko.reader.generated import models as wire
 from oko.reader.lifetime import Lifetime
 from oko.reader.runtime import Runtime
@@ -88,7 +88,10 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
 
     @app.get('/api/v3/status', response_model=wire.RuntimeStatus)
     async def status() -> wire.RuntimeStatus:
-        old = previous.Status.model_validate(runtime.status())
+        old = facts.Status.model_validate(runtime.status())
+        current = runtime._store if not runtime.stopped else None
+        bindings = {feed['id']: wire.TelegramAccess.model_validate(binding) for feed in current.subscriptions.feeds() if (binding := current.subscriptions.telegram.binding(feed['id']))} if current else {}
+        material_feeds = {row['id']:row['feed_id'] for row in current.db.execute('SELECT id,feed_id FROM items WHERE viewed=0')} if current else {}
         policy: wire.ExplicitLifetimePolicy | wire.ClientPresenceLifetimePolicy
         if lifetime.mode == 'explicit':
             policy = wire.ExplicitLifetimePolicy(kind='explicit')
@@ -97,20 +100,20 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
                 grace_seconds=lifetime.grace_seconds, renew_after_seconds=lifetime.renew_after_seconds)
         return wire.RuntimeStatus(api_version='3.0.0', runtime_state='stopped' if runtime.stopped else 'unavailable' if old.error else 'running',
             lifetime=wire.LifetimePolicy(policy), work_allowed=not runtime.stopped and lifetime.admitted(), active_client_sessions=lifetime.active_clients,
-            work=project.work(old.jobs if isinstance(old.jobs, list) else []),
+            work=[wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('storage_unavailable'),retry_at=None))] if old.error else [wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('client_presence_required'),retry_at=None))] if not lifetime.admitted() and not runtime.stopped else project.work(current.work_summary() if current else []),
             sources=[wire.SourceState(feed_id=wire.FeedId(value.feed_id), title=value.title,
                 state='unavailable' if isinstance(value.error, str) and value.error else 'ready',
                 reason=wire.WaitingReason('source_unavailable') if isinstance(value.error, str) and value.error else None,
                 message=value.error if isinstance(value.error, str) else None,
                 gap=value.gap if isinstance(value.gap, str) else None, changes=value.changes if isinstance(value.changes, str) else None) for value in old.sources],
             ready_sources=old.ready_sources, total_sources=old.total_sources,
-            youtube=project.youtube(old.youtube if isinstance(old.youtube, previous.YouTube) else None),
+            youtube=project.youtube(old.youtube if isinstance(old.youtube, facts.YouTube) else None),
             initial_histories=[project.history(value) for value in old.initial_histories] if isinstance(old.initial_histories, list) else [],
             telegram_reads=[wire.TelegramReadState(feed_id=wire.FeedId(value.feed_id),
                 initial=wire.TelegramMessageId(str(value.initial)) if value.initial else None,
                 confirmed=wire.TelegramMessageId(str(value.confirmed)) if value.confirmed else None, pending=value.pending,
-                waiting=wire.WaitingReason('profile_unavailable') if value.waiting else None, error=value.error or None) for value in old.telegram_reads] if isinstance(old.telegram_reads, list) else [],
-            problems=project.problems(old.problems) if isinstance(old.problems, previous.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
+                waiting=wire.WaitingReason('telegram_read_frontier') if value.waiting else None, error=value.error or None) for value in old.telegram_reads] if isinstance(old.telegram_reads, list) else [],
+            problems=project.problems(old.problems,bindings,material_feeds,set(old.viewed_ids) if isinstance(old.viewed_ids,list) else set()) if isinstance(old.problems, facts.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
             diagnostic_count=len(journal.records), diagnostic_persistence_error=journal.persistence_error or None,
             viewed_ids=[wire.MaterialId(value) for value in old.viewed_ids] if isinstance(old.viewed_ids, list) else [])
 

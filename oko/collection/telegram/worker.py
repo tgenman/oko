@@ -9,14 +9,53 @@ from datetime import datetime, timezone
 import json
 from oko.diagnostics import exception_details
 import logging
+from urllib.parse import urlsplit
 import os
 from pathlib import Path
 import sys
 from typing import Any
 
-from oko.collection.telegram.topics import history, list_topics, message_topic, topic_info, read_state, read_window
+from oko.collection.telegram.topics import history, message_topic, topic_info, read_state, read_window
 
 MAX_MEDIA = 200 * 1024 * 1024
+
+
+def message_text(message: Any) -> str:
+    raw = message.message or ''
+    encoded = raw.encode('utf-16-le')
+    links = []
+    fallback = []
+    for entity in (getattr(message,'entities',None) or []):
+        url = getattr(entity,'url',None)
+        if not isinstance(url,str):
+            continue
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme not in ('http','https') or not parsed.hostname:
+                continue
+        except ValueError:
+            continue
+        start,end = entity.offset*2,(entity.offset+entity.length)*2
+        if not 0<=start<end<=len(encoded):
+            fallback.append(url)
+            continue
+        links.append((start,end,url))
+    output = []
+    offset = 0
+    for start,end,url in sorted(links):
+        if start<offset:
+            fallback.append(url)
+            continue
+        try:
+            prefix = encoded[offset:start].decode('utf-16-le')
+            label = encoded[start:end].decode('utf-16-le')
+        except UnicodeError:
+            fallback.append(url)
+            continue
+        output.append(prefix+'['+label+']('+url.replace('(','%28').replace(')','%29')+')')
+        offset = end
+    output.append(encoded[offset:].decode('utf-16-le'))
+    return ''.join(output)+''.join('\n\nСсылка: '+url for url in dict.fromkeys(fallback))
 
 
 def record(msg: Any) -> dict[str, Any]:
@@ -37,8 +76,10 @@ def record(msg: Any) -> dict[str, Any]:
         media = dict(kind=kind, mime=mime if extension != 'bin' else 'application/octet-stream', extension=extension)
     elif msg.media and type(msg.media).__name__ != 'MessageMediaWebPage':
         media = dict(kind='unsupported', mime='application/octet-stream', extension='bin')
-    return dict(id=msg.id, date=msg.date.timestamp(), text=msg.message or '',
-                group=msg.grouped_id, media=media, service=False)
+    edited = getattr(msg,'edit_date',None)
+    return dict(id=msg.id, date=msg.date.timestamp(), text=message_text(msg), original_text=msg.message or '',
+                group=msg.grouped_id, media=media, service=False,
+                edited=edited.timestamp() if edited else None)
 
 
 async def main() -> None:
@@ -125,21 +166,14 @@ async def main() -> None:
                     if 'expected_user_id' in body and int((await cl.get_me()).id) != body['expected_user_id']:
                         raise PermissionError('account-identity-mismatch')
                     entity = await entity_for(cl, body['account'], body['peer'])
-                    topic_id = body.get('topic_id')
-                    if getattr(entity, 'forum', False) and topic_id is None and op not in ('info', 'topics'):
-                        raise ValueError('choose forum topic')
+                    topic_id = body.get('topic_id') if op in ('read_state', 'read_window', 'acknowledge') else None
                     if topic_id is not None and not getattr(entity, 'forum', False):
                         raise ValueError('topic requires forum')
-                    if op == 'topics':
-                        value = await list_topics(cl, entity)
-                    elif op == 'info':
-                        topic = await topic_info(cl, entity, topic_id) if topic_id is not None else None
-                        value = dict(peer=utils.get_peer_id(entity), title=entity.title + (' · ' + topic.title if topic else ''),
-                                     kind='channel' if getattr(entity, 'broadcast', False) else 'group', forum=bool(getattr(entity, 'forum', False)), topic_id=topic_id, username=getattr(entity, 'username', None),
+                    if op == 'info':
+                        value = dict(peer=utils.get_peer_id(entity), title=entity.title,
+                                     kind='channel' if getattr(entity, 'broadcast', False) else 'group', forum=bool(getattr(entity, 'forum', False)), username=getattr(entity, 'username', None),
                                      usernames=[u.username for u in (getattr(entity, 'usernames', None) or []) if u.active])
                     elif op == 'history_page':
-                        if topic_id is not None:
-                            await topic_info(cl, entity, topic_id)
                         upper, before = body['upper'], body['before']
                         first = not upper
                         archive_params: dict[str, Any] = dict(limit=100)
@@ -158,8 +192,6 @@ async def main() -> None:
                         value = dict(messages=[record(m) for m in expanded.values()], upper=upper,
                                      next_before=min([m.id for m in raw], default=before), more=len(raw) == 100)
                     elif op == 'page':
-                        if topic_id is not None:
-                            await topic_info(cl, entity, topic_id)
                         after, since = body['after'], body['since']
                         params: dict[str, Any] = dict(limit=100, reverse=True)
                         if after:
@@ -190,6 +222,9 @@ async def main() -> None:
                         since = datetime.fromtimestamp(body['since'], timezone.utc)
                         if topic_id is not None:
                             value = await read_state(cl, entity, topic_id, since)
+                        elif getattr(entity, 'forum', False):
+                            before = await cl.get_messages(entity, limit=1, offset_date=since)
+                            value = dict(read_max=0, initial=before[0].id if before else 0, forum=True)
                         else:
                             from telethon import functions
                             dialog = await cl(functions.messages.GetPeerDialogsRequest(
@@ -205,7 +240,18 @@ async def main() -> None:
                         else:
                             batch = await cl.get_messages(entity, limit=100, reverse=True,
                                 offset_id=body['after'], max_id=body['until']+1)
-                            value = dict(ids=[m.id for m in batch], more=len(batch) == 100)
+                            value = dict(ids=sorted(m.id for m in batch), more=len(batch) == 100)
+                            if getattr(entity, 'forum', False):
+                                value['topics'] = {str(m.id): message_topic(m) for m in batch}
+                                boundaries = {}
+                                for topic in set(value['topics'].values()):
+                                    try:
+                                        boundaries[topic] = (await topic_info(cl, entity, topic)).read_inbox_max_id
+                                    except ValueError:
+                                        # Deleted/unknown topic: keep it unread and let its
+                                        # explicit acknowledgement surface the problem.
+                                        boundaries[topic] = 0
+                                value['read_ids'] = [m.id for m in batch if m.id <= boundaries[message_topic(m)]]
                     elif op == 'acknowledge':
                         max_id = body['max_id']
                         if not isinstance(max_id, int) or max_id <= 0:
@@ -215,6 +261,8 @@ async def main() -> None:
                             await topic_info(cl, entity, topic_id)
                             value = bool(await cl(functions.messages.ReadDiscussionRequest(
                                 peer=entity, msg_id=topic_id, read_max_id=max_id)))
+                        elif getattr(entity, 'forum', False):
+                            raise ValueError('forum requires a verified topic boundary')
                         else:
                             value = bool(await cl.send_read_acknowledge(entity, max_id=max_id))
                     elif op == 'download':

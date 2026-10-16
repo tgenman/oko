@@ -63,6 +63,7 @@ export function createMaterialList({readerApi,onOpen,onRetry,fetchMedia}:{reader
   mountSurface(host('material-list'),<Surface/>);
   function update(cards:Card[],selected:string|null=null) {const position=restore||anchor(),focused=(document.activeElement as HTMLElement|null)?.dataset.card;restore=null;store.set({...store.get(),cards,selected,status:cards.length?'':'Нет материалов',retry:false});if(focused)row(focused)?.focus({preventScroll:true});apply(position);}
   return {
+    title(id:string){return store.get().cards.find(card=>card.id===id)?.title;},
     select,update,
     bindCommands(value:NonNullable<typeof commands>){commands=value;},
     async load(params:URLSearchParams) {const sort=params.get('sort');return (await readCards({client:readerApi.client,query:{sort:sort==='oldest'||sort==='importance'?sort:'newest',...(params.get('show_hidden')==='true'?{show_hidden:true}:{}),...(params.has('folder')?{folder:params.get('folder')!}:{}),...(params.has('feed')?{feed:params.get('feed')!}:{})}})).data;},

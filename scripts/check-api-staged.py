@@ -9,9 +9,9 @@ import sys
 import tempfile
 import tomllib
 
-INPUTS = ('api/', 'scripts/api', 'scripts/generate', 'scripts/legacy_api.py', 'scripts/check-api-staged.py',
-          'frontend/src/api/generated/', 'frontend/src/api/legacy-generated/',
-          'oko/reader/generated/', 'oko/reader/legacy_generated/', 'package.json', 'package-lock.json',
+INPUTS = ('api/', 'scripts/api', 'scripts/generate',  'scripts/check-api-staged.py',
+          'frontend/src/api/generated/',
+          'oko/reader/generated/',  'package.json', 'package-lock.json',
           'pyproject.toml', 'uv.lock')
 
 

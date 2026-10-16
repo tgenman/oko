@@ -1,5 +1,9 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Literal
+from collections.abc import Callable
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, JsonValue, Field
 
 
 @dataclass(frozen=True)
@@ -19,9 +23,54 @@ class Image:
 
 
 @dataclass(frozen=True)
+class DownloadStage:
+    path: Path
+    job: int
+    generation: int
+    admitted: Callable[[], bool] = lambda: True
+
+
+@dataclass(frozen=True)
+class StagedPayload:
+    path: Path
+    size: int
+    sha256: str
+
+
+class ResourceManifest(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
+    key: str
+    origin: str
+    order: int
+    name: str = Field(pattern=r'^(?:media|image)-[0-9]+\.[a-z0-9]+$')
+    kind: str
+    mime: str
+    status: Literal['missing', 'loaded', 'unsupported'] = 'missing'
+    reason: str = ''
+    sha256: str | None = None
+
+
+class ArticleManifest(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
+    url: str
+    title: str | None = None
+    text: str | None = None
+    resource_keys: tuple[str, ...] = ()
+    reason: str = ''
+
+
+class SourceManifest(BaseModel):
+    source_url: str | None = None
+    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
+    post: dict[str, JsonValue]
+    resources: tuple[ResourceManifest, ...] = ()
+    articles: tuple[ArticleManifest, ...] = ()
+
+
+@dataclass(frozen=True)
 class Attachment:
     name: str
-    data: bytes
+    data: bytes | StagedPayload
     kind: str
     mime: str
 
@@ -38,6 +87,7 @@ class Material:
     captions: str | None = None
     collection_error: 'SourceError | None' = None
     description: str = ''
+    source_manifest: SourceManifest | None = None
 
 
 class Source(Protocol):
@@ -46,9 +96,10 @@ class Source(Protocol):
 
 
 class SourceError(Exception):
-    def __init__(self, label: str, delay: float = 60, *, remote_traceback: str = '', code: str | None = None) -> None:
+    def __init__(self, label: str, delay: float = 60, *, remote_traceback: str = '', code: str | None = None, retryable: bool = True) -> None:
         self.label, self.delay = label, delay
         self.code = code
+        self.retryable = retryable
         self.remote_traceback = remote_traceback
         self.remote_type = self.remote_message = self.remote_location = ''
 

@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 import time
 import pytest
 from datetime import date, timedelta
@@ -7,13 +8,13 @@ from tests.support.feed_url import client_for, verify, add
 def test_new_feed_saves_default_history_before_collection_and_restarts(tmp_path):
     with client_for(tmp_path) as client:
         feed = add(client, verify(client)).json()
-        assert feed['initial_history']['mode'] == 'count'
-        assert feed['initial_history']['count'] == 20
-        assert feed['initial_history']['state'] == 'pending'
+        assert feed['history']['selection']['mode'] == 'count'
+        assert feed['history']['selection']['count'] == '20'
+        assert feed['history']['state'] == 'not_started'
     with client_for(tmp_path) as client:
-        history = client.get('/api/subscriptions').json()['feeds'][0]['initial_history']
-        assert history['count'] == 20
-        assert history['loaded'] == 0
+        history = client.get('/api/v3/subscriptions').json()['feeds'][0]['history']
+        assert int(history['selection']['count']) == 20
+        assert history['progress']['loaded'] == 0
 
 
 @pytest.mark.parametrize('posts', [[5, 4, 3, 2, 1], [5, 5, 4, 3, 2, 1]])
@@ -32,37 +33,37 @@ def test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count(tm
     with open_reader() as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 2}).json()
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 2:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 2:
                 break
             time.sleep(.02)
-        assert history['loaded'] == 2
-        assert {card['url'] for card in client.get('/api/cards').json()} == {'https://source.test/post/5', 'https://source.test/post/4'}
+        assert history['progress']['loaded'] == 2
+        assert {card['source_url'] for card in client.get('/api/v3/cards').json()} == {'https://source.test/post/5', 'https://source.test/post/4'}
     posts.insert(0, 6)
     with open_reader() as client:
-        client.post('/api/tabs/reader/heartbeat')
+        presence(client, 'reader')
         for _ in range(100):
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             if len(cards) == 3:
                 break
             time.sleep(.02)
-        assert {card['url'] for card in cards} == {'https://source.test/post/6', 'https://source.test/post/5', 'https://source.test/post/4'}
-        assert client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']['loaded'] == 2
+        assert {card['source_url'] for card in cards} == {'https://source.test/post/6', 'https://source.test/post/5', 'https://source.test/post/4'}
+        assert client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']['progress']['loaded'] == 2
 
 
 def test_date_boundary_uses_user_zone_and_invalid_values_are_rejected(tmp_path):
     with client_for(tmp_path) as client:
         checked = verify(client)
         for history in [{'mode': 'count', 'count': 0}, {'mode': 'count', 'count': 1.5}, {'mode': 'count', 'count': True},
-                        {'mode': 'date', 'count': None, 'date': str(date.today() + timedelta(days=2)), 'timezone': 'Europe/Moscow'},
-                        {'mode': 'date', 'date': '2025-10-01'}, {'mode': 'date', 'count': None, 'date': 'bad'}]:
+                        {'mode': 'date', 'date': str(date.today() + timedelta(days=2)), 'timezone': 'Europe/Moscow'},
+                        {'mode': 'date', 'date': '2025-10-01'}, {'mode': 'date', 'date': 'bad'}]:
             assert add(client, checked, initial_history=history).status_code == 422
-        response = add(client, checked, initial_history={'mode': 'date', 'count': None, 'date': '2025-10-01', 'timezone': 'Europe/Moscow'})
+        response = add(client, checked, initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'Europe/Moscow'})
         assert response.status_code == 200, response.text
-        history = response.json()['initial_history']
-        assert history['since'] == 1759266000.0  # 2025-09-30 21:00 UTC = Oct 1 midnight Moscow
+        history = response.json()['history']
+        assert history['selection'] == {'mode':'date','date':'2025-10-01','timezone':'Europe/Moscow'}  # 2025-09-30 21:00 UTC = Oct 1 midnight Moscow
     with client_for(tmp_path) as client:
-        assert client.get('/api/subscriptions').json()['feeds'][0]['initial_history']['since'] == 1759266000.0
+        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['history']['selection'] == {'mode':'date','date':'2025-10-01','timezone':'Europe/Moscow'}
 
 
 def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
@@ -84,27 +85,27 @@ def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
     with open_reader() as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 4}).json()
         for _ in range(200):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 2:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 2:
                 break
             time.sleep(.01)
-        assert history['loaded'] == 2
-        assert history['available'] == 4
-        assert history['state'] == 'loading'
+        assert history['progress']['loaded'] == 2
+        assert history['progress']['available'] == 4
+        assert history['state'] == 'fetching'
     blocked = False
     posts[:] = [5, 4]  # rotated window omits both remaining selected publications
     with open_reader() as client:
-        assert client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']['loaded'] == 2
-        client.post('/api/tabs/reader/heartbeat')
+        assert client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']['progress']['loaded'] == 2
+        presence(client, 'reader')
         for _ in range(200):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 4:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 4:
                 break
             time.sleep(.01)
-        assert history['loaded'] == 4
-        assert history['available'] == 4
-        assert history['state'] == 'done'
-        assert len(client.get('/api/cards').json()) == 5
+        assert history['progress']['loaded'] == 4
+        assert history['progress']['available'] == 4
+        assert history['state'] == 'complete'
+        assert len(client.get('/api/v3/cards').json()) == 5
 
 
 def test_selected_date_includes_midnight_and_every_later_post(tmp_path):
@@ -118,14 +119,14 @@ def test_selected_date_includes_midnight_and_every_later_post(tmp_path):
             return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>История</title>' + ''.join(f'<entry><id>{n}</id><title>Post {n}</title><link href="https://source.test/post/{n}"/><published>{stamp}</published></entry>' for n, stamp in enumerate(timestamps)) + '</feed>')
         return httpx.Response(200, text='<article>Текст</article>')
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'date', 'count': None, 'date': '2025-10-01', 'timezone': 'Europe/Moscow'}).json()
+        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'Europe/Moscow'}).json()
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 2:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 2:
                 break
             time.sleep(.02)
-        assert history['loaded'] == 2
-        assert {c['url'] for c in client.get('/api/cards').json()} == {'https://source.test/post/1', 'https://source.test/post/2'}
+        assert history['progress']['loaded'] == 2
+        assert {c['source_url'] for c in client.get('/api/v3/cards').json()} == {'https://source.test/post/1', 'https://source.test/post/2'}
 
 
 def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_path):
@@ -143,27 +144,27 @@ def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_pa
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_history=History(['wxyzabcdefg', 'lmnopqrstuv', 'abcdefghijk']), youtube_captions=NoCaptions(), clock=lambda: clock[0], wall_clock=lambda: clock[0], lease=60), headers=HEADERS) as client:
         feed = add(client, verify(client, YOUTUBE), initial_history={'mode': 'count', 'count': 2}).json()
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 1:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 1:
                 break
             time.sleep(.02)
-        assert history['loaded'] == 1
+        assert history['progress']['loaded'] == 1
         clock[0] += 10
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 2:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 2:
                 break
             time.sleep(.02)
-        assert history['loaded'] == 2
-        assert history['state'] == 'done'
-        assert {c['url'] for c in client.get('/api/cards').json()} == {'https://www.youtube.com/watch?v=lmnopqrstuv', 'https://www.youtube.com/watch?v=wxyzabcdefg'}
+        assert history['progress']['loaded'] == 2
+        assert history['state'] == 'complete'
+        assert {c['source_url'] for c in client.get('/api/v3/cards').json()} == {'https://www.youtube.com/watch?v=lmnopqrstuv', 'https://www.youtube.com/watch?v=wxyzabcdefg'}
 
 
 def test_count_has_no_product_limit_and_preserves_large_integer(tmp_path):
     with client_for(tmp_path) as client:
         response = add(client, verify(client), initial_history={'mode': 'count', 'count': '9007199254740993'})
         assert response.status_code == 200, response.text
-        assert response.json()['initial_history']['count'] == 9007199254740993
+        assert response.json()['history']['selection']['count'] == '9007199254740993'
 
 
 def test_rss_unknown_dates_included_and_window_warnings_survive_rotation(tmp_path):
@@ -179,23 +180,23 @@ def test_rss_unknown_dates_included_and_window_warnings_survive_rotation(tmp_pat
     def reader():
         return TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
     with reader() as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'date', 'count': None, 'date': '2025-10-01'}).json()
+        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'UTC'}).json()
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 2:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 2:
                 break
             time.sleep(.02)
-        assert history['loaded'] == 2
-        assert 'полнота истории за период не подтверждена' in ' '.join(history['warnings'])
-        unknown = next(c for c in client.get('/api/cards').json() if c['url'].endswith('/unknown'))
-        assert unknown['published_known'] is False
-        assert unknown['published'] == 0  # no invented publication date
-        assert client.get('/api/materials/' + unknown['id']).json()['published_known'] is False
+        assert history['progress']['loaded'] == 2
+        assert 'полнота истории за период не подтверждена' in ' '.join(history['progress']['warnings'])
+        unknown = next(c for c in client.get('/api/v3/cards').json() if c['source_url'].endswith('/unknown'))
+        assert unknown['published_at'] is None
+        assert unknown['published_at'] is None  # no invented publication date
+        assert client.get('/api/v3/materials/' + unknown['id']).json()['published_at'] is None
     rows[:] = [('later', '2025-10-03T12:00:00Z')]
     with reader() as client:
-        history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-        assert history['available'] == 2
-        assert 'полнота истории за период не подтверждена' in ' '.join(history['warnings'])
+        history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+        assert history['progress']['available'] == 2
+        assert 'полнота истории за период не подтверждена' in ' '.join(history['progress']['warnings'])
 
 
 @pytest.mark.parametrize('dates, warning', [(['', '', ''], True), (['2025-10-03T12:00:00Z', '', '2025-10-01T12:00:00Z'], False), (['2025-10-01T12:00:00Z', '', '2025-10-03T12:00:00Z'], True)])
@@ -211,12 +212,12 @@ def test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 2}).json()
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 2:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 2:
                 break
             time.sleep(.02)
-        assert {c['url'] for c in client.get('/api/cards').json()} == {'https://source.test/first', 'https://source.test/second'}
-        assert ('точность выбора последних N не подтверждена' in ' '.join(history['warnings'])) is warning
+        assert {c['source_url'] for c in client.get('/api/v3/cards').json()} == {'https://source.test/first', 'https://source.test/second'}
+        assert ('точность выбора последних N не подтверждена' in ' '.join(history['progress']['warnings'])) is warning
 
 
 def test_finite_rss_history_reports_requested_and_available_without_archive(tmp_path):
@@ -232,10 +233,10 @@ def test_finite_rss_history_reports_requested_and_available_without_archive(tmp_
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 100}).json()
         for _ in range(100):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['loaded'] == 15:
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['progress']['loaded'] == 15:
                 break
             time.sleep(.02)
-        assert history['count'] == 100
-        assert history['available'] == history['loaded'] == 15
-        assert history['state'] == 'done'
+        assert int(history['selection']['count']) == 100
+        assert history['progress']['available'] == history['progress']['loaded'] == 15
+        assert history['state'] == 'complete'

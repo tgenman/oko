@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 from tests.support.filters import FilterSource, transport, setup_filters
 import json
 from pathlib import Path
@@ -14,26 +15,26 @@ def test_hidden_ads_and_clean_view_preserve_original_and_restore_same_version(tm
     options = dict(source=FilterSource(), token='test', ai_transport=transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         setup_filters(client)
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards').json()) == 2 and all(x['filter']['status'] == 'done' for x in c) else None))
-        all_cards = client.get('/api/cards?show_hidden=true').json()
+        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards').json()) == 2 and all(x['filter']['attempt']['state'] == 'ready' for x in c) else None))
+        all_cards = client.get('/api/v3/cards?show_hidden=true').json()
         assert len(all_cards) == 3
-        hidden = next(c for c in all_cards if c['filter']['hidden'])
-        assert hidden['filter']['reason'] == 'Реклама'
-        mixed = next(c for c in cards if c['url'].endswith('/1'))
-        material = client.get('/api/materials/' + mixed['id']).json()
-        assert material['display_text'] == 'Открылась библиотека. '
-        assert material['text'] == 'Открылась библиотека. Реклама: купите курс.'
-        assert sum(f['count'] for f in client.get('/api/folders').json()) == 2
-        assert client.post('/api/materials/' + hidden['id'] + '/filter/restore').status_code == 200
-        client.patch('/api/settings/oko/global', json={'prompt_filters': 'Ещё раз убирай рекламу.'})
-        wait_for(client, lambda: all(c.get('filter', {}).get('status') == 'done' for c in client.get('/api/cards').json()))
-        assert len(client.get('/api/cards').json()) == 3
-        assert client.get('/api/materials/' + hidden['id']).json()['filter']['restored']
+        hidden = next(c for c in all_cards if c['filter']['result']['hidden'])
+        assert hidden['filter']['result']['reason'] == 'Реклама'
+        mixed = next(c for c in cards if c['source_url'].endswith('/1'))
+        material = client.get('/api/v3/materials/' + mixed['id']).json()
+        assert material['content']['display_text'] == 'Открылась библиотека. '
+        assert material['content']['text'] == 'Открылась библиотека. Реклама: купите курс.'
+        assert sum(f['count'] for f in client.get('/api/v3/folders').json()) == 2
+        assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore').status_code == 200
+        client.patch('/api/v3/settings/oko/global', json={'prompt_filters': 'Ещё раз убирай рекламу.'})
+        wait_for(client, lambda: all(c['filter']['attempt']['state'] == 'ready' for c in client.get('/api/v3/cards').json()))
+        assert len(client.get('/api/v3/cards').json()) == 3
+        assert client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert len(client.get('/api/cards').json()) == 3
-        assert client.get('/api/materials/' + hidden['id']).json()['filter']['restored']
-        client.post('/api/materials/' + hidden['id'] + '/viewed')
-        assert client.get('/api/materials/' + hidden['id']).status_code == 404
+        assert len(client.get('/api/v3/cards').json()) == 3
+        assert client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
+        client.post('/api/v3/materials/' + hidden['id'] + '/viewed')
+        assert client.get('/api/v3/materials/' + hidden['id']).status_code == 404
         assert not (tmp_path / 'content' / hidden['id']).exists()
 
 
@@ -41,8 +42,8 @@ def test_theses_receive_clean_text_and_hidden_material_is_not_summarized(tmp_pat
     calls = []
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport(calls, theses=True)), headers=HEADERS) as client:
         setup_filters(client)
-        client.patch('/api/settings/oko/global', json={'theses': True})
-        wait_for(client, lambda: all(c.get('theses') for c in client.get('/api/cards').json()))
+        client.patch('/api/v3/settings/oko/global', json={'theses': True})
+        wait_for(client, lambda: all(c['theses']['result'] for c in client.get('/api/v3/cards').json()))
         inputs = [json.loads(json.loads(r.content)['messages'][1]['content']) for r in calls if r.url.path == '/v1/chat/completions']
         texts = {p['sources'][0]['text'] for p in inputs if p['operation'] == 'theses'}
         assert texts == {'Открылась библиотека. ', 'Изменён закон о выборах.'}
@@ -57,14 +58,14 @@ def test_unknown_filter_fragment_is_error_and_forbidden_ai_sends_nothing(tmp_pat
         return native.handler(request)
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         setup_filters(client)
-        item = client.get('/api/cards').json()[0]['id']
-        material = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json())['filter'].get('error') else None))
-        assert 'отсутствующий фрагмент' in material['filter']['error']
-        assert material['display_text'] == material['text']
-        assert len(client.get('/api/cards').json()) == 3
-        client.put('/api/processors/llamacpp', json={'endpoint': 'https://remote.example.org', 'model': 'local:latest', 'local_execution': True})
-        material = wait_for(client, lambda: (m if 'Запрещена публичная' in ((m := client.get('/api/materials/' + item).json())['filter'].get('error') or '') else None))
-        assert material['filter']['status'] == 'pending'
+        item = client.get('/api/v3/cards').json()[0]['id']
+        material = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['filter']['diagnostic_message'] else None))
+        assert 'отсутствующий фрагмент' in material['filter']['diagnostic_message']
+        assert material['content']['display_text'] == material['content']['text']
+        assert len(client.get('/api/v3/cards').json()) == 3
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://remote.example.org', 'model': 'local:latest', 'local_execution': True})
+        material = wait_for(client, lambda: (m if 'Запрещена публичная' in ((m := client.get('/api/v3/materials/' + item).json())['filter']['diagnostic_message'] or '') else None))
+        assert material['filter']['attempt']['state'] == 'waiting'
         assert not any(r.url.host == 'remote.example.org' and r.url.path == '/v1/chat/completions' for r in calls)
 
 
@@ -92,18 +93,18 @@ def test_filter_delete_and_stop_reject_cancel_resistant_late_reply(tmp_path):
         setup_filters(client)
         assert held.started.wait(2)
         # First item is wholly advertising; the late answer would hide it.
-        item = next(c['id'] for c in client.get('/api/cards').json() if c['url'].endswith('/0'))
-        client.post('/api/materials/' + item + '/viewed')
-        client.post('/api/stop')
+        item = next(c['id'] for c in client.get('/api/v3/cards').json() if c['source_url'].endswith('/0'))
+        client.post('/api/v3/materials/' + item + '/viewed')
+        client.post('/api/v3/stop')
         held.release.set()
         time.sleep(.15)
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport([])), headers=HEADERS) as client:
-        assert client.get('/api/materials/' + item).status_code == 404
-        client.post('/api/tabs/reader/heartbeat')
-        wait_for(client, lambda: all(c['filter']['status'] == 'done' for c in client.get('/api/cards').json()))
-        assert len(client.get('/api/cards?show_hidden=true').json()) == 2
+        assert client.get('/api/v3/materials/' + item).status_code == 404
+        presence(client, 'reader')
+        wait_for(client, lambda: all(c['filter']['attempt']['state'] == 'ready' for c in client.get('/api/v3/cards').json()))
+        assert len(client.get('/api/v3/cards?show_hidden=true').json()) == 2
 
 
 def test_filter_missing_file_retries_without_losing_user_correction(tmp_path):
@@ -111,16 +112,16 @@ def test_filter_missing_file_retries_without_losing_user_correction(tmp_path):
     options = dict(source=FilterSource(), token='test', ai_transport=transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         setup_filters(client)
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards?show_hidden=true').json()) == 3 and all(x['filter']['status'] == 'done' for x in c) else None))
-        item = next(c['id'] for c in cards if c['filter']['hidden'])
-        client.post('/api/materials/' + item + '/filter/restore')
+        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c) else None))
+        item = next(c['id'] for c in cards if c['filter']['result']['hidden'])
+        client.post('/api/v3/materials/' + item + '/filter/restore')
     (tmp_path / 'content' / item / '1' / 'filter.md').unlink()
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        result = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json())['filter']['status'] == 'done' else None))
-        assert result['filter']['restored']
-        assert not result['filter']['hidden']
-        assert len(client.get('/api/cards').json()) == 3
+        presence(client, 'reader')
+        result = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['filter']['attempt']['state'] == 'ready' else None))
+        assert result['filter']['result']['restored']
+        assert not result['filter']['result']['hidden']
+        assert len(client.get('/api/v3/cards').json()) == 3
 
 
 def test_restore_applies_only_to_original_version_and_media_survive_filter(tmp_path):
@@ -133,17 +134,17 @@ def test_restore_applies_only_to_original_version_and_media_survive_filter(tmp_p
     source = ChangingSource()
     with TestClient(create_app(tmp_path, source=source, token='test', ai_transport=transport([])), headers=HEADERS) as client:
         setup_filters(client)
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/cards?show_hidden=true').json()) == 3 and all(x['filter']['status'] == 'done' for x in c) else None))
-        hidden = next(c for c in cards if c['filter']['hidden'])
+        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c) else None))
+        hidden = next(c for c in cards if c['filter']['result']['hidden'])
         item = hidden['id']
         assert client.get(hidden['attachments'][0]['url']).content == b'attachment'
-        client.post('/api/materials/' + item + '/filter/restore')
+        client.post('/api/v3/materials/' + item + '/filter/restore')
         source.revision = True
-        client.post('/api/materials/' + item + '/retry')
-        result = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('version') != hidden['version'] and m['filter']['status'] == 'done' else None))
-        assert result['filter']['hidden']
-        assert not result['filter']['restored']
-        client.post('/api/materials/' + item + '/viewed')
+        client.post('/api/v3/materials/' + item + '/retry')
+        result = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['content']['version'] != hidden['version'] and m['filter']['attempt']['state'] == 'ready' else None))
+        assert result['filter']['result']['hidden']
+        assert not result['filter']['result']['restored']
+        client.post('/api/v3/materials/' + item + '/viewed')
         assert client.get(hidden['attachments'][0]['url']).status_code == 404
 
 
@@ -172,19 +173,19 @@ def test_process_death_after_filter_move_does_not_publish_orphan(tmp_path):
     process = launch(tmp_path, 'after_filter_move', model_origin=f'http://127.0.0.1:{server.server_port}')
     try:
         with connect(tmp_path, process) as client:
-            client.post('/api/tabs/a/heartbeat')
+            presence(client, 'a')
             item = wait_cards(client, 3)[0]['id']
-            client.put('/api/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
-            client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'prompt_filters': 'Скрыть тестовые публикации.'})
+            client.put('/api/v3/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
+            client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'prompt_filters': 'Скрыть тестовые публикации.'})
         assert process.wait(timeout=5) == 79
         process = launch(tmp_path, model_origin=f'http://127.0.0.1:{server.server_port}')
         with connect(tmp_path, process) as client:
-            assert len(client.get('/api/cards').json()) == 3
-            assert client.get('/api/materials/' + item).json()['filter']['status'] == 'pending'
-            client.post('/api/tabs/a/heartbeat')
-            wait_for(client, lambda: len(client.get('/api/cards').json()) == 0)
-            assert len(client.get('/api/cards?show_hidden=true').json()) == 3
-            client.post('/api/materials/' + item + '/viewed')
+            assert len(client.get('/api/v3/cards').json()) == 3
+            assert client.get('/api/v3/materials/' + item).json()['filter']['attempt']['state'] == 'queued'
+            presence(client, 'a')
+            wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 0)
+            assert len(client.get('/api/v3/cards?show_hidden=true').json()) == 3
+            client.post('/api/v3/materials/' + item + '/viewed')
             assert not (tmp_path / 'content' / item).exists()
     finally:
         cleanup(process)
@@ -206,10 +207,10 @@ def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', codex_client=service), headers=HEADERS) as client:
         configure_codex(client)
         setup_filters(client)
-        client.patch('/api/settings/oko/global', json={'processor': 'codex'})
-        item = client.get('/api/cards').json()[0]['id']
-        wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/materials/' + item).json()['filter'].get('error') or ''))
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'codex'})
+        item = client.get('/api/v3/cards').json()[0]['id']
+        wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/v3/materials/' + item).json()['filter']['diagnostic_message'] or ''))
         assert service.inputs == []
-        client.patch('/api/feeds/demo', json={'public_ai': True})
-        wait_for(client, lambda: len(client.get('/api/cards').json()) == 0)
+        client.patch('/api/v3/feeds/demo', json={'public_ai': True})
+        wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 0)
         assert len(service.inputs) == 3

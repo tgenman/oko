@@ -17,7 +17,8 @@ def test_legacy_history_preserves_boundaries_and_only_current_enrollment():
     assert cursor.selection.error == 'retry'
     assert cursor.selection.retry_at == 99.0
     assert cursor.selection.oldest == 171
-    assert cursor.position == dict(after=240, upper=200, before=170, since=10.5, enrolled=3, lane='live')
+    assert cursor.selection.since == 10.5
+    assert cursor.position == dict(after=240, upper=200, before=170, enrolled=3, lane='live')
     restored = HistoryEnvelope.decode(cursor.encode(), adapter='client')
     assert restored == cursor
     assert old['history_enroll'] == ['album-7']

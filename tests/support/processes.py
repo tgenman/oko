@@ -25,13 +25,13 @@ class ProcessClock:
         temporary.replace(self.path)
 
 
-def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = '', clock: ProcessClock | None = None):
+def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = '', clock: ProcessClock | None = None, api_only: bool = False):
     env = dict(os.environ, PYTHONPATH=str(ROOT), OKO_TEST_FAULT=fault, OKO_TEST_MODEL_ORIGIN=model_origin,
                OKO_TEST_CLOCK=str(clock.path) if clock else '')
     logs = root / 'process-logs'
     logs.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(dir=logs, prefix='server-', suffix='.log', delete=False) as output:
-        process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--data', str(root), '--no-browser', '--demo', '--lease', lease, '--grace', grace], env=env, stdout=output, stderr=subprocess.STDOUT)
+        process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--data', str(root), '--no-browser', '--demo', '--lease', lease, '--grace', grace, *(['--api-only'] if api_only else [])], env=env, stdout=output, stderr=subprocess.STDOUT)
         process.log_path = Path(output.name)
     return process
 
@@ -49,7 +49,7 @@ def connect(root: Path, process):
         try:
             metadata = json.loads((root / 'runtime.json').read_text())
             with httpx.Client(base_url=metadata['url'], headers={'Authorization': 'Bearer ' + metadata['token']}, timeout=2) as client:
-                client.get('/api/status').raise_for_status()
+                client.get('/api/v3/status').raise_for_status()
             return httpx.Client(base_url=metadata['url'], headers={'Authorization': 'Bearer ' + metadata['token']}, timeout=2)
         except (OSError, ValueError, httpx.HTTPError):
             if process.poll() is not None:
@@ -60,8 +60,8 @@ def connect(root: Path, process):
 
 def wait_cards(client, count):
     for _ in range(250):
-        cards = client.get('/api/cards').json()
-        if len(cards) == count and all(c['complete'] for c in cards):
+        cards = client.get('/api/v3/cards').json()
+        if len(cards) == count and all((c['availability'] == 'available') for c in cards):
             return cards
         time.sleep(.02)
     raise AssertionError(cards)

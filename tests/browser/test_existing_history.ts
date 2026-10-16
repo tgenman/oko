@@ -9,7 +9,7 @@ test('legacy feed shows only known history settings and saving does not change i
     await r.page.evaluate(() => {
       const t = readerTransport;
       const feed = {id: 'legacy', title: 'Старый фид', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal', initial_days: 7, initial_history: null};
-      t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
+      t.replies.set('/api/v3/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/v3/feeds/verify', {body: {url: feed.original_urls[0], title: feed.title, kind: 'rss', verification: 'checked', existing: feed}});
       t.replies.set('/api/v3/settings/feed/legacy', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
       t.replies.set('/api/v3/feeds/legacy', {body: feed});
@@ -36,7 +36,7 @@ test('legacy settings show the actual frozen boundary instead of mutable days', 
     await r.page.evaluate(() => {
       const t = readerTransport;
       const feed = {id:'legacy', title:'Старый фид', kind:'rss', transport:'rss', folder_id:'f', original_urls:['https://source.test/feed'], importance:'normal', initial_days:7, initial_history:null, legacy_since:1759352400};
-      t.replies.set('/api/subscriptions', {body:{folders:[{id:'f',title:'Учёба'}], feeds:[feed]}});
+      t.replies.set('/api/v3/subscriptions', {body:{folders:[{id:'f',title:'Учёба'}], feeds:[feed]}});
       t.replies.set('/api/v3/settings/feed/legacy', {body:{...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
     await r.page.locator('#feeds-open').click();

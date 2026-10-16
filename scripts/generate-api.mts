@@ -17,10 +17,10 @@ if (['validate','docs'].includes(command)) {
 }
 if (!['generate','check'].includes(command)) throw new Error('Expected generate or check');
 const cacheInputs = ['api', 'scripts/api.py', 'scripts/api-cache.mts',
-  'scripts/api-templates', 'scripts/generate-api.mts', 'scripts/generate_api.py', 'scripts/legacy_api.py',
+  'scripts/api-templates', 'scripts/generate-api.mts', 'scripts/generate_api.py',
   'pyproject.toml', 'uv.lock',
-  'frontend/src/api/generated', 'frontend/src/api/legacy-generated',
-  'oko/reader/generated', 'oko/reader/legacy_generated'];
+  'frontend/src/api/generated',
+  'oko/reader/generated'];
 const key = async () => fingerprint(root, cacheInputs, {environment: await toolchain(root, python)});
 const before = await key();
 if (command === 'check' && !process.argv.includes('--fresh') && await cached(root, 'api', before) && before === await key()) {
@@ -31,14 +31,8 @@ const {createClient} = await import('@hey-api/openapi-ts');
 // bundle runs the same validation as validate; reuse its canonical bytes.
 const canonicalBytes = execFileSync(python, [path.join(root,'scripts/api.py'),'bundle']);
 execFileSync(python, [path.join(root,'scripts/generate_api.py'),command], {stdio:'inherit'});
-// Expand–contract only: regenerate remaining v2 consumers from the unchanged
-// v2 schema. Remove this bridge after the final v3 consumer migrates.
-const canonical = JSON.parse(canonicalBytes.toString());
-const transitional = canonical.info.version.startsWith('3.');
-if (transitional) execFileSync(python,[path.join(root,'scripts/generate_api.py'),command,'--schema',path.join(root,'api/baseline.json'),'--output',path.join(root,'oko/reader/legacy_generated')],{stdio:'inherit'});
-for (const legacy of (transitional ? [false,true] : [false])) {
 const temporary = await mkdtemp(path.join(tmpdir(),'oko-sdk-'));
-const saved = path.join(root,legacy ? 'frontend/src/api/legacy-generated' : 'frontend/src/api/generated');
+const saved = path.join(root,'frontend/src/api/generated');
 async function files(directory: string, prefix=''): Promise<Map<string, Buffer>> {
   const result = new Map<string, Buffer>();
   for (const entry of await readdir(directory,{withFileTypes:true})) {
@@ -49,7 +43,7 @@ async function files(directory: string, prefix=''): Promise<Map<string, Buffer>>
   return result;
 }
 try {
-  const bundle = legacy ? execFileSync(python,[path.join(root,'scripts/legacy_api.py'),path.join(root,'api/baseline.json')]) : canonicalBytes;
+  const bundle = canonicalBytes;
   const digest = createHash('sha256').update(bundle).digest('hex');
   const source = path.join(temporary,'openapi.json');
   await writeFile(source,bundle);
@@ -86,8 +80,6 @@ try {
     process.stdout.write('TypeScript API library is current\n');
   }
 } finally {await rm(temporary,{recursive:true,force:true});}
-
-}
 
 if (command === 'check') {
   if (before !== await key()) throw new Error('API inputs changed during checking; retry');

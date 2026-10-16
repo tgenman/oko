@@ -1,4 +1,6 @@
 """Read a real pre-removal YouTube snapshot without recollection or regeneration."""
+from tests.support.upgrade import saved_material, saved_theses
+from tests.support.presence import presence, close_presence
 import json
 import sqlite3
 from pathlib import Path
@@ -44,20 +46,24 @@ def test_upgrade_preserves_youtube_caption_theses_after_metadata_revision(tmp_pa
                          rss_transport=transport, ai_transport=transport,
                          youtube_captions=UnexpectedCaptions())
         with TestClient(app, headers={'Authorization': 'Bearer test'}) as client:
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             assert [card['id'] for card in cards] == [expected['id']]
-            response = client.get('/api/materials/' + expected['id'])
+            response = client.get('/api/v3/materials/' + expected['id'])
             assert response.status_code == 200
             material = response.json()
-            for field in ('title', 'text', 'version', 'captions', 'theses', 'provenance', 'filter', 'images', 'previous'):
-                assert material[field] == expected[field], field
-            for version, saved in zip(material['previous'], fixture['previous'], strict=True):
+            saved_material(material,expected)
+            assert material['title']==expected['title']
+            assert material['source']['captions']==expected['captions']
+            for version, saved in zip(material['content']['previous_versions'], fixture['previous'], strict=True):
                 response = client.get(version['url'])
                 assert response.status_code == 200
                 previous = response.json()
-                assert previous == saved
+                assert previous['text']==saved['text'] and previous['title']==saved['title']
+                assert previous['completeness']['state']==('complete' if saved['full'] else 'incomplete')
+                assert previous['images']==[url.replace('/api/materials/','/api/v3/materials/',1) for url in saved['images']]
+                assert previous['attachments']==saved['attachments']
             for url, contents in fixture['media'].items():
-                response = client.get(url)
+                response = client.get(url.replace('/api/materials/','/api/v3/materials/',1))
                 assert response.status_code == 200
                 assert response.content == bytes.fromhex(contents)
         assert calls == []
@@ -96,9 +102,8 @@ def test_upgrade_preserves_caption_theses_while_filter_blocks_reading(tmp_path, 
     with TestClient(create_app(tmp_path, token='test', ai_transport=httpx.MockTransport(response)), headers={'Authorization': 'Bearer test'}) as client:
         expected = fixture['expected']
         if filter_state == 'hidden':
-            assert client.post('/api/materials/' + expected['id'] + '/filter/restore').status_code == 200
-        client.post('/api/tabs/test/heartbeat')
-        material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + expected['id']).json()).get('theses') else None)
-        assert material['theses'] == expected['theses']
-        assert material['provenance'] == expected['provenance']
+            assert client.post('/api/v3/materials/' + expected['id'] + '/filter/restore').status_code == 200
+        presence(client, 'test')
+        material = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + expected['id']).json())['theses']['result'] else None)
+        saved_theses(material,expected['theses'],expected['provenance'])
         assert calls == (['filter'] if filter_state == 'pending' else [])

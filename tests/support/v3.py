@@ -11,7 +11,13 @@ class TestClient(BaseClient):
         response = super().request(method, url, **kwargs)
         path = str(url).split("?")[0]
         if path.startswith("/api/v3/"):
-            route = next(key for key in SPEC["paths"] if re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", key), path))
+            route = next((key for key in SPEC["paths"] if re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", key), path)), None)
+            if route is None:
+                assert response.status_code == 404, response.text
+                return response
+            if method.lower() not in SPEC["paths"][route]:
+                assert response.status_code == 405, response.text
+                return response
             content = SPEC["paths"][route][method.lower()]["responses"][str(response.status_code)].get("content", {})
             if "application/json" in response.headers.get("content-type", ""):
                 schema = content["application/json"]["schema"]

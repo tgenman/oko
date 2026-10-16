@@ -1,4 +1,5 @@
 """Reader actions through the agreed HTTP interface and external-source seam."""
+from tests.support.presence import presence, close_presence
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -37,29 +38,29 @@ def test_viewed_and_feed_deletion_wait_for_one_cleanup(tmp_path: Path):
             self.closing = False
     app = create_app(tmp_path, token='test-token', telegram_client=Client())
     with TestClient(app, headers=HEADERS, raise_server_exceptions=False) as client:
-        client.post('/api/tabs/a/heartbeat')
-        client.post('/api/tabs/b/heartbeat')
+        presence(client, 'a')
+        presence(client, 'b')
         feed = connect(client)
         assert downloading.wait(2)
-        item = client.get('/api/cards').json()[0]['id']
+        item = client.get('/api/v3/cards').json()[0]['id']
         with ThreadPoolExecutor(max_workers=2) as pool:
-            viewed = pool.submit(client.post, '/api/materials/' + item + '/viewed')
+            viewed = pool.submit(client.post, '/api/v3/materials/' + item + '/viewed')
             try:
                 assert cleaning.wait(2)
                 switched = pool.submit(client.delete, '/api/v3/feeds/' + feed['id'])
                 # Queries remain usable while cleanup is waiting.
-                assert client.get('/api/materials/' + item).status_code == 404
-                assert client.get('/api/subscriptions').status_code == 200
+                assert client.get('/api/v3/materials/' + item).status_code == 404
+                assert client.get('/api/v3/subscriptions').status_code == 200
                 time.sleep(.05)
             finally:
                 release.set()
             assert viewed.result(timeout=2).status_code == 200
             assert switched.result(timeout=2).status_code == 200
         for _ in range(100):
-            if not client.get('/api/subscriptions').json()['feeds']: break
+            if not client.get('/api/v3/subscriptions').json()['feeds']: break
             time.sleep(.02)
-        assert not client.get('/api/subscriptions').json()['feeds']
-        assert client.get('/api/cards').json() == []
+        assert not client.get('/api/v3/subscriptions').json()['feeds']
+        assert client.get('/api/v3/cards').json() == []
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
 
@@ -77,36 +78,36 @@ def test_stop_does_not_wait_for_connect_and_rejects_late_metadata(tmp_path: Path
             return await super().info(account, peer)
     kwargs = dict(token='test-token', telegram_client=Client())
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        client.post('/api/tabs/a/heartbeat')
+        presence(client, 'a')
         configure(client)
         with ThreadPoolExecutor(max_workers=1) as pool:
-            pending = pool.submit(client.post, '/api/telegram/connect', json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=False))
+            pending = pool.submit(client.post, '/api/v3/telegram/connect', json=dict(source_locator='@fixture', access={'kind':'client','profile':'personal'},folder='Новости',auto_read=False))
             try:
                 assert connecting.wait(2)
                 started = time.monotonic()
-                assert client.post('/api/stop').status_code == 200
+                assert client.post('/api/v3/stop').status_code == 200
                 assert time.monotonic()-started < .8
             finally:
                 release.set()
             assert pending.result(timeout=2).status_code == 409
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        assert client.get('/api/subscriptions').json()['feeds'] == []
+        assert client.get('/api/v3/subscriptions').json()['feeds'] == []
 
 
 def test_repeated_close_does_not_extend_shutdown_grace(tmp_path: Path):
     from tests.support.reader import Clock
     clock = Clock()
     with TestClient(create_app(tmp_path, token='test-token', clock=clock), headers=HEADERS) as client:
-        client.post('/api/tabs/a/heartbeat')
-        client.post('/api/tabs/a/close')
+        presence(client, 'a')
+        close_presence(client, 'a')
         clock.now += 10
-        client.post('/api/tabs/a/close')
+        close_presence(client, 'a')
         clock.now += 5
         for _ in range(100):
-            if client.get('/api/status').json()['stopped']:
+            if client.get('/api/v3/status').json()['runtime_state'] == 'stopped':
                 break
             time.sleep(.01)
-        assert client.get('/api/status').json()['stopped'] is True
+        assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
 
 
 def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
@@ -120,21 +121,21 @@ def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
             return self.rows
     source = Client()
     with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'theses': False})
-        client.post('/api/tabs/a/heartbeat')
+        client.patch('/api/v3/settings/oko/global', json={'theses': False})
+        presence(client, 'a')
         connect(client)
         card = settled(client)[0]
         # External loss of a stored file must not turn a preparation failure into
         # an unhandled task exception which closes the whole reader.
         next((tmp_path / 'content' / card['id']).glob('*/media-11.jpg')).unlink()
         source.rows = source.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=None)]
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         for _ in range(100):
-            state = client.get('/api/status').json()
-            if state['errors'] or state['stopped']:
+            state = client.get('/api/v3/status').json()
+            if any(p['code']=='material_read_failed' for p in state['problems']['current']) or state['runtime_state']=='stopped':
                 break
             time.sleep(.01)
-        assert state['stopped'] is False
-        assert state['errors'] == ['Ошибка сбора']
-        assert client.get('/api/cards').status_code == 200
-        assert client.post('/api/materials/' + card['id'] + '/viewed').status_code == 200
+        assert state['runtime_state']=='running'
+        assert any(p['code']=='material_read_failed' for p in state['problems']['current'])
+        assert client.get('/api/v3/cards').status_code == 200
+        assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200

@@ -584,6 +584,13 @@ class ProblemCode(
             "material_read_failed",
             "feed_delete_failed",
             "telegram_read_failed",
+            "profile_not_configured",
+            "profile_unavailable",
+            "account_identity_mismatch",
+            "source_identity_conflict",
+            "duplicate_source",
+            "profile_in_use",
+            "profile_account_conflict",
         ]
     ]
 ):
@@ -604,6 +611,13 @@ class ProblemCode(
         "material_read_failed",
         "feed_delete_failed",
         "telegram_read_failed",
+        "profile_not_configured",
+        "profile_unavailable",
+        "account_identity_mismatch",
+        "source_identity_conflict",
+        "duplicate_source",
+        "profile_in_use",
+        "profile_account_conflict",
     ] = Field(..., examples=["processor_not_configured"])
 
 
@@ -969,6 +983,7 @@ class WaitingReason(
             "storage_unavailable",
             "client_presence_required",
             "retry_scheduled",
+            "telegram_read_frontier",
         ]
     ]
 ):
@@ -983,6 +998,7 @@ class WaitingReason(
         "storage_unavailable",
         "client_presence_required",
         "retry_scheduled",
+        "telegram_read_frontier",
     ] = Field(..., examples=["processor_unavailable"])
 
 
@@ -2815,6 +2831,30 @@ class CodexProcessorState(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: CodexAvailability
     configuration: CodexConfiguration | None
+
+
+class Collect409Errors(RootModel[RuntimeStoppedError | DeletionInProgressError]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: RuntimeStoppedError | DeletionInProgressError = Field(
+        ...,
+        discriminator="code",
+        examples=[
+            {
+                "code": "runtime_stopped",
+                "command_id": None,
+                "details": None,
+                "diagnostic_id": None,
+                "message": "example",
+            },
+            {
+                "code": "deletion_in_progress",
+                "command_id": None,
+                "details": {"feed_id": "example"},
+                "diagnostic_id": None,
+                "message": "example",
+            },
+        ],
+    )
 
 
 class CommandReceiptAbandoned(WireModel):

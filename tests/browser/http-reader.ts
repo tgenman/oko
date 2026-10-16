@@ -33,8 +33,8 @@ export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>
     t?.signal.throwIfAborted();
     const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
     async function api<P extends string>(url: P,method='GET',body?: unknown): Promise<ApiReply<P>> {
-      const response=await fetch(origin+'/api/'+url,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
-      assert.equal(response.status,200,await response.clone().text()); return response.json();
+      const response=await fetch(origin+'/api/'+(url.startsWith('v3/')?url:'v3/'+url),{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+      assert.equal(response.status,method==='POST'&&url.replace(/^v3\//,'')==='client-sessions'?201:200,await response.clone().text()); return response.json();
     }
     const page=await readyContext.newPage();
     t?.signal.throwIfAborted();

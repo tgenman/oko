@@ -12,9 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @lru_cache(maxsize=1)
 def bundled():
-    # Legacy HTTP handlers still use the reviewed v2 DTOs during v3 migration.
-    # Full checks independently regenerate and validate both libraries.
-    return json.loads((ROOT / 'oko/reader/legacy_generated/openapi.json').read_text())
+    return json.loads((ROOT / 'oko/reader/generated/openapi.json').read_text())
 
 
 def validate_reply(spec, path, method, response):
@@ -22,23 +20,24 @@ def validate_reply(spec, path, method, response):
     Draft202012Validator(dict(schema, components=spec['components'])).validate(response.json())
 
 
-def test_legacy_contract_covers_real_reader_routes_and_responses(tmp_path):
+def test_v3_contract_covers_all_real_reader_routes_and_responses(tmp_path):
     spec = bundled()
     with TestClient(create_app(tmp_path, token='synthetic')) as client:
-        routes = {(route.path, method.lower()) for route in client.app.routes if getattr(route, 'path', '').startswith('/api/') and not route.path.startswith('/api/v3/') for method in route.methods}
+        routes = {(path,method) for path, methods in client.app.openapi()['paths'].items() if path.startswith('/api/v3/') for method in methods if method in {'get','post','put','patch','delete'}}
         described = {(path, method) for path, operations in spec['paths'].items() for method in operations if method in {'get','post','put','patch','delete'}}
         assert described == routes
+        assert len(routes) == 50
         assert len({operation['operationId'] for operations in spec['paths'].values() for operation in operations.values()}) == len(routes)
-        for path in ['/api/status', '/api/navigation', '/api/cards', '/api/subscriptions', '/api/settings/oko/global', '/api/youtube', '/api/debug']:
+        for path in ['/api/v3/status', '/api/v3/reading-composition', '/api/v3/cards', '/api/v3/subscriptions', '/api/v3/settings/oko/global', '/api/v3/youtube', '/api/v3/diagnostics']:
             response = client.get(path, headers={'Authorization':'Bearer synthetic'})
             assert response.status_code == 200
-            validate_reply(spec, '/api/settings/{scope}/{owner}' if path.startswith('/api/settings/') else path, 'get', response)
-        response = client.get('/api/status')
+            validate_reply(spec, '/api/v3/settings/{scope}/{owner}' if path.startswith('/api/v3/settings/') else path, 'get', response)
+        response = client.get('/api/v3/status')
         assert response.status_code == 403
-        validate_reply(spec, '/api/status', 'get', response)
-        response = client.patch('/api/settings/oko/global',json={'theses':'wrong'},headers={'Authorization':'Bearer synthetic'})
+        validate_reply(spec, '/api/v3/status', 'get', response)
+        response = client.patch('/api/v3/settings/oko/global',json={'theses':'wrong'},headers={'Authorization':'Bearer synthetic'})
         assert response.status_code == 422
-        validate_reply(spec, '/api/settings/{scope}/{owner}', 'patch', response)
+        validate_reply(spec, '/api/v3/settings/{scope}/{owner}', 'patch', response)
 
 
 def test_real_settings_diagnostics_and_exact_history_obey_contract(tmp_path):
@@ -48,24 +47,24 @@ def test_real_settings_diagnostics_and_exact_history_obey_contract(tmp_path):
     headers = {'Authorization':'Bearer synthetic'}
     with TestClient(create_app(tmp_path, token='synthetic')) as client:
         for payload in [{'prompt_theses':'Synthetic'}, {'prompt_theses':None}, {}]:
-            response = client.patch('/api/settings/oko/global', json=payload, headers=headers)
+            response = client.patch('/api/v3/settings/oko/global', json=payload, headers=headers)
             assert response.status_code == 200
-            validate_reply(spec, '/api/settings/{scope}/{owner}', 'patch', response)
-        response = client.post('/api/debug', json={'source':'synthetic','message':'example'}, headers=headers)
+            validate_reply(spec, '/api/v3/settings/{scope}/{owner}', 'patch', response)
+        response = client.post('/api/v3/diagnostics', json={'source':'synthetic','message':'example'}, headers=headers)
         assert response.status_code == 200
-        validate_reply(spec, '/api/debug', 'post', response)
+        validate_reply(spec, '/api/v3/diagnostics', 'post', response)
         assert response.json()['entry']['message'] == 'example'
-        feed = client.get('/api/subscriptions', headers=headers).json()['feeds'][0]['id']
-        response = client.post(f'/api/feeds/{feed}/history',json={'mode':'count','count':'9007199254740993'},headers=headers)
+        feed = client.get('/api/v3/subscriptions', headers=headers).json()['feeds'][0]['id']
+        response = client.post(f'/api/v3/feeds/{feed}/history',json={'mode':'count','count':'9007199254740993'},headers=headers)
         assert response.status_code == 200
-        validate_reply(spec,'/api/feeds/{identity}/history','post',response)
-        assert response.json()['count_text'] == '9007199254740993'
-        response = client.patch(f'/api/feeds/{feed}/history',json={'paused':True},headers=headers)
+        validate_reply(spec,'/api/v3/feeds/{identity}/history','post',response)
+        assert response.json()['history']['selection']['count'] == '9007199254740993'
+        response = client.patch(f'/api/v3/feeds/{feed}/history',json={'paused':True},headers=headers)
         assert response.status_code == 200
-        validate_reply(spec,'/api/feeds/{identity}/history','patch',response)
-        response = client.delete(f'/api/feeds/{feed}/history',headers=headers)
+        validate_reply(spec,'/api/v3/feeds/{identity}/history','patch',response)
+        response = client.delete(f'/api/v3/feeds/{feed}/history',headers=headers)
         assert response.status_code == 200
-        validate_reply(spec,'/api/feeds/{identity}/history','delete',response)
-        response = client.get('/api/materials/absent',headers=headers)
+        validate_reply(spec,'/api/v3/feeds/{identity}/history','delete',response)
+        response = client.get('/api/v3/materials/absent',headers=headers)
         assert response.status_code == 404
-        validate_reply(spec,'/api/materials/{item}','get',response)
+        validate_reply(spec,'/api/v3/materials/{item}','get',response)

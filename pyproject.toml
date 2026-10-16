@@ -7,6 +7,7 @@ dependencies = [
     "pydantic==2.13.5",
     "uvicorn==0.54.0",
     "httpx==0.28.1",
+    "httpcore==1.0.9",
     "telethon==1.45.0",
     "python-dotenv==1.2.2",
     "python-socks[asyncio]==2.8.2",

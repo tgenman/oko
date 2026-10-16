@@ -9,13 +9,14 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 import secrets
 import sqlite3
+import shutil
 import time
 from typing import Any, Literal, TypeVar
 
 import httpx
 
 from oko.collection.rss import RSSSource, feed_title, normalized
-from oko.collection.contracts import SourceError, SourceDeleted, SourceSkipped
+from oko.collection.contracts import SourceError, SourceDeleted, SourceSkipped, DownloadStage
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
@@ -25,7 +26,8 @@ from oko.reviews.coordination import PreparedWork
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
-from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram, TelegramPeer
+from oko.collection.telegram.web import WebTelegram
+from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, identify
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions
 from oko.collection.youtube.history import HistoryClient
@@ -79,7 +81,11 @@ class Runtime:
         self._error: str | None = None
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=self._wall_clock())
         self._viewed_ids: list[str] = []
-        self._active: asyncio.Task[None] | None = None
+        self._lanes: dict[str, asyncio.Task[None]] = {}
+        self._account_retry: dict[int, float] = {}
+        self._restored_wait_feeds: set[str] = set()
+        self._lane_feeds: dict[str, str] = {}
+        self._ai_feed: str | None = None
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()
         self._detached_ai: set[asyncio.Task[None]] = set()
@@ -95,19 +101,24 @@ class Runtime:
             if not self._live() and not self.stopped:
                 await self._cancel()
 
-    async def _cancel(self) -> None:
-        self._cancelling += 1
-        self._epoch += 1
-        for request in tuple(self._requests):
-            request.cancel()
+    async def _cancel(self, feeds: set[str] | None = None) -> None:
+        if feeds is None:
+            self._cancelling += 1
+            self._epoch += 1
+            for request in tuple(self._requests):
+                request.cancel()
         try:
             # Invalidate before waiting: even an adapter suppressing cancellation may
             # not publish its old generation when another tab is still alive.
             if self._store:
-                self._store.interrupted()
+                self._store.interrupted(feeds)
             ai_task = self._ai
-            tasks = [t for t in (self._active, self._ai) if t]
-            self._active = self._ai = None
+            lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
+            cancelled_feeds = {self._lane_feeds[lane] for lane in lanes if lane in self._lane_feeds}
+            tasks = [self._lanes.pop(lane) for lane in lanes]
+            if self._ai and (feeds is None or self._ai_feed in feeds):
+                tasks.append(self._ai)
+                self._ai = None
             for task in tasks:
                 task.cancel()
                 done, _ = await asyncio.wait({task}, timeout=.25)
@@ -131,9 +142,15 @@ class Runtime:
 
                     task.add_done_callback(completed)
             if self._telegram_client:
-                await self._telegram_client.close()
+                if feeds is None or (tasks and not isinstance(self._telegram_client, LocalTelegram)):
+                    await self._telegram_client.close()
+                elif isinstance(self._telegram_client,LocalTelegram):
+                    accounts = {source.account for feed in cancelled_feeds if isinstance(source := self._sources.get(feed), TelegramSource)}
+                    for account in accounts:
+                        await self._telegram_client.close_account(account)
         finally:
-            self._cancelling -= 1
+            if feeds is None:
+                self._cancelling -= 1
 
     def _sync_sources(self) -> None:
         if not self._store:
@@ -157,9 +174,17 @@ class Runtime:
                 continue
             if binding and binding['kind'] == 'legacy_client':
                 continue
+            if binding and binding['kind'] == 'web':
+                if not isinstance(self._sources.get(feed['id']), TelegramSource):
+                    self._sources[feed['id']] = TelegramSource(WebTelegram(binding['username'], self._rss_transport), '', 0, feed['initial_days'], binding['username'])
+                    self._store.enqueue_discovery(feed['id'])
+                web_source = self._sources[feed['id']]
+                if isinstance(web_source, TelegramSource):
+                    web_source.initial_history = feed['initial_history']
+                continue
             if feed['transport'] == 'telegram' and self._telegram_client and feed.get('telegram_peer'):
                 if not isinstance(self._sources.get(feed['id']), TelegramSource):
-                    self._sources[feed['id']] = TelegramSource(self._telegram_client, (self._store.subscriptions.telegram.profile(binding['role']) or {})['account'] if binding and binding['kind'] == 'client' else feed['telegram_account'], feed['telegram_peer'], feed['initial_days'], feed.get('telegram_username'), feed.get('telegram_topic'))
+                    self._sources[feed['id']] = TelegramSource(self._telegram_client, (self._store.subscriptions.telegram.profile(binding['role']) or {})['account'] if binding and binding['kind'] == 'client' else feed['telegram_account'], feed['telegram_peer'], feed['initial_days'], feed.get('telegram_username'), http_transport=self._rss_transport)
                     self._store.enqueue_discovery(feed['id'])
                 telegram_source = self._sources[feed['id']]
                 if isinstance(telegram_source, TelegramSource):
@@ -180,13 +205,20 @@ class Runtime:
         for feed in self._store.subscriptions.feeds():
             binding = self._store.subscriptions.telegram.binding(feed['id'])
             bound_source = self._sources.get(feed['id'])
+            if bound_source and binding and binding['kind'] == 'web' and feed['connection'] != 'deleting':
+                self._telegram_bindings[feed['id']] = TelegramBinding(bound_source, 'telegram-web', 'common')
             if bound_source and binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
                 profile = self._store.subscriptions.telegram.profile(binding['role'])
                 if profile:
                     state = self._store.db.execute('SELECT initial FROM telegram_read_state WHERE feed=?', (feed['id'],)).fetchone()
                     read = ClientReadBinding(profile['account'], profile['user_id'], int(binding['peer_id']), profile['generation'], (state['initial'] or 0) if state else 0)
                     self._telegram_bindings[feed['id']] = TelegramBinding(bound_source, 'telegram', binding['role'], read)
-        active = {f['id'] for f in self._store.subscriptions.feeds() if f['connection'] != 'deleting' and not ((self._store.subscriptions.telegram.binding(f['id']) or {}).get('kind') == 'legacy_client') and ((f['transport'] in ('rss', 'youtube') and self._rss_enabled) or (f['transport'] == 'telegram' and self._telegram_client and f.get('telegram_peer')))}
+                    wait = self._store.db.execute('SELECT value FROM state WHERE key=?', ('telegram-retry:'+str(profile['user_id']),)).fetchone()
+                    if wait and feed['id'] not in self._restored_wait_feeds:
+                        deadline = self._account_retry.setdefault(profile['user_id'], self._clock() + max(0, float(wait[0]) - self._wall_clock()))
+                        self._store.restore_telegram_wait(feed['id'], deadline)
+                        self._restored_wait_feeds.add(feed['id'])
+        active = {f['id'] for f in self._store.subscriptions.feeds() if f['connection'] != 'deleting' and not ((self._store.subscriptions.telegram.binding(f['id']) or {}).get('kind') == 'legacy_client') and (((self._store.subscriptions.telegram.binding(f['id']) or {}).get('kind') == 'web') or (f['transport'] in ('rss', 'youtube') and self._rss_enabled) or (f['transport'] == 'telegram' and self._telegram_client and f.get('telegram_peer')))}
         self._sources = {key: source for key, source in self._sources.items() if key in active or key == self._source_feed and self._source}
 
     @property
@@ -215,7 +247,7 @@ class Runtime:
             self._viewed_ids = [row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')]
         state['problems'] = self._last_problems
         if self._error:
-            state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',section='action',title='Хранилище недоступно',
+            state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',operation='producer:storage',section='action',title='Хранилище недоступно',
                 consequence='Сбор и обработка остановлены.',next_step='Проверьте доступность хранилища; состояние не сбрасывается.',
                 objects=[],action=None,created_at=self._wall_clock(),next_at=None,state='current',finished_at=None,outcome=None)],recent=[],count=1,updated_at=self._wall_clock())
         state['viewed_ids'] = self._viewed_ids
@@ -238,7 +270,7 @@ class Runtime:
         elif pending and not self._sources:
             stage = 'Источник не подключён'
         elif pending and state['errors']:
-            stage = 'Сбор с ошибками' if self._active and not self._active.done() else 'Ожидание повтора'
+            stage = 'Сбор с ошибками' if any(not task.done() for task in self._lanes.values()) else 'Ожидание повтора'
         elif pending:
             stage = 'Сбор'
         else:
@@ -267,7 +299,8 @@ class Runtime:
     async def report_action(self, identity: str, context: dict[str, Any], result: str) -> str:
         async with self._actions:
             if any(obj['kind'] == 'material' and self.material_was_viewed(obj['id']) for obj in context['objects']):
-                return 'abandoned'
+                # Keep the neutral observation outcome while forgetting UI resources.
+                return self.require_store().problems.report_action(identity, dict(context, objects=[]), 'abandoned', self._wall_clock())
             try:
                 return self.require_store().problems.report_action(identity, context, result, self._wall_clock())
             except ValueError:
@@ -286,17 +319,25 @@ class Runtime:
             if not self._closed:
                 await self._cancel()
 
-    async def collect(self) -> None:
+    async def collect(self, feed: str | None = None) -> None:
         async with self._actions:
             current = self.require_store()
             self._sync_sources()
-            for feed in self._sources:
-                current.enqueue_discovery(feed)
+            if feed is not None:
+                saved = next((entry for entry in current.subscriptions.feeds() if entry['id']==feed),None)
+                if saved is None:
+                    raise ActionError('missing','Фид недоступен')
+                if saved['connection']=='deleting':
+                    raise ActionError('conflict','Фид удаляется',code='deletion_in_progress')
+            for source_feed in self._sources:
+                if feed is None or feed==source_feed:
+                    current.enqueue_discovery(source_feed)
 
     async def retry_material(self, item: str) -> None:
         async with self._actions:
             if not self.require_store().retry_material(item):
                 raise ActionError('missing', 'Материал недоступен')
+            await self._cancel({self.require_store().item_feed(item)})
 
     def youtube_status(self) -> dict[str, Any]:
         return self.require_store().youtube.status(self._wall_clock())
@@ -364,8 +405,9 @@ class Runtime:
                 raise ActionError('unavailable', 'Удаление не завершено. Око повторит попытку; ошибка видна в статусе.')
 
     async def _drain_deletions(self, current: Store) -> None:
-        if self._active or self._ai or self._requests:
-            await self._cancel()
+        feeds = {row[0] for row in current.db.execute("SELECT DISTINCT feed_id FROM items WHERE id IN (SELECT item FROM jobs WHERE kind='delete' AND status!='done')")}
+        if feeds:
+            await self._cancel(feeds)
         job = current.next_job(self._clock(), deleting_only=True)
         while job:
             self._delete(job, current)
@@ -792,22 +834,10 @@ class Runtime:
         result, _, _ = await self._call_telegram(lambda client: client.accounts())
         return result
 
-    async def telegram_topics(self, body: TelegramPeer) -> list[dict[str, Any]]:
-        access = self.require_store().subscriptions.telegram
-        profile = next((access.profile(role) for role in ('personal', 'collection') if (access.profile(role) or {}).get('account') == body.account), None)
-        if not profile:
-            raise ActionError('conflict', 'Сначала подтвердите профиль Telegram', expected=True)
-        await self._verify_telegram_profile(profile['role'])
-        result, _, _ = await self._call_telegram(
-            lambda client: client.topics(body.account, int(body.peer) if body.peer.startswith('-') else body.peer))
-        return result
-
     async def connect_telegram(self, body: ConnectTelegram) -> dict[str, Any]:
         # Transitional endpoint requires the same explicit profile confirmation.
         from oko.subscriptions.telegram import TelegramConflict
         current = self.require_store()
-        if body.topic_id is not None:
-            raise ActionError('invalid', 'Подключается вся группа; отдельные темы больше не поддерживаются')
         profile = next((current.subscriptions.telegram.profile(role) for role in ('personal', 'collection')
                         if (current.subscriptions.telegram.profile(role) or {}).get('account') == body.account), None)
         if not profile:
@@ -840,7 +870,7 @@ class Runtime:
             current.remove_feed(identity)
             if self.diagnostics:
                 self.diagnostics.forget_materials(members)
-            await self._cancel()
+            await self._cancel({identity})
             self._sources.pop(identity, None)
             self._telegram_bindings.pop(identity, None)
 
@@ -857,7 +887,8 @@ class Runtime:
 
     async def _execute_read(self, job: Job, current: Store, source: Source) -> None:
         binding = self._telegram_bindings.get(job.item)
-        if not binding or not binding.read or not isinstance(source, TelegramSource):
+        client = self._telegram_client
+        if not client or not binding or not binding.read or not isinstance(source, TelegramSource):
             async with self._actions:
                 if self._store is current and current.valid(job):
                     current.read_sync.suspend(job)
@@ -869,11 +900,13 @@ class Runtime:
                 return
             signature = current.read_sync.signature(request)
         await source.resolve()
-        state = await source.client.read_state(source.account, source.peer, request['since'], **source.scope)
+        state = await client.read_state(source.account, source.peer, request['since'], )
+        state['read_max'] = max(state['read_max'], current.read_sync.confirmed(job.item))
+        window: dict[str, Any] = {}
         plan = current.read_sync.plan(request, state)
         confirmed = plan.confirmed
         if plan.until > confirmed:
-            window = await source.client.read_window(source.account, source.peer, confirmed, plan.until, **source.scope)
+            window = await client.read_window(source.account, source.peer, confirmed, plan.until, )
             plan = current.read_sync.plan(request, state, window)
         async with self._actions:
             if source.identity_info and self._store is current and current.valid(job):
@@ -882,18 +915,53 @@ class Runtime:
             if not self._live() or not current.valid(job) or not latest or current.read_sync.signature(latest) != signature:
                 return
         if plan.candidate > confirmed:
-            await source.client.acknowledge(source.account, source.peer, plan.candidate, **source.scope)
-            self._fault('after_telegram_acknowledge')
+            if 'topics' in window:
+                topics: dict[int, int] = {}
+                for member in window['ids']:
+                    if member <= plan.candidate and member not in window.get('read_ids', []):
+                        topic = int(window['topics'][str(member)])
+                        topics[topic] = max(topics.get(topic, 0), member)
+                for topic, maximum in sorted(topics.items()):
+                    async with self._actions:
+                        latest = current.read_sync.request(job.item) if self._store is current else None
+                        if not self._live() or not current.valid(job) or not latest or current.read_sync.signature(latest) != signature:
+                            return
+                        if current.read_sync.topic_confirmed(job.item, topic) >= maximum:
+                            continue
+                    await client.acknowledge(source.account, source.peer, maximum, topic_id=topic)
+                    async with self._actions:
+                        if self._store is current and self._live() and current.valid(job):
+                            current.read_sync.topic_completed(job.item, topic, maximum)
+                    self._fault('after_telegram_acknowledge')
+            else:
+                await client.acknowledge(source.account, source.peer, plan.candidate, )
+                self._fault('after_telegram_acknowledge')
             confirmed = plan.candidate
         async with self._actions:
             if self._store is current and self._live() and current.valid(job):
                 current.read_sync.completed(job, plan, confirmed, self._clock())
+
+    def _lane(self, feed: str) -> str:
+        binding = self._telegram_bindings.get(feed)
+        return binding.lane if binding else 'common'
+
+    def _account_wait(self, feed: str, error: SourceError | None, job: Job | None = None) -> None:
+        binding = self._telegram_bindings.get(feed)
+        if not error or error.remote_type != 'FloodWaitError' or not binding or not binding.read or not self._store:
+            return
+        ready = self._clock() + error.delay
+        self._account_retry[binding.read.user_id] = ready
+        with self._store.db:
+            self._store.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('telegram-retry:'+str(binding.read.user_id), str(self._wall_clock() + error.delay)))
+            if job:
+                self._store.db.execute("UPDATE jobs SET problem_code=? WHERE id=? AND generation=? AND status='pending'", (job.kind+':FloodWaitError', job.id, job.generation))
 
     async def _execute(self, job: Job) -> None:
         diagnostic_materials.set((job.item,) if job.kind in ('fetch','delete') else ())
         capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
         feed = ''
+        staging: DownloadStage | None = None
         try:
             async with self._actions:
                 current = self._store
@@ -906,7 +974,8 @@ class Runtime:
                 feed = (job.item or 'demo') if job.kind in ('discover', 'read') else current.item_feed(job.item)
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 source = self._sources.get(feed)
-                publication = current.publication(job.item) if job.kind == 'fetch' else None
+                staging = current.download_stage(job,lambda:self._store is current and self._live() and current.valid(job)) if job.kind == 'fetch' and isinstance(source, TelegramSource) else None
+                publication = current.publication(job.item, staging) if job.kind == 'fetch' else None
                 binding = self._telegram_bindings.get(feed)
                 namespace = binding.cursor_key if binding else ''
                 cursor = current.cursor(feed, namespace) if job.kind == 'discover' else None
@@ -914,9 +983,10 @@ class Runtime:
                 return
             if isinstance(source, TelegramSource):
                 saved_binding = current.subscriptions.telegram.binding(feed)
-                if not saved_binding or saved_binding['kind'] != 'client':
+                if not saved_binding or saved_binding['kind'] not in ('client', 'web'):
                     raise SourceError('Сопоставьте старый аккаунт профилю Telegram', code='identity-unconfirmed')
-                await self._verify_telegram_profile(saved_binding['role'])
+                if saved_binding['kind'] == 'client':
+                    await self._verify_telegram_profile(saved_binding['role'])
 
             if job.kind == 'read':
                 await self._execute_read(job, current, source)
@@ -926,6 +996,8 @@ class Runtime:
                     if self._store is current and self._live() and current.valid(job):
                         if isinstance(source, TelegramSource) and source.identity_info:
                             current.subscriptions.telegram.refresh(feed, source.identity_info)
+                        if isinstance(source, TelegramSource):
+                            self._account_wait(feed, source.retry_error)
                         current.discovered(items, next_cursor, job, feed, namespace)
                         if getattr(source, 'more', False):
                             # Yield a scheduling turn to saved page materials;
@@ -936,12 +1008,13 @@ class Runtime:
             elif publication:
                 caption_attempt = CaptionAttempt(self, current, job) if isinstance(source, YouTubeSource) else None
                 material = (await source.fetch(publication, captions=caption_attempt, request_captions=not current.youtube.terminal(job.item))
-                            if isinstance(source, YouTubeSource) else await source.fetch(publication))
+                            if isinstance(source, YouTubeSource) else await source.fetch(publication, staging=staging) if isinstance(source, TelegramSource) else await source.fetch(publication))
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
                         if isinstance(source, TelegramSource) and source.identity_info:
                             current.subscriptions.telegram.refresh(feed, source.identity_info)
-                        current.save(job, material, self._clock())
+                        current.save(job, material, self._clock(), staging)
+                        self._account_wait(feed, material.collection_error, job)
                         if caption_attempt and caption_attempt.attempted and not caption_attempt.blocked:
                             current.youtube.completed(job.item, material.captions == 'available')
                         if caption_attempt and caption_attempt.retry:
@@ -963,17 +1036,32 @@ class Runtime:
                         current.source_removed(job)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
-                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,
-                                  code=error.code if isinstance(error, (SourceError, TelegramConflict)) and error.code else job.kind + ':' + (getattr(error, 'remote_type', '') or type(error).__name__))
+                    if isinstance(error, SourceError):
+                        self._account_wait(feed, error)
+                    if isinstance(error, SourceError):
+                        code = error.code or 'source-unavailable'
+                    elif isinstance(error, TelegramConflict):
+                        code = error.code
+                    elif job.kind == 'fetch' and isinstance(error, FileNotFoundError):
+                        code = 'material-read-failed'
+                    elif job.kind == 'fetch' and isinstance(error, OSError):
+                        code = 'material-save-failed'
+                    else:
+                        code = job.kind + ':' + type(error).__name__
+                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code)
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):
                         current.feed_status(feed, error=label, gap=None)
 
+        finally:
+            if staging:
+                shutil.rmtree(staging.path,ignore_errors=True)
+
     async def run(self) -> None:
         journal_context = active_journal.set(self.diagnostics)
         try:
-            self._store = Store(self._root, self._fault, wall_clock=self._wall_clock)
+            self._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock)
             viewed = {row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')}
             if viewed and self.diagnostics:
                 self.diagnostics.forget_materials(viewed)
@@ -1006,20 +1094,29 @@ class Runtime:
                         if self._ai is None and not self._detached_ai and not self._store.status()['deleting']:
                             ai_job = self._store.next_job(now, ai_only=True)
                             if ai_job:
+                                self._ai_feed = self._store.item_feed(ai_job.item)
                                 self._ai = asyncio.create_task(self._execute_ai(ai_job))
-                        if self._active and self._active.done():
-                            await self._active
-                            self._active = None
-                        if self._active is None:
-                            state = self._store.status()
-                            self._sync_sources()
-                            if now-self._last_collection >= 300:
-                                for feed in self._sources:
-                                    self._store.enqueue_discovery(feed)
-                                self._last_collection = now
-                            job = self._store.next_job(now, deleting_only=state['deleting'] or not self._sources, feeds=list(self._sources))
+                        self._sync_sources()
+                        if now-self._last_collection >= 300:
+                            for feed in self._sources:
+                                self._store.enqueue_discovery(feed)
+                            self._last_collection = now
+                        state = self._store.status()
+                        for lane in ('common', 'personal', 'collection'):
+                            task = self._lanes.get(lane)
+                            if task and task.done():
+                                await task
+                                del self._lanes[lane]
+                            profile = self._store.subscriptions.telegram.profile(lane) if lane != 'common' else None
+                            ready_at = self._account_retry.get(profile['user_id'], 0) if profile else 0
+                            if lane in self._lanes or now < ready_at:
+                                continue
+                            feeds = [feed for feed in self._sources if self._lane(feed) == lane]
+                            job = self._store.next_job(now, deleting_only=state['deleting'] or not feeds,
+                                                       feeds=feeds, include_deletions=lane == 'common')
                             if job:
-                                self._active = asyncio.create_task(self._execute(job))
+                                self._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self._store.item_feed(job.item)
+                                self._lanes[lane] = asyncio.create_task(self._execute(job))
                 await asyncio.sleep(.02)
         except Exception:
             record_caught('Главный цикл Око')

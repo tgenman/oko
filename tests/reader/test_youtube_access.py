@@ -1,3 +1,5 @@
+from datetime import datetime
+from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import add_sources
 import asyncio
 import json
@@ -60,7 +62,7 @@ def add(client, channel=CHANNEL):
     assert response.status_code == 200, response.text
     feed = next(f for f in response.json()['feeds'] if url in f['original_urls'])
     if channel.startswith('UC'):
-        client.patch('/api/feeds/' + feed['id'], json={'importance': 'high'})
+        client.patch('/api/v3/feeds/' + feed['id'], json={'importance': 'high'})
     return feed['id']
 
 
@@ -74,11 +76,11 @@ def eventually(predicate):
 
 
 def materials(client):
-    return [client.get('/api/materials/' + row['id']).json() for row in client.get('/api/cards').json()]
+    return [client.get('/api/v3/materials/' + row['id']).json() for row in client.get('/api/v3/cards').json()]
 
 
 def heartbeat(client):
-    assert client.post('/api/tabs/reader/heartbeat').status_code == 200
+    assert presence(client, 'reader').status_code in (200,201)
 
 
 def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
@@ -88,13 +90,13 @@ def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
         add(client)
         add(client, 'UC' + 'b' * 22)
         heartbeat(client)
-        eventually(lambda: len(captions.calls) == 1 and any(m.get('captions') == 'available' for m in materials(client)))
+        eventually(lambda: len(captions.calls) == 1 and any(m['source'].get('captions') == 'available' for m in materials(client)))
         add(client, 'https://rss.test/feed')
-        eventually(lambda: any(m.get('text') == 'Независимый текст' for m in materials(client)))
+        eventually(lambda: any(m['content'].get('text') == 'Независимый текст' for m in materials(client)))
         assert len(captions.calls) == 1
-        saved = next(m for m in materials(client) if m.get('captions') == 'available')
-        client.post('/api/materials/' + saved['id'] + '/retry')
-        eventually(lambda: not client.get('/api/materials/' + saved['id']).json().get('loading'))
+        saved = next(m for m in materials(client) if m['source'].get('captions') == 'available')
+        client.post('/api/v3/materials/' + saved['id'] + '/retry')
+        eventually(lambda: not client.get('/api/v3/materials/' + saved['id']).json()['content'].get('loading'))
         assert len(captions.calls) == 1
         clock.advance(9.9)
         time.sleep(.1)
@@ -111,13 +113,13 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
         add(client)
         add(client, 'UC' + 'b' * 22)
         heartbeat(client)
-        eventually(lambda: client.get('/api/youtube').json()['paused'])
-        item = eventually(lambda: next((m for m in materials(client) if m.get('captions') == 'error'), None))
-        assert client.get('/api/youtube').json()['next_at'] == clock.wall + 900
-        client.post('/api/materials/' + item['id'] + '/retry')
-        client.put('/api/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
+        eventually(lambda: (client.get('/api/v3/youtube').json()['admission']=='paused'))
+        item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
+        assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + 900
+        client.post('/api/v3/materials/' + item['id'] + '/retry')
+        client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
         add(client, 'https://rss.test/feed')
-        eventually(lambda: any(m.get('text') == 'Независимый текст' for m in materials(client)))
+        eventually(lambda: any(m['content'].get('text') == 'Независимый текст' for m in materials(client)))
         assert len(captions.calls) == 1
     clock.tick = 0  # A new monotonic origin must not expire the durable pause.
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
@@ -125,9 +127,9 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
         clock.advance(899)
         time.sleep(.1)
         assert len(captions.calls) == 1
-        assert client.get('/api/youtube').json()['paused']
+        assert (client.get('/api/v3/youtube').json()['admission']=='paused')
         clock.advance(1)
-        eventually(lambda: len(captions.calls) == 2 and client.get('/api/youtube').json()['strikes'] == 0)
+        eventually(lambda: len(captions.calls) == 2 and client.get('/api/v3/youtube').json()['strikes'] == 0)
         time.sleep(.1)
         assert len(captions.calls) == 2
         clock.advance(10)
@@ -141,17 +143,17 @@ def test_exhausted_blocked_material_needs_explicit_retry(tmp_path):
         add(client)
         heartbeat(client)
         for count, delay in enumerate((900, 1800, 3600), 1):
-            eventually(lambda: len(captions.calls) == count and client.get('/api/youtube').json()['strikes'] == count)
-            assert client.get('/api/youtube').json()['next_at'] == clock.wall + delay
+            eventually(lambda: len(captions.calls) == count and client.get('/api/v3/youtube').json()['strikes'] == count)
+            assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + delay
             clock.advance(delay)
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         time.sleep(.15)
         assert len(captions.calls) == 3
         item = materials(client)[0]
-        assert item['captions'] == 'error'
-        assert not item['loading']
-        client.post('/api/materials/' + item['id'] + '/retry')
-        eventually(lambda: materials(client)[0].get('captions') == 'available')
+        assert item['source']['captions'] == 'error'
+        assert not item['content']['loading']
+        client.post('/api/v3/materials/' + item['id'] + '/retry')
+        eventually(lambda: materials(client)[0]['source'].get('captions') == 'available')
         assert len(captions.calls) == 4
 
 
@@ -162,10 +164,10 @@ def test_retry_after_and_backoff_cap(tmp_path):
         add(client)
         heartbeat(client)
         for count, delay in enumerate((30000, 1800, 3600, 7200, 14400, 21600, 21600), 1):
-            eventually(lambda: len(captions.calls) == count and client.get('/api/youtube').json()['next_at'] == clock.wall + delay)
-            item = eventually(lambda: next((m for m in materials(client) if m.get('captions') == 'error'), None))
+            eventually(lambda: len(captions.calls) == count and datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + delay)
+            item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
             # Explicit cycles let the test exercise the global cap beyond the per-item budget.
-            client.post('/api/materials/' + item['id'] + '/retry')
+            client.post('/api/v3/materials/' + item['id'] + '/retry')
             clock.advance(delay)
 
 
@@ -177,12 +179,12 @@ def test_missing_and_network_failure_do_not_pause_or_automatically_retry(tmp_pat
         add(client)
         add(client, 'UC' + 'b' * 22)
         heartbeat(client)
-        eventually(lambda: any(m.get('captions') == state for m in materials(client)))
-        assert not client.get('/api/youtube').json()['paused']
+        eventually(lambda: any(m['source'].get('captions') == state for m in materials(client)))
+        assert not (client.get('/api/v3/youtube').json()['admission']=='paused')
         clock.advance(10)
         eventually(lambda: len(captions.calls) == 2)
         clock.advance(1000)
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         time.sleep(.2)
         assert len(captions.calls) == 2
 
@@ -191,27 +193,27 @@ def test_proxy_configuration_redacts_preserves_and_clears_secrets(tmp_path):
     clock = Clock()
     captions = Captions(clock, [])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
-        assert client.get('/api/youtube').json()['mode'] == 'direct'
+        assert client.get('/api/v3/youtube').json()['mode'] == 'direct'
         for bad in ({'mode': 'proxy', 'address': 'socks5://localhost:1'}, {'mode': 'proxy', 'address': 'http://user:secret@proxy.test:1'}, {'password': 123}):
-            response = client.put('/api/youtube', json=bad)
-            assert response.status_code == 400
+            response = client.patch('/api/v3/youtube', json=bad)
+            assert response.status_code == (422 if 'password' in bad else 400)
             assert 'secret' not in response.text
-        response = client.put('/api/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'username': 'private-user', 'password': 'private-password'})
+        response = client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'credentials':{'action':'replace','username':'private-user','password':'private-password'}})
         assert response.status_code == 200
         assert response.json()['has_password']
         assert 'private-' not in response.text
         assert not captions.calls
         assert stat.S_IMODE((tmp_path / 'youtube-proxy.json').stat().st_mode) == 0o600
-        client.put('/api/youtube', json={'mode': 'direct'})
+        client.patch('/api/v3/youtube', json={'mode': 'direct'})
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
-        config = client.get('/api/youtube').json()
+        config = client.get('/api/v3/youtube').json()
         assert config['mode'] == 'direct' and config['has_password'] and config['has_username']
-        client.put('/api/youtube', json={'mode': 'proxy'})
-        assert client.get('/api/youtube').json()['has_password']
-        client.put('/api/youtube', json={'clear_credentials': True})
-        assert not client.get('/api/youtube').json()['has_password']
-        assert not client.get('/api/youtube').json()['has_username']
-        assert 'private-' not in json.dumps(client.get('/api/debug').json())
+        client.patch('/api/v3/youtube', json={'mode': 'proxy'})
+        assert client.get('/api/v3/youtube').json()['has_password']
+        client.patch('/api/v3/youtube', json={'credentials':{'action':'clear'}})
+        assert not client.get('/api/v3/youtube').json()['has_password']
+        assert not client.get('/api/v3/youtube').json()['has_username']
+        assert 'private-' not in json.dumps(client.get('/api/v3/diagnostics').json())
 
 
 def test_proxy_change_rejects_late_block_and_prevents_overlapping_calls(tmp_path):
@@ -239,15 +241,15 @@ def test_proxy_change_rejects_late_block_and_prevents_overlapping_calls(tmp_path
             add(client)
             heartbeat(client)
             assert started.wait(3)
-            client.put('/api/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000'})
+            client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000'})
             clock.advance(10)
             time.sleep(.15)
             assert captions.calls == 1
             release.set()
             time.sleep(.1)
             clock.advance(1)
-            eventually(lambda: materials(client)[0].get('text') == 'Новое подключение')
-            assert not client.get('/api/youtube').json()['paused']
+            eventually(lambda: materials(client)[0]['content'].get('text') == 'Новое подключение')
+            assert not (client.get('/api/v3/youtube').json()['admission']=='paused')
     finally:
         release.set()
 
@@ -258,13 +260,13 @@ def test_viewed_waiting_material_and_closed_reader_do_not_resume(tmp_path):
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
         add(client)
         heartbeat(client)
-        item = eventually(lambda: next((m for m in materials(client) if m.get('captions') == 'error'), None))
-        client.post('/api/tabs/reader/close')
+        item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
+        close_presence(client, 'reader')
         clock.advance(900)
         time.sleep(.1)
         assert len(captions.calls) == 1
-        client.post('/api/materials/' + item['id'] + '/viewed')
+        client.post('/api/v3/materials/' + item['id'] + '/viewed')
         heartbeat(client)
         time.sleep(.1)
-        assert client.get('/api/cards').json() == []
+        assert client.get('/api/v3/cards').json() == []
         assert len(captions.calls) == 1

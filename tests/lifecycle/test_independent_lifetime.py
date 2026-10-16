@@ -15,15 +15,15 @@ def test_explicit_execution_collects_without_presence_until_stop(tmp_path):
     exits = []
     with TestClient(create_app(tmp_path, token='test', source=DemoSource(), clock=clock,
                                api_only=True, shutdown=lambda: exits.append(True)), headers=HEADERS) as client:
-        cards = wait_for(client, lambda: client.get('/api/cards').json())
+        cards = wait_for(client, lambda: client.get('/api/v3/cards').json())
         assert len(cards) == 3
         clock.now += 100
         time.sleep(.05)
-        assert not client.get('/api/status').json()['stopped']
+        assert client.get('/api/v3/status').json()['runtime_state'] != 'stopped'
         assert exits == []
-        assert client.post('/api/stop').status_code == 200
+        assert client.post('/api/v3/stop').status_code == 200
         wait_for(client, lambda: exits)
-        assert client.get('/api/status').json()['stopped']
+        assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
 
 
 def test_api_only_process_runs_without_frontend_or_node_and_reuses_own_profile(tmp_path):
@@ -60,7 +60,7 @@ def test_api_only_process_runs_without_frontend_or_node_and_reuses_own_profile(t
                                        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10)
             assert different.returncode != 0
             assert 'explicit' in different.stderr
-            assert client.post('/api/stop').status_code == 200
+            assert client.post('/api/v3/stop').status_code == 200
         assert process.wait(timeout=3) == 0
     finally:
         cleanup(process)
@@ -140,6 +140,39 @@ def test_neutral_last_close_cancels_resistant_external_wait_and_prevents_late_co
         finally:
             release.set()
         time.sleep(.05)
-        cards = client.get('/api/cards').json()
-        assert all(not card['complete'] for card in cards)
-        assert 'Must never be committed' not in client.get('/api/cards').text
+        cards = client.get('/api/v3/cards').json()
+        assert all(not (card['availability'] == 'available') for card in cards)
+        assert 'Must never be committed' not in client.get('/api/v3/cards').text
+
+
+def test_standalone_client_reads_configures_reconciles_lost_reply_and_stops(tmp_path):
+    import json
+    from pathlib import Path
+    import subprocess
+    import sys
+    from tests.support.processes import launch,connect,cleanup
+    from oko.reader.generated.revision import CONTRACT_DIGEST
+    process=launch(tmp_path,api_only=True)
+    try:
+        with connect(tmp_path,process) as client:
+            metadata=json.loads((tmp_path/'runtime.json').read_text())
+            script=Path(__file__).parents[1]/'fixtures/independent_v3_client.py'
+            contract=json.loads((Path(__file__).parents[2]/'oko/reader/generated/openapi.json').read_text())
+            contract['info']['version']='3.0.1'
+            contract['info']['description']='Independent client documentation revision; unchanged operations and DTOs'
+            client_contract=tmp_path/'client-openapi.json'
+            client_contract.write_text(json.dumps(contract,ensure_ascii=False))
+            config={'url':metadata['url'],'token':metadata['token'],'contract_path':str(client_contract)}
+            incompatible=subprocess.run([sys.executable,str(script)],input=json.dumps(dict(config,major=2)),capture_output=True,text=True,timeout=10)
+            assert incompatible.returncode==0,incompatible.stderr
+            assert json.loads(incompatible.stdout)=={'state':'unsupported_major','requests':[['GET','/api/v3/status']]}
+            result=subprocess.run([sys.executable,str(script)],input=json.dumps(config),capture_output=True,text=True,timeout=15)
+            assert result.returncode==0,result.stderr
+            evidence=json.loads(result.stdout)
+            assert evidence['state']=='complete'
+            assert len(evidence['client_contract_digest'])==64
+            assert evidence['client_contract_digest']!=CONTRACT_DIGEST
+            assert evidence['requests'].count(['PATCH','/api/v3/settings/oko/global'])==3
+        assert process.wait(timeout=3)==0
+    finally:
+        cleanup(process)

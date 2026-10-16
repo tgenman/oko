@@ -8,7 +8,7 @@ test('Codex has two explicit choices; Fast starts off and unsupported effort is 
   try {
     await r.start([]);
     await r.page.evaluate(models => {
-      readerTransport.replies.set('/api/subscriptions', {body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions', {body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/codex', {body:{config:null}});
       readerTransport.replies.set('/api/v3/processors/codex/models', {body:{models}});
       readerTransport.replies.set('/api/v3/processors/llamacpp', {body:null});
@@ -40,7 +40,7 @@ test('late catalog and save replies keep new drafts across closing settings', as
   try {
     await r.start([]);
     await r.page.evaluate(models => {
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/llamacpp',{body:null});
       readerTransport.replies.set('/api/v3/processors/codex',{body:{config:null}});
       readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models}});
@@ -96,7 +96,7 @@ test('catalog refresh before initial config response never replaces saved choice
     await r.start([]);
     const saved=Object.fromEntries(['filter','theses'].map(kind=>[kind,{model:'large',reasoning_effort:'high',fast:false}]));
     await r.page.evaluate(models=>{
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/llamacpp',{body:null});
       readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models}});
       readerTransport.held.set('/api/v3/processors/codex',true);
@@ -119,7 +119,7 @@ test('llama.cpp keeps connection drafts and concurrent save does not suppress av
   try {
     await r.start([]);
     await r.page.evaluate(models => {
-      readerTransport.replies.set('/api/subscriptions', {body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions', {body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/codex', {body:{config:null}});
       readerTransport.replies.set('/api/v3/processors/codex/models', {body:{models}});
       readerTransport.replies.set('/api/v3/processors/llamacpp', {body:{endpoint:'http://127.0.0.1:8080',model:'old',local_execution:true}});
@@ -157,7 +157,7 @@ test('llama.cpp distinguishes newer unsaved input and ignores a check from a pre
   try {
     await r.start([]);
     await r.page.evaluate(models=>{
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/codex',{body:{config:null}});
       readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models}});
       readerTransport.replies.set('/api/v3/processors/llamacpp',{body:{endpoint:'http://127.0.0.1:8080',model:'old',local_execution:false}});
@@ -190,7 +190,7 @@ test('Codex catalog error preserves configured choices and refresh recovers with
   try {
     await r.start([]);
     await r.page.evaluate(()=>{
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/llamacpp',{body:null});
       readerTransport.replies.set('/api/v3/processors/codex',{body:{config:Object.fromEntries(['filter','theses'].map(kind=>[kind,{model:'large',reasoning_effort:'high',fast:false}]))}});
       readerTransport.replies.set('/api/v3/processors/codex/models',{status:503,body:{detail:'Каталог временно недоступен'}});

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import secrets
 import sqlite3
 import time
 from collections.abc import Callable
@@ -16,9 +17,10 @@ from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.reader.composition import FolderContents, ReadingComposition
 from oko.collection.telegram.read_sync import ReadSync
+from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
-from oko.collection.contracts import SourceDeleted, Attachment, Image, Material, Publication
+from oko.collection.contracts import SourceDeleted, Attachment, Image, Material, Publication, DownloadStage, StagedPayload, SourceManifest
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
@@ -33,11 +35,22 @@ class Job:
     generation: int
 
 
+@dataclass(frozen=True)
+class WorkSummary:
+    kind: str
+    status: str
+    feed: str | None
+    count: int
+    error_code: str | None
+    retry_at: float | None
+
+
 class Store:
     """SQLite owns identity/lifecycle; files own all publication content."""
-    def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic) -> None:
         self.root, self.fault = root, fault
         self.wall_clock = wall_clock
+        self.clock = clock
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(root / 'state.sqlite')
         self.db.row_factory = sqlite3.Row
@@ -165,15 +178,27 @@ class Store:
     def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo', namespace: str = '') -> None:
         with self.db:
             history_items = []
-            selection = json.loads(cursor) if self.subscriptions.history.status(feed) else {}
-            history_ids = set(selection.get('history_ids', selection.get('history_enroll', [])))
+            envelope = HistoryEnvelope.decode(cursor, adapter='client' if namespace == 'telegram' else 'web') if namespace in ('telegram', 'telegram-web') else None
+            selection = json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
+            history_ids = set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_ids', selection.get('history_enroll', [])))
             for p in publications:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
                 source_id = p.id if feed == 'demo' else feed + ':' + p.id
-                existing = self.db.execute('SELECT url FROM items WHERE source_id=?', (source_id,)).fetchone()
-                if existing and existing['url'] != p.url and not (p.members and p.id.startswith('album:')):
-                    source_id = feed + ':' + p.url
-                    item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
+                existing = self.db.execute('SELECT id,source_id,url FROM items WHERE source_id=?', (source_id,)).fetchone()
+                if envelope and p.members and not existing:
+                    placeholders = ','.join('?' for _ in p.members)
+                    matches = self.db.execute(f"SELECT DISTINCT i.id,i.source_id,i.url FROM items i JOIN json_each(i.members) m WHERE i.feed_id=? AND m.value IN ({placeholders})", (feed,*p.members)).fetchall()
+                    if len(matches)>1:
+                        raise ValueError('Conflicting Telegram album membership')
+                    if matches:
+                        existing = matches[0]
+                        item,source_id = existing['id'],existing['source_id']
+                if existing and existing['url'] != p.url:
+                    if envelope:
+                        self.db.execute('UPDATE items SET url=? WHERE id=?', (p.url,existing['id']))
+                    elif not (p.members and p.id.startswith('album:')):
+                        source_id = feed + ':' + p.url
+                        item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
                 inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members,published_known) VALUES (?,?,?,?,?,?,?)',
                                 (item, source_id, p.url, p.published, feed, json.dumps(p.members), p.published_known))
                 if inserted.rowcount and p.teaser:
@@ -184,12 +209,14 @@ class Store:
                     self.db.execute('UPDATE items SET published=?,published_known=1 WHERE id=?', (p.published, row['id']))
                 if row and p.id in history_ids:
                     history_items.append(row['id'])
+                if row and row['viewed'] and namespace=='telegram-web':
+                    self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(sorted(set(json.loads(row['members'])) | set(p.members))),row['id']))
                 if row and not row['viewed'] and not self.db.execute("SELECT 1 FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE d.item=? AND h.outcome='unavailable'", (row['id'],)).fetchone():
                     members = sorted(set(json.loads(row['members'])) | set(p.members))
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
                         self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (row['id'],))
-                    self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done'", (row['id'],))
+                    self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done' AND (jobs.error IS NULL OR jobs.problem_code IS NULL)", (row['id'],))
             if 'youtube_history' in selection:
                 # A new prefix can overlap an older, longer selection. Reorder
                 # retained history after that prefix instead of keeping colliding ranks.
@@ -203,8 +230,12 @@ class Store:
                 self.subscriptions.history.freeze(feed, history_items)
                 if 'warnings' in selection:
                     self.subscriptions.history.warnings(feed, selection['warnings'])
-            if 'history_enroll' in selection:
-                self.subscriptions.history.enroll(feed, history_items, selection['scan_complete'])
+            if envelope and self.subscriptions.history.status(feed):
+                self.subscriptions.history.enroll(feed, history_items, envelope.selection.scan_complete)
+                self.subscriptions.history.telegram_state(feed, envelope.selection)
+            if 'history_enroll' in selection or envelope:
+                if not envelope:
+                    self.subscriptions.history.enroll(feed, history_items, selection['scan_complete'])
                 for item in history_items:
                     row = self.db.execute('SELECT viewed FROM items WHERE id=?', (item,)).fetchone()
                     if row['viewed']:
@@ -215,15 +246,19 @@ class Store:
                             self.subscriptions.history.saved(item, material.get('full', False))
             if selection:
                 self.subscriptions.history.discovery_state(feed, selection)
-            if namespace == 'telegram':
-                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT d.item FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE h.outcome='unavailable'))", (feed,))
-                self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
+            if envelope:
+                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND (error IS NULL OR problem_code IS NULL) AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT d.item FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE h.outcome='unavailable'))", (feed,))
+                if namespace == 'telegram':
+                    self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
 
+    def _has_unviewed(self, item: str) -> bool:
+        return self.db.execute('SELECT 1 FROM items WHERE id=? AND viewed=0',(item,)).fetchone() is not None
+
     def source_removed(self, job: Job) -> None:
-        if not self.valid(job) or self.publication(job.item) is None:
+        if not self.valid(job) or not self._has_unviewed(job.item):
             return
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
@@ -233,7 +268,7 @@ class Store:
         self.processing.sync()
 
     def retry_material(self, item: str) -> bool:
-        if self.publication(item) is None:
+        if not self._has_unviewed(item):
             return False
         with self.db:
             self.youtube.reset(item)
@@ -255,7 +290,7 @@ class Store:
             "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
         if ai_only:
             query += " AND kind IN ('filter','theses')"
@@ -265,6 +300,8 @@ class Store:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
+        if not include_deletions:
+            query += " AND kind NOT IN ('delete','feed-delete')"
         query += " AND NOT (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed WHERE h.paused=1 OR (h.scan_complete=0 AND json_extract(h.selection,'$.mode')='count')))"
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
@@ -290,34 +327,52 @@ class Store:
         row = self.db.execute('SELECT status,generation,kind,item FROM jobs WHERE id=?', (job.id,)).fetchone()
         return bool(row and row['status'] == 'running' and row['generation'] == job.generation and row['kind'] == job.kind and row['item'] == job.item)
 
-    def publication(self, item: str) -> Publication | None:
+    def download_stage(self, job: Job, admitted: Callable[[], bool] | None = None) -> DownloadStage:
+        if not self.valid(job):
+            raise ValueError('expired download job')
+        directory = self.root/'staging'/'_downloads'/(str(job.id)+'-'+str(job.generation)+'-'+secrets.token_hex(8))
+        directory.mkdir(parents=True,mode=0o700)
+        return DownloadStage(directory,job.id,job.generation,admitted or (lambda:self.valid(job)))
+
+    def _retained_payload(self, path: Path, staging: DownloadStage | None) -> bytes | StagedPayload:
+        if staging is None:
+            return path.read_bytes()
+        retained = staging.path/('retained-'+path.name)
+        os.link(path,retained)
+        return StagedPayload(retained,retained.stat().st_size,self.versions.file_digest(retained))
+
+    def publication(self, item: str, staging: DownloadStage | None = None) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         fallback = self.material(item) if row else None
-        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', [])), captions=fallback.get('captions'), description=fallback.get('description', ''), attachments=tuple(Attachment(Path(a['url']).name, (self.path(item).parent / Path(a['url']).name).read_bytes(), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
+        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', [])), captions=fallback.get('captions'), description=fallback.get('description', ''), attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
         if teaser and fallback:
-            teaser = replace(teaser, reason=fallback.get('reason', ''))
+            header = json.loads(self.path(item).read_text().split('\n\n',1)[0]) if self.path(item).is_file() else {}
+            manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if 'source_manifest' in header else None
+            teaser = replace(teaser, reason=fallback.get('reason', ''), source_manifest=manifest)
         return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members'])), bool(row['published_known'])) if row else None
 
-    def save(self, job: Job, material: Material, now: float | None = None) -> None:
+    def save(self, job: Job, material: Material, now: float | None = None, staging: DownloadStage | None = None) -> None:
         item = job.item
-        if not self.valid(job) or self.publication(item) is None:
+        if not self.valid(job) or not self._has_unviewed(item):
             return
-        prepared = self.versions.prepare(item, material)
+        prepared = self.versions.prepare(item, material, job, staging)
         self.fault('after_file_move')
         with self.db:
             self.versions.publish(item, prepared, True)
             self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
+            if material.source_manifest and material.source_manifest.source_url:
+                self.db.execute('UPDATE items SET url=? WHERE id=?', (material.source_manifest.source_url,item))
             if material.members:
                 self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
             if not material.collection_error or not self.subscriptions.history.member(item):
                 self.subscriptions.history.saved(item, material.full)
             self.finish(job)
-            self.history_collection_error(job, material, time.monotonic() if now is None else now)
+            self.history_collection_error(job, material, self.clock() if now is None else now)
         self.processing.sync()
 
     def history_collection_error(self, job: Job, material: Material, now: float) -> None:
         error = material.collection_error
-        if not error or not self.subscriptions.history.member(job.item):
+        if not error:
             return
         if isinstance(error, SourceDeleted):
             self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
@@ -325,7 +380,8 @@ class Store:
             self.db.execute('UPDATE jobs SET error=? WHERE id=?', (error.label, job.id))
         else:
             self.subscriptions.history.failed(job.item)
-            self.db.execute("UPDATE jobs SET status='pending',next=?,error=? WHERE id=?", (now + error.delay, error.label, job.id))
+            self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=? WHERE id=?",
+                ('pending' if error.retryable else 'done',now+error.delay,error.label,error.code or job.kind+':'+(error.remote_type or type(error).__name__),job.id))
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
@@ -386,7 +442,7 @@ class Store:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?))', (feed, feed))
             self.db.execute('DELETE FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?)', (feed, feed))
             self.db.execute('DELETE FROM items WHERE feed_id=?', (feed,))
-            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
+            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state', 'telegram_read_topics'):
                 self.db.execute(f'DELETE FROM {table} WHERE feed=?', (feed,))
             self.db.execute("DELETE FROM settings WHERE scope='feed' AND owner=?", (feed,))
             self.db.execute('DELETE FROM state WHERE key IN (?,?,?)', ('cursor:'+feed, 'cursor:telegram:'+feed, 'feed-status:'+feed))
@@ -410,10 +466,21 @@ class Store:
             self.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
                             (now + delay, error, code or job.kind, job.id, job.generation))
 
-    def interrupted(self) -> None:
+    def restore_telegram_wait(self, feed: str, deadline: float) -> None:
         with self.db:
-            self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
-            self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
+            self.db.execute("""UPDATE jobs SET next=? WHERE status='pending' AND problem_code LIKE '%:FloodWaitError'
+              AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))""", (deadline, feed, feed))
+
+    def interrupted(self, feeds: set[str] | None = None) -> None:
+        selection = "status='running'"
+        params: tuple[str, ...] = ()
+        if feeds is not None:
+            placeholders = ','.join('?' for _ in feeds) or "''"
+            selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})))"
+            params = (*feeds, *feeds)
+        with self.db:
+            self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
+            self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
 
     def material(self, item: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
@@ -428,13 +495,26 @@ class Store:
             if filtered['status'] == 'done' and not filtered['restored']:
                 for fragment in filtered['removed']:
                     display_text = display_text.replace(fragment, '')
-            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), source_order=row['source_order'], title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), description=json.loads(header).get('description', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), source_order=row['source_order'], title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))", (item,self.clock())).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), description=json.loads(header).get('description', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
         except (OSError, ValueError, KeyError):
             record_caught('store.material')
             return None
 
     def cards(self, show_hidden: bool = False) -> list[dict[str, Any]]:
         return self.reading.cards(show_hidden)
+
+    def work_summary(self) -> list[WorkSummary]:
+        rows = self.db.execute("""SELECT jobs.kind,jobs.status,jobs.problem_code,count(*) AS count,
+            CASE WHEN jobs.kind IN ('discover','read','feed-delete') THEN NULLIF(jobs.item,'') ELSE items.feed_id END AS feed,
+            min(jobs.next) AS next,sum(jobs.error IS NOT NULL) AS errors
+            FROM jobs LEFT JOIN items ON items.id=jobs.item
+            WHERE jobs.status IN ('pending','running')
+            GROUP BY jobs.kind,jobs.status,jobs.problem_code,feed ORDER BY min(jobs.id)""").fetchall()
+        now, wall = self.clock(), self.wall_clock()
+        return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
+                    row['problem_code'] or ('legacy-'+row['kind'] if row['errors'] else None),
+                    wall+max(0,row['next']-now) if row['status']=='pending' and row['errors'] and row['next'] else None)
+                for row in rows]
 
     def status(self) -> dict[str, Any]:
         rows = self.db.execute('SELECT kind,status,error,count(*) AS count FROM jobs GROUP BY kind,status,error').fetchall()

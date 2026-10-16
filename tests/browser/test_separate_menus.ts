@@ -10,9 +10,9 @@ test('three menus keep reading position and addition tabs, Escape restores openi
   try {
     await r.start([material('one', {text: 'Читать дальше. '.repeat(3000)})]);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
+      readerTransport.replies.set('/api/v3/subscriptions', {body: {folders: [], feeds: []}});
       readerTransport.replies.set('/api/v3/processors/llamacpp', {body: null});
-      readerTransport.replies.set('/api/telegram/accounts', {body: ['personal']});
+      readerTransport.replies.set('/api/v3/telegram/accounts', {body: ['personal']});
     });
     await r.page.locator('#cards button').click();
     await expect(r.page.locator('#title')).toHaveText('one');
@@ -100,40 +100,17 @@ test('object and global drafts are independent, field save preserves other unsav
   } finally {await r.close();}
 });
 
-test('reconnection drafts belong to each existing Telegram feed without changing the new-source form', async () => {
-  const r = await reader();
-  try {
-    await r.start([]);
-    await r.page.evaluate(() => {
-      const t = readerTransport;
-      const feeds = ['one','two'].map(id=>({id,title:id,kind:'telegram',identity:'telegram:'+id,folder_id:'f',original_urls:[],importance:'normal',auto_read:false,read_history:false,telegram_peer:'@'+id+'channel',telegram_account:'personal',transport:'telegram'}));
-      t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Telegram'}],feeds}});
-      t.replies.set('/api/telegram/accounts',{body:['personal']});
-      for (const feed of feeds) t.replies.set('/api/v3/settings/feed/'+feed.id,t.replies.get('/api/v3/settings/oko/global')!);
-    });
-    await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab',{name:'Telegram',exact:true}).click();
-    await r.page.locator('#telegram-peer').fill('@newchannel');
-    await r.page.keyboard.press('Escape');
-    await r.page.locator('#feeds-open').click();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.locator('#reconnect-peer').fill('@draftone');
-    await expect(r.page.locator('#reconnect-history')).toBeHidden();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.locator('#reconnect-peer').fill('@drafttwo');
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await expect(r.page.locator('#reconnect-peer')).toHaveValue('@draftone');
-    await r.page.keyboard.press('Escape');
-    await r.page.locator('#add-open').click();
-    await expect(r.page.locator('#telegram-peer')).toHaveValue('@newchannel');
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
+test('new Telegram source draft survives opening profile settings without a reconnection form', async () => {
+ const r=await reader();try{
+  await r.start([]);
+  await r.page.locator('#add-open').click();await r.page.locator('#add-telegram-tab').click();
+  await r.page.locator('#telegram-peer').fill('@newchannel');await r.page.keyboard.press('Escape');
+  await r.page.locator('#settings-open').click();await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await expect(r.page.locator('#reconnect-connection')).toHaveCount(0);
+  await r.page.keyboard.press('Escape');await r.page.locator('#add-open').click();
+  await expect(r.page.locator('#telegram-peer')).toHaveValue('@newchannel');
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });
 
 test('late subscription and settings responses cannot replace newer object selection; pending save retains later edits', async () => {
@@ -143,13 +120,13 @@ test('late subscription and settings responses cannot replace newer object selec
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: one');
-    await r.page.evaluate(() => {readerTransport.held.set('/api/v3/settings/feed/one',true); readerTransport.held.set('/api/subscriptions',true);});
+    await r.page.evaluate(() => {readerTransport.held.set('/api/v3/settings/feed/one',true); readerTransport.held.set('/api/v3/subscriptions',true);});
     await r.page.keyboard.press('Escape');
     await r.page.locator('#feeds-open').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/subscriptions'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/subscriptions'));
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
-    await r.page.evaluate(() => readerTransport.release('/api/subscriptions',readerTransport.replies.get('/api/subscriptions')!.body));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/subscriptions',readerTransport.replies.get('/api/v3/subscriptions')!.body));
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Отправленный');
@@ -233,7 +210,7 @@ test('late failed save cannot replace messages after closing and reopening the s
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Новый черновик');
     await r.page.evaluate(() => readerTransport.release('/api/v3/settings/feed/one', {detail:'Старая ошибка'}, 500));
-    await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старая ошибка'))).toBe(true);
+    await expect.poll(() => r.api('diagnostics').then(result => result.groups.some(g=>g.message==='Старая ошибка'))).toBe(true);
     await expect(r.page.locator('#settings-message')).not.toContainText('Старая ошибка');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Новый черновик');
   } finally {await r.close();}
@@ -265,7 +242,7 @@ test('field save completes after leaving a model check; stale checks cannot repo
     await r.page.keyboard.press('Escape');
     await r.page.locator('#settings-open').click();
     await r.page.evaluate(() => readerTransport.release('/api/v3/processors/llamacpp/check',{detail:'Старый сбой модели'},500));
-    await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
+    await expect.poll(() => r.api('diagnostics').then(result => result.groups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
     await expect(r.page.locator('#llamacpp-check-status')).not.toContainText('Старый сбой модели');
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
@@ -288,7 +265,7 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
     await r.page.keyboard.press('Escape');
     await r.page.locator('#add-open').click();
     await r.page.evaluate(() => {
-      const data = readerTransport.replies.get('/api/subscriptions')!.body;
+      const data = readerTransport.replies.get('/api/v3/subscriptions')!.body;
       const feed = {...data!.feeds[0],id:'new',title:'Новый фид'};
       data!.feeds.push(feed);
       readerTransport.release('/api/v3/feeds',feed);
@@ -303,30 +280,17 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
   } finally {await r.close();}
 });
 
-test('pending Telegram accounts configure the newly selected feed', async () => {
-  const r = await reader();
-  try {
-    await r.start([]); await objects(r);
-    await r.page.evaluate(() => {
-      for (const feed of readerTransport.replies.get('/api/subscriptions')!.body!.feeds) {
-        Object.assign(feed, {kind:'telegram', identity:'telegram:' + feed.id + 'channel', telegram_account:'personal', transport:'telegram', auto_read:false});
-      }
-      readerTransport.held.set('/api/telegram/accounts',true);
-    });
-    await r.page.locator('#feeds-open').click();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/accounts'));
-    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.evaluate(() => readerTransport.release('/api/telegram/accounts',['personal']));
-    await expect(r.page.locator('#reconnect-peer')).toHaveValue('@twochannel');
-    await expect(r.page.locator('#reconnect-account')).toHaveValue('personal');
-    await expect(r.page.locator('#reconnect-add')).toBeEnabled();
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
+test('late profile catalog cannot overwrite a newer profile choice', async () => {
+ const r=await reader();try{
+  await r.start([]);await r.page.locator('#settings-open').click();
+  await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await expect(r.page.locator('#telegram-profile-personal option')).toHaveCount(3);
+  await r.page.locator('#telegram-profile-personal').selectOption('two');
+  await r.page.locator('#settings-dialog .settings-back').click();
+  await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await expect(r.page.locator('#telegram-profile-personal')).toHaveValue('two');
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });
 
 test('a saved feed updates reading even when navigation cancels its catalog refresh', async () => {
@@ -335,20 +299,21 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     await r.start([material('before')]); await objects(r);
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/subscriptions')!.body);
+    const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/v3/subscriptions')!.body);
+    const domainStatus=await r.api('v3/status');
     let catalogRead = 0, statusRead = 0;
     let heldCatalog: Route | undefined, heldStatus: Route | undefined;
-    await r.page.route('**/api/subscriptions', async route => {
+    await r.page.route('**/api/v3/subscriptions', async route => {
       if (++catalogRead === 1) heldCatalog = route;
       else await route.fulfill({json:subscriptions});
     });
-    await r.page.route('**/api/status', async route => {
+    await r.page.route('**/api/v3/status', async route => {
       if (++statusRead === 1) heldStatus = route;
-      else await route.fulfill({json:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1}});
+      else await route.fulfill({json:domainStatus});
     });
     await r.page.evaluate(() => {
-      readerTransport.native.add('/api/status');
-      readerTransport.native.add('/api/subscriptions');
+      readerTransport.native.add('/api/v3/status');
+      readerTransport.native.add('/api/v3/subscriptions');
       readerTransport.replies.set('PATCH /api/v3/feeds/one',{body:{}});
     });
     // An old background read is still pending when the server write completes.
@@ -385,13 +350,13 @@ test('a completed RSS addition preserves changes typed after submission', async 
     await r.page.locator('#rss-history-count').fill('13');
     await r.page.keyboard.press('Escape');
     await r.page.locator('#add-open').click();
-    const refreshes=await r.page.evaluate(() => readerTransport.requests.filter(request => request.url==='/api/subscriptions').length);
+    const refreshes=await r.page.evaluate(() => readerTransport.requests.filter(request => request.url==='/api/v3/subscriptions').length);
     await r.page.evaluate(() => {
-      const catalog=readerTransport.replies.get('/api/subscriptions')!.body;
+      const catalog=readerTransport.replies.get('/api/v3/subscriptions')!.body;
       const feed={...catalog!.feeds[0],id:'new',title:'Sent A'};
       catalog!.feeds.push(feed);readerTransport.release('/api/v3/feeds',feed);
     });
-    await r.page.waitForFunction(previous => readerTransport.requests.filter(request => request.url==='/api/subscriptions').length>previous,refreshes);
+    await r.page.waitForFunction(previous => readerTransport.requests.filter(request => request.url==='/api/v3/subscriptions').length>previous,refreshes);
     await expect(r.page.locator('#rss-title')).toHaveValue('Draft B');
     await expect(r.page.locator('#rss-history-count')).toHaveValue('13');
     await expect(r.page.locator('#add-dialog')).toBeVisible();
@@ -402,4 +367,18 @@ test('a completed RSS addition preserves changes typed after submission', async 
     }
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
+});
+
+test('confirmed feed removal wins over stale catalogue snapshots without deleting siblings',async()=>{
+ const r=await reader();try{
+  await r.start([]);await objects(r);
+  await r.page.evaluate(()=>readerTransport.replies.set('DELETE /api/v3/feeds/one',{body:{feed_id:'one',state:'deleted'}}));
+  await r.page.locator('#feeds-open').click();await r.page.locator('#feed-tree [data-owner="feed/one"]').click();await feedOptions(r.page);
+  await r.page.locator('#feed-delete').click();await r.page.locator('#feed-delete-confirm-action').click();
+  await expect(r.page.locator('#feed-tree [data-owner="feed/one"]')).toHaveCount(0);
+  await expect(r.page.locator('#feed-tree [data-owner="feed/two"]')).toHaveCount(1);
+  await r.page.locator('#feeds-close').click();await r.page.locator('#feeds-open').click();
+  await expect(r.page.locator('#feed-tree [data-owner="feed/one"]')).toHaveCount(0);
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });

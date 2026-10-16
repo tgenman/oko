@@ -9,7 +9,7 @@ test('a completed field write reconciles after Back without discarding a newer d
   const r = await reader(); let held: Route | null | undefined;
   try {
     await r.start([]);
-    await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
+    await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
     await r.page.route('**/api/v3/settings/oko/global',async route=>{
       if (route.request().method()==='PATCH') held=route; else await route.continue();
     });
@@ -33,7 +33,7 @@ test('a completed field write reconciles after Back without discarding a newer d
 
 test('Back restores the current field and section links after a saved editor rerenders', async () => {
   const r=await reader();try{
-    await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
+    await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
     await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
     await r.page.locator('#setting-originals').uncheck();await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
     await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
@@ -46,26 +46,20 @@ test('Back restores the current field and section links after a saved editor rer
   }finally{await r.close();}
 });
 
-test('Back closes Telegram reconnection and rejects delayed accounts from the previous section', async () => {
-  const r=await reader();try{
-    await r.start([]);await objects(r);
-    await r.page.evaluate(()=>{
-      const feed=readerTransport.replies.get('/api/subscriptions')!.body!.feeds[0];
-      Object.assign(feed,{kind:'telegram',identity:'telegram:onechannel',transport:'telegram',telegram_peer:'@onechannel',telegram_account:'personal',auto_read:false});
-      readerTransport.replies.set('/api/telegram/accounts',{body:['personal']});
-      readerTransport.held.set('/api/telegram/accounts',true);
-    });
-    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/one"]').click();await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/telegram/accounts'));
-    await r.page.locator('#feeds-dialog .settings-back').click();
-    await r.page.evaluate(()=>readerTransport.release('/api/telegram/accounts',['personal']));
-    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
-    await settingsHome(r.page);await editSetting(r.page,'prompt_theses');
-    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
-    await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
-    expect(r.errors).toEqual([]);
-  }finally{await r.close();}
+test('Back leaves Telegram profiles and rejects delayed profile state from the previous section', async () => {
+ const r=await reader();try{
+  await r.start([]);
+  await r.page.evaluate(()=>readerTransport.held.set('/api/v3/telegram/profiles',true));
+  await r.page.locator('#settings-open').click();
+  await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/telegram/profiles'));
+  await r.page.locator('#settings-dialog .settings-back').click();
+  await r.page.evaluate(()=>readerTransport.release('/api/v3/telegram/profiles',{personal:{role:'personal',state:'unconfigured'},collection:{role:'collection',state:'unconfigured'},configurations:[]}));
+  await expect(r.page.locator('[data-settings-page="telegram-profiles"]')).toBeHidden();
+  await editSetting(r.page,'prompt_theses');
+  await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });
 
 test('returning to Codex retries a catalog load interrupted by section navigation', async () => {
@@ -73,7 +67,7 @@ test('returning to Codex retries a catalog load interrupted by section navigatio
   try {
     await r.start([]);
     await r.page.evaluate(models => {
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/llamacpp',{body:null});
       readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models}});
       readerTransport.held.set('/api/v3/processors/codex/models',true);
@@ -101,7 +95,7 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
   try {
     await r.start([]);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions', {body:{folders:[], feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/llamacpp', {body:null});
     });
     await r.page.locator('#settings-open').click();

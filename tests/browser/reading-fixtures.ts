@@ -1,5 +1,5 @@
 import type {FixtureMaterial} from './fixture-types';
-import type {Navigation,Version,CompletionConflict} from '../../frontend/src/api/legacy-generated/types.gen';
+import type {Navigation,Version,CompletionConflict} from './scenario-data';
 
 // Convert old scenario data at the synthetic transport boundary only. The real
 // HTTP scenarios exercise the canonical responses without this adapter.

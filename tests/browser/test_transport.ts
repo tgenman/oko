@@ -59,19 +59,19 @@ test('reader transport shares authorization and preserves JSON, media and closin
         return new Response('{"saved":true}', {headers:{'Content-Type':'application/json'}});
       }});
       const saved = await transport.json('/api/v3/settings/feed/f', 'PATCH', {theses:false}, controller.signal);
-      await transport.media('/api/materials/a/media/image', controller.signal, 'no-store');
+      await transport.media('/api/v3/materials/a/media/image', controller.signal, 'no-store');
       await transport.media('https://other.test/image');
-      await transport.close('/api/tabs/tab/close');
+      await transport.close('/api/v3/tabs/tab/close');
       const unavailable = createTransport({token:'session',origin:location.origin,fetch:async () => new Response('{\"detail\":\"Медиа недоступно\"}',{status:503,headers:{'X-Oko-Error':'media-diagnostic'}})});
-      const media = await unavailable.media('/api/image');
+      const media = await unavailable.media('/api/v3/image');
       return {saved, requests, media:{ok:media.ok,status:media.status,diagnosticId:media.headers.get('X-Oko-Error')}};
     });
     expect(result.saved).toEqual({saved:true});
     expect(result.media).toEqual({ok:false,status:503,diagnosticId:'media-diagnostic'});
     expect(result.requests[0]).toEqual({url:'/api/v3/settings/feed/f',method:'PATCH',cache:'no-store',authorization:'Bearer transport-session',contentType:'application/json',body:'{"theses":false}',signal:true});
-    expect(result.requests[1]).toEqual({url:'/api/materials/a/media/image',cache:'no-store',authorization:'Bearer transport-session',signal:true});
+    expect(result.requests[1]).toEqual({url:'/api/v3/materials/a/media/image',cache:'no-store',authorization:'Bearer transport-session',signal:true});
     expect(result.requests[2].authorization).toBeUndefined();
-    expect(result.requests[3]).toEqual({url:'/api/tabs/tab/close',method:'POST',keepalive:true,authorization:'Bearer transport-session',signal:false});
+    expect(result.requests[3]).toEqual({url:'/api/v3/tabs/tab/close',method:'POST',keepalive:true,authorization:'Bearer transport-session',signal:false});
   } finally {await r.close();}
 });
 
@@ -94,7 +94,7 @@ test('transport preserves error detail and diagnostic identity without retrying 
       const transport = createTransport({token:'session',origin:location.origin,fetch:async () => replies[count++]()});
       const errors: {name:string;message:string;detail?:unknown;diagnosticId?:string|null}[] = [];
       for (let i=0;i<6;i++) {
-        try {await transport.json('/api/action','POST');}
+        try {await transport.json('/api/v3/action','POST');}
         catch(caught) {const error = caught as ReaderError;errors.push({name:error.name,message:error.message,detail:error.detail,diagnosticId:error.diagnosticId});}
       }
       return {errors,count};

@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import add_sources
 import time
 import pytest
@@ -35,7 +36,7 @@ def reader(root, history, requests, rss=None):
 
 def wait_history(client, feed, predicate):
     for _ in range(300):
-        value = client.get('/api/settings/feed/' + feed).json()['feed']['initial_history']
+        value = client.get('/api/v3/settings/feed/' + feed).json()['feed']['history']
         if value and predicate(value):
             return value
         time.sleep(.02)
@@ -46,7 +47,7 @@ def import_channel(client):
     feed = add_sources(client, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Channel', 'Без папки')]).json()['feeds'][0]['id']
     client.delete('/api/v3/feeds/'+feed+'/history')
     # Do not request captions in this enumeration/material-history scenario.
-    client.patch('/api/settings/feed/' + feed, json={'theses': False})
+    client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
     return feed
 
 
@@ -59,26 +60,26 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
     saved_sources(tmp_path, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Channel', 'Без папки')])
     history, requests = HistoryFixture(), []
     with reader(tmp_path, history, requests) as client:
-        feed = client.get('/api/subscriptions').json()['feeds'][0]['id']
-        client.patch('/api/settings/feed/' + feed, json={'theses': False})
-        client.post('/api/tabs/history/heartbeat')
-        response = client.post('/api/feeds/' + feed + '/history', json={'mode': 'count', 'count': 6})
+        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]['id']
+        client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
+        presence(client, 'history')
+        response = client.post('/api/v3/feeds/' + feed + '/history', json={'mode': 'count', 'count': '6'})
         assert response.status_code == 200, response.text
-        progress = wait_history(client, feed, lambda h: h['state'] == 'done')
-        assert progress['loaded'] == 6 and progress['available'] == 6
-        cards = client.get('/api/cards', params={'feed': feed}).json()
+        progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
+        assert progress['progress']['loaded'] == 6 and progress['progress']['available'] == 6
+        cards = client.get('/api/v3/cards', params={'feed': feed}).json()
         assert len(cards) == 6
         assert [c['title'] for c in cards[:3]] == ['Video 60', 'Video 59', 'Video 58']
-        assert all(not c['published_known'] for c in cards)
+        assert all(c['published_at'] is None for c in cards)
         assert len(history.calls) == 1
         assert len([u for u in requests if '/feeds/videos.xml' in u]) <= 4  # count-history must not list once per video
         viewed = cards[0]['id']
-        assert client.post('/api/materials/' + viewed + '/viewed').status_code == 200
+        assert client.post('/api/v3/materials/' + viewed + '/viewed').status_code == 200
     with reader(tmp_path, history, requests) as client:
-        client.post('/api/tabs/history/heartbeat')
+        presence(client, 'history')
         time.sleep(.1)
         assert len(history.calls) == 1
-        assert len(client.get('/api/cards', params={'feed': feed}).json()) == 5
+        assert len(client.get('/api/v3/cards', params={'feed': feed}).json()) == 5
 
 
 def test_partial_error_requires_manual_resume_and_rss_remains_independent(tmp_path):
@@ -96,19 +97,19 @@ def test_partial_error_requires_manual_resume_and_rss_remains_independent(tmp_pa
     xml = ['<feed xmlns="http://www.w3.org/2005/Atom"><title>Channel</title></feed>']
     with reader(tmp_path, history, requests, lambda: xml[0]) as client:
         feed = import_channel(client)
-        client.post('/api/tabs/history/heartbeat')
-        assert client.post('/api/feeds/' + feed + '/history', json={'count': 8}).status_code == 200
+        presence(client, 'history')
+        assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'8'}).status_code == 200
         progress = wait_history(client, feed, lambda h: h['state'] == 'waiting')
-        assert progress['available'] == 3 and progress['loaded'] == 0
-        assert not progress['scan_complete']
-        assert progress['discovery_error'] == 'YouTube unavailable'
-        assert client.post('/api/feeds/' + feed + '/history', json={'count': 9}).status_code == 409
+        assert progress['progress']['available'] == 3 and progress['progress']['loaded'] == 0
+        assert not progress['progress']['scan_complete']
+        assert progress['progress']['discovery_problem']['message'] == 'YouTube unavailable'
+        assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'9'}).status_code == 409
         xml[0] = f'''<feed xmlns="http://www.w3.org/2005/Atom"><title>Channel</title>
         <entry><id>yt:video:{video(99)}</id><title>New arrival</title><link href="https://www.youtube.com/watch?v={video(99)}"/>
         <published>2026-10-13T12:00:00Z</published></entry></feed>'''
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         for _ in range(100):
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             arrived = next((c for c in cards if c['title'] == 'New arrival'), None)
             if arrived and not arrived['loading']:
                 break
@@ -116,32 +117,32 @@ def test_partial_error_requires_manual_resume_and_rss_remains_independent(tmp_pa
         assert arrived and not arrived['loading']
         assert len(history.calls) == 1
     with reader(tmp_path, history, requests, lambda: xml[0]) as client:
-        client.post('/api/tabs/history/heartbeat')
+        presence(client, 'history')
         time.sleep(.15)
         assert len(history.calls) == 1
-        assert client.patch('/api/feeds/' + feed + '/history', json={'paused': False}).status_code == 200
-        progress = wait_history(client, feed, lambda h: h['state'] == 'done')
-        assert progress['loaded'] == 8 and progress['available'] == 8
+        assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused': False}).status_code == 200
+        progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
+        assert progress['progress']['loaded'] == 8 and progress['progress']['available'] == 8
         assert len(history.calls) == 2
-        assert len(client.get('/api/cards').json()) == 9
-        assert {c['title'] for c in client.get('/api/cards').json()} >= {'Video 60','Video 59','Video 58'}
+        assert len(client.get('/api/v3/cards').json()) == 9
+        assert {c['title'] for c in client.get('/api/v3/cards').json()} >= {'Video 60','Video 59','Video 58'}
 
 
 def test_stop_then_new_selection_retains_viewed_tombstones_and_saved_materials(tmp_path):
     history, requests = HistoryFixture(), []
     with reader(tmp_path, history, requests) as client:
         feed = import_channel(client)
-        client.post('/api/tabs/history/heartbeat')
-        assert client.post('/api/feeds/' + feed + '/history', json={'count': 4}).status_code == 200
-        wait_history(client, feed, lambda h: h['state'] == 'done')
-        cards = client.get('/api/cards').json()
-        client.post('/api/materials/' + cards[0]['id'] + '/viewed')
-        assert client.delete('/api/feeds/' + feed + '/history').json()['state'] == 'cancelled'
-        assert client.patch('/api/feeds/' + feed + '/history', json={'paused': False}).status_code == 400
-        assert client.post('/api/feeds/' + feed + '/history', json={'count': 2}).status_code == 200
-        progress = wait_history(client, feed, lambda h: h['state'] == 'done')
-        assert progress['available'] == 2 and progress['viewed'] == 1
-        assert len(client.get('/api/cards').json()) == 3
+        presence(client, 'history')
+        assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'4'}).status_code == 200
+        wait_history(client, feed, lambda h: h['state'] == 'complete')
+        cards = client.get('/api/v3/cards').json()
+        client.post('/api/v3/materials/' + cards[0]['id'] + '/viewed')
+        assert client.delete('/api/v3/feeds/' + feed + '/history').json()['history']['state'] == 'cancelled'
+        assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused': False}).status_code == 409
+        assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'2'}).status_code == 200
+        progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
+        assert progress['progress']['available'] == 2 and progress['progress']['viewed'] == 1
+        assert len(client.get('/api/v3/cards').json()) == 3
         assert len(history.calls) == 2
 
 
@@ -164,13 +165,13 @@ def test_recovered_rss_window_does_not_import_old_entries_outside_n(tmp_path):
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, lease=60,
                               rss_transport=httpx.MockTransport(reply), youtube_history=history), headers=HEADERS) as client:
         feed = import_channel(client)
-        client.post('/api/tabs/history/heartbeat')
-        client.post('/api/feeds/' + feed + '/history', json={'count':1})
-        wait_history(client, feed, lambda h:h['state']=='done')
+        presence(client, 'history')
+        client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'1'})
+        wait_history(client, feed, lambda h:h['state']=='complete')
         recovered = True
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         time.sleep(.4)
-        titles = {c['title'] for c in client.get('/api/cards').json()}
+        titles = {c['title'] for c in client.get('/api/v3/cards').json()}
         assert titles == {'Video 60','Video 99'}
 
 
@@ -179,15 +180,15 @@ def test_smaller_history_after_new_upload_preserves_retained_order(tmp_path):
     history = History([video(60), video(59), video(58)])
     with reader(tmp_path, history, []) as client:
         feed = import_channel(client)
-        client.post('/api/tabs/history/heartbeat')
-        client.post('/api/feeds/' + feed + '/history', json={'count': 3})
-        wait_history(client, feed, lambda h: h['state'] == 'done')
+        presence(client, 'history')
+        client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'3'})
+        wait_history(client, feed, lambda h: h['state'] == 'complete')
         history.videos = (video(61), video(60), video(59), video(58))
-        client.post('/api/feeds/' + feed + '/history', json={'count': 2})
-        wait_history(client, feed, lambda h: h['state'] == 'done' and h['count'] == 2)
+        client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'2'})
+        wait_history(client, feed, lambda h: h['state'] == 'complete' and int(h['selection']['count']) == 2)
         for sort, numbers in [('newest', [61, 60, 59, 58]), ('oldest', [58, 59, 60, 61])]:
-            cards = client.get('/api/cards', params={'feed': feed, 'sort': sort}).json()
-            assert [c['url'].split('=')[-1] for c in cards] == [video(n) for n in numbers]
+            cards = client.get('/api/v3/cards', params={'feed': feed, 'sort': sort}).json()
+            assert [c['source_url'].split('=')[-1] for c in cards] == [video(n) for n in numbers]
 
 
 @pytest.mark.parametrize('all_failed', [False, True])
@@ -209,16 +210,16 @@ def test_date_boundary_survives_failed_rss_windows(tmp_path, all_failed):
         return httpx.Response(200, text=f'<feed xmlns="http://www.w3.org/2005/Atom"><title>Channel</title>{items}</feed>')
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, lease=600, clock=lambda: clock[0],
                               rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'theses': False})
-        client.post('/api/tabs/history/heartbeat')
+        client.patch('/api/v3/settings/oko/global', json={'theses': False})
+        presence(client, 'history')
         url = f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}'
-        checked = client.post('/api/feeds/verify', json={'url': url})
+        checked = client.post('/api/v3/feeds/verify', json={'url': url})
         assert checked.status_code == 200, checked.text
-        result = client.post('/api/feeds', json={'url': url,
+        result = client.post('/api/v3/feeds', json={'url': url,
             'title':'Channel', 'folder':'Video', 'verification':checked.json()['verification'],
-            'initial_history':{'mode':'date','count':None,'date':'2026-01-01','timezone':'UTC'}})
+            'initial_history':{'mode':'date','date':'2026-01-01','timezone':'UTC'}})
         assert result.status_code == 200, result.text
-        client.post('/api/tabs/history/heartbeat')
+        presence(client, 'history')
         for _ in range(100):
             if len(requests) >= 2:
                 break
@@ -226,11 +227,11 @@ def test_date_boundary_survives_failed_rss_windows(tmp_path, all_failed):
         time.sleep(.1)
         recovered = True
         clock[0] += 61
-        client.post('/api/tabs/history/heartbeat')
-        client.post('/api/collect')
+        presence(client, 'history')
+        client.post('/api/v3/collect')
         for _ in range(100):
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             if len(requests) >= 4 and cards and all(not c['loading'] for c in cards):
                 break
             time.sleep(.02)
-        assert [c['url'] for c in cards] == [f'https://www.youtube.com/watch?v={video(2)}']
+        assert [c['source_url'] for c in cards] == [f'https://www.youtube.com/watch?v={video(2)}']
