@@ -197,6 +197,7 @@ class LocalTelegram(_TelegramOperations):
         self.generation = 0
         self.workers: dict[int, _TelegramWorker] = {}
         self._identity_lock = asyncio.Lock()
+        self._account_locks: dict[str, asyncio.Lock] = {}
 
     async def accounts(self) -> list[str]:
         from oko.collection.telegram.client import ClientRegistry
@@ -206,17 +207,18 @@ class LocalTelegram(_TelegramOperations):
             raise SourceError('Окружение Telegram-клиента недоступно') from None
 
     async def identity(self, account: str) -> int:
-        user = self.expected_users.get(account)
-        if user is not None and user in self.workers:
-            return await self.workers[user].identity(account)
-        # A probe releases its session before the collection worker starts.
-        async with self._identity_lock:
-            probe = _TelegramWorker(self.env_file, self.root / '_probe')
-            probe.allowed = self.allowed
-            try:
-                return await probe.identity(account)
-            finally:
-                await probe.close()
+        async with self._account_locks.setdefault(account, asyncio.Lock()):
+            user = self.expected_users.get(account)
+            if user is not None and user in self.workers:
+                return await self.workers[user].identity(account)
+            # A probe releases its session before the collection worker starts.
+            async with self._identity_lock:
+                probe = _TelegramWorker(self.env_file, self.root / '_probe')
+                probe.allowed = self.allowed
+                try:
+                    return await probe.identity(account)
+                finally:
+                    await probe.close()
 
     async def request(self, operation: str, **args: Any) -> Any:
         if operation == 'accounts':
@@ -228,13 +230,15 @@ class LocalTelegram(_TelegramOperations):
         if user is None:
             user = await self.identity(account)
             self.expected_users[account] = user
-        worker = self.workers.get(user)
-        if worker is None:
-            worker = _TelegramWorker(self.env_file, self.root)
-            worker.spool = self.root / 'staging' / '_telegram' / str(user)
-            self.workers[user] = worker
-        worker.allowed = self.allowed
-        worker.expected_users[account] = user
+        # A profile probe and collection must never open this session together.
+        async with self._account_locks.setdefault(account, asyncio.Lock()):
+            worker = self.workers.get(user)
+            if worker is None:
+                worker = _TelegramWorker(self.env_file, self.root)
+                worker.spool = self.root / 'staging' / '_telegram' / str(user)
+                self.workers[user] = worker
+            worker.allowed = self.allowed
+            worker.expected_users[account] = user
         return await worker.request(operation, **args)
 
     async def download_to(self, account: str, peer: int, identity: int, staging: DownloadStage, name: str) -> StagedPayload:
