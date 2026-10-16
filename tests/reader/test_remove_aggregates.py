@@ -1,4 +1,5 @@
 """Upgrade a synthetic reader snapshot captured before aggregate removal."""
+from tests.support.upgrade import saved_material
 import json
 import sqlite3
 from pathlib import Path
@@ -18,20 +19,19 @@ def test_upgrade_preserves_individual_results_and_removes_group_work(tmp_path):
         path.write_bytes(bytes.fromhex(contents))
     for _ in range(2):
         with TestClient(create_app(tmp_path, token='test'), headers={'Authorization': 'Bearer test'}) as client:
-            settings = client.get('/api/settings/oko/global').json()
+            settings = client.get('/api/v3/settings/oko/global').json()
             assert set(settings['effective']) == {'originals', 'theses', 'prompt_theses', 'prompt_filters', 'processor'}
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             assert {c['id'] for c in cards} == {m['id'] for m in fixture['expected']}
             for expected in fixture['expected']:
-                material = client.get('/api/materials/' + expected['id']).json()
-                for field in ('text', 'version', 'theses', 'provenance', 'filter', 'images'):
-                    assert material[field] == expected[field], field
-            assert client.post('/api/digests/folder/demo', json={}).status_code == 404
-            assert client.get('/api/materials/event-legacy').status_code == 404
-            assert client.get('/api/materials/digest-legacy').status_code == 404
-            status = client.get('/api/status').json()
-            assert not any(j['kind'] in ('events', 'digest') for j in status['jobs'])
-            assert set(client.get('/api/processors/codex').json()['config']) == {'filter', 'theses'}
+                material = client.get('/api/v3/materials/' + expected['id']).json()
+                saved_material(material,expected)
+            assert client.post('/api/v3/digests/folder/demo', json={}).status_code == 404
+            assert client.get('/api/v3/materials/event-legacy').status_code == 404
+            assert client.get('/api/v3/materials/digest-legacy').status_code == 404
+            status = client.get('/api/v3/status').json()
+            assert all(j['phase']!='processing' or j['operation'] in ('filter','theses') for j in status['work'])
+            assert set(client.get('/api/v3/processors/codex').json()['configuration']) == {'filter', 'theses'}
         assert not (tmp_path / 'events').exists()
         assert not (tmp_path / 'digests').exists()
 
@@ -51,9 +51,8 @@ def test_interrupted_upgrade_recovers_accepted_results(tmp_path):
             raise OSError('synthetic interruption after atomic relabel')
     with TestClient(create_app(tmp_path, token='test', fault=fault), headers={'Authorization': 'Bearer test'}) as client:
         assert failed
-        assert client.get('/api/status').json()['error']
+        assert client.get('/api/v3/status').json()['runtime_state']=='unavailable'
     with TestClient(create_app(tmp_path, token='test'), headers={'Authorization': 'Bearer test'}) as client:
         for expected in fixture['expected']:
-            material = client.get('/api/materials/' + expected['id']).json()
-            assert material['theses'] == expected['theses']
-            assert material['filter'] == expected['filter']
+            material = client.get('/api/v3/materials/' + expected['id']).json()
+            saved_material(material,expected)

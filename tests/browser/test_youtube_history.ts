@@ -10,7 +10,7 @@ test('YouTube settings start N history and waiting resumes manually without chan
       const t = readerTransport;
       const feed = {id:'yt',title:'Видео',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa'],importance:'normal',initial_history:null};
       const settings = t.replies.get('/api/v3/settings/oko/global')!.body;
-      t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds:[feed]}});
       t.replies.set('/api/v3/settings/feed/yt',{body:{...settings,feed}});
       const history = window.readerFixtures.history({mode:'count',count:60,loaded:0,available:3,incomplete:0,state:'waiting',paused:false,scan_complete:false,discovery_error:'YouTube недоступен'});
       t.replies.set('POST /api/v3/feeds/yt/history',{body:history});
@@ -28,7 +28,7 @@ test('YouTube settings start N history and waiting resumes manually without chan
     await r.page.evaluate(() => {
       const t=readerTransport;
       const history=t.replies.get('POST /api/v3/feeds/yt/history')!.body;
-      t.replies.get('/api/subscriptions')!.body!.feeds[0].initial_history=history;
+      t.replies.get('/api/v3/subscriptions')!.body!.feeds[0].initial_history=history;
     });
     await r.page.locator('#feeds-close').click();
     await r.page.locator('#feeds-open').click();
@@ -71,7 +71,7 @@ test('late history start preserves selection and input in another feed', async()
     await r.page.evaluate(()=>{
       const t=readerTransport, settings=t.replies.get('/api/v3/settings/oko/global')!.body;
       const feeds=['A','B'].map(id=>({id,title:id,kind:'youtube',transport:'youtube',folder_id:'f',original_urls:['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa'],importance:'normal',initial_history:null}));
-      t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds}});
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Учёба'}],feeds}});
       for(const feed of feeds)t.replies.set('/api/v3/settings/feed/'+feed.id,{body:{...settings,feed}});
       t.held.set('/api/v3/feeds/A/history',true);
     });
@@ -98,7 +98,7 @@ test('reopened first history gets progress and resume after a late response', as
  await r.page.evaluate(()=>{
   const t=readerTransport, settings=t.replies.get('/api/v3/settings/oko/global')!.body;
   const feed={id:'A',title:'A',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:[],importance:'normal',initial_history:null};
-  t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'f'}],feeds:[feed]}});
+  t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'f'}],feeds:[feed]}});
   t.replies.set('/api/v3/settings/feed/A',{body:{...settings,feed}});
   t.held.set('/api/v3/feeds/A/history',true);
  });
@@ -112,8 +112,8 @@ test('reopened first history gets progress and resume after a late response', as
  await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
  await r.page.evaluate(()=>{
   const t=readerTransport,history=window.readerFixtures.history({feed_id:'A',mode:'count',count:60,loaded:0,available:0,state:'waiting',paused:false,discovery_error:'limit'});
-  t.replies.get('/api/subscriptions')!.body!.feeds[0].initial_history=history;
-  t.replies.set('/api/status',{body:{stage:'Ожидание',errors:[],ready_sources:1,total_sources:1,initial_histories:[history],sources:[]}});
+  t.replies.get('/api/v3/subscriptions')!.body!.feeds[0].initial_history=history;
+  t.replies.set('/api/v3/status',{body:{stage:'Ожидание',errors:[],ready_sources:1,total_sources:1,initial_histories:[history],sources:[]}});
   t.release('/api/v3/feeds/A/history',history);
  });
  await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
@@ -129,7 +129,7 @@ test('saved history count retains exact decimal text when reopening settings',as
       const t=readerTransport,settings=t.replies.get('/api/v3/settings/oko/global')!.body;
       const feed={id:'large',title:'Large',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:[],importance:'normal',
         initial_history:window.readerFixtures.history({mode:'count',count:9007199254740992,count_text:'9007199254740993',state:'done',loaded:0,available:0})};
-      t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'f'}],feeds:[feed]}});
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'f'}],feeds:[feed]}});
       t.replies.set('/api/v3/settings/feed/large',{body:{...settings,feed}});
       t.held.set('/api/v3/feeds/large/history',true);
     });

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from pydantic import ValidationError
 
 from oko.reader.generated import models as wire
-from oko.reader.legacy_generated import models as previous
+from oko.reader import snapshots as facts
 from oko.reader import projection_v3 as project
 from oko.reader.commands_v3 import track
 from oko.reader.runtime import Runtime, ActionError
@@ -32,7 +32,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.get('/api/v3/subscriptions', response_model=wire.SubscriptionCatalog)
     async def subscriptions() -> wire.SubscriptionCatalog:
         saved = runtime.require_store().subscriptions
-        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(previous.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds()])
+        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds()])
 
     @router.post('/api/v3/feeds/verify', response_model=wire.FeedVerification)
     async def verify(request: Request, body: wire.FeedUrlRequest) -> wire.FeedVerification:
@@ -41,14 +41,14 @@ def register(app: FastAPI, runtime: Runtime) -> None:
 
     async def verify_source(body: wire.FeedUrlRequest) -> wire.FeedVerification:
         try:
-            result = previous.FeedVerification.model_validate(await runtime.verify_feed(FeedURL(url=body.url.root)))
+            result = facts.FeedVerification.model_validate(await runtime.verify_feed(FeedURL(url=body.url.root)))
         except ActionError as error:
             if runtime.stopped:
                 raise ApiError(409, wire.ErrorEnvelope(wire.RuntimeStoppedError(code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=None))) from None
             if error.code != 'source_unavailable':
                 raise ApiError(400, wire.ErrorEnvelope(wire.SourceConnectionInvalidError(code='source_connection_invalid', message=str(error.detail), details=wire.SourceConnectionInvalidErrorDetails(reason='invalid_source'), diagnostic_id=None, command_id=None))) from None
             raise ApiError(503, wire.ErrorEnvelope(wire.SourceUnavailableError(code='source_unavailable', message=str(error.detail), details=wire.SourceUnavailableErrorDetails(retry_at=None), diagnostic_id=None, command_id=None))) from None
-        if isinstance(result.existing, previous.SubscriptionFeed):
+        if isinstance(result.existing, facts.SubscriptionFeed):
             return wire.FeedVerification(wire.ExistingFeedVerification(state='existing', existing_feed=project.subscription(result.existing)))
         return wire.FeedVerification(wire.NewFeedVerification(state='new', verification=result.verification,
             candidate=wire.FeedCandidate(url=wire.SourceUrl(result.url), title=result.title, kind=result.kind)))
@@ -58,11 +58,11 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         history = selection(body.initial_history) if isinstance(body.initial_history, wire.HistorySelection) else InitialHistory()
         async with track(runtime, request, wire.CommandContext(wire.CommandAddFeed(operation='add_feed'))):
             result = await runtime.add_feed(AddFeed(url=body.url.root, verification=body.verification, title=body.title, folder=body.folder, initial_history=history))
-            return project.subscription(previous.SubscriptionFeed.model_validate(result))
+            return project.subscription(facts.SubscriptionFeed.model_validate(result))
 
     @router.get('/api/v3/youtube', response_model=wire.YouTubeState)
     async def youtube() -> wire.YouTubeState:
-        return project.youtube(previous.YouTube.model_validate(runtime.youtube_status()))
+        return project.youtube(facts.YouTube.model_validate(runtime.youtube_status()))
 
     @router.patch('/api/v3/youtube', response_model=wire.YouTubeState)
     async def configure(request: Request, body: wire.YouTubePatchRequest) -> wire.YouTubeState:
@@ -78,10 +78,10 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             elif isinstance(credentials, wire.CredentialsReplace):
                 values.update(username=credentials.username, password=credentials.password)
         async with track(runtime, request, wire.CommandContext(wire.CommandYoutubeConfigure(operation='youtube_configure'))):
-            return project.youtube(previous.YouTube.model_validate(await runtime.configure_youtube(values)))
+            return project.youtube(facts.YouTube.model_validate(await runtime.configure_youtube(values)))
 
     def history(identity: str, result: object) -> wire.FeedHistoryState:
-        return project.history(previous.InitialHistoryStatus.model_validate(dict(previous.History.model_validate(result).model_dump(), feed_id=identity)))
+        return project.history(facts.InitialHistoryStatus.model_validate(dict(facts.History.model_validate(result).model_dump(), feed_id=identity)))
 
     @asynccontextmanager
     async def archive(request: Request, identity: str, context: wire.CommandContext) -> AsyncIterator[None]:
@@ -96,7 +96,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                 if not saved:
                     raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), diagnostic_id=None, command_id=command_id,
                         details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(identity))))))) from None
-                state = project.subscription(previous.SubscriptionFeed.model_validate(saved[0])).root.history
+                state = project.subscription(facts.SubscriptionFeed.model_validate(saved[0])).root.history
                 raise ApiError(409, wire.ErrorEnvelope(wire.HistoryConflictError(code='history_conflict', message=str(error.detail), diagnostic_id=None, command_id=command_id,
                     details=wire.HistoryConflictErrorDetails(feed_id=wire.FeedId(identity), history=state)))) from None
 

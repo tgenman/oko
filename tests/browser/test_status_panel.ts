@@ -1,4 +1,4 @@
-import type {Problem} from '../../frontend/src/api/legacy-generated/types.gen';
+import type {Problem} from './scenario-data';
 import type {ReaderFixture} from './support.ts';
 import {test} from 'node:test';
 import {reader, material, expect} from './support.ts';
@@ -8,7 +8,7 @@ const modelProblem: Problem = {id:'processor:codex-choice',code:'codex-choice',s
   consequence:'Тезисы пока не создаются.',next_step:'Выберите модель.',objects:[{kind:'settings',id:'global',label:'Настройки Око'}],
   action:{kind:'settings',page:'codex'},created_at:1800000000,next_at:null,state:'current',finished_at:null,outcome:null};
 async function status(r: ReaderFixture,current: Problem[],recent: Problem[]=[]) {
-  await r.page.evaluate(({current,recent})=>readerTransport.replies.set('/api/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,
+  await r.page.evaluate(({current,recent})=>readerTransport.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,
     problems:{current,recent,count:current.length,updated_at:1800000000}}}),{current,recent});
 }
 
@@ -18,14 +18,14 @@ test('late status-target opening cannot navigate a reopened settings menu',async
     await r.start([]);await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
     await r.page.locator('#status-toggle').click();
-    await r.page.evaluate(()=>readerTransport.held.set('/api/subscriptions',true));
+    await r.page.evaluate(()=>readerTransport.held.set('/api/v3/subscriptions',true));
     await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
-    await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/subscriptions'))).toBe(true);
+    await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/v3/subscriptions'))).toBe(true);
     await r.page.locator('#settings-close').click();
     await r.page.evaluate(()=>{
-      const resolve=readerTransport.pending.get('/api/subscriptions');
+      const resolve=readerTransport.pending.get('/api/v3/subscriptions');
       window.releaseOldMenu=()=>resolve!(new Response(JSON.stringify({folders:[],feeds:[]}),{headers:{'Content-Type':'application/json'}}));
-      readerTransport.pending.delete('/api/subscriptions');readerTransport.held.delete('/api/subscriptions');
+      readerTransport.pending.delete('/api/v3/subscriptions');readerTransport.held.delete('/api/v3/subscriptions');
     });
     await r.page.locator('#status-close').click();
     await r.page.locator('#settings-open').click();
@@ -42,12 +42,12 @@ test('status-target continuation respects a newer page in the same menu',async()
     await r.start([]);await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
     await r.page.locator('#status-toggle').click();
-    await r.page.evaluate(()=>readerTransport.held.set('/api/subscriptions',true));
+    await r.page.evaluate(()=>readerTransport.held.set('/api/v3/subscriptions',true));
     await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
-    await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/subscriptions'))).toBe(true);
+    await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/v3/subscriptions'))).toBe(true);
     await r.page.getByRole('button',{name:'Модели',exact:true}).click();
     await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','models');
-    await r.page.evaluate(()=>readerTransport.release('/api/subscriptions',{folders:[],feeds:[]}));
+    await r.page.evaluate(()=>readerTransport.release('/api/v3/subscriptions',{folders:[],feeds:[]}));
     await r.page.waitForTimeout(150);
     await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','models');
   } finally {await r.close();}
@@ -117,7 +117,7 @@ test('offline state keeps last problems without a false zero and distinguishes a
     await r.start([]);await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
     await r.page.locator('#status-toggle').click();
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/status',{status:503,body:{detail:'offline'}}));
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'offline'}}));
     await expect(r.page.locator('#status-panel')).toContainText('Состояние может быть устаревшим');
     await expect(r.page.locator('#status-panel')).toContainText('Не выбрана модель Codex');
     await expect(r.page.locator('.status-action')).toBeDisabled();
@@ -125,7 +125,7 @@ test('offline state keeps last problems without a false zero and distinguishes a
     await expect(r.page.locator('.status-action')).toBeEnabled();
     await r.page.locator('#status-close').click();
     await expect(r.page.locator('#status-panel')).toBeHidden();
-    await r.page.evaluate(()=>readerTransport.replies.get('/api/status')!.body!.stopped=true);
+    await r.page.evaluate(()=>readerTransport.replies.get('/api/v3/status')!.body!.stopped=true);
     await expect(r.page.locator('#progress')).toHaveText('Око остановлено');
     await r.page.locator('#status-toggle').click();
     await expect(r.page.locator('#status-panel')).toContainText('Око остановлено');

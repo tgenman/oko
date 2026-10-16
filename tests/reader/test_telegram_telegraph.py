@@ -50,14 +50,14 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
             client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
             body['access'] = {'kind':'client','profile':'personal'}
         assert client.post('/api/v3/telegram/connect',json=body).status_code == 200
-        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
-        assert material['text'].startswith(POST)
-        assert material['text'].count('Article One') == 1
-        assert material['text'].count('Article Two') == 1
-        assert 'Photo caption' in material['text']
-        assert material['full'] is True
-        assert len(material['attachments']) == 1
-        assert client.get(material['attachments'][0]['url']).content == b'article-photo'
+        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
+        assert material['content']['text'].startswith(POST)
+        assert material['content']['text'].count('Article One') == 1
+        assert material['content']['text'].count('Article Two') == 1
+        assert 'Photo caption' in material['content']['text']
+        assert (material['content']['completeness']['state']=='complete') is True
+        assert len(material['content']['attachments']) == 1
+        assert client.get(material['content']['attachments'][0]['url']).content == b'article-photo'
         assert not any('example.org' in url for url in calls)
         assert sum('/getPage/One?' in url for url in calls) == 1
         assert sum('/getPage/Two?' in url for url in calls) == 1
@@ -94,40 +94,40 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         deadline = time.monotonic()+2
         pending = None
         while time.monotonic()<deadline:
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             if cards:
-                pending = client.get('/api/materials/'+cards[0]['id']).json()
-                if 'Статья Telegraph недоступна' in pending.get('reason',''):
+                pending = client.get('/api/v3/materials/'+cards[0]['id']).json()
+                if 'Статья Telegraph недоступна' in pending['content'].get('completeness',{}).get('message',''):
                     break
             time.sleep(.02)
-        assert pending and 'Статья Telegraph недоступна' in pending['reason']
+        assert pending and 'Статья Telegraph недоступна' in pending['content']['completeness'].get('message','')
         identity = pending['id']
         phase[0] = 1
-        client.post('/api/materials/'+identity+'/retry')
+        client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
-        loaded = client.get('/api/materials/'+identity).json()
-        assert loaded['full'] is True and loaded['previous'] == []
-        assert 'Version one' in loaded['text']
-        assert loaded['version'] != pending['version']
-        image = loaded['attachments'][0]['url']
+        loaded = client.get('/api/v3/materials/'+identity).json()
+        assert (loaded['content']['completeness']['state']=='complete') is True and loaded['content']['previous_versions'] == []
+        assert 'Version one' in loaded['content']['text']
+        assert loaded['content']['revision_id'] != pending['content']['revision_id']
+        image = loaded['content']['attachments'][0]['url']
         phase[0] = 2
-        client.post('/api/materials/'+identity+'/retry')
+        client.post('/api/v3/materials/'+identity+'/retry')
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            if any('Не удалось загрузить' in error for error in client.get('/api/status').json()['errors']):
+            if any('Не удалось загрузить' in error for error in [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]):
                 break
             time.sleep(.02)
         else:
             raise AssertionError('Article retry error was not observable')
-        retained = client.get('/api/materials/'+identity).json()
-        assert retained['text'] == loaded['text'] and retained['full'] is True
-        assert retained['previous'] == [] and retained['version']==loaded['version']
+        retained = client.get('/api/v3/materials/'+identity).json()
+        assert retained['content']['text'] == loaded['content']['text'] and (retained['content']['completeness']['state']=='complete') is True
+        assert retained['content']['previous_versions'] == [] and retained['content']['revision_id']==loaded['content']['revision_id']
         assert client.get(image).content == b'known-article-image'
         phase[0] = 3
-        client.post('/api/materials/'+identity+'/retry')
+        client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
-        changed = client.get('/api/materials/'+identity).json()
-        assert 'Version two' in changed['text'] and len(changed['previous'])==1
+        changed = client.get('/api/v3/materials/'+identity).json()
+        assert 'Version two' in changed['content']['text'] and len(changed['content']['previous_versions'])==1
 
 
 def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
@@ -143,11 +143,11 @@ def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
-        assert material['full'] is False
-        assert 'Available text' in material['text'] and 'http://127.0.0.1/private' in material['text']
-        assert '<iframe' not in material['text']
-        assert 'Внешнее встраивание' in material['reason']
+        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
+        assert (material['content']['completeness']['state']=='complete') is False
+        assert 'Available text' in material['content']['text'] and 'http://127.0.0.1/private' in material['content']['text']
+        assert '<iframe' not in material['content']['text']
+        assert 'Внешнее встраивание' in material['content']['completeness'].get('message','')
         assert '127.0.0.1' not in calls
 
 
@@ -185,7 +185,7 @@ def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_p
             while time.monotonic()<deadline and (client.get('/api/v3/subscriptions').json()['feeds'] or list((tmp_path/'staging').rglob('incoming-*'))):
                 time.sleep(.02)
             time.sleep(.05)
-            assert not client.get('/api/cards').json()
+            assert not client.get('/api/v3/cards').json()
             assert not assets
         finally:
             release.set()
@@ -217,9 +217,9 @@ FakeClient.rows = linked_rows
         client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@forum',folder='Forum',
                     access={'kind':'client','profile':'personal'},initial_history={'mode':'count','count':'1'}))
-        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
-        assert material['text'].startswith('😀 [Читать статью](https://telegra.ph/Article)')
-        assert 'Full linked article' in material['text'] and material['full'] is True
+        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
+        assert material['content']['text'].startswith('😀 [Читать статью](https://telegra.ph/Article)')
+        assert 'Full linked article' in material['content']['text'] and (material['content']['completeness']['state']=='complete') is True
         assert len(calls)==1
         assert trace.is_file()
 
@@ -284,7 +284,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
             assert regeneration_started.wait(2)
         phase[0]=2
         assert client.post(path+'/retry').status_code==200
-        wait_for(client,lambda: client.get('/api/status').json()['errors'])
+        wait_for(client,lambda: [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')])
         retained=client.get(path).json()
         assert retained['content']['revision_id']==initial['content']['revision_id']
         assert retained['theses']['result']==accepted
@@ -357,7 +357,7 @@ def test_retained_theses_and_provenance_come_from_the_same_committed_bytes(tmp_p
         assert client.post(path+'/regenerate').status_code==200
         missing[0]=True
         assert client.post(path+'/retry').status_code==200
-        wait_for(client,lambda: client.get('/api/status').json()['errors'])
+        wait_for(client,lambda: [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')])
         fail[0]=True
         codex.hold=False
         assert moved.wait(3)

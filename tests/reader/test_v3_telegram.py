@@ -58,3 +58,28 @@ def test_closed_access_defaults_and_invalid_selection_have_no_feed_writes(tmp_pa
         for mutation in [{'access':{'kind':'web'}}, {'telegram_account':'two'}, {'telegram_peer':'-1009'}]:
             result = client.patch('/api/v3/feeds/'+feed['id'], json=mutation)
             assert result.status_code in (409, 422), result.text
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_confirmed_telegram_access_is_identical_in_catalog_composition_card_and_material(tmp_path, legacy):
+    from tests.reader.test_telegram_bindings import legacy_feeds
+    from tests.support.reader import wait_for
+    saved_id=legacy_feeds(tmp_path,accounts=('one',))[0] if legacy else None
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()),headers=HEADERS) as client:
+        if legacy:
+            assert client.get('/api/v3/subscriptions').json()['feeds'][0]['access']['kind']=='legacy_client'
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        if not legacy:
+            reply=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox','access':{'kind':'client','profile':'personal'},'initial_history':{'mode':'count','count':'1'}})
+            assert reply.status_code==200,reply.text
+            saved_id=reply.json()['feed_id']
+        catalog=next(feed for feed in client.get('/api/v3/subscriptions').json()['feeds'] if feed['id']==saved_id)
+        assert catalog['access']['kind']=='client' and catalog['access']['role']=='personal'
+        assert catalog['access']['account_user_id']=='9007199254740993'
+        composition=next(row['feed'] for row in client.get('/api/v3/reading-composition').json()['feeds'] if row['feed']['id']==saved_id)
+        assert composition['access']==catalog['access']
+        assert composition['connection']==catalog['connection']=='ready'
+        card=wait_for(client,lambda: next((card for card in client.get('/api/v3/cards').json() if card['feed_id']==saved_id and card['availability']=='available'),None))
+        assert card['source']['access']==catalog['access']
+        material=client.get('/api/v3/materials/'+card['id']).json()
+        assert material['source']['access']==catalog['access']

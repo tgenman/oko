@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 import time
 
 
@@ -21,8 +22,8 @@ def wait_for(client, predicate):
 
 
 def setup_reader(client, *, theses):
-    response = client.patch('/api/settings/oko/global', json={'theses': theses, 'prompt_filters': ''})
+    response = client.patch('/api/v3/settings/oko/global', json={'theses': theses, 'prompt_filters': ''})
     assert response.status_code == 200, response.text
-    client.post('/api/tabs/reader/heartbeat')
-    cards = wait_for(client, lambda: (cards if len(cards := client.get('/api/cards').json()) == 3 and all(c['complete'] for c in cards) else None))
+    presence(client, 'reader')
+    cards = wait_for(client, lambda: (cards if len(cards := client.get('/api/v3/cards').json()) == 3 and all((c['availability'] == 'available') for c in cards) else None))
     return cards[0]['id']

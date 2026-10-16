@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 from tests.support.reader import HEADERS, wait_for, setup_reader
 from tests.support.models import model_transport
 import json
@@ -13,13 +14,13 @@ def test_completed_theses_survive_restart_without_second_model_call(tmp_path: Pa
     options = dict(source=DemoSource(), token='test', ai_transport=model_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: all(m.get('theses') for m in client.get('/api/cards').json()))
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: all(m['theses']['result'] for m in client.get('/api/v3/cards').json()))
     before = len([r for r in calls if r.url.path == '/v1/chat/completions'])
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        assert client.get('/api/materials/' + item).json()['theses']
+        presence(client, 'reader')
+        assert client.get('/api/v3/materials/' + item).json()['theses']['result']
         time.sleep(.1)
     assert len([r for r in calls if r.url.path == '/v1/chat/completions']) == before
 
@@ -29,13 +30,13 @@ def test_missing_theses_file_is_regenerated_after_restart(tmp_path: Path):
     options = dict(source=DemoSource(), token='test', ai_transport=model_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
     (tmp_path / 'content' / item / '1' / 'theses.md').unlink()
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        presence(client, 'reader')
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
 
 
 def test_process_death_after_theses_move_retries_without_publishing_orphan(tmp_path: Path):
@@ -72,19 +73,19 @@ def test_process_death_after_theses_move_retries_without_publishing_orphan(tmp_p
     process = launch(tmp_path, 'after_theses_move', model_origin=f'http://127.0.0.1:{server.server_port}')
     try:
         with connect(tmp_path, process) as client:
-            client.post('/api/tabs/a/heartbeat')
+            presence(client, 'a')
             cards = wait_cards(client, 3)
             item = cards[0]['id']
-            client.put('/api/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
-            client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+            client.put('/api/v3/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
+            client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         assert process.wait(timeout=5) == 79
         process = launch(tmp_path, model_origin=f'http://127.0.0.1:{server.server_port}')
         with connect(tmp_path, process) as client:
-            assert client.get('/api/materials/' + item).json()['theses'] is None
-            client.post('/api/tabs/a/heartbeat')
-            result = wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+            assert client.get('/api/v3/materials/' + item).json()['theses']['result'] is None
+            presence(client, 'a')
+            result = wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
             assert result['points'][0]['text'] == 'Контент удаляется при просмотре.'
-            client.post('/api/materials/' + item + '/viewed')
+            client.post('/api/v3/materials/' + item + '/viewed')
             assert not (tmp_path / 'content' / item).exists()
             assert not (tmp_path / 'staging' / item).exists()
     finally:

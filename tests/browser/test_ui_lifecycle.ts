@@ -9,7 +9,7 @@ test('a completed field write reconciles after Back without discarding a newer d
   const r = await reader(); let held: Route | null | undefined;
   try {
     await r.start([]);
-    await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
+    await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
     await r.page.route('**/api/v3/settings/oko/global',async route=>{
       if (route.request().method()==='PATCH') held=route; else await route.continue();
     });
@@ -33,7 +33,7 @@ test('a completed field write reconciles after Back without discarding a newer d
 
 test('Back restores the current field and section links after a saved editor rerenders', async () => {
   const r=await reader();try{
-    await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
+    await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
     await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
     await r.page.locator('#setting-originals').uncheck();await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
     await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
@@ -67,7 +67,7 @@ test('returning to Codex retries a catalog load interrupted by section navigatio
   try {
     await r.start([]);
     await r.page.evaluate(models => {
-      readerTransport.replies.set('/api/subscriptions',{body:{folders:[],feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/llamacpp',{body:null});
       readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models}});
       readerTransport.held.set('/api/v3/processors/codex/models',true);
@@ -95,7 +95,7 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
   try {
     await r.start([]);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/subscriptions', {body:{folders:[], feeds:[]}});
+      readerTransport.replies.set('/api/v3/subscriptions', {body:{folders:[], feeds:[]}});
       readerTransport.replies.set('/api/v3/processors/llamacpp', {body:null});
     });
     await r.page.locator('#settings-open').click();

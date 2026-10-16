@@ -40,7 +40,7 @@ def test_frontend_nested_modules_survive_a_different_working_directory(tmp_path:
         assert client.get('/style.css').headers['content-type'].startswith('text/css')
         assert script.headers['cache-control'] == 'no-store'
         assert "frame-ancestors 'none'" in script.headers['content-security-policy']
-        assert client.get('/api/navigation', headers={'Authorization': 'Bearer secret'}).status_code == 200
+        assert client.get('/api/v3/reading-composition', headers={'Authorization': 'Bearer secret'}).status_code == 200
 
 
 def test_frontend_rejects_traversal_symlinks_and_unknown_data_paths(tmp_path: Path, monkeypatch):
@@ -57,9 +57,9 @@ def test_frontend_rejects_traversal_symlinks_and_unknown_data_paths(tmp_path: Pa
     monkeypatch.setattr('oko.reader.static.FRONTEND_ROOT', frontend)
     with TestClient(create_app(tmp_path / 'data', token='secret')) as client:
         for path in ('/leak.txt', '/leak-directory/private.txt', '/%2e%2e/private.txt', '/%2Fetc/passwd',
-                     '/missing', '/api/unknown', '/api', '/loop', '/%00', '/%2e', '/%2e/', '/%2e%2f'):
+                     '/missing', '/api/v3/unknown', '/api', '/loop', '/%00', '/%2e', '/%2e/', '/%2e%2f'):
             response = client.get(path, headers={'Authorization': 'Bearer secret'})
-            assert response.status_code == 404, path
+            assert response.status_code == (410 if path == '/api' else 404), path
             assert 'private bytes' not in response.text
             assert response.headers['content-type'].startswith('application/json')
         assert client.get('/index.html', headers={'Host': 'evil.example'}).status_code == 403

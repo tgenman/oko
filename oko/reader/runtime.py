@@ -299,7 +299,8 @@ class Runtime:
     async def report_action(self, identity: str, context: dict[str, Any], result: str) -> str:
         async with self._actions:
             if any(obj['kind'] == 'material' and self.material_was_viewed(obj['id']) for obj in context['objects']):
-                return 'abandoned'
+                # Keep the neutral observation outcome while forgetting UI resources.
+                return self.require_store().problems.report_action(identity, dict(context, objects=[]), 'abandoned', self._wall_clock())
             try:
                 return self.require_store().problems.report_action(identity, context, result, self._wall_clock())
             except ValueError:

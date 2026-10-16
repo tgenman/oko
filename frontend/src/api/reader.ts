@@ -1,4 +1,4 @@
-import {createClient} from './legacy-generated/client';
+import {createClient} from './generated/client';
 import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop, collect} from './generated/sdk.gen';
 import type {CommandContext,RuntimeStatus} from './generated/types.gen';
 import {ReaderError,decodeJson} from './errors';
@@ -43,7 +43,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         if(!response.ok || !isBinaryOperation(url.pathname,request.method))await decodeJson(response.clone());
         return response;
       } catch(error) {
-        if (onError && !['/api/debug','/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {
+        if (onError && !['/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {
           if (error instanceof Error) {
             Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : []});
             reported.add(error);

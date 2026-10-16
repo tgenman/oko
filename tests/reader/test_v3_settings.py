@@ -27,7 +27,7 @@ def test_settings_inheritance_reset_and_command_receipt(tmp_path):
 
 def test_inheritance_and_atomic_feed_validation(tmp_path):
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
-        feed = client.get('/api/subscriptions').json()['feeds'][0]
+        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]
         folder = feed['folder_id']
         assert client.patch('/api/v3/settings/folder/' + folder, json={'originals': False}).status_code == 200
         path = '/api/v3/settings/feed/' + feed['id']
@@ -120,8 +120,8 @@ def test_delayed_server_result_wins_over_observation(tmp_path):
 
 def test_legacy_receipts_and_diagnostics_remain_readable(tmp_path):
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        assert client.patch('/api/settings/oko/global', json={'theses': False}, headers={'X-Oko-Action': 'legacy'}).status_code == 200
-        client.post('/api/debug', json={'source': 'old client', 'message': 'old error'})
+        assert client.patch('/api/v3/settings/oko/global', json={'theses': False}, headers={'X-Oko-Action': 'legacy'}).status_code == 200
+        client.post('/api/v3/diagnostics', json={'source': 'old client', 'message': 'old error'})
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
         receipt = client.get('/api/v3/commands/legacy').json()
         assert receipt['outcome'] == 'succeeded'
@@ -161,8 +161,13 @@ def test_failed_edit_can_be_discarded_without_undoing_saved_configuration(tmp_pa
 
 
 def test_context_field_order_and_legacy_processor_are_preserved(tmp_path):
+    from oko.storage.store import Store
+    from oko.subscriptions.subscriptions import Overrides
+    saved = Store(tmp_path, lambda _: None)
+    saved.subscriptions.update_settings('oko','global',Overrides(processor='historical-choice'))
+    saved.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
-        assert client.patch('/api/settings/oko/global', json={'processor': 'historical-choice'}).status_code == 200
+        assert client.patch('/api/v3/settings/oko/global', json={'processor': 'historical-choice'}).status_code == 422
         reply = client.get('/api/v3/settings/oko/global')
         assert reply.status_code == 200, reply.text
         assert reply.json()['effective']['processor']['value'] == {'kind': 'legacy', 'value': 'historical-choice'}
@@ -190,7 +195,7 @@ def test_concurrent_reuse_of_correlation_cannot_change_context(tmp_path):
 def test_imported_telegram_without_access_stays_unconfigured_and_patch_is_atomic(tmp_path):
     saved_sources(tmp_path, [('https://t.me/example_channel', 'Saved', 'Без папки')])
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        imported = client.get('/api/subscriptions')
+        imported = client.get('/api/v3/subscriptions')
         assert imported.status_code == 200, imported.text
         feed = imported.json()['feeds'][0]
         path = '/api/v3/settings/feed/' + feed['id']
@@ -211,12 +216,12 @@ def test_late_diagnostic_for_viewed_material_is_forgotten(tmp_path):
     from tests.support.reader import wait_for
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''})
-        client.post('/api/collect')
-        cards = wait_for(client, lambda: client.get('/api/cards').json())
+        client.post('/api/v3/collect')
+        cards = wait_for(client, lambda: client.get('/api/v3/cards').json())
         identity = cards[0]['id']
         event = {'source': 'material viewer', 'message': 'private synthetic material text', 'material_ids': [identity]}
         assert client.post('/api/v3/diagnostics', json=event).json()['state'] == 'accepted'
-        assert client.post('/api/materials/' + identity + '/viewed').status_code == 200
+        assert client.post('/api/v3/materials/' + identity + '/viewed').status_code == 200
         reply = client.post('/api/v3/diagnostics', json=event)
         assert reply.status_code == 200, reply.text
         assert reply.json() == {'state': 'ignored', 'reason': 'material_viewed'}
@@ -240,9 +245,9 @@ def test_receipt_keeps_confirmed_outcome_of_retired_operation(tmp_path):
 def test_feed_settings_preserve_configured_history_on_read_and_patch(tmp_path):
     saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=synthetic', 'History', 'Без папки')])
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        result = client.get('/api/subscriptions')
+        result = client.get('/api/v3/subscriptions')
         identity = result.json()['feeds'][0]['id']
-        assert client.post('/api/feeds/' + identity + '/history', json={'mode': 'count', 'count': '20'}).status_code == 200
+        assert client.post('/api/v3/feeds/' + identity + '/history', json={'mode': 'count', 'count': '20'}).status_code == 200
         path = '/api/v3/settings/feed/' + identity
         response = client.get(path)
         assert response.status_code == 200, response.text

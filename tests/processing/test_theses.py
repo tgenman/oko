@@ -18,19 +18,19 @@ def test_local_theses_follow_inherited_prompt_and_delete_with_original(tmp_path:
     calls = []
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        assert client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True}).status_code == 200
-        assert client.post('/api/processors/llamacpp/check').json()['local'] is True
-        assert client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_theses': 'Один тезис о просмотре.'}).status_code == 200
-        material = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('theses') else None))
-        assert material['theses']['points'][0]['text'] == 'Просмотрено удаляет текст.'
-        assert material['text'].startswith('Это тестовая публикация.')
+        assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True}).status_code == 200
+        assert client.post('/api/v3/processors/llamacpp/check').json()['locality'] == 'local'
+        assert client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_theses': 'Один тезис о просмотре.'}).status_code == 200
+        material = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['result'] else None))
+        assert material['theses']['result']['points'][0]['text'] == 'Просмотрено удаляет текст.'
+        assert material['content']['text'].startswith('Это тестовая публикация.')
         chat = next(r for r in calls if r.url.path == '/v1/chat/completions')
         payload = json.loads(chat.content)
         assert payload['stream'] is False
         assert 'Один тезис о просмотре.' in payload['messages'][0]['content']
         assert 'tools' not in payload
-        assert client.post('/api/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/materials/' + item).status_code == 404
+        assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
+        assert client.get('/api/v3/materials/' + item).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
 
@@ -39,13 +39,13 @@ def test_unknown_remote_boundary_never_receives_forbidden_content(tmp_path: Path
     calls = []
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'https://models.example.org', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        m = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
-        assert 'Запрещена публичная' in m['ai']['error']
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://models.example.org', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        m = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] else None))
+        assert 'Запрещена публичная' in m['theses']['diagnostic_message']
         assert not any(r.url.path == '/v1/chat/completions' for r in calls)
-        client.patch('/api/feeds/demo', json={'public_ai': True})
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        client.patch('/api/v3/feeds/demo', json={'public_ai': True})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
         assert any(r.url.path == '/v1/chat/completions' for r in calls)
 
 
@@ -58,11 +58,11 @@ def test_http_success_without_finished_attributed_result_is_not_theses(tmp_path:
         return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps({'points': [{'text': 'Выдуманный тезис', 'sources': [{'id': 'outsider', 'url': 'https://evil.org'}]}]})}}]})
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        m = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
-        assert m['theses'] is None
-        assert 'неизвестный источник' in m['ai']['error']
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        m = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] else None))
+        assert m['theses']['result'] is None
+        assert 'неизвестный источник' in m['theses']['diagnostic_message']
         assert not list(tmp_path.glob('content/*/1/theses.md'))
 
 
@@ -98,17 +98,17 @@ def test_permission_change_invalidates_late_output_and_keeps_one_ai_request(tmp_
     held = HeldModel()
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=held), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         assert held.started.wait(2)
-        client.patch('/api/settings/oko/global', json={'prompt_theses': 'Новый промпт'})
+        client.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'Новый промпт'})
         time.sleep(.15)
         maximum = held.maximum
-        late = client.get('/api/materials/' + item).json()['theses']
+        late = client.get('/api/v3/materials/' + item).json()['theses']['result']
         held.release.set()
         assert maximum == 1
         assert late is None
-        result = wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        result = wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
         assert result
         requests = [json.loads(r.content) for r in held.requests if r.url.path == '/v1/chat/completions']
         assert any('Новый промпт' in r['messages'][0]['content'] for r in requests)
@@ -118,14 +118,14 @@ def test_viewed_during_ai_never_reappears_and_stop_is_bounded(tmp_path: Path):
     held = HeldModel()
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=held), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         assert held.started.wait(2)
         start = time.monotonic()
-        assert client.post('/api/materials/' + item + '/viewed').status_code == 200
+        assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         assert time.monotonic() - start < .8
         start = time.monotonic()
-        assert client.post('/api/stop').status_code == 200
+        assert client.post('/api/v3/stop').status_code == 200
         assert time.monotonic() - start < .8
         held.release.set()
         time.sleep(.1)
@@ -144,12 +144,12 @@ def test_model_error_remains_visible_without_leaking_response(tmp_path: Path):
         return httpx.Response(200, json=reply) if request.url.path == '/v1/chat/completions' else good.handler(request)
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        m = wait_for(client, lambda: (m if (m := client.get('/api/materials/' + item).json()).get('ai', {}).get('error') else None))
-        assert m['theses'] is None
-        assert 'secret prompt' not in json.dumps(client.get('/api/status').json())
-        assert m['ai']['error'] != 'Ошибка подготовки тезисов'
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        m = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] else None))
+        assert m['theses']['result'] is None
+        assert 'secret prompt' not in json.dumps(client.get('/api/v3/status').json())
+        assert m['theses']['diagnostic_message'] != 'Ошибка подготовки тезисов'
 
 
 @pytest.mark.parametrize('case', ['unknown', 'unconfirmed', 'router', 'missing'])
@@ -169,14 +169,14 @@ def test_unverified_local_server_never_receives_forbidden_content(tmp_path: Path
         config = {'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest'}
         if case != 'unconfirmed':
             config['local_execution'] = True
-        assert client.put('/api/processors/llamacpp', json=config).status_code == 200
-        check = client.post('/api/processors/llamacpp/check')
+        assert client.put('/api/v3/processors/llamacpp', json=config).status_code == 200
+        check = client.post('/api/v3/processors/llamacpp/check')
         if case == 'missing':
-            assert check.status_code == 409
+            assert check.status_code == 503
         else:
-            assert check.json()['local'] is False
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('ai', {}).get('error'))
+            assert check.json()['locality']=='remote'
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['diagnostic_message'])
         assert not any(r.url.path == '/v1/chat/completions' for r in calls)
 
 
@@ -192,14 +192,14 @@ def test_reader_can_retry_theses_after_model_response_is_fixed(tmp_path: Path):
 
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('ai', {}).get('error'))
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['diagnostic_message'])
         fixed = True
-        assert client.post('/api/materials/' + item + '/theses/retry').status_code == 200
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
-        client.post('/api/materials/' + item + '/viewed')
-        assert client.post('/api/materials/' + item + '/theses/retry').status_code == 404
+        assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 200
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
+        client.post('/api/v3/materials/' + item + '/viewed')
+        assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 404
 
 
 def test_local_router_checks_selected_model_before_sending_forbidden_public_input(tmp_path: Path):
@@ -213,10 +213,10 @@ def test_local_router_checks_selected_model_before_sending_forbidden_public_inpu
         return native.handler(request)
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        assert client.post('/api/processors/llamacpp/check').json()['local'] is True
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        assert client.post('/api/v3/processors/llamacpp/check').json()['locality'] == 'local'
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])
         assert any(r.url.path == '/v1/chat/completions' for r in calls)
 
 
@@ -229,6 +229,6 @@ def test_theses_disable_reasoning_to_leave_budget_for_finished_json(tmp_path: Pa
         return native.handler(request)
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/materials/' + item).json().get('theses'))
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['theses']['result'])

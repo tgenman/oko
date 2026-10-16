@@ -79,8 +79,8 @@ def test_delete_reserves_claim_until_restart_cleanup_then_readd_has_fresh_id(tmp
         cards = settled(client)
         material = cards[0]['id']
         assert client.delete('/api/v3/feeds/'+feed).json() == {'feed_id': feed, 'state': 'deleting'}
-        assert not client.get('/api/cards').json()
-        assert client.get('/api/materials/'+material).status_code == 404
+        assert not client.get('/api/v3/cards').json()
+        assert client.get('/api/v3/materials/'+material).status_code == 404
         duplicate = client.post('/api/v3/telegram/connect', json=body)
         assert duplicate.status_code == 409
         assert duplicate.json()['details']['existing_feeds'][0]['feed_id'] == feed
@@ -100,7 +100,7 @@ def test_delete_reserves_claim_until_restart_cleanup_then_readd_has_fresh_id(tmp
         added = client.post('/api/v3/telegram/connect', json=body)
         assert added.status_code == 200, added.text
         assert added.json()['feed_id'] != feed
-        assert client.get('/api/materials/'+material).status_code == 404
+        assert client.get('/api/v3/materials/'+material).status_code == 404
         assert not tg.acks
 
 
@@ -152,7 +152,7 @@ def test_legacy_aliases_all_claim_owners_and_saved_material_survive_until_explic
         assert [feed['id'] for feed in feeds] == ids
         assert [feed['access']['alias'] for feed in feeds] == ['one', 'two', 'three']
         assert all(feed['connection'] == 'needs_profile_confirmation' for feed in feeds)
-        assert {client.get('/api/materials/'+card['id']).json()['text'] for card in client.get('/api/cards').json()} == {'one','two','three'}
+        assert {client.get('/api/v3/materials/'+card['id']).json()['content']['text'] for card in client.get('/api/v3/cards').json()} == {'one','two','three'}
         duplicate = client.post('/api/v3/telegram/connect', json={'source_locator':'https://telegram.me/s/SHARED/11', 'folder':'New'})
         assert duplicate.status_code == 409
         assert {f['feed_id'] for f in duplicate.json()['details']['existing_feeds']} == set(ids)
@@ -169,8 +169,9 @@ def test_unexpected_topic_migration_refuses_before_database_changes(tmp_path):
     path = tmp_path/'state.sqlite'
     before = hashlib.sha256(path.read_bytes()).hexdigest()
     with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()), headers=HEADERS) as client:
-        error = client.get('/api/status').json()['error']
-        assert 'миграция фидов отдельных тем' in error
+        state = client.get('/api/v3/status').json()
+        assert state['runtime_state'] == 'unavailable'
+        assert state['problems']['current'][0]['code'] == 'storage_unavailable'
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
 
 
@@ -188,7 +189,7 @@ def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
         assert response.status_code == 200, response.text
         feed = response.json()['feed_id']
         assert response.json()['access'] == {'kind':'web', 'username':'telegram', 'preview_url':'https://t.me/s/telegram'}
-        assert settled(client)[0]['members'] == [392]
+        assert settled(client)[0]['source']['message_ids'] == ['392']
         collected_calls = len(calls)
         assert collected_calls >= 1
         assert client.post('/api/v3/telegram/connect', json={'source_locator':'@TELEGRAM', 'folder':'Other'}).status_code == 409
@@ -272,7 +273,7 @@ def test_used_profile_detects_external_replacement_and_recovers_same_person(tmp_
         material = settled(client)[0]['id']
         tg.users['one'] = 303
         before = len(tg.reads)
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         for _ in range(100):
             if client.get('/api/v3/telegram/profiles').json()['personal']['state'] == 'identity_mismatch': break
             time.sleep(.02)
@@ -280,7 +281,7 @@ def test_used_profile_detects_external_replacement_and_recovers_same_person(tmp_
         assert len(tg.reads) == before and not tg.acks
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['connection'] == 'unavailable'
         assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'}).json()['code'] == 'profile_in_use'
-        assert client.get('/api/materials/'+material).status_code == 200
+        assert client.get('/api/v3/materials/'+material).status_code == 200
         tg.users['restored'] = 9007199254740993
         assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'restored'}).status_code == 200
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == feed
@@ -313,7 +314,7 @@ def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
             body = dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})
             old_feed = client.post('/api/v3/telegram/connect', json=body).json()['feed_id']
             assert started.wait(2)
-            old_material = client.get('/api/cards').json()[0]['id']
+            old_material = client.get('/api/v3/cards').json()[0]['id']
             assert client.delete('/api/v3/feeds/'+old_feed).status_code == 200
             for _ in range(100):
                 if not client.get('/api/v3/subscriptions').json()['feeds']: break
@@ -325,7 +326,7 @@ def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
             from tests.support.telegram import settled
             card = settled(client)[0]
             assert card['feed_id'] == new.json()['feed_id'] and card['id'] != old_material
-            assert client.get('/api/materials/'+old_material).status_code == 404
+            assert client.get('/api/v3/materials/'+old_material).status_code == 404
             assert not (tmp_path/'content'/old_material).exists()
             assert not (tmp_path/'staging'/old_material).exists()
     finally:
@@ -337,11 +338,11 @@ def test_legacy_adoption_cannot_replace_unknown_original_person_with_another_pro
     with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()), headers=HEADERS) as client:
         before = client.get('/api/v3/subscriptions').json()
         assert client.put('/api/v3/telegram/profiles/collection', json={'configuration_ref':'two'}).status_code == 200
-        response = client.post('/api/telegram/connect', json=dict(account='two',peer='-1001234567890',feed_id=feed,folder='Other',auto_read=False))
+        response = client.post('/api/v3/telegram/connect', json=dict(source_locator='-1001234567890',access={'kind':'client','profile':'collection'},folder='Other',auto_read=False))
         assert response.status_code == 409
         assert client.get('/api/v3/subscriptions').json() == before
-        material = client.get('/api/cards').json()[0]['id']
-        assert client.get('/api/materials/'+material).json()['text'] == 'one'
+        material = client.get('/api/v3/cards').json()[0]['id']
+        assert client.get('/api/v3/materials/'+material).json()['content']['text'] == 'one'
 
 
 def test_confirmed_alias_cannot_be_reassigned_to_another_peer(tmp_path):
@@ -421,7 +422,7 @@ def test_late_discovery_cannot_complete_a_recreated_feed_job(tmp_path):
             assert new_started.wait(2)
             old_release.set()
             time.sleep(.1)
-            assert not client.get('/api/cards').json()
+            assert not client.get('/api/v3/cards').json()
             new_release.set()
             from tests.support.telegram import settled
             assert settled(client)[0]['title'] == 'Current'

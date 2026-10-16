@@ -199,8 +199,8 @@ def checkout_state(excluded):
 
 TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
-               'tests/support/', 'frontend/src/api/generated/', 'frontend/src/api/legacy-generated/',
-               'oko/reader/generated/', 'oko/reader/legacy_generated/',
+               'tests/support/', 'frontend/src/api/generated/',
+               'oko/reader/generated/',
                'tests/api/test_governance.py', 'tests/api/test_strict_generation.py',
                'package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock',
                'tsconfig.json', 'tsconfig.browser-tests.json', 'tsconfig.tooling.json',

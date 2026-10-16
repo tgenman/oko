@@ -4,12 +4,12 @@ from typing import Literal
 from fastapi import APIRouter, Depends, FastAPI, Request
 
 from oko.reader.generated import models as wire
-from oko.reader.legacy_generated import models as previous
+from oko.reader import snapshots as facts
 from oko.reader.runtime import Runtime
 from oko.subscriptions.subscriptions import Overrides
 
 
-def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: previous.EffectiveSettings, binding: dict[str, object] | None = None) -> wire.EffectiveSettingsSnapshot:
+def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.EffectiveSettings, binding: dict[str, object] | None = None) -> wire.EffectiveSettingsSnapshot:
     def origin(level: str, identity: str | None) -> wire.SettingOrigin:
         return wire.SettingOrigin.model_validate({'scope': level, **({'owner': identity} if level != 'default' else {})})
 
@@ -36,7 +36,7 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: previou
     if scope == 'folder':
         return wire.EffectiveSettingsSnapshot(wire.FolderSettingsSnapshot(scope='folder', owner=wire.FolderId(owner), effective=values, overrides=overrides))
     from oko.reader.projection_v3 import subscription
-    if not isinstance(value.feed, previous.SubscriptionFeed):
+    if not isinstance(value.feed, facts.SubscriptionFeed):
         raise ValueError('Feed settings require a feed')
     return wire.EffectiveSettingsSnapshot(wire.FeedSettingsSnapshot(scope='feed', owner=wire.FeedId(owner), effective=values, overrides=overrides, feed=subscription(value.feed, binding)))
 
@@ -66,7 +66,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.get('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def settings(scope: Literal['oko', 'folder', 'feed'], owner: str) -> wire.EffectiveSettingsSnapshot:
         target(scope, owner)
-        return snapshot(scope, owner, previous.EffectiveSettings.model_validate(runtime.require_store().subscriptions.effective(scope, owner)), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None)
+        return snapshot(scope, owner, facts.EffectiveSettings.model_validate(runtime.require_store().subscriptions.effective(scope, owner)), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None)
 
     @router.patch('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def patch(request: Request, scope: Literal['oko', 'folder', 'feed'], owner: str, body: wire.SettingsPatch) -> wire.EffectiveSettingsSnapshot:
@@ -74,7 +74,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         context = wire.CommandContext(wire.CommandSettingsPatch(operation='settings_patch', target=target(scope, owner), keys=[wire.SettingKey.model_validate(key) for key in sorted(body.model_fields_set)]))
         async with track(runtime, request, context):
             result = await runtime.update_settings(scope, owner, Overrides.model_validate(body.model_dump(exclude_unset=True)))
-            return snapshot(scope, owner, previous.EffectiveSettings.model_validate(result), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None)
+            return snapshot(scope, owner, facts.EffectiveSettings.model_validate(result), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None)
 
     async def immutable_access(request: Request, identity: str) -> None:
         # Check immutable bindings before request DTO rejection; no write occurs.
@@ -94,7 +94,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         from oko.reader.projection_v3 import subscription
         from oko.subscriptions.subscriptions import FeedPatch
         target('feed', identity)
-        feed = previous.SubscriptionFeed.model_validate(runtime.require_store().subscriptions.feeds(identity)[0])
+        feed = facts.SubscriptionFeed.model_validate(runtime.require_store().subscriptions.feeds(identity)[0])
         context = wire.CommandContext(wire.CommandFeedPatch(operation='feed_patch', feed_id=wire.FeedId(identity), fields=[wire.FeedField.model_validate(key) for key in sorted(body.model_fields_set)]))
         async with track(runtime, request, context):
             if feed.kind == 'telegram' and 'transport' in body.model_fields_set:
@@ -102,6 +102,6 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             if feed.kind == 'telegram' and feed.transport != 'telegram' and body.model_fields_set.intersection(('auto_read', 'read_history')):
                 raise ApiError(400, wire.ErrorEnvelope(wire.SourceConnectionInvalidError(code='source_connection_invalid', message='Веб-доступ не поддерживает отметки Telegram', details=wire.SourceConnectionInvalidErrorDetails(reason='telegram_web_read_unavailable'), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
             result = await runtime.patch_feed(identity, FeedPatch.model_validate(body.model_dump(exclude_unset=True)))
-            return subscription(previous.SubscriptionFeed.model_validate(result), runtime.require_store().subscriptions.telegram.binding(identity))
+            return subscription(facts.SubscriptionFeed.model_validate(result), runtime.require_store().subscriptions.telegram.binding(identity))
 
     app.include_router(router)

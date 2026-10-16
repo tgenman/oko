@@ -32,8 +32,8 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     const {origin, token} = JSON.parse(first[0]); lines.close();
     const headers = {Authorization:'Bearer ' + token, 'Content-Type':'application/json'};
     async function api<P extends string>(url: P, method='GET', body?: unknown): Promise<ApiReply<P>> {
-      const response = await fetch(origin + '/api/' + url, {method, headers, body:body === undefined ? undefined : JSON.stringify(body)});
-      assert.equal(response.status, 200, await response.clone().text()); return response.json();
+      const response = await fetch(origin + '/api/' + (url.startsWith('v3/')?url:'v3/'+url), {method, headers, body:body === undefined ? undefined : JSON.stringify(body)});
+      assert.equal(response.status, method==='POST'&&url.replace(/^v3\//,'')==='client-sessions'?201:200, await response.clone().text()); return response.json();
     }
     await expect.poll(async () => {try {return (await fetch(origin)).status;} catch {return 0;}}, {timeout:10000}).toBe(200);
     await api('settings/oko/global', 'PATCH', {theses:false});
@@ -86,10 +86,10 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await expect.poll(async () => (await api('youtube')).mode).toBe('direct');
     const plan = await addSources(api, [["https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa", "YouTube", "Без папки"]]);
     await api('feeds/' + plan.feeds[0].id, 'PATCH', {importance:'high'});
-    await expect.poll(async () => (await api('youtube')).paused).toBe(true);
+    await expect.poll(async () => (await api('youtube')).admission==='paused').toBe(true);
     await expect(page.locator('#youtube-pause')).toContainText('Получение субтитров приостановлено');
     await expect(page.locator('#youtube-pause')).toContainText('Следующая попытка не раньше');
-    assert.ok(!JSON.stringify(await api('debug')).includes('fixture-password'));
+    assert.ok(!JSON.stringify(await api('diagnostics')).includes('fixture-password'));
     await expect(page.locator('#youtube-short-status')).toHaveText('Приостановлено');
     await page.setViewportSize({width:1200, height:940});
     await page.screenshot({path:artifactPath('youtube-desktop.png')});

@@ -22,10 +22,10 @@ def test_web_connect_collects_text_and_links_without_client_or_read_sync(tmp_pat
         connected = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         assert connected.status_code == 200, connected.text
         cards = settled(client)
-        material = client.get('/api/materials/'+cards[0]['id']).json()
-        assert material['text'] == 'Hello\nWorld [article](https://example.org/article?a=1&b=2)'
-        assert material['full'] is True
-        assert client.get('/api/status').json()['telegram_reads'] == []
+        material = client.get('/api/v3/materials/'+cards[0]['id']).json()
+        assert material['content']['text'] == 'Hello\nWorld [article](https://example.org/article?a=1&b=2)'
+        assert (material['content']['completeness']['state']=='complete') is True
+        assert client.get('/api/v3/status').json()['telegram_reads'] == []
         assert all(url.startswith('https://t.me/') for url in requests)
 
 
@@ -51,18 +51,18 @@ def test_web_catchup_keeps_old_frontier_and_resumes_remaining_pages_after_restar
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',
                     initial_history={'mode':'count','count':'1'}))
         old = settled(client)[0]['id']
-        client.post('/api/materials/'+old+'/viewed')
+        client.post('/api/v3/materials/'+old+'/viewed')
         phase[0] = 1
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         assert held.wait(3)
     phase[0] = 2
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
         cards = settled(client,5)
-        assert {m for c in cards for m in c['members']} == {2,3,4,5,6}
+        assert {m for c in cards for m in [int(identity) for identity in c['source']['message_ids']]} == {2,3,4,5,6}
         assert len({c['id'] for c in cards}) == 5
-        assert client.get('/api/materials/'+old).status_code == 404
+        assert client.get('/api/v3/materials/'+old).status_code == 404
         assert (2,5) in calls and (2,3) in calls
-        assert client.get('/api/status').json()['telegram_reads'] == []
+        assert client.get('/api/v3/status').json()['telegram_reads'] == []
 
 
 def test_recorded_album_anchors_are_one_web_publication(tmp_path):
@@ -87,13 +87,13 @@ def test_recorded_album_anchors_are_one_web_publication(tmp_path):
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@durov',folder='Inbox'))
         assert result.status_code == 200, result.text
         cards = settled(client,19)
-        albums = [c for c in cards if 373 in c['members']]
+        albums = [c for c in cards if 373 in [int(identity) for identity in c['source']['message_ids']]]
         assert len(albums) == 1
-        assert albums[0]['members'] == list(range(373,382))
-        assert not any(c['members']==[i] for c in cards for i in range(374,382))
-        material = client.get('/api/materials/'+albums[0]['id']).json()
-        assert material['full'] is True
-        assert sum(a['kind']=='video' for a in material['attachments']) == 9
+        assert [int(identity) for identity in albums[0]['source']['message_ids']] == list(range(373,382))
+        assert not any([int(identity) for identity in c['source']['message_ids']]==[i] for c in cards for i in range(374,382))
+        material = client.get('/api/v3/materials/'+albums[0]['id']).json()
+        assert (material['content']['completeness']['state']=='complete') is True
+        assert sum(a['kind']=='video' for a in material['content']['attachments']) == 9
 
 
 def test_web_media_is_downloaded_locally_with_no_reader_credentials(tmp_path):
@@ -107,10 +107,10 @@ def test_web_media_is_downloaded_locally_with_no_reader_credentials(tmp_path):
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
-        assert material['full'] is True
-        assert len(material['attachments']) == 1
-        attachment = material['attachments'][0]
+        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
+        assert (material['content']['completeness']['state']=='complete') is True
+        assert len(material['content']['attachments']) == 1
+        attachment = material['content']['attachments'][0]
         assert attachment['kind'] == 'image'
         assert client.get(attachment['url']).content == b'fixture-photo'
         assert any(url.startswith('https://cdn.example/') for url,_,_ in requests)
@@ -131,34 +131,34 @@ def test_media_completion_is_not_author_edit_but_changed_known_bytes_are(tmp_pat
         deadline = time.monotonic()+2
         failed = None
         while time.monotonic()<deadline:
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             if cards:
-                failed = client.get('/api/materials/'+cards[0]['id']).json()
-                if 'Не удалось загрузить' in failed.get('reason',''):
+                failed = client.get('/api/v3/materials/'+cards[0]['id']).json()
+                if 'Не удалось загрузить' in failed['content'].get('completeness',{}).get('message',''):
                     break
             time.sleep(.02)
-        assert failed and 'Не удалось загрузить' in failed['reason']
+        assert failed and 'Не удалось загрузить' in failed['content']['completeness'].get('message','')
         identity = failed['id']
         phase[0] = 1
-        assert client.post('/api/materials/'+identity+'/retry').status_code == 200
+        assert client.post('/api/v3/materials/'+identity+'/retry').status_code == 200
         settled(client)
-        loaded = client.get('/api/materials/'+identity).json()
-        assert loaded['full'] is True
-        assert loaded['version'] != failed['version']
-        assert loaded['previous'] == []
-        name = loaded['attachments'][0]['url'].split('/')[-1]
+        loaded = client.get('/api/v3/materials/'+identity).json()
+        assert (loaded['content']['completeness']['state']=='complete') is True
+        assert loaded['content']['revision_id'] != failed['content']['revision_id']
+        assert loaded['content']['previous_versions'] == []
+        name = loaded['content']['attachments'][0]['url'].split('/')[-1]
         phase[0] = 2
-        client.post('/api/materials/'+identity+'/retry')
+        client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
-        rotated = client.get('/api/materials/'+identity).json()
-        assert rotated['version'] == loaded['version']
-        assert rotated['attachments'][0]['url'].split('/')[-1] == name
+        rotated = client.get('/api/v3/materials/'+identity).json()
+        assert rotated['content']['revision_id'] == loaded['content']['revision_id']
+        assert rotated['content']['attachments'][0]['url'].split('/')[-1] == name
         phase[0] = 3
-        client.post('/api/materials/'+identity+'/retry')
+        client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
-        changed = client.get('/api/materials/'+identity).json()
-        assert changed['version'] != loaded['version']
-        assert len(changed['previous']) == 1
+        changed = client.get('/api/v3/materials/'+identity).json()
+        assert changed['content']['revision_id'] != loaded['content']['revision_id']
+        assert len(changed['content']['previous_versions']) == 1
 
 
 def test_media_redirect_cannot_reach_a_local_service(tmp_path):
@@ -172,10 +172,10 @@ def test_media_redirect_cannot_reach_a_local_service(tmp_path):
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
-        assert material['full'] is False
-        assert 'Небезопасный адрес' in material['reason']
-        assert not material['attachments']
+        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
+        assert (material['content']['completeness']['state']=='complete') is False
+        assert 'Небезопасный адрес' in material['content']['completeness'].get('message','')
+        assert not material['content']['attachments']
         assert '127.0.0.1' not in calls
 
 
@@ -197,14 +197,14 @@ def test_stream_without_length_stops_at_200_mib_without_automatic_retry(tmp_path
         deadline = time.monotonic()+5
         material = None
         while time.monotonic()<deadline:
-            cards = client.get('/api/cards').json()
+            cards = client.get('/api/v3/cards').json()
             if cards:
-                material = client.get('/api/materials/'+cards[0]['id']).json()
-                if '200 МиБ' in material.get('reason',''):
+                material = client.get('/api/v3/materials/'+cards[0]['id']).json()
+                if '200 МиБ' in material['content'].get('completeness',{}).get('message',''):
                     break
             time.sleep(.02)
-        assert material and '200 МиБ' in material['reason']
-        assert material['full'] is False and not material['attachments']
+        assert material and '200 МиБ' in material['content']['completeness'].get('message','')
+        assert (material['content']['completeness']['state']=='complete') is False and not material['content']['attachments']
         assert count[0] == 201
         time.sleep(.1)
         assert count[0] == 201
@@ -233,8 +233,8 @@ def test_dns_private_answer_is_rejected_before_connecting(tmp_path,monkeypatch):
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=FixtureTransport()),
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
-        assert material['full'] is False and 'Небезопасный адрес' in material['reason']
+        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
+        assert (material['content']['completeness']['state']=='complete') is False and 'Небезопасный адрес' in material['content']['completeness'].get('message','')
         assert not connections
 
 
@@ -252,25 +252,25 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        original = client.get('/api/materials/'+settled(client)[0]['id']).json()
+        original = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         phase[0] = 1
-        client.post('/api/materials/'+original['id']+'/retry')
+        client.post('/api/v3/materials/'+original['id']+'/retry')
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            state = client.get('/api/status').json()
-            if any('200 МиБ' in error for error in state['errors']):
+            state = client.get('/api/v3/status').json()
+            if any('200 МиБ' in error for error in [p['message'] for p in state['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]):
                 break
             time.sleep(.02)
         else:
             raise AssertionError('Oversized failed refresh was hidden')
-        current = client.get('/api/materials/'+original['id']).json()
-        assert client.get(current['attachments'][0]['url']).content == b'known-file'
-        assert current['previous'] == [] and current['version']==original['version']
+        current = client.get('/api/v3/materials/'+original['id']).json()
+        assert client.get(current['content']['attachments'][0]['url']).content == b'known-file'
+        assert current['content']['previous_versions'] == [] and current['content']['revision_id']==original['content']['revision_id']
         assert any('200 МиБ' in str(problem) for problem in state['problems']['current'])
-        assert not any(job['kind']=='fetch' and job['status']=='pending' for job in state['jobs'])
-        client.post('/api/collect')
+        assert any(intent['kind']=='retry_material' for p in state['problems']['current'] for intent in p['recovery'])
+        client.post('/api/v3/collect')
         deadline = time.monotonic()+2
-        while time.monotonic()<deadline and any(job['kind']=='discover' and job['status']!='done' for job in client.get('/api/status').json()['jobs']):
+        while time.monotonic()<deadline and any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']):
             time.sleep(.02)
         assert calls[0] == 2
 
@@ -285,21 +285,21 @@ def test_album_first_part_deletion_and_new_url_keep_one_card_and_tombstone(tmp_p
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',initial_history={'mode':'count','count':'1'}))
         original = settled(client)[0]
-        assert original['members'] == [11,12]
+        assert [int(identity) for identity in original['source']['message_ids']] == [11,12]
         phase[0] = 1
-        client.post('/api/collect')
+        client.post('/api/v3/collect')
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            cards = client.get('/api/cards').json()
-            if len(cards)==1 and cards[0]['members']==[12,13] and not cards[0].get('loading'):
+            cards = client.get('/api/v3/cards').json()
+            if len(cards)==1 and [int(identity) for identity in cards[0]['source']['message_ids']]==[12,13] and not cards[0].get('loading'):
                 break
             time.sleep(.02)
-        assert len(cards)==1 and cards[0]['id']==original['id'] and cards[0]['members']==[12,13]
-        assert client.get('/api/materials/'+original['id']).json()['url']=='https://t.me/fixture/12'
-        client.post('/api/materials/'+original['id']+'/viewed')
-        client.post('/api/collect')
+        assert len(cards)==1 and cards[0]['id']==original['id'] and [int(identity) for identity in cards[0]['source']['message_ids']]==[12,13]
+        assert client.get('/api/v3/materials/'+original['id']).json()['source_url']=='https://t.me/fixture/12'
+        client.post('/api/v3/materials/'+original['id']+'/viewed')
+        client.post('/api/v3/collect')
         time.sleep(.1)
-        assert client.get('/api/cards').json()==[]
+        assert client.get('/api/v3/cards').json()==[]
 
 
 def test_web_date_boundary_is_inclusive_without_enrolling_earlier_post(tmp_path):
@@ -312,8 +312,8 @@ def test_web_date_boundary_is_inclusive_without_enrolling_earlier_post(tmp_path)
                     initial_history={'mode':'date','date':'2026-10-15','timezone':'UTC'}))
         assert result.status_code == 200, result.text
         cards = settled(client)
-        assert cards[0]['members']==[11]
-        assert client.get('/api/materials/'+cards[0]['id']).json()['text']=='Selected'
+        assert [int(identity) for identity in cards[0]['source']['message_ids']]==[11]
+        assert client.get('/api/v3/materials/'+cards[0]['id']).json()['content']['text']=='Selected'
 
 
 def test_html_quotes_poll_voice_sticker_and_unavailable_document_are_preserved(tmp_path):
@@ -331,12 +331,12 @@ def test_html_quotes_poll_voice_sticker_and_unavailable_document_are_preserved(t
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
-        assert all(text in material['text'] for text in ('Original','Paragraph','Quoted text','Forwarded source','Choose?','50% Yes','report.pdf','12 KB'))
-        assert 'https://t.me/fixture/1' in material['text'] and 'https://t.me/source' in material['text']
-        assert material['full'] is False
-        assert 'Видео не предоставлено' in material['reason'] and 'Файл документа не предоставлен' in material['reason']
-        assert sorted(a['kind'] for a in material['attachments'])==['audio','image','image']
+        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
+        assert all(text in material['content']['text'] for text in ('Original','Paragraph','Quoted text','Forwarded source','Choose?','50% Yes','report.pdf','12 KB'))
+        assert 'https://t.me/fixture/1' in material['content']['text'] and 'https://t.me/source' in material['content']['text']
+        assert (material['content']['completeness']['state']=='complete') is False
+        assert 'Видео не предоставлено' in material['content']['completeness'].get('message','') and 'Файл документа не предоставлен' in material['content']['completeness'].get('message','')
+        assert sorted(a['kind'] for a in material['content']['attachments'])==['audio','image','image']
 
 
 def test_store_rejects_unowned_staged_file_from_source(tmp_path):
@@ -354,15 +354,15 @@ def test_store_rejects_unowned_staged_file_from_source(tmp_path):
                     headers={'Authorization':'Bearer test'}) as client:
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            if 'Ошибка сбора' in client.get('/api/status').json()['errors']:
+            if 'Ошибка сбора' in [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]:
                 break
             time.sleep(.02)
         else:
             raise AssertionError('Unowned payload was not rejected')
-        cards = client.get('/api/cards').json()
-        material = client.get('/api/materials/'+cards[0]['id']).json()
-        assert material['text']=='Preview' and not material['attachments']
-        assert client.get('/api/materials/'+cards[0]['id']+'/media/media-1.bin').status_code==404
+        cards = client.get('/api/v3/cards').json()
+        material = client.get('/api/v3/materials/'+cards[0]['id']).json()
+        assert material['content']['text']=='Preview' and not material['content']['attachments']
+        assert client.get('/api/v3/materials/'+cards[0]['id']+'/media/media-1.bin').status_code==404
     assert foreign.read_bytes()==b'foreign-fixture'
 
 
@@ -384,13 +384,13 @@ def test_retry_and_save_do_not_read_all_retained_media_into_ram(tmp_path,monkeyp
                 raise AssertionError('Accepted media must be streamed, not materialized in RAM')
             return read_bytes(path)
         monkeypatch.setattr(Path,'read_bytes',bounded)
-        assert client.post('/api/materials/'+identity+'/retry').status_code==200
+        assert client.post('/api/v3/materials/'+identity+'/retry').status_code==200
         settled(client)
-        material = client.get('/api/materials/'+identity).json()
-        assert material['full'] is True
+        material = client.get('/api/v3/materials/'+identity).json()
+        assert (material['content']['completeness']['state']=='complete') is True
         assert not calls
         monkeypatch.setattr(Path,'read_bytes',read_bytes)
-        assert client.get(material['attachments'][0]['url']).content==b'known-bytes'
+        assert client.get(material['content']['attachments'][0]['url']).content==b'known-bytes'
 
 
 def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync(tmp_path,monkeypatch):

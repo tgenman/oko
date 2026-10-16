@@ -10,7 +10,7 @@ test('RSS connection selects count or inclusive date and displays saved history 
       const t = readerTransport;
       const feed = {id: 'rss', title: 'История', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal' as const, initial_days: 1,
         initial_history: window.readerFixtures.history({mode: 'date', count:null, count_text:null, date: '2025-10-01', timezone: 'UTC', since: 1759276800, loaded: 7, state: 'loading', frozen: true, available: 20, paused: false})};
-      t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
+      t.replies.set('/api/v3/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/v3/feeds', {body: feed});
       t.replies.set('/api/v3/feeds/verify', {body: {url: feed.original_urls[0], title: feed.title, kind: 'rss', verification: 'checked', existing: null}});
       t.replies.set('/api/v3/settings/feed/rss', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
@@ -34,7 +34,7 @@ test('Telegram connection sends default count and can switch to date with user t
   const r = await reader();
   try {
     await r.page.addInitScript(() => {
-      readerTransport.replies.set('/api/telegram/accounts', {body: ['fixture']});
+      readerTransport.replies.set('/api/v3/telegram/accounts', {body: ['fixture']});
       readerTransport.held.set('/api/v3/telegram/connect', true);
     });
     await r.start([]);
@@ -65,7 +65,7 @@ test('finite history warning and unknown date are visible in settings and materi
       const t = readerTransport;
       const feed = {id: 'rss', title: 'История', kind: 'rss', transport: 'rss', folder_id: 'f', original_urls: ['https://source.test/feed'], importance: 'normal' as const, initial_days: 1,
         initial_history: window.readerFixtures.history({mode: 'count', count: 100, count_text: '100', loaded: 15, state: 'done', frozen: true, scan_complete: true, available: 15, paused: false, warnings: ['Порядок RSS неоднозначен: точность выбора последних N не подтверждена']})};
-      t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
+      t.replies.set('/api/v3/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/v3/settings/feed/rss', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
       t.replies.set('/api/v3/materials/unknown', {body: {...card, originals: true, images: [], attachments: []}});
     }, card);

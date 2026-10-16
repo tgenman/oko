@@ -122,7 +122,7 @@ if (process.argv.includes('--check')) {
       active=false;
     };
     const watchDigest = () => fingerprint(root, [...inputs, 'api', 'scripts', 'oko/reader/generated',
-      'oko/reader/legacy_generated', 'node_modules/.package-lock.json']);
+       'node_modules/.package-lock.json']);
     let seen = await watchDigest();
     // Poll content rather than relying on platform-specific recursive watchers.
     // This also observes atomic file replacements used by editors.

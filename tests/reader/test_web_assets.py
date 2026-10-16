@@ -28,5 +28,5 @@ def test_reader_serves_entire_browser_module_graph_without_exposing_reader_data(
             assert response.headers['content-type'].startswith('text/javascript'), path
             for relative in re.findall(r"(?:\bfrom\s*|\bimport\s*)['\"]([^'\"]+)['\"]", response.text):
                 pending.append(urljoin(path, relative))
-        assert client.get('/api/subscriptions').status_code == 403
-        assert client.get('/api/subscriptions', headers={'Authorization':'Bearer test'}).status_code == 200
+        assert client.get('/api/v3/subscriptions').status_code == 403
+        assert client.get('/api/v3/subscriptions', headers={'Authorization':'Bearer test'}).status_code == 200

@@ -117,7 +117,7 @@ class Problems:
                        if feeds.get(self.store.item_feed(row['id']), {}).get('kind') == 'youtube']
             groups['youtube:admission'] = dict(id='youtube:admission',code='youtube-admission',section='wait',title='YouTube ограничил запросы',
                 consequence=f'Ожидают субтитров: {len(objects)}.',next_step='Око повторит получение после паузы.',
-                objects=objects,action=None,created_at=now,state='current',finished_at=None,outcome=None,next_at=youtube['next_at'])
+                objects=objects,action=None,created_at=now,state='retrying',finished_at=None,outcome=None,next_at=youtube['next_at'])
         affected = {obj['id'] for group in groups.values() for obj in group['objects'] if obj['kind'] == 'material'}
         for row in self.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 AND complete=1').fetchall():
             if row['id'] in affected or self.store.versions.deleted(row['id']):

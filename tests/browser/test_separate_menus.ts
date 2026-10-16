@@ -10,9 +10,9 @@ test('three menus keep reading position and addition tabs, Escape restores openi
   try {
     await r.start([material('one', {text: 'Читать дальше. '.repeat(3000)})]);
     await r.page.evaluate(() => {
-      readerTransport.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
+      readerTransport.replies.set('/api/v3/subscriptions', {body: {folders: [], feeds: []}});
       readerTransport.replies.set('/api/v3/processors/llamacpp', {body: null});
-      readerTransport.replies.set('/api/telegram/accounts', {body: ['personal']});
+      readerTransport.replies.set('/api/v3/telegram/accounts', {body: ['personal']});
     });
     await r.page.locator('#cards button').click();
     await expect(r.page.locator('#title')).toHaveText('one');
@@ -120,13 +120,13 @@ test('late subscription and settings responses cannot replace newer object selec
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: one');
-    await r.page.evaluate(() => {readerTransport.held.set('/api/v3/settings/feed/one',true); readerTransport.held.set('/api/subscriptions',true);});
+    await r.page.evaluate(() => {readerTransport.held.set('/api/v3/settings/feed/one',true); readerTransport.held.set('/api/v3/subscriptions',true);});
     await r.page.keyboard.press('Escape');
     await r.page.locator('#feeds-open').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/subscriptions'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/subscriptions'));
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
-    await r.page.evaluate(() => readerTransport.release('/api/subscriptions',readerTransport.replies.get('/api/subscriptions')!.body));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/subscriptions',readerTransport.replies.get('/api/v3/subscriptions')!.body));
     await expect(r.page.locator('#owner-heading')).toHaveText('Фид: two');
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Отправленный');
@@ -210,7 +210,7 @@ test('late failed save cannot replace messages after closing and reopening the s
     await editSetting(r.page, 'prompt_theses');
     await r.page.locator('#setting-prompt_theses').fill('Новый черновик');
     await r.page.evaluate(() => readerTransport.release('/api/v3/settings/feed/one', {detail:'Старая ошибка'}, 500));
-    await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старая ошибка'))).toBe(true);
+    await expect.poll(() => r.api('diagnostics').then(result => result.groups.some(g=>g.message==='Старая ошибка'))).toBe(true);
     await expect(r.page.locator('#settings-message')).not.toContainText('Старая ошибка');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Новый черновик');
   } finally {await r.close();}
@@ -242,7 +242,7 @@ test('field save completes after leaving a model check; stale checks cannot repo
     await r.page.keyboard.press('Escape');
     await r.page.locator('#settings-open').click();
     await r.page.evaluate(() => readerTransport.release('/api/v3/processors/llamacpp/check',{detail:'Старый сбой модели'},500));
-    await expect.poll(() => r.api('debug').then(result => result.groups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
+    await expect.poll(() => r.api('diagnostics').then(result => result.groups.some(g=>g.message==='Старый сбой модели'))).toBe(true);
     await expect(r.page.locator('#llamacpp-check-status')).not.toContainText('Старый сбой модели');
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
@@ -265,7 +265,7 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
     await r.page.keyboard.press('Escape');
     await r.page.locator('#add-open').click();
     await r.page.evaluate(() => {
-      const data = readerTransport.replies.get('/api/subscriptions')!.body;
+      const data = readerTransport.replies.get('/api/v3/subscriptions')!.body;
       const feed = {...data!.feeds[0],id:'new',title:'Новый фид'};
       data!.feeds.push(feed);
       readerTransport.release('/api/v3/feeds',feed);
@@ -299,11 +299,11 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     await r.start([material('before')]); await objects(r);
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/subscriptions')!.body);
+    const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/v3/subscriptions')!.body);
     const domainStatus=await r.api('v3/status');
     let catalogRead = 0, statusRead = 0;
     let heldCatalog: Route | undefined, heldStatus: Route | undefined;
-    await r.page.route('**/api/subscriptions', async route => {
+    await r.page.route('**/api/v3/subscriptions', async route => {
       if (++catalogRead === 1) heldCatalog = route;
       else await route.fulfill({json:subscriptions});
     });
@@ -313,7 +313,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     });
     await r.page.evaluate(() => {
       readerTransport.native.add('/api/v3/status');
-      readerTransport.native.add('/api/subscriptions');
+      readerTransport.native.add('/api/v3/subscriptions');
       readerTransport.replies.set('PATCH /api/v3/feeds/one',{body:{}});
     });
     // An old background read is still pending when the server write completes.
@@ -350,13 +350,13 @@ test('a completed RSS addition preserves changes typed after submission', async 
     await r.page.locator('#rss-history-count').fill('13');
     await r.page.keyboard.press('Escape');
     await r.page.locator('#add-open').click();
-    const refreshes=await r.page.evaluate(() => readerTransport.requests.filter(request => request.url==='/api/subscriptions').length);
+    const refreshes=await r.page.evaluate(() => readerTransport.requests.filter(request => request.url==='/api/v3/subscriptions').length);
     await r.page.evaluate(() => {
-      const catalog=readerTransport.replies.get('/api/subscriptions')!.body;
+      const catalog=readerTransport.replies.get('/api/v3/subscriptions')!.body;
       const feed={...catalog!.feeds[0],id:'new',title:'Sent A'};
       catalog!.feeds.push(feed);readerTransport.release('/api/v3/feeds',feed);
     });
-    await r.page.waitForFunction(previous => readerTransport.requests.filter(request => request.url==='/api/subscriptions').length>previous,refreshes);
+    await r.page.waitForFunction(previous => readerTransport.requests.filter(request => request.url==='/api/v3/subscriptions').length>previous,refreshes);
     await expect(r.page.locator('#rss-title')).toHaveValue('Draft B');
     await expect(r.page.locator('#rss-history-count')).toHaveValue('13');
     await expect(r.page.locator('#add-dialog')).toBeVisible();

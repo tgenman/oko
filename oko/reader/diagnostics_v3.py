@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, FastAPI
 
 from oko.diagnostics import BrowserError, Journal
 from oko.reader.generated import models as wire
-from oko.reader.legacy_generated import models as previous
+from oko.reader import snapshots as facts
 from oko.reader.projection_v3 import diagnostic
 from oko.reader.runtime import Runtime
 
@@ -13,7 +13,7 @@ def register(app: FastAPI, runtime: Runtime, journal: Journal) -> None:
     router = APIRouter(dependencies=[Depends(no_query)])
     @router.get('/api/v3/diagnostics', response_model=wire.DiagnosticJournal)
     async def entries() -> wire.DiagnosticJournal:
-        return wire.DiagnosticJournal(groups=[diagnostic(previous.DiagnosticEntry.model_validate(entry)) for entry in journal.entries()], persistence_error=journal.persistence_error or None)
+        return wire.DiagnosticJournal(groups=[diagnostic(facts.DiagnosticEntry.model_validate(entry)) for entry in journal.entries()], persistence_error=journal.persistence_error or None)
 
     @router.delete('/api/v3/diagnostics', response_model=wire.DiagnosticClearResult)
     async def clear() -> wire.DiagnosticClearResult:
@@ -36,6 +36,6 @@ def register(app: FastAPI, runtime: Runtime, journal: Journal) -> None:
         if not group:
             return wire.DiagnosticReceipt(wire.DiagnosticIgnored(state='ignored', reason='material_viewed'))
         entry = next(entry for entry in journal.entries() if entry['id'] == group)
-        return wire.DiagnosticReceipt(wire.DiagnosticAccepted(state='accepted', entry=diagnostic(previous.DiagnosticEntry.model_validate(entry))))
+        return wire.DiagnosticReceipt(wire.DiagnosticAccepted(state='accepted', entry=diagnostic(facts.DiagnosticEntry.model_validate(entry))))
 
     app.include_router(router)

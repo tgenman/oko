@@ -1,13 +1,14 @@
-import type {FeedVerification,SubscriptionFeed} from '../../frontend/src/api/generated/types.gen';
-import type {Card, Material, Status, Subscriptions, Navigation, EffectiveSettings, YouTube, DiagnosticJournal, CodexState, ProcessorConfig, History} from '../../frontend/src/api/legacy-generated/types.gen';
+import type * as Wire from '../../frontend/src/api/generated/types.gen';
+import type {Card, Material, Status, Subscriptions, Navigation, EffectiveSettings, History} from './scenario-data';
 
 // Scenarios deliberately omit optional fields and inject malformed HTTP replies.
 // Keep those payloads unknown at the transport boundary; successful snapshots
 // are additionally checked against the exported OpenAPI schemas at delivery.
 export type FixtureMaterial = Partial<Material & Card> & Pick<Material, 'id' | 'title' | 'text' | 'feed_id' | 'published' | 'complete' | 'url'>;
 export interface FixtureReply<T = unknown> {body?: T; status?: number; next?: [string, FixtureReply][]; base64?: string; mime?: string;}
-export type ApiReply<P extends string> = P extends 'v3/feeds/verify' ? FeedVerification : P extends 'v3/feeds' ? SubscriptionFeed : P extends 'cards' ? Card[] : P extends 'navigation' ? Navigation : P extends 'youtube' ? YouTube : P extends 'subscriptions' ? Subscriptions : P extends `settings/${string}` ? EffectiveSettings : P extends `materials/${string}` ? Material : P extends 'status' ? Status : P extends 'debug' ? DiagnosticJournal : P extends 'processors/codex' ? CodexState : P extends 'processors/llamacpp' ? ProcessorConfig : P extends `feeds/${string}/history` ? History : unknown;
-type Snapshot<P extends string> = P extends '/api/v3/cards' ? Partial<Card>[] : P extends '/api/v3/reading-composition' ? Navigation : P extends '/api/status' ? Status : P extends '/api/subscriptions' ? Subscriptions : P extends `${string}/history` ? History : P extends `/api/v3/settings/${string}` ? EffectiveSettings : unknown;
+type NativeReply<P extends string> = P extends 'feeds/verify' ? Wire.FeedVerification : P extends 'feeds' ? Wire.SubscriptionFeed : P extends 'client-sessions' ? Wire.ClientSession : P extends 'cards' ? Wire.ReadingCard[] : P extends 'reading-composition' ? Wire.ReadingComposition : P extends 'youtube' ? Wire.YouTubeState : P extends 'subscriptions' ? Wire.SubscriptionCatalog : P extends `settings/${string}` ? Wire.EffectiveSettingsSnapshot : P extends `materials/${string}` ? Wire.ReadableMaterial : P extends 'status' ? Wire.RuntimeStatus : P extends 'diagnostics' ? Wire.DiagnosticJournal : P extends 'processors/codex' ? Wire.CodexProcessorState : P extends 'processors/llamacpp' ? Wire.LocalProcessorState : P extends `feeds/${string}/history` ? Wire.FeedHistoryState : unknown;
+export type ApiReply<P extends string> = NativeReply<P extends `v3/${infer Route}` ? Route : P>;
+type Snapshot<P extends string> = P extends '/api/v3/cards' ? Partial<Card>[] : P extends '/api/v3/reading-composition' ? Navigation : P extends '/api/v3/status' ? Status : P extends '/api/v3/subscriptions' ? Subscriptions : P extends `${string}/history` ? History : P extends `/api/v3/settings/${string}` ? EffectiveSettings : unknown;
 export interface ReplyMap extends Map<string, FixtureReply> {get<P extends string>(path: P): FixtureReply<Snapshot<P>> | undefined;}
 export interface ReaderTransport {
   replies: ReplyMap;

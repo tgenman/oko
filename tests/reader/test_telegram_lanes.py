@@ -71,8 +71,8 @@ def test_blocked_personal_download_keeps_web_and_collection_live_until_stop(tmp_
             assert telegram.downloading.wait(2)
             deadline = time.monotonic()+2
             while time.monotonic() < deadline:
-                cards = client.get('/api/cards').json()
-                if all(any(c['feed_id']==feed and c['complete'] for c in cards) for feed in feeds[1:]):
+                cards = client.get('/api/v3/cards').json()
+                if all(any(c['feed_id']==feed and (c['availability'] == 'available') for c in cards) for feed in feeds[1:]):
                     break
                 time.sleep(.02)
             else:
@@ -182,15 +182,15 @@ def test_forum_frontier_never_crosses_other_topic_and_partial_success_is_not_rep
         assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'fixture'}).status_code == 200
         assert client.post('/api/v3/telegram/connect', json=dict(source_locator='@forum', folder='Forum',
                     access={'kind':'client','profile':'personal'})).status_code == 200
-        cards = {c['members'][0]:c['id'] for c in settled(client, 4)}
-        client.post('/api/materials/'+cards[14]+'/viewed')
-        client.post('/api/materials/'+cards[11]+'/viewed')
+        cards = {[int(identity) for identity in c['source']['message_ids']][0]:c['id'] for c in settled(client, 4)}
+        client.post('/api/v3/materials/'+cards[14]+'/viewed')
+        client.post('/api/v3/materials/'+cards[11]+'/viewed')
         deadline = time.monotonic()+2
         while not telegram.acks and time.monotonic() < deadline:
             time.sleep(.02)
         assert telegram.acks == [(1,11)]
-        client.post('/api/materials/'+cards[12]+'/viewed')
-        client.post('/api/materials/'+cards[13]+'/viewed')
+        client.post('/api/v3/materials/'+cards[12]+'/viewed')
+        client.post('/api/v3/materials/'+cards[13]+'/viewed')
         deadline = time.monotonic()+2
         while (50,14) not in telegram.acks and time.monotonic() < deadline:
             time.sleep(.02)
@@ -224,11 +224,11 @@ def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_acc
                     access={'kind':'client','profile':role})).status_code == 200
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            if telegram.calls == 1 and any(c['complete'] for c in client.get('/api/cards').json()):
+            if telegram.calls == 1 and any((c['availability'] == 'available') for c in client.get('/api/v3/cards').json()):
                 break
             time.sleep(.02)
         assert telegram.calls == 1
-        assert any(c['complete'] for c in client.get('/api/cards').json())
+        assert any((c['availability'] == 'available') for c in client.get('/api/v3/cards').json())
     mono[0] = 10
     wall[0] += 30
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
@@ -238,7 +238,7 @@ def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_acc
         wall[0] += 31
         deadline = time.monotonic()+2
         while telegram.calls == 1 and time.monotonic()<deadline:
-            client.get('/api/status')
+            client.get('/api/v3/status')
             time.sleep(.02)
         assert telegram.calls > 1
 
@@ -256,9 +256,9 @@ def test_server_read_topics_do_not_block_viewed_posts_from_new_import(tmp_path):
         client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@forum',folder='Forum',
                     access={'kind':'client','profile':'personal'}, initial_history={'mode':'count','count':'2'}))
-        cards = {c['members'][0]:c['id'] for c in settled(client,2)}
+        cards = {[int(identity) for identity in c['source']['message_ids']][0]:c['id'] for c in settled(client,2)}
         assert set(cards) == {13,14}
-        client.post('/api/materials/'+cards[13]+'/viewed')
+        client.post('/api/v3/materials/'+cards[13]+'/viewed')
         deadline = time.monotonic()+2
         while not telegram.acks and time.monotonic()<deadline:
             time.sleep(.02)
@@ -279,7 +279,7 @@ def test_partial_forum_ack_survives_restart_without_replaying_successful_topics(
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@forum',folder='Forum',
                     access={'kind':'client','profile':'personal'}))
         for card in settled(client,4):
-            client.post('/api/materials/'+card['id']+'/viewed')
+            client.post('/api/v3/materials/'+card['id']+'/viewed')
         deadline = time.monotonic()+2
         while not telegram.failures and time.monotonic()<deadline:
             time.sleep(.02)
@@ -289,6 +289,6 @@ def test_partial_forum_ack_survives_restart_without_replaying_successful_topics(
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
         deadline = time.monotonic()+2
         while (50,14) not in telegram.acks and time.monotonic()<deadline:
-            client.get('/api/status')
+            client.get('/api/v3/status')
             time.sleep(.02)
         assert telegram.acks == [(1,11),(20,12),(30,13),(50,14)]

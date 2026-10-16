@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 import time
 
 
@@ -14,6 +15,21 @@ class Telegram:
 
     async def page(self, account, peer, after, since):
         return dict(messages=[dict(id=11, date=time.time()-60, text='Текст канала', group=None, media=None)], more=False, gap=None)
+
+    async def history_page(self, account, peer, upper, before, since):
+        after=0
+        rows=[]
+        while True:
+            batch=await self.page(account,peer,after,since)
+            rows.extend(batch['messages'])
+            if not batch['more']:
+                break
+            following=max([after]+[row['id'] for row in batch['messages']])
+            assert following>after, 'Synthetic history page must advance'
+            after=following
+        upper=upper or max([0]+[row['id'] for row in rows])
+        rows=[row for row in rows if row['id']<=upper and (not before or row['id']<before)]
+        return dict(messages=rows,upper=upper,next_before=min([row['id'] for row in rows],default=before),more=False)
 
     async def messages(self, account, peer, ids):
         return [dict(id=11, date=time.time()-60, text='Текст канала', group=None, media=None)]
@@ -36,9 +52,10 @@ class Telegram:
 
 
 def connect(client, peer='@fixture', folder='Новости'):
-    response = connect_request(client, json=dict(account='fixture', peer=peer, folder=folder, auto_read=False))
+    response = connect_request(client, json=dict(account='fixture', peer=peer, folder=folder, auto_read=False, initial_history={'mode':'date','date':str(date.today()-timedelta(days=1)),'timezone':'UTC'}))
     assert response.status_code == 200, response.json()
-    return response.json()
+    feed_id = response.json()['feed_id']
+    return next(feed for feed in client.get('/api/v3/subscriptions').json()['feeds'] if feed['id'] == feed_id)
 
 
 def configure(client, account='fixture'):
@@ -51,18 +68,33 @@ def configure(client, account='fixture'):
 
 def connect_request(client, *, json):
     configure(client, json.get('account', 'fixture'))
-    # Preserve existing imported/unconfigured feed IDs through explicit adoption.
-    if 'feed_id' not in json:
-        old = next((f for f in client.get('/api/subscriptions').json()['feeds'] if f['kind'] == 'telegram' and not f.get('telegram_peer')), None)
-        if old:
-            json = dict(json, feed_id=old['id'])
-    return client.post('/api/telegram/connect', json=json)
+    payload = dict(source_locator=json['peer'], folder=json.get('folder', 'Новости'),
+                   access={'kind':'client','profile':'personal'}, auto_read=json.get('auto_read',False))
+    payload.update({key:value for key,value in json.items() if key not in {'account','peer','folder','auto_read','initial_history'}})
+    if 'initial_history' in json:
+        selection = dict(json['initial_history'])
+        if selection.get('mode') == 'count' and type(selection.get('count')) is int:
+            selection['count'] = str(selection['count'])
+        payload['initial_history'] = selection
+    return client.post('/api/v3/telegram/connect', json=payload)
 
 
 def settled(client, count=1):
     for _ in range(200):
-        cards = client.get('/api/cards').json()
-        if len(cards) == count and all(c.get('complete') and not c.get('loading') for c in cards):
+        cards = client.get('/api/v3/cards').json()
+        if len(cards) == count and all((c.get('availability') == 'available') and not c.get('loading') for c in cards):
             return cards
         time.sleep(.02)
-    raise AssertionError(client.get('/api/status').json())
+    raise AssertionError(client.get('/api/v3/status').json())
+
+
+def connected_feed(client, response):
+    assert response.status_code == 200, response.text
+    identity=response.json()['feed_id']
+    return next(feed for feed in client.get('/api/v3/subscriptions').json()['feeds'] if feed['id']==identity)
+
+
+def connected_feed(client, response):
+    assert response.status_code == 200, response.text
+    identity=response.json()['feed_id']
+    return next(feed for feed in client.get('/api/v3/subscriptions').json()['feeds'] if feed['id']==identity)

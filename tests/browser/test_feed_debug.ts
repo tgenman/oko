@@ -9,7 +9,7 @@ test('add URL uses one form and automatically shows YouTube connection', async (
     await r.page.evaluate(() => {
       const t = readerTransport;
       const feed = {id: 'youtube', title: '3Blue1Brown', kind: 'youtube', transport: 'youtube', folder_id: 'f', original_urls: ['https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw'], importance: 'normal', initial_days: 1};
-      t.replies.set('/api/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
+      t.replies.set('/api/v3/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/v3/feeds', {body: feed});
       t.replies.set('/api/v3/feeds/verify', {body: {url: feed.original_urls[0], title: '3Blue1Brown', kind: 'youtube', verification: 'checked', existing: null}});
       t.replies.set('/api/v3/settings/feed/youtube', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
@@ -38,7 +38,7 @@ test('debug toggle shows server traceback and caught browser errors are sent whi
   const r = await reader();
   try {
     await r.start([]);
-    await r.api('debug', 'POST', {source:'collector', message:'broken source', traceback:'RuntimeError at discover', error_type:'RuntimeError', location:'discover:42'});
+    await r.api('diagnostics', 'POST', {source:'collector', message:'broken source', traceback:'RuntimeError at discover', error_type:'RuntimeError', location:'discover:42'});
     await r.page.evaluate(() => readerTransport.replies.set('/api/v3/collect', {status: 500, body: {detail: 'collection failed'}}));
     await expect(r.page.locator('#debug-panel')).toBeHidden();
     await r.page.locator('#collect').click();
@@ -61,7 +61,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
     await r.start([]);
     await r.page.evaluate(() => {
       const t = readerTransport;
-      t.replies.set('/api/subscriptions', {body: {folders: [], feeds: []}});
+      t.replies.set('/api/v3/subscriptions', {body: {folders: [], feeds: []}});
       t.replies.set('/api/v3/processors/llamacpp', {body: null});
       t.held.set('/api/v3/feeds/verify', true);
     });
@@ -79,7 +79,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
     await r.page.evaluate(() => {
       const feed = {id: 'existing', title: 'Старое имя', kind: 'rss', transport: 'rss', importance: 'high', initial_days: 7, folder_id: 'f'};
       readerTransport.replies.set('/api/v3/feeds/verify', {body: {existing: feed}});
-      readerTransport.replies.set('/api/subscriptions', {body: {feeds: [feed], folders: [{id: 'f', title: 'Старая папка'}]}});
+      readerTransport.replies.set('/api/v3/subscriptions', {body: {feeds: [feed], folders: [{id: 'f', title: 'Старая папка'}]}});
       readerTransport.replies.set('/api/v3/settings/feed/existing', {body: {...readerTransport.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
     await r.page.locator('#rss-check').click();
@@ -151,18 +151,18 @@ test('switch works with keyboard and clearing history rejects a late journal res
     expect(size!.width).toBeGreaterThan(size!.height);
     await r.page.evaluate(() => {
       readerTransport.held.set('/api/v3/diagnostics', true);
-      readerTransport.held.set('/api/status', true);
+      readerTransport.held.set('/api/v3/status', true);
     });
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/diagnostics'));
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/status'));
-    const old = (await r.api('debug')).groups;
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/status'));
+    const old = (await r.api('diagnostics')).groups;
     // Release only the old GET; DELETE uses the normal transport immediately.
     await r.page.evaluate(() => readerTransport.held.delete('/api/v3/diagnostics'));
     await r.page.locator('#debug-clear').click();
     await expect(r.page.locator('#debug-empty')).toBeVisible();
     await expect(r.page.locator('#debug-count')).toHaveText('0');
     await r.page.evaluate(groups => readerTransport.release('/api/v3/diagnostics', {groups, persistence_error: ''}), old);
-    await r.page.evaluate(() => readerTransport.release('/api/status', {stage: 'Готово', errors: [], sources: [], ready_sources:1, total_sources:1, debug_count: 31, debug_persistence_error: 'old disk error'}));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/status', {stage: 'Готово', errors: [], sources: [], ready_sources:1, total_sources:1, debug_count: 31, debug_persistence_error: 'old disk error'}));
     await expect(r.page.locator('#debug-errors')).not.toContainText('old error');
     await expect(r.page.locator('#debug-count')).toHaveText('0');
     await expect(r.page.locator('#debug-status')).toHaveText('');
@@ -178,10 +178,10 @@ test('adding a feed selects existing folders or keeps a new folder draft across 
     await r.start([]);
     await r.page.evaluate(() => {
       const t = readerTransport;
-      t.replies.set('/api/subscriptions', {body: {folders: [{id:'science',title:'Наука'}], feeds:[]}});
+      t.replies.set('/api/v3/subscriptions', {body: {folders: [{id:'science',title:'Наука'}], feeds:[]}});
       t.replies.set('/api/v3/feeds/verify', {body: {url:'https://source.test/feed',title:'Источник',kind:'rss',verification:'checked'}});
       t.replies.set('/api/v3/feeds', {status:400,body:{detail:'Тестовый отказ'}});
-      t.replies.set('/api/telegram/accounts', {body:['personal']});
+      t.replies.set('/api/v3/telegram/accounts', {body:['personal']});
       t.replies.set('/api/v3/telegram/connect', {status:400,body:{detail:'Тестовый отказ'}});
     });
     await r.page.locator('#add-open').click();
@@ -222,7 +222,7 @@ test('journal polling updates a group without losing its disclosure or keyboard 
   try {
     await r.page.clock.install();
     await r.start([]);
-    await r.api('debug', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
+    await r.api('diagnostics', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
     await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
     const details = r.page.locator('#debug-errors details').filter({hasText:'same group'});
@@ -230,7 +230,7 @@ test('journal polling updates a group without losing its disclosure or keyboard 
     await summary.click();
     await expect(details).toHaveAttribute('open','');
     await expect(summary).toBeFocused();
-    await r.api('debug', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
+    await r.api('diagnostics', 'POST', {source:'collector',message:'same group',error_type:'Error',location:'synthetic'});
     await r.page.clock.fastForward(2000);
     await expect(summary).toContainText('×2');
     await expect(details).toHaveAttribute('open','');

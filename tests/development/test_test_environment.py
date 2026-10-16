@@ -1,4 +1,5 @@
 """Public test factory and CLI contract checking, without external services."""
+from tests.support.presence import presence, close_presence
 import asyncio
 from pathlib import Path
 import subprocess
@@ -11,15 +12,15 @@ from tests.support.reader import HEADERS
 def test_factory_defaults_are_synthetic_and_accept_explicit_clients(tmp_path):
     from tests.support.app import create_app
     with TestClient(create_app(tmp_path / 'one', token='test'), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        checked = client.post('/api/processors/codex/check').json()
-        assert checked['available'] is False
-        assert checked['auth'] == 'synthetic'
-        assert 'синтетический' in checked['reason'].lower()
+        presence(client, 'reader')
+        checked = client.post('/api/v3/processors/codex/check').json()
+        assert checked['state']=='unavailable'
+        assert checked['auth'] == 'unknown'
+        assert 'синтетический' in checked['message'].lower()
     from tests.support.codex import CodexService
     with TestClient(create_app(tmp_path / 'two', token='test', codex_client=CodexService()), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        assert client.post('/api/processors/codex/check').json()['available'] is True
+        presence(client, 'reader')
+        assert client.post('/api/v3/processors/codex/check').json()['state']=='available'
 
 
 def test_contract_cli_rejects_old_inherited_signature_before_test_execution(tmp_path):
@@ -50,12 +51,12 @@ def test_factory_collects_youtube_without_starting_a_real_caption_worker(tmp_pat
             return httpx.Response(200, text=feed_xml())
         return httpx.Response(200, content=PNG, headers={'Content-Type':'image/png'})
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'theses':True})
+        client.patch('/api/v3/settings/oko/global', json={'theses':True})
         subscribe(client)
-        client.post('/api/tabs/reader/heartbeat')
-        card = wait_for(client, lambda: (c[0] if len(c:=client.get('/api/cards').json())==1 and c[0]['complete'] and not c[0].get('loading') else None))
-        assert card['captions']=='unavailable'
-        assert card['theses'] is None
+        presence(client, 'reader')
+        card = wait_for(client, lambda: (c[0] if len(c:=client.get('/api/v3/cards').json())==1 and c[0]['availability']=='available' and not c[0].get('loading') else None))
+        assert card['source']['captions']=='unavailable'
+        assert card['theses']['result'] is None
 
 
 def test_factory_http_transport_rejects_external_hosts_before_connecting():
@@ -126,9 +127,9 @@ def test_factory_does_not_contact_even_a_local_model_without_explicit_transport(
         return httpx.Response(200,json={})
     monkeypatch.setattr(httpx.AsyncHTTPTransport,'handle_async_request',connect)
     with TestClient(create_app(tmp_path,token='test'),headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        client.put('/api/processors/llamacpp',json={'endpoint':'http://127.0.0.1:9931','model':'local','local_execution':True})
-        assert client.post('/api/processors/llamacpp/check').status_code == 409
+        presence(client, 'reader')
+        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://127.0.0.1:9931','model':'local','local_execution':True})
+        assert client.post('/api/v3/processors/llamacpp/check').status_code == 503
     assert calls == []
 
 
@@ -161,8 +162,8 @@ def test_factory_default_empty_history_completes_without_a_real_history_worker(t
     from tests.support.youtube import CHANNEL
     transport=httpx.MockTransport(lambda request: httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom"/>'))
     with TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=transport),headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global',json={'theses':False})
-        client.post('/api/tabs/reader/heartbeat')
+        client.patch('/api/v3/settings/oko/global',json={'theses':False})
+        presence(client, 'reader')
         url=f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}'
         verified=client.post('/api/v3/feeds/verify',json={'url':url})
         assert verified.status_code==200, verified.text
@@ -172,6 +173,6 @@ def test_factory_default_empty_history_completes_without_a_real_history_worker(t
             'initial_history':{'mode':'count','count':'3'}})
         assert connected.status_code==200, connected.text
         feed=connected.json()['id']
-        history=wait_for(client,lambda: (h if (h:=client.get('/api/settings/feed/'+feed).json()['feed']['initial_history']) and h['mode']=='count' and h['state']=='done' else None))
-        assert history['loaded']==0
-        assert not client.get('/api/cards').json()
+        history=wait_for(client,lambda: (h if (h:=client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']) and h['state']=='complete' and h['selection']['mode']=='count' else None))
+        assert history['progress']['loaded']==0
+        assert not client.get('/api/v3/cards').json()

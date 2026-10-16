@@ -1,4 +1,5 @@
 """Processing consistency through the reader and replaceable external AI."""
+from tests.support.presence import presence, close_presence
 import asyncio
 import json
 import threading
@@ -37,21 +38,21 @@ def test_finished_views_do_not_repeat_processing_on_unchanged_passes(tmp_path):
     calls = []
     options = dict(source=FilterSource(), token='test', ai_transport=coordinated_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Убери рекламу.'})
-        client.post('/api/tabs/reader/heartbeat')
-        result = wait_for(client, lambda: cards if len(cards := client.get('/api/cards').json()) == 2 and all(c.get('theses') for c in cards) else None)
-        wait_for(client, lambda: client.get('/api/status').json()['stage'] == 'Готово')
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Убери рекламу.'})
+        presence(client, 'reader')
+        result = wait_for(client, lambda: cards if len(cards := client.get('/api/v3/cards').json()) == 2 and all(c['theses']['result'] for c in cards) else None)
+        wait_for(client, lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
         assert {'filter', 'theses'} <= {c['operation'] for c in calls}
         assert all('Реклама:' not in c['snippet'] for c in result)
         count = len(calls)
         time.sleep(1.2)  # More than two periodic reconciliation passes.
         assert len(calls) == count
-        assert [c['theses'] for c in client.get('/api/cards').json()] == [c['theses'] for c in result]
+        assert [c['theses'] for c in client.get('/api/v3/cards').json()] == [c['theses'] for c in result]
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        wait_for(client, lambda: client.get('/api/status').json()['stage'] == 'Готово')
-        assert [c['theses'] for c in client.get('/api/cards').json()] == [c['theses'] for c in result]
+        presence(client, 'reader')
+        wait_for(client, lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        assert [c['theses'] for c in client.get('/api/v3/cards').json()] == [c['theses'] for c in result]
         assert len(calls) == count
 
 
@@ -75,55 +76,55 @@ def test_permission_revoked_during_processor_check_prevents_source_transfer(tmp_
 
     transport = Checking()
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': False})
-        client.patch('/api/feeds/demo', json={'public_ai': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        client.post('/api/tabs/reader/heartbeat')
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': False})
+        client.patch('/api/v3/feeds/demo', json={'public_ai': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+        presence(client, 'reader')
         try:
             assert transport.started.wait(2)
-            assert client.patch('/api/feeds/demo', json={'public_ai': False}).status_code == 200
+            assert client.patch('/api/v3/feeds/demo', json={'public_ai': False}).status_code == 200
         finally:
             transport.release.set()
-        wait_for(client, lambda: client.get('/api/status').json()['errors'])
+        wait_for(client, lambda: client.get('/api/v3/status').json()['problems']['current'])
         assert not any(r.url.path == '/v1/chat/completions' for r in transport.calls)
-        assert all(c.get('theses') is None for c in client.get('/api/cards').json())
+        assert all(c['theses']['result'] is None for c in client.get('/api/v3/cards').json())
 
 
 def test_restore_hidden_original_creates_its_theses(tmp_path):
     calls = []
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport(calls)), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Убери рекламу.'})
-        client.post('/api/tabs/reader/heartbeat')
-        hidden = wait_for(client, lambda: next((c for c in client.get('/api/cards?show_hidden=true').json() if c.get('filter', {}).get('hidden')), None))
-        assert hidden.get('theses') is None
-        assert client.post('/api/materials/' + hidden['id'] + '/filter/restore').status_code == 200
-        material = wait_for(client, lambda: m if (m := client.get('/api/materials/' + hidden['id']).json()).get('theses') else None)
-        assert material['filter']['restored']
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Убери рекламу.'})
+        presence(client, 'reader')
+        hidden = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards?show_hidden=true').json() if (c['filter']['result'] or {}).get('hidden')), None))
+        assert hidden['theses']['result'] is None
+        assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore').status_code == 200
+        material = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + hidden['id']).json())['theses']['result'] else None)
+        assert material['filter']['result']['restored']
         assert any(c['operation'] == 'theses' and c['sources'][0]['id'] == hidden['id'] for c in calls)
 
 
 def test_original_presentation_inherits_independently_of_theses(tmp_path):
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport([])), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'originals': False, 'theses': True})
-        client.post('/api/tabs/reader/heartbeat')
-        material = wait_for(client, lambda: next((c for c in client.get('/api/cards').json() if c.get('theses')), None))
-        current = client.get('/api/materials/' + material['id']).json()
-        assert current['originals'] is False and current['text']
-        client.patch('/api/settings/feed/demo', json={'originals': True})
-        assert client.get('/api/materials/' + material['id']).json()['originals'] is True
-        assert client.get('/api/settings/feed/demo').json()['effective']['theses']['value'] is True
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'originals': False, 'theses': True})
+        presence(client, 'reader')
+        material = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']), None))
+        current = client.get('/api/v3/materials/' + material['id']).json()
+        assert current['originals'] is False and current['content']['text']
+        client.patch('/api/v3/settings/feed/demo', json={'originals': True})
+        assert client.get('/api/v3/materials/' + material['id']).json()['originals'] is True
+        assert client.get('/api/v3/settings/feed/demo').json()['effective']['theses']['value'] is True
 
 
 def test_folder_completion_includes_hidden_publications(tmp_path):
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport([])), headers=HEADERS) as client:
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'theses': False, 'prompt_filters': 'Убери рекламу.'})
-        client.post('/api/tabs/reader/heartbeat')
-        wait_for(client, lambda: len(c := client.get('/api/cards?show_hidden=true').json()) == 3 and all(x.get('filter', {}).get('status') == 'done' for x in c))
-        assert len(client.get('/api/cards').json()) == 2
-        preview = client.post('/api/folders/demo/completion/preview').json()
-        assert preview['cards'] == preview['originals'] == 3
-        assert client.post('/api/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/cards?show_hidden=true').json() == []
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': False, 'prompt_filters': 'Убери рекламу.'})
+        presence(client, 'reader')
+        wait_for(client, lambda: len(c := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c))
+        assert len(client.get('/api/v3/cards').json()) == 2
+        preview = client.post('/api/v3/folders/demo/completion/preview').json()
+        assert preview['cards_count'] == preview['publications_count'] == 3
+        assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
+        assert client.get('/api/v3/cards?show_hidden=true').json() == []

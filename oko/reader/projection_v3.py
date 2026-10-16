@@ -1,4 +1,4 @@
-"""Typed projections while domain producers migrate from the reviewed v2 shape."""
+"""Project validated domain snapshots into the canonical v3 HTTP models."""
 from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict
 from typing import TYPE_CHECKING, Literal
@@ -7,14 +7,14 @@ if TYPE_CHECKING:
     from oko.storage.store import WorkSummary
 
 from oko.reader.generated import models as wire
-from oko.reader.legacy_generated import models as previous
+from oko.reader import snapshots as facts
 
 
 def timestamp(value: float) -> wire.Timestamp:
     return wire.Timestamp(datetime.fromtimestamp(value, timezone.utc).isoformat().replace('+00:00', 'Z'))
 
 
-def affected(value: previous.ProblemObject) -> wire.AffectedResource:
+def affected(value: facts.ProblemObject) -> wire.AffectedResource:
     if value.kind == 'material':
         return wire.AffectedResource(wire.MaterialResource(kind='material', material_id=wire.MaterialId(value.id)))
     if value.kind == 'feed':
@@ -71,8 +71,8 @@ def producer_code(raw: str, kind: str) -> str:
             'feed-delete':'feed_delete_failed','read':'telegram_read_failed'}.get(kind,'source_unavailable')
 
 
-def problem(value: previous.Problem, bindings: dict[str, wire.TelegramAccess] | None = None,
-            material_feeds: dict[str, str] | None = None) -> wire.CurrentProblem | wire.RetryingProblem | wire.FinishedProblem | wire.LegacyCurrentProblem | wire.LegacyRetryingProblem | wire.LegacyFinishedProblem:
+def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | None = None,
+            material_feeds: dict[str, str] | None = None, forgotten: set[str] | None = None) -> wire.CurrentProblem | wire.RetryingProblem | wire.FinishedProblem | wire.LegacyCurrentProblem | wire.LegacyRetryingProblem | wire.LegacyFinishedProblem:
     command = wire.CommandId(value.request_id) if isinstance(value.request_id, str) and value.request_id else None
     context = None
     error = None
@@ -130,6 +130,18 @@ def problem(value: previous.Problem, bindings: dict[str, wire.TelegramAccess] | 
             elif feeds and code=='source_unavailable':
                 for feed in sorted(set(feeds)):
                     recovery.append(wire.RecoveryIntent(wire.RecoveryRetryCollection(kind='retry_collection',target=wire.CollectionTarget(wire.FeedCollectionTarget(scope='feed',feed_id=wire.FeedId(feed))))))
+    if forgotten:
+        resources = [resource for resource in resources if not isinstance(resource.root,wire.MaterialResource) or resource.root.material_id.root not in forgotten]
+        retained: list[wire.RecoveryIntent] = []
+        for recommendation in recovery:
+            target = recommendation.root
+            if isinstance(target,(wire.RecoveryInspectMaterials,wire.RecoveryRetryMaterial,wire.RecoveryRetryFilter,wire.RecoveryRetryTheses)):
+                ids = [identity for identity in target.material_ids if identity.root not in forgotten]
+                if ids:
+                    retained.append(wire.RecoveryIntent(target.model_copy(update={'material_ids':ids})))
+            else:
+                retained.append(recommendation)
+        recovery = retained
     if code=='command_outcome_unknown':
         recovery = [intent for intent in recovery if isinstance(intent.root,(wire.RecoveryConfigureProcessor,wire.RecoveryConfigureTelegramProfile,wire.RecoveryChangeSetting,wire.RecoveryConnectSource,wire.RecoveryInspectMaterials))]
     data = dict(id=value.id,code=code,command_id=command,title=value.title,
@@ -145,17 +157,17 @@ def problem(value: previous.Problem, bindings: dict[str, wire.TelegramAccess] | 
     return wire.Problem.model_validate(data).root
 
 
-def problems(value: previous.ProblemSnapshot, bindings: dict[str, wire.TelegramAccess] | None = None,
-             material_feeds: dict[str, str] | None = None) -> wire.ProblemSnapshot:
+def problems(value: facts.ProblemSnapshot, bindings: dict[str, wire.TelegramAccess] | None = None,
+             material_feeds: dict[str, str] | None = None, forgotten: set[str] | None = None) -> wire.ProblemSnapshot:
     current: list[wire.CurrentProblem | wire.RetryingProblem | wire.LegacyCurrentProblem | wire.LegacyRetryingProblem] = []
     recent: list[wire.FinishedProblem | wire.LegacyFinishedProblem] = []
     for entry in value.current:
-        projected = problem(entry,bindings,material_feeds)
+        projected = problem(entry,bindings,material_feeds,forgotten)
         if isinstance(projected,(wire.FinishedProblem,wire.LegacyFinishedProblem)):
             raise ValueError('Current snapshot contains a finished problem')
         current.append(projected)
     for entry in value.recent:
-        projected = problem(entry,bindings,material_feeds)
+        projected = problem(entry,bindings,material_feeds,forgotten)
         if not isinstance(projected,(wire.FinishedProblem,wire.LegacyFinishedProblem)):
             raise ValueError('Recent snapshot contains an unfinished problem')
         recent.append(projected)
@@ -182,7 +194,7 @@ def work(jobs: list['WorkSummary']) -> list[wire.WorkEntry]:
     return result or [wire.WorkEntry(wire.WorkIdle(phase='idle'))]
 
 
-def youtube(value: previous.YouTube | None) -> wire.YouTubeState:
+def youtube(value: facts.YouTube | None) -> wire.YouTubeState:
     if value is None:
         return wire.YouTubeState(mode='direct', address='', has_password=False, has_username=False,
             admission='ready', retry_at=None, strikes=0, reason=None)
@@ -192,7 +204,7 @@ def youtube(value: previous.YouTube | None) -> wire.YouTubeState:
         reason=wire.WaitingReason('youtube_rate_limited') if value.reason else None)
 
 
-def history(value: previous.InitialHistoryStatus) -> wire.FeedHistoryState:
+def history(value: facts.InitialHistoryStatus) -> wire.FeedHistoryState:
     if value.mode == 'count':
         count = value.count_text or (str(value.count) if value.count is not None else None)
         if count is None:
@@ -234,9 +246,9 @@ def history(value: previous.InitialHistoryStatus) -> wire.FeedHistoryState:
     return wire.FeedHistoryState(feed_id=wire.FeedId(value.feed_id), history=wire.HistoryState(state))
 
 
-def subscription(value: previous.SubscriptionFeed, binding: dict[str, object] | None = None) -> wire.SubscriptionFeed:
+def subscription(value: facts.SubscriptionFeed, binding: dict[str, object] | None = None) -> wire.SubscriptionFeed:
     data = value.model_dump(exclude_unset=True)
-    data['history'] = history(previous.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, previous.History) else wire.HistoryState(wire.HistoryAbsent(state='absent', legacy_since=timestamp(value.legacy_since) if isinstance(value.legacy_since, float) else None)).model_dump(mode='json')
+    data['history'] = history(facts.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, facts.History) else wire.HistoryState(wire.HistoryAbsent(state='absent', legacy_since=timestamp(value.legacy_since) if isinstance(value.legacy_since, float) else None)).model_dump(mode='json')
     data.pop('initial_history', None)
     data.pop('legacy_since', None)
     data['connection'] = 'ready' if data.get('connection') == 'connected' else data.get('connection', 'unavailable')
@@ -245,15 +257,13 @@ def subscription(value: previous.SubscriptionFeed, binding: dict[str, object] | 
             data['access'] = binding
             if binding['kind'] == 'client':
                 data['auto_read'], data['read_history'] = bool(value.auto_read), bool(value.read_history)
-        elif value.transport is None or value.transport == 'telegram' and not isinstance(value.telegram_account, str):
-            data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_connection'
-            data['access'] = wire.TelegramUnconfiguredAccess(kind='unconfigured', source_locator=value.identity if isinstance(value.identity, str) else value.id).model_dump(mode='json')
-        elif value.transport == 'telegram':
+        elif value.transport == 'telegram' and isinstance(value.telegram_account, str):
             data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_profile_confirmation'
-            data['access'] = wire.TelegramLegacyClientAccess(kind='legacy_client', alias=value.telegram_account if isinstance(value.telegram_account, str) else '', peer_id=wire.TelegramPeerId(str(value.telegram_peer)) if isinstance(value.telegram_peer, int) else None, source_locator=value.identity if isinstance(value.identity, str) else value.id).model_dump(mode='json')
+            data['access'] = wire.TelegramLegacyClientAccess(kind='legacy_client', alias=value.telegram_account, peer_id=wire.TelegramPeerId(str(value.telegram_peer)) if isinstance(value.telegram_peer, int) else None, source_locator=value.identity if isinstance(value.identity, str) else value.id).model_dump(mode='json')
         else:
-            username = value.telegram_username if isinstance(value.telegram_username, str) else str(data['identity']).removeprefix('telegram:').removeprefix('@')
-            data['access'] = wire.TelegramWebAccess(kind='web', username=username, preview_url=wire.SourceUrl('https://t.me/s/' + username)).model_dump(mode='json')
+            data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_connection'
+            access = wire.TelegramUnconfiguredAccess.model_validate(binding) if binding and binding['kind']=='unconfigured' else wire.TelegramUnconfiguredAccess(kind='unconfigured', source_locator=value.identity if isinstance(value.identity,str) else value.id)
+            data['access'] = access.model_dump(mode='json')
         data.pop('transport', None)
     for key in ('telegram_account', 'telegram_peer', 'telegram_topic', 'telegram_username', 'read_history', 'auto_read'):
         if key not in ('auto_read', 'read_history') or not binding or binding['kind'] != 'client':
@@ -261,7 +271,7 @@ def subscription(value: previous.SubscriptionFeed, binding: dict[str, object] | 
     return wire.SubscriptionFeed.model_validate(data)
 
 
-def codex(value: previous.CodexState) -> wire.CodexProcessorState:
+def codex(value: facts.CodexState) -> wire.CodexProcessorState:
     data = value.model_dump(exclude_unset=True)
     availability = {key: data.get(key) for key in ('local', 'version')}
     availability.update(auth=data.get('auth', 'unchecked'), limits_checked=value.limits_checked,
@@ -276,7 +286,7 @@ def codex(value: previous.CodexState) -> wire.CodexProcessorState:
                                     availability=wire.CodexAvailability.model_validate(availability))
 
 
-def diagnostic(value: previous.DiagnosticEntry) -> wire.DiagnosticEntry:
+def diagnostic(value: facts.DiagnosticEntry) -> wire.DiagnosticEntry:
     data = value.model_dump()
     data.setdefault('material_ids', [])
     for old, new in (('first_time', 'first_at'), ('last_time', 'last_at')):

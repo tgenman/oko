@@ -31,18 +31,18 @@ async function reader() {
       const history=(value:unknown):unknown=>{
         if(!value||typeof value!=='object')return {state:'absent',legacy_since:null};
         if('selection' in value||('state' in value&&value.state==='absent'))return value;
-        const h=value as import('../../frontend/src/api/legacy-generated/types.gen').History;
+        const h=value as import('./scenario-data').History;
         const selection=h.mode==='date'?{mode:'date',date:h.date,timezone:h.timezone}:{mode:'count',count:h.count_text||String(h.count)};
         const progress={loaded:h.loaded||0,viewed:h.viewed||0,incomplete:h.incomplete||0,available:h.available||0,retrying:h.retrying||0,unavailable:h.unavailable||0,requests:h.requests||0,errors:(h.errors||[]).map(e=>({material_id:e.item,code:'source_unavailable',message:e.message})),scan_complete:!!h.scan_complete,manifest_complete:!!h.frozen,warnings:h.warnings||[],discovery_problem:h.discovery_error?{code:'source_unavailable',message:h.discovery_error,retry_at:h.discovery_retry_at?new Date(h.discovery_retry_at*1000).toISOString():null}:null};
         const state=h.state==='done'?'complete':h.state==='pending'?'not_started':h.state==='selecting'?'discovering':h.state==='loading'?'fetching':h.state;
         return {state,selection,progress,...(state==='not_started'?{}:{run:h.run||'fixture-run'}),...(state==='paused'?{paused_phase:h.frozen?'fetching':'discovering'}:{}),...(state==='waiting'?{reason:'retry_scheduled',retry_at:null}:{}),...(state==='cancelled'?{outcome:'cancelled'}:{})};
       };
-      const youtube=(value:unknown)=>{const v=value as import('../../frontend/src/api/legacy-generated/types.gen').YouTube|undefined;return {mode:v?.mode||'direct',address:v?.address||'',has_username:!!v?.has_username,has_password:!!v?.has_password,admission:v?.paused?'paused':v?.next_at?'waiting':'ready',retry_at:v?.next_at?new Date(v.next_at*1000).toISOString():null,strikes:v?.strikes||0,reason:v?.reason?'youtube_rate_limited':null};};
+      const youtube=(value:unknown)=>{const v=value as import('./scenario-data').YouTube|undefined;return {mode:v?.mode||'direct',address:v?.address||'',has_username:!!v?.has_username,has_password:!!v?.has_password,admission:v?.paused?'paused':v?.next_at?'waiting':'ready',retry_at:v?.next_at?new Date(v.next_at*1000).toISOString():null,strikes:v?.strikes||0,reason:v?.reason?'youtube_rate_limited':null};};
       const v3Reply=(url:string,method:string,body:unknown):unknown=>{
         if(url==='/api/v3/status'){
           if(body&&typeof body==='object'&&'api_version'in body&&'runtime_state'in body)return body;
-          const v=body as import('../../frontend/src/api/legacy-generated/types.gen').Status;
-          const problem=(p:import('../../frontend/src/api/legacy-generated/types.gen').Problem)=>{
+          const v=body as import('./scenario-data').Status;
+          const problem=(p:import('./scenario-data').Problem)=>{
             const codes:Record<string,string>={'codex-choice':'processor_not_configured','processor-config':'processor_not_configured','ai-permission':'public_ai_not_allowed','source-connection':'source_unavailable','material-incomplete':'material_incomplete','action-failed':'command_failed','action-unknown':'command_outcome_unknown','youtube-admission':'youtube_rate_limited','storage-unavailable':'storage_unavailable'};
             const code=codes[p.code]||'legacy_problem';
             let affected=p.objects.map<import('../../frontend/src/api/generated/types.gen').AffectedResource>(o=>o.kind==='material'?{kind:'material',material_id:o.id}:o.kind==='feed'?{kind:'feed',feed_id:o.id}:{kind:'runtime'});
@@ -67,7 +67,7 @@ async function reader() {
           return {api_version:'3.0.0',runtime_state:v.stopped?'stopped':v.error?'unavailable':'running',work_allowed:!v.stopped,active_client_sessions:1,lifetime:{kind:'client_presence',lease_seconds:60,grace_seconds:60,renew_after_seconds:20},initial_histories:(v.initial_histories||[]).map(h=>({feed_id:h.feed_id,history:history(h)})),youtube:youtube(v.youtube),work:!v.jobs?.some(j=>j.status==='pending'||j.status==='running')?[{phase:'idle'}]:(v.jobs||[]).filter(j=>j.status==='pending'||j.status==='running').map(j=>j.kind==='filter'||j.kind==='theses'?{phase:'processing',operation:j.kind,progress:{completed:0,total:j.count}}:{phase:j.kind==='delete'?'deleting':'collecting',feed_id:null,progress:{completed:0,total:j.count}}),sources:(v.sources||[]).map(source=>({feed_id:source.feed_id,title:source.title,state:source.error?'unavailable':'ready',reason:source.error?'source_unavailable':null,message:source.error||null,gap:source.gap||null,changes:source.changes||null})),ready_sources:v.ready_sources||0,total_sources:v.total_sources||0,problems:{current,recent,count:current.length,updated_at:new Date((v.problems?.updated_at||0)*1000).toISOString()},diagnostic_count:v.debug_count||0,diagnostic_persistence_error:v.debug_persistence_error||null,viewed_ids:v.viewed_ids||[],telegram_reads:[]};
         }
         if(url==='/api/v3/youtube'&&body&&typeof body==='object'&&!('admission' in body))return youtube(body);
-        if(url==='/api/v3/feeds/verify'&&body&&typeof body==='object'&&!('state' in body)){const v=body as import('../../frontend/src/api/legacy-generated/types.gen').FeedVerification;return v.existing?{state:'existing',existing_feed:v.existing}:{state:'new',verification:v.verification,candidate:{url:v.url,title:v.title,kind:v.kind}};}
+        if(url==='/api/v3/feeds/verify'&&body&&typeof body==='object'&&!('state' in body)){const v=body as import('./scenario-data').FeedVerification;return v.existing?{state:'existing',existing_feed:v.existing}:{state:'new',verification:v.verification,candidate:{url:v.url,title:v.title,kind:v.kind}};}
         if(url.startsWith('/api/v3/feeds/')&&url.endsWith('/history')&&body&&typeof body==='object'&&!('history' in body))return {feed_id:url.split('/')[4],history:history(body)};
         if(url==='/api/v3/processors/llamacpp'&&method==='GET'&&body===null)return {configuration:null};
         if(!body||typeof body!=='object')return body;
@@ -77,7 +77,7 @@ async function reader() {
             if(!item||typeof item!=='object'||!('value' in item)||!('scope' in item))return [key,item];
             return [key,{value:item.value,origin:{scope:item.scope,...(item.scope==='default'?{}:{owner:'owner' in item?item.owner:'global'})}}];
           }));
-          const feed=('feed' in body?body.feed:null)||replies.get('/api/subscriptions')?.body?.feeds.find(f=>f.id===owner);
+          const feed=('feed' in body?body.feed:null)||replies.get('/api/v3/subscriptions')?.body?.feeds.find(f=>f.id===owner);
           return {scope,owner,effective,overrides:body.overrides,...(scope==='feed'&&feed&&typeof feed==='object'?{feed:{...feed,history:'initial_history' in feed&&feed.initial_history?history(feed.initial_history):{state:'absent',legacy_since:'legacy_since' in feed&&typeof feed.legacy_since==='number'?new Date(feed.legacy_since*1000).toISOString():null}}}:{})};
         }
         if(url==='/api/v3/processors/llamacpp'&&method==='GET'&&!('configuration' in body))return {configuration:body};
@@ -111,7 +111,7 @@ async function reader() {
         if (window.readerTransport.native.has(key)) return nativeFetch(url, options);
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
         const method = options?.method || 'GET', pathname = key.split('?')[0];
-        const reply = replies.get(method + ' ' + key) || replies.get(key) || (key==='/api/v3/status'?replies.get('/api/status'):undefined) || replies.get(method + ' ' + pathname) || replies.get(pathname);
+        const reply = replies.get(method + ' ' + key) || replies.get(key) || replies.get(method + ' ' + pathname) || replies.get(pathname);
         if (reply) {
           for (const [route, next] of reply.next || []) replies.set(route, next);
           if (reply.base64) return new Response(Uint8Array.from(atob(reply.base64), c => c.charCodeAt(0)), {headers: {'Content-Type': reply.mime || 'application/octet-stream'}});
@@ -128,7 +128,7 @@ async function reader() {
     async function start(materials: FixtureMaterial[], target = page) {
       await target.addInitScript(materials => {
         const t = window.readerTransport;
-        t.replies.set('/api/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
+        t.replies.set('/api/v3/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
         t.replies.set('/api/v3/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
         t.replies.set('/api/v3/reading-composition', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0}], count:0}});
         t.replies.set('/api/v3/processors/codex', {body:{config:null}});

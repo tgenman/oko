@@ -1,3 +1,5 @@
+from tests.support.telegram import connected_feed
+from tests.support.presence import presence, close_presence
 from tests.support.telegram import connect_request
 import time
 from fastapi.testclient import TestClient
@@ -12,41 +14,41 @@ def test_count_selects_whole_album_and_resumes_without_live_count(tmp_path):
     def open_reader():
         return TestClient(create_app(tmp_path,token='test',telegram_client=archive),headers=HEADERS)
     with open_reader() as client:
-        client.post("/api/tabs/reader/heartbeat")
+        presence(client, 'reader')
         response=connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=False,initial_history=dict(mode='count',count=2)))
         assert response.status_code==200,response.text
-        feed=response.json()
+        feed=connected_feed(client,response)
         for _ in range(200):
-            h=client.get('/api/settings/feed/'+feed['id']).json()['feed']['initial_history']
-            if h and h['state']=='done': break
+            h=client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
+            if h and h['state']=='complete': break
             time.sleep(.02)
-        assert h['loaded']==2
-        assert {c['members'][0] for c in client.get('/api/cards').json()}=={4,6}
+        assert h['progress']['loaded']==2
+        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()}=={4,6}
     archive.rows.append(dict(id=7,date=1759350007,text='new',group=None,media=None))
     with open_reader() as client:
-        client.post("/api/tabs/reader/heartbeat")
-        client.post('/api/tabs/reader/heartbeat')
+        presence(client, 'reader')
+        presence(client, 'reader')
         for _ in range(200):
-            cards=client.get('/api/cards').json()
+            cards=client.get('/api/v3/cards').json()
             if len(cards)==3: break
             time.sleep(.02)
         assert len(cards)==3
-        assert client.get('/api/settings/feed/'+feed['id']).json()['feed']['initial_history']['loaded']==2
+        assert client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']['progress']['loaded']==2
 
 def test_telegram_date_is_inclusive_and_validation_matches_rss(tmp_path):
     archive=Archive()
     archive.rows=[dict(id=n,date=1759352400+offset,text=str(n),group=None,media=None) for n,offset in [(1,-1),(2,0),(3,1)]]
     with TestClient(create_app(tmp_path,token='test',telegram_client=archive),headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
+        presence(client, 'reader')
         body=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=False)
         assert connect_request(client,json=dict(**body,initial_history=dict(mode='count',count=0))).status_code==422
-        feed=connect_request(client,json=dict(**body,initial_history=dict(mode='date',count=None,date='2025-10-02',timezone='Europe/Moscow'))).json()
+        feed=connected_feed(client, connect_request(client,json=dict(**body,initial_history=dict(mode='date',date='2025-10-02',timezone='Europe/Moscow'))))
         for _ in range(200):
-            h=client.get('/api/settings/feed/'+feed['id']).json()['feed']['initial_history']
-            if h['state']=='done':break
+            h=client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
+            if h['state']=='complete':break
             time.sleep(.02)
-        assert h['loaded']==2
-        assert {c['members'][0] for c in client.get('/api/cards').json()}=={2,3}
+        assert h['progress']['loaded']==2
+        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()}=={2,3}
 
 def test_snapshot_and_sparse_group_pages_resume_before_older_pages(tmp_path):
     import asyncio
@@ -68,27 +70,27 @@ def test_snapshot_and_sparse_group_pages_resume_before_older_pages(tmp_path):
     archive=Sparse()
     def open_reader(): return TestClient(create_app(tmp_path,token='test',telegram_client=archive),headers=HEADERS)
     with open_reader() as client:
-        client.post('/api/tabs/reader/heartbeat')
-        feed=connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=False,initial_history=dict(mode='count',count=2))).json()
+        presence(client, 'reader')
+        feed=connected_feed(client, connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=False,initial_history=dict(mode='count',count=2))))
         for _ in range(100):
-            h=client.get('/api/settings/feed/'+feed['id']).json()['feed']['initial_history']
+            h=client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
             if any(before==5 for _,before,_ in archive.calls):break
             time.sleep(.02)
-        assert h['state']=='selecting'
-        assert h['available']==1
-        assert h['loaded']==0
+        assert h['state']=='discovering'
+        assert h['progress']['available']==1
+        assert h['progress']['loaded']==0
     archive.blocked=False
     archive.rows.append(dict(id=7,date=1759350007,text='live',group=None,media=None))
     with open_reader() as client:
-        client.post('/api/tabs/reader/heartbeat')
+        presence(client, 'reader')
         for _ in range(200):
-            h=client.get('/api/settings/feed/'+feed['id']).json()['feed']['initial_history']
-            if h['state']=='done':break
+            h=client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
+            if h['state']=='complete':break
             time.sleep(.02)
-        assert h['loaded']==2
+        assert h['progress']['loaded']==2
         assert all(topic is None for _,_,topic in archive.calls)
         assert any(upper==6 and before==3 for upper,before,_ in archive.calls)
-        assert {c['members'][0] for c in client.get('/api/cards').json()}=={2,6,7}
+        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()}=={2,6,7}
 
 def test_count_history_keeps_safe_numeric_read_boundary(tmp_path):
     class ReadArchive(Archive):
@@ -101,15 +103,15 @@ def test_count_history_keeps_safe_numeric_read_boundary(tmp_path):
             self.acks.append(max_id)
     archive=ReadArchive()
     with TestClient(create_app(tmp_path,token='test',telegram_client=archive),headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        feed=connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=True,initial_history=dict(mode='count',count=2))).json()
+        presence(client, 'reader')
+        feed=connected_feed(client, connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=True,initial_history=dict(mode='count',count=2))))
         for _ in range(200):
-            reads=client.get('/api/status').json()['telegram_reads']
+            reads=client.get('/api/v3/status').json()['telegram_reads']
             if reads and reads[0]['waiting']:break
             time.sleep(.02)
-        assert reads[0]['initial']==3 # Before oldest member of the chosen whole album (4,5).
-        assert reads[0]['confirmed']==0
-        assert 'Старая непрочитанная история' in reads[0]['waiting']
+        assert reads[0]['initial']=='3' # Before oldest member of the chosen whole album (4,5).
+        assert reads[0]['confirmed'] is None
+        assert reads[0]['waiting']=='telegram_read_frontier'
         assert archive.acks==[]
 
 
@@ -133,22 +135,22 @@ def test_archive_error_does_not_delay_live_and_survives_restart(tmp_path):
     archive = FailingArchive()
     def reader(): return TestClient(create_app(tmp_path, token='test', telegram_client=archive), headers=HEADERS)
     with reader() as client:
-        client.post('/api/tabs/reader/heartbeat')
-        feed = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=5))).json()
+        presence(client, 'reader')
+        feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=5))))
         for _ in range(150):
-            cards = client.get('/api/cards').json()
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if any(c['members'] == [7] for c in cards): break
+            cards = client.get('/api/v3/cards').json()
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if any([int(identity) for identity in c['source']['message_ids']] == [7] for c in cards): break
             time.sleep(.02)
-        assert any(c['members'] == [7] for c in cards)
-        assert history['discovery_error'] == 'Архив временно недоступен'
-        assert history['discovery_retry_at'] > time.time()
-        assert client.get('/api/debug').json()['groups']
+        assert any([int(identity) for identity in c['source']['message_ids']] == [7] for c in cards)
+        assert history['progress']['discovery_problem']['message'] == 'Архив временно недоступен'
+        assert __import__('datetime').datetime.fromisoformat(history['progress']['discovery_problem']['retry_at'].replace('Z','+00:00')).timestamp() > time.time()
+        assert client.get('/api/v3/diagnostics').json()['groups']
     with reader() as client:
-        client.post('/api/tabs/reader/heartbeat')
-        history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-        assert history['discovery_error'] == 'Архив временно недоступен'
-        assert history['discovery_retry_at'] > time.time()
+        presence(client, 'reader')
+        history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+        assert history['progress']['discovery_problem']['message'] == 'Архив временно недоступен'
+        assert __import__('datetime').datetime.fromisoformat(history['progress']['discovery_problem']['retry_at'].replace('Z','+00:00')).timestamp() > time.time()
 
 
 def test_count_metadata_manifest_finishes_before_content_and_never_replaces_deleted_member(tmp_path):
@@ -168,18 +170,18 @@ def test_count_metadata_manifest_finishes_before_content_and_never_replaces_dele
             return await super().messages(account, peer, ids, **scope)
     archive = ManifestArchive()
     with TestClient(create_app(tmp_path, token='test', telegram_client=archive), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        feed = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=3))).json()
+        presence(client, 'reader')
+        feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=3))))
         for _ in range(200):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['state'] == 'done': break
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['state'] == 'complete': break
             time.sleep(.02)
         assert not archive.early_content
-        assert history['loaded'] == 2
-        assert history['available'] == 3
-        assert history['unavailable'] == 1
+        assert history['progress']['loaded'] == 2
+        assert history['progress']['available'] == 3
+        assert history['progress']['unavailable'] == 1
         assert set(archive.content) == {2,3,4}
-        assert {c['members'][0] for c in client.get('/api/cards').json()} == {2,3,4}
+        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()} == {2,3,4}
 
 
 def test_count_skips_service_actions_but_keeps_empty_media_posts(tmp_path):
@@ -194,14 +196,14 @@ def test_count_skips_service_actions_but_keeps_empty_media_posts(tmp_path):
         async def acknowledge(self, account, peer, max_id, **scope):
             self.acks.append(max_id)
     with TestClient(create_app(tmp_path, token='test', telegram_client=ServiceArchive()), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        feed = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=2))).json()
+        presence(client, 'reader')
+        feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=2))))
         for _ in range(200):
-            history = client.get('/api/settings/feed/' + feed['id']).json()['feed']['initial_history']
-            if history['state'] == 'done': break
+            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+            if history['state'] == 'complete': break
             time.sleep(.02)
-        assert history['loaded'] == 2
-        assert {c['members'][0] for c in client.get('/api/cards').json()} == {3,6}
+        assert history['progress']['loaded'] == 2
+        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()} == {3,6}
 
 
 def test_service_ids_in_selected_span_still_block_unsafe_read_acknowledgment(tmp_path):
@@ -215,14 +217,14 @@ def test_service_ids_in_selected_span_still_block_unsafe_read_acknowledgment(tmp
             self.acks.append(max_id)
     archive = ServiceArchive()
     with TestClient(create_app(tmp_path, token='test', telegram_client=archive), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        feed = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=True, initial_history=dict(mode='count', count=2))).json()
-        client.patch('/api/feeds/' + feed['id'], json={'read_history': True})
+        presence(client, 'reader')
+        feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=True, initial_history=dict(mode='count', count=2))))
+        client.patch('/api/v3/feeds/' + feed['id'], json={'read_history': True})
         for _ in range(200):
-            reads = client.get('/api/status').json()['telegram_reads']
-            if reads and reads[0]['confirmed'] == 3 and reads[0]['waiting']: break
+            reads = client.get('/api/v3/status').json()['telegram_reads']
+            if reads and reads[0]['confirmed'] == '3' and reads[0]['waiting']: break
             time.sleep(.02)
-        assert reads[0]['initial'] == 2
-        assert reads[0]['confirmed'] == 3
+        assert reads[0]['initial'] == '2'
+        assert reads[0]['confirmed'] == '3'
         assert 6 not in archive.acks
         assert reads[0]['waiting']

@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 from pathlib import Path
 from typing import Any
 from fastapi.testclient import TestClient
@@ -25,8 +26,8 @@ class CodexService(CodexClient):
 
 
 def configure_codex(client: TestClient) -> None:
-    client.post('/api/tabs/reader/heartbeat')
+    presence(client, 'reader')
     config = {kind: dict(model='synthetic', reasoning_effort='low', fast=False)
               for kind in ('filter', 'theses')}
-    response = client.put('/api/processors/codex', json=config)
+    response = client.put('/api/v3/processors/codex', json=config)
     assert response.status_code == 200, response.text

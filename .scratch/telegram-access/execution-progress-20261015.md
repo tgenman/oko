@@ -29,3 +29,7 @@ TypesPASS, browser6PASS; подробности и ограничения в о�
 #5: коммит `d51ed76`. #21: исправлены metadata-only derivatives и provenance одного принятого файла; финальный связанный набор32Python+6browserPASS, ревью0. Полный gate не запускался.
 
 #21: коммит `0fa766b`. #6: финальный набор39Python+30browserPASS, оба ревью0; следующая #7, затем полный gate и один PR.
+
+#6: коммит `9162fe9`. #7 в работе; подробный checkpoint ../independent-api/integration-progress-20261016.md. Общий gate пока FAIL/INTERRUPTED, PR не создавался.
+
+2026-10-16, итог #7: полный all tools PASS105.20s, 435Python+9HTTP+111tools+122browser, 2 историческихskip. Предыдущая строка FAIL/INTERRUPTED относится к раннему кандидату. Финальное evidence: ../independent-api/verification-integration-20261016.md. Остались staged, отдельный commit#7, push и один общий PR.

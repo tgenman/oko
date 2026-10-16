@@ -55,9 +55,9 @@ test('width, focus, source warning and settings help remain separate from select
   await r.start([material('one')]);
   await r.page.evaluate(()=>{
    const t=readerTransport, feed={id:'feed',title:'Длинное название источника для проверки многоточия в дереве',folder_id:'f',kind:'youtube',transport:'youtube',count:1,original_urls:[],importance:'normal'};
-   t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Тема'}],feeds:[feed]}});
+   t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Тема'}],feeds:[feed]}});
    t.replies.set('/api/v3/settings/feed/feed',{body:{...t.replies.get('/api/v3/settings/oko/global')!.body,feed}});
-   t.replies.get('/api/status')!.body!.sources=[{feed_id:'feed',title:feed.title,error:'Нет связи',changes:'Справка синтетического источника'}];
+   t.replies.get('/api/v3/status')!.body!.sources=[{feed_id:'feed',title:feed.title,error:'Нет связи',changes:'Справка синтетического источника'}];
   });
   await expect(r.page.locator('.tree-warning')).toBeVisible();
   await r.page.locator('.tree-warning').click();

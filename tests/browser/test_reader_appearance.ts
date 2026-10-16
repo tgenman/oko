@@ -7,11 +7,10 @@ test('reader header keeps every action beside Oko and progress below on desktop'
   try {
     await r.page.setViewportSize({width:1440,height:900});
     await r.start([material('one',{title:'Кто быстрее?',snippet:'Три одинаковые бутылки скатываются с горки.',changed:true,feed_title:'GetAClass'})]);
-    const stage = 'Подготовка тезисов · ' + 'Длинное описание текущей работы '.repeat(12);
-    await r.page.evaluate(stage => {
-      readerTransport.replies.get('/api/status')!.body!.stage = stage;
-    }, stage);
-    await expect(r.page.locator('#progress')).toContainText(stage);
+    const state=await r.api('v3/status');
+    state.work=[{phase:'processing',operation:'theses',progress:{completed:0,total:10}},{phase:'processing',operation:'filter',progress:{completed:0,total:10}},{phase:'collecting',feed_id:null,progress:{completed:0,total:10}},{phase:'deleting',feed_id:null,progress:{completed:0,total:10}},{phase:'waiting',reason:'retry_scheduled',retry_at:null}];
+    await r.page.evaluate(state=>readerTransport.replies.set('/api/v3/status',{body:state}),state);
+    await expect(r.page.locator('#progress')).toContainText('Подготовка тезисов · Фильтрация · Сбор источников · Локальная очистка · Ожидание');
     const wide = artifactPath('reader-header-wide.png');
     await r.page.screenshot({path:wide}); console.info('Header screenshot:',wide);
     const brand = await r.page.locator('header .brand').boundingBox();

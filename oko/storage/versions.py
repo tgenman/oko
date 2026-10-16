@@ -226,7 +226,7 @@ class Versions:
 
     def previous(self, item: str) -> list[dict[str, Any]]:
         rows = self.store.db.execute('SELECT number,fingerprint FROM content_versions WHERE item=? AND visible=1 AND number!=? ORDER BY number DESC', (item, self.number(item))).fetchall()
-        return [dict(number=r['number'], version=r['fingerprint'], url=f"/api/materials/{item}/versions/{r['number']}") for r in rows]
+        return [dict(number=r['number'], version=r['fingerprint'], url=f"/api/v3/materials/{item}/versions/{r['number']}") for r in rows]
 
     def read(self, item: str, number: int) -> dict[str, Any] | None:
         if not self.store.db.execute('SELECT 1 FROM items WHERE id=? AND viewed=0', (item,)).fetchone():
@@ -237,7 +237,7 @@ class Versions:
             path = self.path(item, number)
             raw, text = path.read_text().split('\n\n', 1)
             header = json.loads(raw)
-            base = f'/api/materials/{item}/versions/{number}'
+            base = f'/api/v3/materials/{item}/versions/{number}'
             return dict(title=header['title'], text=text, full=header['full'], reason=header['reason'],
                         images=[base + '/images/' + p.name for p in sorted(path.parent.glob('image-*'))],
                         attachments=[dict(url=base+'/media/'+a['name'], kind=a['kind'], mime=a['mime']) for a in header['attachments']])

@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 import json, httpx
 from oko.collection.contracts import Material, Publication
 from tests.support.models import model_transport
@@ -30,8 +31,8 @@ def transport(calls, *, theses=False):
 
 
 def setup_filters(client):
-    client.patch('/api/settings/oko/global', json={'theses': False, 'prompt_filters': '', 'processor': 'llamacpp'})
-    client.post('/api/tabs/reader/heartbeat')
-    wait_for(client, lambda: len(c := client.get('/api/cards').json()) == 3 and all(x['complete'] for x in c))
-    client.put('/api/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-    client.patch('/api/settings/oko/global', json={'processor': 'llamacpp', 'prompt_filters': 'Убирай рекламу. Сохраняй законы.'})
+    client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': '', 'processor': 'llamacpp'})
+    presence(client, 'reader')
+    wait_for(client, lambda: len(c := client.get('/api/v3/cards').json()) == 3 and all((x['availability'] == 'available') for x in c))
+    client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+    client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'prompt_filters': 'Убирай рекламу. Сохраняй законы.'})

@@ -110,9 +110,9 @@ def test_forum_is_one_binding_and_legacy_topic_creation_is_rejected(tmp_path):
     from tests.support.telegram import configure
     with TestClient(create_app(tmp_path, token='test-token', api_only=True, telegram_client=ForumTelegram()), headers=HEADERS) as client:
         configure(client)
-        response = client.post('/api/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Forum', auto_read=False, topic_id=20))
+        response = client.post('/api/v3/telegram/connect', json=dict(account='fixture', peer='@forum', folder='Forum', auto_read=False, topic_id=20))
         assert response.status_code == 422
-        assert not client.get('/api/subscriptions').json()['feeds']
+        assert not client.get('/api/v3/subscriptions').json()['feeds']
         connected = client.post('/api/v3/telegram/connect', json=dict(source_locator='@forum', folder='Forum', access={'kind':'client','profile':'personal'}))
         assert connected.status_code == 200, connected.text
         feeds = client.get('/api/v3/subscriptions').json()['feeds']

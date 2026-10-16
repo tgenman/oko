@@ -28,12 +28,12 @@ def test_feed_reading_does_not_rebuild_all_publications(tmp_path):
     with TestClient(app, headers=HEADERS) as client:
         queries = []
         client.portal.call(lambda: app.state.runtime.require_store().db.set_trace_callback(queries.append))
-        response = client.get('/api/navigation')
+        response = client.get('/api/v3/reading-composition')
         assert response.status_code == 200
         assert response.json()['count'] == 104
         assert len(queries) < 2000, f'navigation used {len(queries)} SQL statements for 104 publications'
         queries.clear()
-        response = client.get('/api/cards', params={'feed': feeds[0]})
+        response = client.get('/api/v3/cards', params={'feed': feeds[0]})
         assert response.status_code == 200
         assert len(response.json()) == 26
         assert {card['feed_id'] for card in response.json()} == {feeds[0]}

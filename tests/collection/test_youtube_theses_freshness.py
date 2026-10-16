@@ -1,3 +1,4 @@
+from tests.support.presence import presence, close_presence
 import json
 import httpx
 import pytest
@@ -23,9 +24,9 @@ class Captions:
 
 def wait(client, predicate):
     def ready():
-        cards = client.get('/api/cards').json()
+        cards = client.get('/api/v3/cards').json()
         if len(cards) == 1:
-            material = client.get('/api/materials/' + cards[0]['id']).json()
+            material = client.get('/api/v3/materials/' + cards[0]['id']).json()
             if predicate(material):
                 return material
         return None
@@ -71,34 +72,34 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
         return sum(r.url.path == '/v1/chat/completions' for r in calls)
 
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={
+        client.patch('/api/v3/settings/oko/global', json={
                      'processor': 'llamacpp', 'prompt_filters': prompt_filters})
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
         subscribe(client)
-        client.post('/api/tabs/reader/heartbeat')
-        original = wait(client, lambda m: m.get('theses') and not m['loading'])
+        presence(client, 'reader')
+        original = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
         assert summary_calls() == 1 and captions.calls == [VIDEO]
         request = next(r for r in calls if r.url.path == '/v1/chat/completions')
         task = json.loads(json.loads(request.content)['messages'][1]['content'])
-        assert task['sources'][0]['text'] == original['text']
+        assert task['sources'][0]['text'] == original['content']['text']
 
         for field, value in [('title', 'Updated title'), ('preview', PNG + b'changed')]:
             metadata[field] = value
-            client.post('/api/collect')
-            updated = wait(client, lambda m: m['version'] != original['version'] and not m['loading']
-                           and m['filter']['status'] in ('off', 'done'))
-            assert updated['text'] == original['text']
-            assert updated['theses'] == original['theses']
+            client.post('/api/v3/collect')
+            updated = wait(client, lambda m: m['content']['revision_id'] != original['content']['revision_id'] and not m['content']['loading']
+                           and m['filter']['attempt']['state'] in ('disabled','ready'))
+            assert updated['content']['text'] == original['content']['text']
+            assert updated['theses']['result'] == original['theses']['result']
             assert summary_calls() == 1 and captions.calls == [VIDEO]
             original = updated
 
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        material = wait(client, lambda m: m.get('theses') and not m['loading'])
-        assert material['theses'] == original['theses']
+        presence(client, 'reader')
+        material = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
+        assert material['theses']['result'] == original['theses']['result']
         assert summary_calls() == 1 and captions.calls == [VIDEO]
-        client.post('/api/materials/' + material['id'] + '/viewed')
+        client.post('/api/v3/materials/' + material['id'] + '/viewed')
         assert not (tmp_path / 'content' / material['id']).exists()
 
 
@@ -115,21 +116,21 @@ def test_changed_caption_text_requires_new_theses(tmp_path):
     # Synthetic revisions exercise text freshness without querying real subtitles.
     saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'a'*22, 'Video', 'Видео')])
     with TestClient(create_app(tmp_path, token='test'), headers=HEADERS) as client:
-        feed = client.get('/api/subscriptions').json()['feeds'][0]['id']
+        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]['id']
     source, calls = SavedCaptions(), []
     with TestClient(create_app(tmp_path, token='test', source=source, source_feed=feed,
                                ai_transport=model_transport(calls)), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp'})
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
-        client.post('/api/tabs/reader/heartbeat')
-        original = wait(client, lambda m: m.get('theses') and not m['loading'])
+        presence(client, 'reader')
+        original = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
         source.text = 'Changed saved transcript'
-        client.post('/api/collect')
-        wait(client, lambda m: m.get('theses') and m['text'] == source.text and not m['loading'])
+        client.post('/api/v3/collect')
+        wait(client, lambda m: m['theses']['result'] and m['content']['text'] == source.text and not m['content']['loading'])
         requests = [json.loads(json.loads(r.content)['messages'][1]['content'])
                     for r in calls if r.url.path == '/v1/chat/completions']
-        assert [r['sources'][0]['text'] for r in requests] == [original['text'], source.text]
+        assert [r['sources'][0]['text'] for r in requests] == [original['content']['text'], source.text]
         assert requests[0]['sources'][0]['version'] != requests[1]['sources'][0]['version']
 
 
@@ -139,12 +140,12 @@ def test_previous_caption_signature_is_upgraded_without_model_call(tmp_path, int
     options = dict(token='test', rss_enabled=True, rss_transport=transport(),
                    youtube_captions=captions, ai_transport=model_transport(calls))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/settings/oko/global', json={'processor': 'llamacpp'})
-        client.put('/api/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp'})
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
         subscribe(client)
-        client.post('/api/tabs/reader/heartbeat')
-        original = wait(client, lambda m: m.get('theses') and not m['loading'])
+        presence(client, 'reader')
+        original = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
 
     # Seed the previously persisted format; acceptance is checked through HTTP.
     store = Store(tmp_path, lambda point: None)
@@ -168,8 +169,8 @@ def test_previous_caption_signature_is_upgraded_without_model_call(tmp_path, int
         store.db.close()
 
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.post('/api/tabs/reader/heartbeat')
-        material = wait(client, lambda m: m.get('theses') and not m['loading'])
-        assert material['theses'] == original['theses']
+        presence(client, 'reader')
+        material = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
+        assert material['theses']['result'] == original['theses']['result']
         assert sum(r.url.path == '/v1/chat/completions' for r in calls) == 1
         assert captions.calls == [VIDEO]

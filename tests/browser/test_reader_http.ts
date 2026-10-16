@@ -11,13 +11,13 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   const plan=await addSources(api, [["https://a.test/feed", "Альфа", "Наука"], ["https://b.test/feed", "Бета", "Наука"], ["https://empty.test/feed", "Пустой", "Наука"]]);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await page.goto(origin+'/#token='+token);
-  await expect.poll(async()=>{const cards=await api('cards'); return cards.length===2&&cards.every(c=>c.complete&&!c.loading);},{timeout:15000}).toBe(true);
+  await expect.poll(async()=>{const cards=await api('cards'); return cards.length===2&&cards.every(c=>c.availability==='available'&&!c.loading);},{timeout:15000}).toBe(true);
   await expect(page.locator('#cards button')).toHaveCount(2);
   await expect(page.locator('#cards .card-snippet').first()).toHaveText('Открылась библиотека на 24 места.');
   await expect(page.locator('#cards img')).toHaveCount(2);
   await expect.poll(()=>page.locator('#cards img').evaluateAll(images=>images.every(img=>(img as HTMLImageElement).complete&&(img as HTMLImageElement).naturalWidth>0))).toBe(true);
   const alpha=plan.feeds.find(feed=>feed.title==='Альфа'), beta=plan.feeds.find(feed=>feed.title==='Бета'), empty=plan.feeds.find(feed=>feed.title==='Пустой');
-  const navigation=await api('navigation'), folder=navigation.folders.find(folder=>folder.title==='Наука');
+  const navigation=await api('reading-composition'), folder=navigation.folders.find(folder=>folder.title==='Наука');
   await page.locator(`[data-folder="${folder!.id}"]`).click();
   await expect(page.locator('#count-label')).toHaveText('2 карточки');
   for(const feed of [alpha,beta]){
@@ -27,7 +27,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   }
   await api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
   await api('settings/oko/global','PATCH',{theses:true});
-  await expect.poll(async()=>{const cards=await api('cards');return cards.length===2&&cards.every(c=>!!c.theses);},{timeout:15000}).toBe(true);
+  await expect.poll(async()=>{const cards=await api('cards');return cards.length===2&&cards.every(c=>!!c.theses.result);},{timeout:15000}).toBe(true);
   await page.locator(`[data-feed="${empty!.id}"]`).click();
   await expect(page.locator('#cards button')).toHaveCount(0);
   await expect(page.locator('#list-status')).toHaveText('Нет материалов');
@@ -43,6 +43,6 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   await expect(page.locator('#title')).toContainText('Статья');
   await page.locator('#viewed').click();
   await expect(page.locator('#cards button')).toHaveCount(0);
-  assert.deepEqual(await api('cards'),[]); assert.equal((await api('navigation')).count,0);
+  assert.deepEqual(await api('cards'),[]); assert.equal((await api('reading-composition')).count,0);
   assert.deepEqual(errors,[]);
 });

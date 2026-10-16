@@ -1,9 +1,8 @@
 import {flushSync} from 'react-dom';
 import type {ReaderApi} from '../api/reader';
-import * as sdk from '../api/legacy-generated/sdk.gen';
 import * as settings from '../api/generated/sdk.gen';
 import type {EffectiveSettingsSnapshot,SettingsPatch,SettingsTarget,HistoryState,FeedHistoryState,YouTubeState,FeedPatchRequest as FeedPatch,RuntimeStatus,SourceState,RemoveFeedResult} from '../api/generated/types.gen';
-import type {Subscriptions,SubscriptionFeed} from '../api/legacy-generated/types.gen';
+import type {SubscriptionCatalog} from '../api/generated/types.gen';
 import {createOperations,type Operation} from './operations';
 type SettingsScope=SettingsTarget['scope'];
 export type DialogName='add'|'feeds'|'settings';
@@ -19,7 +18,7 @@ export class MenusOwner {
   active:DialogName|null=null; page='home'; stack:{page:string;trigger:HTMLElement|null;target?:string}[]=[];
   opener:HTMLElement|null=null; stopped=false; selected:string|null=null; currentPath:string|null=null;
   youtube:YouTubeState|null=null;
-  subscriptions:Subscriptions={folders:[],feeds:[]}; sources:SourceState[]=[]; histories:FeedHistoryState[]=[];
+  subscriptions:SubscriptionCatalog={folders:[],feeds:[]}; sources:SourceState[]=[]; histories:FeedHistoryState[]=[];
   collapsed=new Set<string>(); values=new Map<string,EffectiveSettingsSnapshot>(); drafts=new Map<string,Draft>();
   historyPending=new Map<string,Operation>();
   historyBusy(id:string){return this.historyPending.get('history/'+id)?.current===true;}
@@ -44,7 +43,7 @@ export class MenusOwner {
     const action=this.menuOperations.begin('open');const revision=this.navigationRevision;const owner=this;try{await this.refresh();if(name==='add'){action.commit(()=>{for(const callback of this.onAddOpen)callback();});}else await action.commit(()=>this.loadSettings());if(name==='settings')action.commit(()=>{for(const callback of this.onPageChange)callback('settings-open');});}catch(error){action.commit(()=>{if(name==='add')this.addMessage=message(error);else this.settingsMessage=message(error);this.changed();});}return {get current(){return action.current&&revision===owner.navigationRevision;}};}
   async refresh():Promise<boolean>{
     const action=this.subscriptionOperations.begin('load',{abortable:true});
-    try{const{data}=await sdk.subscriptionList({client:this.api.client,signal:action.signal});if(!action.current)return false;
+    try{const{data}=await settings.subscriptionList({client:this.api.client,signal:action.signal});if(!action.current)return false;
       this.subscriptions={...data,feeds:data.feeds.filter(feed=>!this.removedFeeds.has(feed.id))};
       for(const feed of this.subscriptions.feeds)if(feed.connection==='deleting')this.deletions.add(feed.id);
       if(this.selected&&!this.subscriptions.folders.some(f=>'folder/'+f.id===this.selected)&&!this.subscriptions.feeds.some(f=>'feed/'+f.id===this.selected))this.selected=null;

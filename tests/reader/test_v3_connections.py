@@ -76,7 +76,7 @@ def test_connection_errors_and_history_conflicts_have_canonical_receipts(tmp_pat
         assert result.status_code==409 and result.json()['code']=='verification_expired'
         assert client.post('/api/v3/feeds/verify',json={'url':'https://t.me/example_channel'}).status_code==400
         assert client.post('/api/v3/feeds/verify',json={'url':'https://offline.test/feed'}).status_code==503
-        for path in ['/api/import','/api/import/preview']:
+        for path in ['/api/v3/import','/api/v3/import/preview']:
             assert client.post(path,json={'opml':'<opml><body/></opml>'}).status_code in (404,405)
 
 
