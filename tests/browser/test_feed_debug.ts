@@ -182,7 +182,7 @@ test('adding a feed selects existing folders or keeps a new folder draft across 
       t.replies.set('/api/v3/feeds/verify', {body: {url:'https://source.test/feed',title:'Источник',kind:'rss',verification:'checked'}});
       t.replies.set('/api/v3/feeds', {status:400,body:{detail:'Тестовый отказ'}});
       t.replies.set('/api/telegram/accounts', {body:['personal']});
-      t.replies.set('/api/telegram/connect', {status:400,body:{detail:'Тестовый отказ'}});
+      t.replies.set('/api/v3/telegram/connect', {status:400,body:{detail:'Тестовый отказ'}});
     });
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/feed');
@@ -191,10 +191,10 @@ test('adding a feed selects existing folders or keeps a new folder draft across 
     for (const prefix of ['rss', 'telegram']) {
       if (prefix === 'telegram') {
         await r.page.locator('#add-telegram-tab').click();
-        await expect(r.page.locator('#telegram-account')).toHaveValue('personal');
+        await expect(r.page.locator('#telegram-access')).toHaveValue('web');
         await r.page.locator('#telegram-peer').fill('@channel');
       }
-      const endpoint = prefix === 'rss' ? '/api/v3/feeds' : '/api/telegram/connect';
+      const endpoint = prefix === 'rss' ? '/api/v3/feeds' : '/api/v3/telegram/connect';
       await r.page.locator('#' + prefix + '-folder').selectOption('Наука');
       await expect(r.page.locator('#' + prefix + '-folder-new')).toBeHidden();
       await r.page.locator('#' + prefix + '-add').click();

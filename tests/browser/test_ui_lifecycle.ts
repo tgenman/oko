@@ -46,26 +46,20 @@ test('Back restores the current field and section links after a saved editor rer
   }finally{await r.close();}
 });
 
-test('Back closes Telegram reconnection and rejects delayed accounts from the previous section', async () => {
-  const r=await reader();try{
-    await r.start([]);await objects(r);
-    await r.page.evaluate(()=>{
-      const feed=readerTransport.replies.get('/api/subscriptions')!.body!.feeds[0];
-      Object.assign(feed,{kind:'telegram',identity:'telegram:onechannel',transport:'telegram',telegram_peer:'@onechannel',telegram_account:'personal',auto_read:false});
-      readerTransport.replies.set('/api/telegram/accounts',{body:['personal']});
-      readerTransport.held.set('/api/telegram/accounts',true);
-    });
-    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/one"]').click();await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/telegram/accounts'));
-    await r.page.locator('#feeds-dialog .settings-back').click();
-    await r.page.evaluate(()=>readerTransport.release('/api/telegram/accounts',['personal']));
-    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
-    await settingsHome(r.page);await editSetting(r.page,'prompt_theses');
-    await expect(r.page.locator('#reconnect-connection')).toBeHidden();
-    await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
-    expect(r.errors).toEqual([]);
-  }finally{await r.close();}
+test('Back leaves Telegram profiles and rejects delayed profile state from the previous section', async () => {
+ const r=await reader();try{
+  await r.start([]);
+  await r.page.evaluate(()=>readerTransport.held.set('/api/v3/telegram/profiles',true));
+  await r.page.locator('#settings-open').click();
+  await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/telegram/profiles'));
+  await r.page.locator('#settings-dialog .settings-back').click();
+  await r.page.evaluate(()=>readerTransport.release('/api/v3/telegram/profiles',{personal:{role:'personal',state:'unconfigured'},collection:{role:'collection',state:'unconfigured'},configurations:[]}));
+  await expect(r.page.locator('[data-settings-page="telegram-profiles"]')).toBeHidden();
+  await editSetting(r.page,'prompt_theses');
+  await expect(r.page.locator('#setting-prompt_theses')).toBeVisible();
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });
 
 test('returning to Codex retries a catalog load interrupted by section navigation', async () => {

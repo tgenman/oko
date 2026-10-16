@@ -100,40 +100,17 @@ test('object and global drafts are independent, field save preserves other unsav
   } finally {await r.close();}
 });
 
-test('reconnection drafts belong to each existing Telegram feed without changing the new-source form', async () => {
-  const r = await reader();
-  try {
-    await r.start([]);
-    await r.page.evaluate(() => {
-      const t = readerTransport;
-      const feeds = ['one','two'].map(id=>({id,title:id,kind:'telegram',identity:'telegram:'+id,folder_id:'f',original_urls:[],importance:'normal',auto_read:false,read_history:false,telegram_peer:'@'+id+'channel',telegram_account:'personal',transport:'telegram'}));
-      t.replies.set('/api/subscriptions',{body:{folders:[{id:'f',title:'Telegram'}],feeds}});
-      t.replies.set('/api/telegram/accounts',{body:['personal']});
-      for (const feed of feeds) t.replies.set('/api/v3/settings/feed/'+feed.id,t.replies.get('/api/v3/settings/oko/global')!);
-    });
-    await r.page.locator('#add-open').click();
-    await r.page.getByRole('tab',{name:'Telegram',exact:true}).click();
-    await r.page.locator('#telegram-peer').fill('@newchannel');
-    await r.page.keyboard.press('Escape');
-    await r.page.locator('#feeds-open').click();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.locator('#reconnect-peer').fill('@draftone');
-    await expect(r.page.locator('#reconnect-history')).toBeHidden();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.locator('#reconnect-peer').fill('@drafttwo');
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await expect(r.page.locator('#reconnect-peer')).toHaveValue('@draftone');
-    await r.page.keyboard.press('Escape');
-    await r.page.locator('#add-open').click();
-    await expect(r.page.locator('#telegram-peer')).toHaveValue('@newchannel');
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
+test('new Telegram source draft survives opening profile settings without a reconnection form', async () => {
+ const r=await reader();try{
+  await r.start([]);
+  await r.page.locator('#add-open').click();await r.page.locator('#add-telegram-tab').click();
+  await r.page.locator('#telegram-peer').fill('@newchannel');await r.page.keyboard.press('Escape');
+  await r.page.locator('#settings-open').click();await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await expect(r.page.locator('#reconnect-connection')).toHaveCount(0);
+  await r.page.keyboard.press('Escape');await r.page.locator('#add-open').click();
+  await expect(r.page.locator('#telegram-peer')).toHaveValue('@newchannel');
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });
 
 test('late subscription and settings responses cannot replace newer object selection; pending save retains later edits', async () => {
@@ -303,30 +280,17 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
   } finally {await r.close();}
 });
 
-test('pending Telegram accounts configure the newly selected feed', async () => {
-  const r = await reader();
-  try {
-    await r.start([]); await objects(r);
-    await r.page.evaluate(() => {
-      for (const feed of readerTransport.replies.get('/api/subscriptions')!.body!.feeds) {
-        Object.assign(feed, {kind:'telegram', identity:'telegram:' + feed.id + 'channel', telegram_account:'personal', transport:'telegram', auto_read:false});
-      }
-      readerTransport.held.set('/api/telegram/accounts',true);
-    });
-    await r.page.locator('#feeds-open').click();
-    await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/accounts'));
-    await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
-    await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Настроить подключение Telegram-фида',exact:true}).click();
-    await r.page.evaluate(() => readerTransport.release('/api/telegram/accounts',['personal']));
-    await expect(r.page.locator('#reconnect-peer')).toHaveValue('@twochannel');
-    await expect(r.page.locator('#reconnect-account')).toHaveValue('personal');
-    await expect(r.page.locator('#reconnect-add')).toBeEnabled();
-    expect(r.errors).toEqual([]);
-  } finally {await r.close();}
+test('late profile catalog cannot overwrite a newer profile choice', async () => {
+ const r=await reader();try{
+  await r.start([]);await r.page.locator('#settings-open').click();
+  await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await expect(r.page.locator('#telegram-profile-personal option')).toHaveCount(3);
+  await r.page.locator('#telegram-profile-personal').selectOption('two');
+  await r.page.locator('#settings-dialog .settings-back').click();
+  await r.page.locator('#settings-dialog [data-settings-target="telegram-profiles"]').click();
+  await expect(r.page.locator('#telegram-profile-personal')).toHaveValue('two');
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });
 
 test('a saved feed updates reading even when navigation cancels its catalog refresh', async () => {

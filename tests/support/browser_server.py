@@ -13,9 +13,40 @@ from tests.support.app import create_app
 from tests.support.models import model_transport
 from tests.support.codex import CodexService
 from tests.support.youtube import PNG, History, NoCaptions
+from tests.support.telegram import Telegram
+from tests.support.telegram_web import page
+
+
+class BrowserTelegram(Telegram):
+    async def accounts(self):
+        return ['one', 'two']
+
+    async def identity(self, account):
+        return {'one': 9007199254740993, 'two': 202}[account]
+
+    async def info(self, account, peer):
+        result = await super().info(account, peer)
+        result['peer'] = -100101 if str(peer).lstrip('@') == 'personal' else -100202
+        return result
+
+    async def history_page(self, account, peer, upper, before, since):
+        result = await self.page(account, peer, 0, since)
+        return dict(messages=result['messages'], upper=11, next_before=11, more=False)
 
 
 def response(request):
+    if request.url.host == 't.me':
+        return httpx.Response(200, text=page([(11, 'Веб-публикация без аккаунта <a href="https://telegra.ph/Fixture">Статья</a>')]))
+    if request.url.host == 'api.telegra.ph':
+        assert request.url.path == '/getPage/Fixture'
+        return httpx.Response(200, json={'ok': True, 'result': {'title': 'Статья Telegraph', 'content': [
+            {'tag': 'p', 'children': ['Полный текст статьи сохранён локально.']},
+            {'tag': 'img', 'attrs': {'src': '/file/fixture.png'}},
+            {'tag': 'iframe', 'attrs': {'src': 'https://example.org/embed'}},
+        ]}})
+    if request.url.host == 'telegra.ph':
+        assert request.url.path == '/file/fixture.png'
+        return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
     if request.url.host == 'i.ytimg.com':
         return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
     if request.url.host == 'www.youtube.com':
@@ -34,7 +65,7 @@ def response(request):
 
 def build_app(root, token):
     return create_app(root, token=token, rss_enabled=True,
-                     rss_transport=httpx.MockTransport(response), ai_transport=model_transport([]), codex_client=CodexService(),
+                     rss_transport=httpx.MockTransport(response), telegram_client=BrowserTelegram(), ai_transport=model_transport([]), codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
                      lease=60, grace=60)
 

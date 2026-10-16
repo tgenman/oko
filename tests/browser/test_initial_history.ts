@@ -35,7 +35,7 @@ test('Telegram connection sends default count and can switch to date with user t
   try {
     await r.page.addInitScript(() => {
       readerTransport.replies.set('/api/telegram/accounts', {body: ['fixture']});
-      readerTransport.held.set('/api/telegram/connect', true);
+      readerTransport.held.set('/api/v3/telegram/connect', true);
     });
     await r.start([]);
     await r.page.locator('#add-open').click();
@@ -49,9 +49,9 @@ test('Telegram connection sends default count and can switch to date with user t
     await expect(r.page.locator('#telegram-history-count')).toBeHidden();
     await r.page.locator('#telegram-history-date').fill('2025-10-01');
     await r.page.locator('#telegram-add').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/telegram/connect'));
-    const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/telegram/connect'));
-    expect(request!.body!.initial_history).toEqual({mode:'date',count:null,date:'2025-10-01',timezone:await r.page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)});
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/telegram/connect'));
+    const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/telegram/connect'));
+    expect(request!.body!.initial_history).toEqual({mode:'date',date:'2025-10-01',timezone:await r.page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)});
     await expect(r.page.locator('#telegram-history-mode')).toBeDisabled();
   } finally {await r.close();}
 });

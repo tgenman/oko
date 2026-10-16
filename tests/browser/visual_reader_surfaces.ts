@@ -63,13 +63,10 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await r.page.locator('#rss-history-mode').selectOption('date');await shot('rss-date','#add-dialog');
    await r.page.locator('#rss-url').fill('https://example.org/error');await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/verify',{status:400,body:{detail:'Синтетическая ошибка проверки фида. '+ 'Длинное пояснение '.repeat(8)}}));
    await r.page.locator('#rss-check').click();await expect(r.page.locator('#rss-message')).toContainText('Синтетическая ошибка');await shot('rss-error','#add-dialog');
-   await r.page.locator('#add-telegram-tab').click();await expect(r.page.locator('#telegram-account')).toHaveValue('synthetic');
+   await r.page.locator('#add-telegram-tab').click();await expect(r.page.locator('#telegram-access')).toHaveValue('web');
    await r.page.locator('#telegram-peer').fill('@synthetic');
-   await r.page.locator('#telegram-topics').click();await expect(r.page.locator('#telegram-topic-label')).toBeVisible();
-   await r.page.locator('#telegram-topic').selectOption('30');
-   expect(await r.page.locator('#telegram-auto').evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(209, 209, 214)');
-   await r.page.locator('#telegram-auto').check();
-   await expect.poll(()=>r.page.locator('#telegram-auto').evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(52, 199, 89)');
+   await expect(r.page.locator('#telegram-topic')).toHaveCount(0);
+   await expect(r.page.locator('#telegram-auto')).toBeHidden();
    await shot('telegram','#add-dialog');
    await r.page.locator('#add-close').click();await expect(r.page.locator('#add-open')).toBeFocused();
    for(const id of ['plain','video','theses','hidden','media']){
