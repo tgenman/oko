@@ -1,4 +1,4 @@
-"""Check the developer command through its process interface and external runtimes."""
+"""Runner orchestration in process; ownership/pipe/signal contracts through real CLI."""
 import os
 from pathlib import Path
 import subprocess
@@ -47,6 +47,51 @@ sys.exit(0)
             'OKO_BROWSER_EXECUTABLE': sys.executable}
 
 
+def run_check_in_process(command, *, env, capture_output, text):
+    """Exercise main/Report/parallel planning; only synthetic tool execution is inline.
+
+    Process ownership, pipes, signals and real Git guards use subprocess tests.
+    Loading a fresh namespace and restoring argv/env keeps these runs independent.
+    """
+    import contextlib
+    import io
+    from unittest.mock import patch
+
+    assert capture_output and text
+    script = Path(command[1])
+    scope = {'__file__': str(script), '__name__': 'runner_under_test'}
+    exec(compile(script.read_text(), str(script), 'exec'), scope)
+
+    def execute_tool(arguments, environment, report=None, **output):
+        # These tests already provide small Python executables as Node/Python/Git.
+        # Execute those exact test programs without another interpreter startup.
+        import shutil
+        binary = shutil.which(arguments[0], path=environment['PATH'])
+        assert binary is not None
+        emitted = io.StringIO()
+        with contextlib.chdir(scope['ROOT']), patch.dict(os.environ, environment, clear=True), patch.object(sys, 'argv', list(arguments)), contextlib.redirect_stdout(emitted), contextlib.redirect_stderr(emitted):
+            try:
+                exec(compile(Path(binary).read_text(), binary, 'exec'), {'__name__': '__main__', '__file__': binary})
+                code = 0
+            except SystemExit as error:
+                code = error.code
+        if report is not None:
+            report.output(emitted.getvalue())
+        else:
+            output['stdout'].write(emitted.getvalue())
+        return code
+
+    scope.update(execute=execute_tool, descendants=lambda pid: set(),
+                 tool_changes=lambda root, base: (False, []), checkout_state=lambda excluded: {})
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with patch.dict(os.environ, env, clear=True), patch.object(sys, 'argv', list(command[1:])), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), patch.object(subprocess, 'Popen', side_effect=AssertionError('Planning tests must not launch CLI processes')):
+        try:
+            code = scope['main']()
+        except SystemExit as error:
+            code = error.code
+    return subprocess.CompletedProcess(command, code, stdout.getvalue(), stderr.getvalue())
+
+
 def test_ui_command_reports_complete_run(tmp_path):
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
                             env=runtimes(tmp_path), capture_output=True, text=True)
@@ -71,7 +116,7 @@ def test_syntax_discovers_nested_frontend_modules(tmp_path):
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(checkout / 'scripts/check'), 'syntax'],
+    result = run_check_in_process([sys.executable, str(checkout / 'scripts/check'), 'syntax'],
                             env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert str(nested) in record.read_text()
@@ -81,7 +126,7 @@ def test_failed_browser_does_not_hide_other_results(tmp_path):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if '--test' in sys.argv else 0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'all'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'all'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'FAIL browser' in result.stdout
@@ -92,7 +137,7 @@ def test_failed_browser_does_not_hide_other_results(tmp_path):
 def test_missing_runtime_reports_unexecuted_checks(tmp_path):
     env = runtimes(tmp_path)
     env['OKO_NODE'] = str(tmp_path / 'missing-node')
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'Node missing' in result.stderr
@@ -152,7 +197,7 @@ def test_missing_browser_dependency_is_not_success(tmp_path):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(1 if '-e' in sys.argv else 0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'all'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'all'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'Browser dependencies unavailable' in result.stderr
@@ -161,7 +206,7 @@ def test_missing_browser_dependency_is_not_success(tmp_path):
 
 
 def test_ui_checks_production_http_modules_before_browser(tmp_path):
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
                             env=runtimes(tmp_path), capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.index('RUN http') < result.stdout.index('RUN browser\n')
@@ -171,7 +216,7 @@ def test_ui_checks_production_http_modules_before_browser(tmp_path):
 def test_python_and_types_do_not_require_node(tmp_path):
     env = runtimes(tmp_path)
     env['OKO_NODE'] = str(tmp_path / 'absent-node')
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', 'types'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'python', 'types'],
                             env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS python-tests' in result.stdout and 'PASS types' in result.stdout
@@ -182,7 +227,7 @@ def test_failed_http_module_check_fails_ui(tmp_path):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_PYTHON'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if 'tests/reader/test_web_assets.py' in sys.argv else 0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'FAIL http' in result.stdout
@@ -194,7 +239,7 @@ def test_browser_file_selection_only_runs_requested_file(tmp_path):
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as f: f.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts'], env=env, capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/test_material_list.ts'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = record.read_text()
     assert '--test-concurrency=4' in commands
@@ -208,7 +253,7 @@ def test_browser_types_failure_prevents_browser_execution(tmp_path):
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace(
         'sys.exit(0)', "sys.exit(7 if any('tsconfig.browser-tests.json' in arg for arg in sys.argv) else 0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'FAIL browser-types' in result.stdout
@@ -221,7 +266,7 @@ def test_tooling_types_failure_prevents_build_and_browser(tmp_path):
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace(
         'sys.exit(0)', "sys.exit(7 if any('tsconfig.tooling.json' in arg for arg in sys.argv) else 0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'FAIL tooling-types' in result.stdout
@@ -233,7 +278,7 @@ def test_tooling_types_failure_prevents_build_and_browser(tmp_path):
 
 
 def test_invalid_file_selection_fails_before_checks(tmp_path):
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/missing.ts'], env=runtimes(tmp_path), capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', 'tests/browser/missing.ts'], env=runtimes(tmp_path), capture_output=True, text=True)
     assert result.returncode != 0
     assert 'RUN browser' not in result.stdout
 
@@ -245,7 +290,7 @@ def test_python_file_selection_supports_test_id_and_does_not_require_node(tmp_pa
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_PYTHON'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as f: f.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files', 'tests/reader/test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data'], env=env, capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files', 'tests/reader/test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'test_web_assets.py::test_reader_serves_entire_browser_module_graph_without_exposing_reader_data' in record.read_text()
     assert 'PASS python-tests' in result.stdout
@@ -256,7 +301,7 @@ def test_selection_rejects_file_from_wrong_suite_and_outside_checkout(tmp_path):
     for filename in ('tests/reader/test_web_assets.py', str(tmp_path / 'test_external.ts')):
         if filename.startswith(str(tmp_path)):
             Path(filename).write_text('')
-        result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', filename], env=env, capture_output=True, text=True)
+        result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--files', filename], env=env, capture_output=True, text=True)
         assert result.returncode == 2
         assert 'RUN browser' not in result.stdout
 
@@ -326,7 +371,7 @@ def test_report_records_missing_dependency_without_claiming_success(tmp_path):
     env = runtimes(tmp_path)
     env['OKO_NODE'] = str(tmp_path / 'missing-node')
     reports = tmp_path / 'reports'
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'ui', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     directory = next(reports.iterdir())
     report = json.loads((directory / 'report.json').read_text())
@@ -372,7 +417,7 @@ def test_browser_name_filter_is_passed_and_reported(tmp_path):
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nif '--test' in sys.argv: print('# pass 1')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'late.*draft', '--files', 'tests/browser/test_settings_navigation.ts', '--report-dir', str(tmp_path / 'reports')], env=env, capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'late.*draft', '--files', 'tests/browser/test_settings_navigation.ts', '--report-dir', str(tmp_path / 'reports')], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert '--test-name-pattern=late.*draft' in record.read_text()
     report = json.loads((next((tmp_path / 'reports').iterdir()) / 'report.json').read_text())
@@ -383,7 +428,7 @@ def test_failed_lint_skips_browser_but_keeps_other_results(tmp_path):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cts' in value for value in sys.argv) else 0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'ui'], env=env, capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'ui'], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert 'FAIL lint' in result.stdout and 'NOT RUN browser' in result.stdout
     assert '\nRUN browser\n' not in result.stdout
@@ -394,7 +439,7 @@ def test_browser_filter_matching_nothing_is_not_success(tmp_path):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "if '--test' in sys.argv: print('# pass 0')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'missing scenario'], env=env, capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'missing scenario'], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert 'No browser scenarios matched' in result.stdout
 
@@ -467,7 +512,7 @@ def test_lifecycle_profile_selects_dedicated_scenarios(tmp_path):
     env=runtimes(tmp_path);record=tmp_path/'commands';env['RECORD']=str(record)
     runtime=Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'lifecycle'],env=env,capture_output=True,text=True)
+    result=run_check_in_process([sys.executable,str(ROOT/'scripts/check'),'lifecycle'],env=env,capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
     assert 'test_ui_lifecycle.ts' in record.read_text()
     assert 'test_material_list.ts' not in record.read_text()
@@ -477,7 +522,7 @@ def test_explicit_suite_order_cannot_run_browser_before_selected_lint(tmp_path):
     env=runtimes(tmp_path)
     runtime=Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(7 if any('lint-js.cts' in value for value in sys.argv) else 0)"))
-    result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'browser','syntax','lint'],env=env,capture_output=True,text=True)
+    result=run_check_in_process([sys.executable,str(ROOT/'scripts/check'),'browser','syntax','lint'],env=env,capture_output=True,text=True)
     assert result.returncode==1,result.stdout+result.stderr
     assert '\nRUN browser\n' not in result.stdout
     assert 'PASS syntax' in result.stdout and 'FAIL lint' in result.stdout and 'NOT RUN browser' in result.stdout
@@ -488,7 +533,7 @@ def test_types_run_before_long_checks_and_failure_skips_them(tmp_path, sets):
     env = runtimes(tmp_path)
     runtime = Path(env['OKO_PYTHON'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "sys.exit(3 if 'mypy' in sys.argv else 0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), *sets],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), *sets],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert 'FAIL types' in result.stdout
@@ -506,7 +551,7 @@ def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_PYTHON'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'all'], env=env, capture_output=True, text=True)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'all'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
     pytest = [command for command in commands if 'pytest' in command]
@@ -514,7 +559,7 @@ def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_
     modules = pytest[0][pytest[0].index('-q') + 1:]
     assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in [*modules, 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py']}
     record.write_text('')
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files',
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files',
                              'tests/reader/test_frontend_build.py'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
@@ -684,12 +729,12 @@ def test_explicit_tools_are_not_duplicated_and_build_precedes_parallel_groups(tm
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_NODE'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'all', 'tools'], env=env, capture_output=True, text=True, timeout=15)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'all', 'tools'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
     assert sum('tests/development/test_hooks.py' in command for command in commands) == 1
     record.write_text('')
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'browser', 'python', 'build'], env=env, capture_output=True, text=True, timeout=15)
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser', 'python', 'build'], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
     last_build = max(i for i, command in enumerate(commands) if any('build-frontend.mts' in arg for arg in command))
@@ -765,7 +810,7 @@ def test_duplicate_tool_file_never_creates_empty_shard(tmp_path):
     runtime = Path(env['OKO_PYTHON'])
     runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
     name = 'tests/reader/test_frontend_build.py'
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/check'), 'tools', '--files', name, name],
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'tools', '--files', name, name],
                             env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
