@@ -6,6 +6,8 @@ import secrets
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from oko.collection.telegram.contracts import HistorySelection
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -72,6 +74,15 @@ class History:
             selection = json.loads(row['selection'])
             selection['warnings'] = warnings
             self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
+
+    def telegram_state(self, feed: str, progress: HistorySelection) -> None:
+        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        if not row:
+            return
+        selection = json.loads(row['selection'])
+        selection.update(warnings=list(progress.warnings), discovery_error=progress.error,
+                         discovery_retry_at=progress.retry_at)
+        self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
 
     def discovery_state(self, feed: str, cursor: dict[str, Any]) -> None:
         row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()

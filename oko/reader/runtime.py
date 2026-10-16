@@ -9,13 +9,14 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 import secrets
 import sqlite3
+import shutil
 import time
 from typing import Any, Literal, TypeVar
 
 import httpx
 
 from oko.collection.rss import RSSSource, feed_title, normalized
-from oko.collection.contracts import SourceError, SourceDeleted, SourceSkipped
+from oko.collection.contracts import SourceError, SourceDeleted, SourceSkipped, DownloadStage
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
@@ -25,6 +26,7 @@ from oko.reviews.coordination import PreparedWork
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
+from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
 from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, identify
 from oko.collection.youtube.source import YouTubeSource, CaptionsClient, LocalCaptions
@@ -112,6 +114,7 @@ class Runtime:
                 self._store.interrupted(feeds)
             ai_task = self._ai
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
+            cancelled_feeds = {self._lane_feeds[lane] for lane in lanes if lane in self._lane_feeds}
             tasks = [self._lanes.pop(lane) for lane in lanes]
             if self._ai and (feeds is None or self._ai_feed in feeds):
                 tasks.append(self._ai)
@@ -139,10 +142,10 @@ class Runtime:
 
                     task.add_done_callback(completed)
             if self._telegram_client:
-                if feeds is None or not isinstance(self._telegram_client, LocalTelegram):
+                if feeds is None or (tasks and not isinstance(self._telegram_client, LocalTelegram)):
                     await self._telegram_client.close()
-                else:
-                    accounts = {source.account for feed in feeds if isinstance(source := self._sources.get(feed), TelegramSource)}
+                elif isinstance(self._telegram_client,LocalTelegram):
+                    accounts = {source.account for feed in cancelled_feeds if isinstance(source := self._sources.get(feed), TelegramSource)}
                     for account in accounts:
                         await self._telegram_client.close_account(account)
         finally:
@@ -171,9 +174,17 @@ class Runtime:
                 continue
             if binding and binding['kind'] == 'legacy_client':
                 continue
+            if binding and binding['kind'] == 'web':
+                if not isinstance(self._sources.get(feed['id']), TelegramSource):
+                    self._sources[feed['id']] = TelegramSource(WebTelegram(binding['username'], self._rss_transport), '', 0, feed['initial_days'], binding['username'])
+                    self._store.enqueue_discovery(feed['id'])
+                web_source = self._sources[feed['id']]
+                if isinstance(web_source, TelegramSource):
+                    web_source.initial_history = feed['initial_history']
+                continue
             if feed['transport'] == 'telegram' and self._telegram_client and feed.get('telegram_peer'):
                 if not isinstance(self._sources.get(feed['id']), TelegramSource):
-                    self._sources[feed['id']] = TelegramSource(self._telegram_client, (self._store.subscriptions.telegram.profile(binding['role']) or {})['account'] if binding and binding['kind'] == 'client' else feed['telegram_account'], feed['telegram_peer'], feed['initial_days'], feed.get('telegram_username'))
+                    self._sources[feed['id']] = TelegramSource(self._telegram_client, (self._store.subscriptions.telegram.profile(binding['role']) or {})['account'] if binding and binding['kind'] == 'client' else feed['telegram_account'], feed['telegram_peer'], feed['initial_days'], feed.get('telegram_username'), http_transport=self._rss_transport)
                     self._store.enqueue_discovery(feed['id'])
                 telegram_source = self._sources[feed['id']]
                 if isinstance(telegram_source, TelegramSource):
@@ -194,6 +205,8 @@ class Runtime:
         for feed in self._store.subscriptions.feeds():
             binding = self._store.subscriptions.telegram.binding(feed['id'])
             bound_source = self._sources.get(feed['id'])
+            if bound_source and binding and binding['kind'] == 'web' and feed['connection'] != 'deleting':
+                self._telegram_bindings[feed['id']] = TelegramBinding(bound_source, 'telegram-web', 'common')
             if bound_source and binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
                 profile = self._store.subscriptions.telegram.profile(binding['role'])
                 if profile:
@@ -205,7 +218,7 @@ class Runtime:
                         deadline = self._account_retry.setdefault(profile['user_id'], self._clock() + max(0, float(wait[0]) - self._wall_clock()))
                         self._store.restore_telegram_wait(feed['id'], deadline)
                         self._restored_wait_feeds.add(feed['id'])
-        active = {f['id'] for f in self._store.subscriptions.feeds() if f['connection'] != 'deleting' and not ((self._store.subscriptions.telegram.binding(f['id']) or {}).get('kind') == 'legacy_client') and ((f['transport'] in ('rss', 'youtube') and self._rss_enabled) or (f['transport'] == 'telegram' and self._telegram_client and f.get('telegram_peer')))}
+        active = {f['id'] for f in self._store.subscriptions.feeds() if f['connection'] != 'deleting' and not ((self._store.subscriptions.telegram.binding(f['id']) or {}).get('kind') == 'legacy_client') and (((self._store.subscriptions.telegram.binding(f['id']) or {}).get('kind') == 'web') or (f['transport'] in ('rss', 'youtube') and self._rss_enabled) or (f['transport'] == 'telegram' and self._telegram_client and f.get('telegram_peer')))}
         self._sources = {key: source for key, source in self._sources.items() if key in active or key == self._source_feed and self._source}
 
     @property
@@ -316,6 +329,7 @@ class Runtime:
         async with self._actions:
             if not self.require_store().retry_material(item):
                 raise ActionError('missing', 'Материал недоступен')
+            await self._cancel({self.require_store().item_feed(item)})
 
     def youtube_status(self) -> dict[str, Any]:
         return self.require_store().youtube.status(self._wall_clock())
@@ -865,7 +879,8 @@ class Runtime:
 
     async def _execute_read(self, job: Job, current: Store, source: Source) -> None:
         binding = self._telegram_bindings.get(job.item)
-        if not binding or not binding.read or not isinstance(source, TelegramSource):
+        client = self._telegram_client
+        if not client or not binding or not binding.read or not isinstance(source, TelegramSource):
             async with self._actions:
                 if self._store is current and current.valid(job):
                     current.read_sync.suspend(job)
@@ -877,13 +892,13 @@ class Runtime:
                 return
             signature = current.read_sync.signature(request)
         await source.resolve()
-        state = await source.client.read_state(source.account, source.peer, request['since'], )
+        state = await client.read_state(source.account, source.peer, request['since'], )
         state['read_max'] = max(state['read_max'], current.read_sync.confirmed(job.item))
         window: dict[str, Any] = {}
         plan = current.read_sync.plan(request, state)
         confirmed = plan.confirmed
         if plan.until > confirmed:
-            window = await source.client.read_window(source.account, source.peer, confirmed, plan.until, )
+            window = await client.read_window(source.account, source.peer, confirmed, plan.until, )
             plan = current.read_sync.plan(request, state, window)
         async with self._actions:
             if source.identity_info and self._store is current and current.valid(job):
@@ -905,13 +920,13 @@ class Runtime:
                             return
                         if current.read_sync.topic_confirmed(job.item, topic) >= maximum:
                             continue
-                    await source.client.acknowledge(source.account, source.peer, maximum, topic_id=topic)
+                    await client.acknowledge(source.account, source.peer, maximum, topic_id=topic)
                     async with self._actions:
                         if self._store is current and self._live() and current.valid(job):
                             current.read_sync.topic_completed(job.item, topic, maximum)
                     self._fault('after_telegram_acknowledge')
             else:
-                await source.client.acknowledge(source.account, source.peer, plan.candidate, )
+                await client.acknowledge(source.account, source.peer, plan.candidate, )
                 self._fault('after_telegram_acknowledge')
             confirmed = plan.candidate
         async with self._actions:
@@ -938,6 +953,7 @@ class Runtime:
         capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
         feed = ''
+        staging: DownloadStage | None = None
         try:
             async with self._actions:
                 current = self._store
@@ -950,7 +966,8 @@ class Runtime:
                 feed = (job.item or 'demo') if job.kind in ('discover', 'read') else current.item_feed(job.item)
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 source = self._sources.get(feed)
-                publication = current.publication(job.item) if job.kind == 'fetch' else None
+                staging = current.download_stage(job,lambda:self._store is current and self._live() and current.valid(job)) if job.kind == 'fetch' and isinstance(source, TelegramSource) else None
+                publication = current.publication(job.item, staging) if job.kind == 'fetch' else None
                 binding = self._telegram_bindings.get(feed)
                 namespace = binding.cursor_key if binding else ''
                 cursor = current.cursor(feed, namespace) if job.kind == 'discover' else None
@@ -958,9 +975,10 @@ class Runtime:
                 return
             if isinstance(source, TelegramSource):
                 saved_binding = current.subscriptions.telegram.binding(feed)
-                if not saved_binding or saved_binding['kind'] != 'client':
+                if not saved_binding or saved_binding['kind'] not in ('client', 'web'):
                     raise SourceError('Сопоставьте старый аккаунт профилю Telegram', code='identity-unconfirmed')
-                await self._verify_telegram_profile(saved_binding['role'])
+                if saved_binding['kind'] == 'client':
+                    await self._verify_telegram_profile(saved_binding['role'])
 
             if job.kind == 'read':
                 await self._execute_read(job, current, source)
@@ -982,12 +1000,12 @@ class Runtime:
             elif publication:
                 caption_attempt = CaptionAttempt(self, current, job) if isinstance(source, YouTubeSource) else None
                 material = (await source.fetch(publication, captions=caption_attempt, request_captions=not current.youtube.terminal(job.item))
-                            if isinstance(source, YouTubeSource) else await source.fetch(publication))
+                            if isinstance(source, YouTubeSource) else await source.fetch(publication, staging=staging) if isinstance(source, TelegramSource) else await source.fetch(publication))
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
                         if isinstance(source, TelegramSource) and source.identity_info:
                             current.subscriptions.telegram.refresh(feed, source.identity_info)
-                        current.save(job, material, self._clock())
+                        current.save(job, material, self._clock(), staging)
                         self._account_wait(feed, material.collection_error, job)
                         if caption_attempt and caption_attempt.attempted and not caption_attempt.blocked:
                             current.youtube.completed(job.item, material.captions == 'available')
@@ -1019,10 +1037,14 @@ class Runtime:
                     elif isinstance(error, SourceError):
                         current.feed_status(feed, error=label, gap=None)
 
+        finally:
+            if staging:
+                shutil.rmtree(staging.path,ignore_errors=True)
+
     async def run(self) -> None:
         journal_context = active_journal.set(self.diagnostics)
         try:
-            self._store = Store(self._root, self._fault, wall_clock=self._wall_clock)
+            self._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock)
             viewed = {row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')}
             if viewed and self.diagnostics:
                 self.diagnostics.forget_materials(viewed)

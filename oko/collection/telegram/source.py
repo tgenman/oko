@@ -8,6 +8,7 @@ import json
 import hashlib
 from pathlib import Path
 import shutil
+import os
 import sys
 import time
 from typing import Any, Protocol
@@ -15,7 +16,11 @@ from typing import Any, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from oko.collection.contracts import SourceError, SourceDeleted
-from oko.collection.contracts import Attachment, Material, Publication
+from oko.collection.contracts import Attachment, Material, Publication, DownloadStage, StagedPayload, SourceManifest, ResourceManifest
+from oko.collection.telegram.contracts import HistoryEnvelope, Adapter
+from oko.collection.telegram.web import WebTelegram
+from oko.collection.telegram.telegraph import enrich
+import httpx
 
 
 class TelegramClient(Protocol):
@@ -112,6 +117,7 @@ class _TelegramWorker(_TelegramOperations):
         self._configuration_digest: str | None = None
 
     async def request(self, operation: str, **args: Any) -> Any:
+        target = args.pop('_target', None)
         generation = self.generation
         async with self.lock:
             try:
@@ -146,6 +152,15 @@ class _TelegramWorker(_TelegramOperations):
                 if operation == 'download':
                     path = self.spool / 'media.bin'
                     try:
+                        if target is not None:
+                            if not isinstance(target,Path) or target.parent.parent.resolve()!=(self.root/'staging'/'_downloads').resolve() or not target.name.startswith('incoming-media-'):
+                                raise ValueError('unowned client download target')
+                            os.replace(path,target)
+                            payload_digest = hashlib.sha256()
+                            with target.open('rb') as source:
+                                while part := source.read(1024*1024):
+                                    payload_digest.update(part)
+                            return StagedPayload(target,target.stat().st_size,payload_digest.hexdigest())
                         return path.read_bytes()
                     finally:
                         path.unlink(missing_ok=True)
@@ -222,6 +237,12 @@ class LocalTelegram(_TelegramOperations):
         worker.expected_users[account] = user
         return await worker.request(operation, **args)
 
+    async def download_to(self, account: str, peer: int, identity: int, staging: DownloadStage, name: str) -> StagedPayload:
+        if not staging.admitted():
+            raise asyncio.CancelledError
+        payload: StagedPayload = await self.request('download',account=account,peer=peer,id=identity,_target=staging.path/('incoming-'+name))
+        return payload
+
     async def close_account(self, account: str) -> None:
         user = self.expected_users.get(account)
         worker = self.workers.pop(user, None) if user is not None else None
@@ -236,7 +257,11 @@ class LocalTelegram(_TelegramOperations):
 
 class TelegramSource:
     changes = 'Telegram: при сборе перечитываются известные непросмотренные сообщения и вложения. Отсутствующие сообщения сохраняются локально; исчезновение может означать удаление или потерю доступа.'
-    def __init__(self, client: TelegramClient, account: str, peer: int, initial_days: int, username: str | None = None) -> None:
+    def __init__(self, client: TelegramClient | WebTelegram, account: str, peer: int, initial_days: int, username: str | None = None, *, http_transport: httpx.AsyncBaseTransport | None = None) -> None:
+        self.http_transport = client.transport if isinstance(client,WebTelegram) else http_transport
+        self.adapter: Adapter = 'web' if isinstance(client, WebTelegram) else 'client'
+        if isinstance(client, WebTelegram):
+            self.changes = 'Telegram web: видимая публичная история; скрытые сообщения и неизвестная смена username могут быть не обнаружены.'
         self.identity_info: dict[str, Any] | None = None
         self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days
@@ -248,6 +273,8 @@ class TelegramSource:
     async def resolve(self) -> None:
         # StringSession does not persist Telethon's entity/access-hash cache.
         # Refill it in the current worker, but never change the feed's identity.
+        if isinstance(self.client, WebTelegram):
+            return
         if self.username:
             info = await self.client.info(self.account, '@' + self.username)
             self.identity_info = info
@@ -258,22 +285,48 @@ class TelegramSource:
         return f'https://t.me/c/{-self.peer-1000000000000}/{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
 
     async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+        previous = HistoryEnvelope.decode(cursor, adapter='web' if isinstance(self.client, WebTelegram) else 'client') if cursor else None
+        if previous:
+            after = previous.position.get('after')
+            if previous.selection.since is None or type(after) is not int or after<0:
+                raise SourceError('Несовместимый курсор Telegram',code='telegram-cursor-incompatible')
+        legacy = json.dumps(previous.progress_state()) if previous else None
+        publications, raw = await self._discover(legacy)
+        envelope = HistoryEnvelope.from_progress(json.loads(raw), adapter=self.adapter)
+        selection = envelope.selection.model_copy(update={'paused': bool((self.initial_history or {}).get('paused'))})
+        return publications, envelope.model_copy(update={'selection': selection}).encode()
+
+    async def _page(self, state: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(self.client, WebTelegram):
+            batch = await self.client.page(self.account, self.peer, state['after'], state['since'], position=state.get('web'))
+            state['web'] = batch['position']
+            return batch
+        return await self.client.page(self.account, self.peer, state['after'], state['since'])
+
+    def _after(self, state: dict[str, Any], batch: dict[str, Any], publications: list[Publication]) -> int:
+        if isinstance(self.client, WebTelegram):
+            return int(batch['next_after'])
+        return int(max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members]))
+
+    async def _discover(self, cursor: str | None) -> tuple[list[Publication], str]:
         self.retry_error = None
         await self.resolve()
         if self.initial_history:
             return await self.discover_history(cursor)
         state: dict[str, Any] = json.loads(cursor) if cursor else dict(after=0, since=time.time()-self.initial_days*86400)
-        batch = await self.client.page(self.account, self.peer, state['after'], state['since'])
+        batch = await self._page(state)
         self.more, self.gap = batch['more'], batch.get('gap')
-        dates = {m['id']: m['date'] for m in batch['messages']}
+        dates = {member:m['date'] for m in batch['messages'] for member in (m['post'].publication.members if 'post' in m else [m['id']])}
         publications = [p for p in reversed(self.publications(batch['messages']))
                         if max(p.members) > state['after'] and max(dates[m] for m in p.members) >= state['since']]
-        state['after'] = max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members])
-        if self.more and state['after'] == (json.loads(cursor)['after'] if cursor else 0):
+        state['after'] = self._after(state, batch, publications)
+        if self.more and not isinstance(self.client, WebTelegram) and state['after'] == (json.loads(cursor)['after'] if cursor else 0):
             raise SourceError('Telegram не продвинул позицию сбора')
         return publications, json.dumps(state)
 
     def publications(self, rows: list[dict[str, Any]], posts_only: bool = False) -> list[Publication]:
+        if isinstance(self.client, WebTelegram):
+            return sorted((m['post'].publication for m in rows), key=lambda p:max(p.members), reverse=True)
         groups: dict[str, list[dict[str, Any]]] = {}
         for msg in rows:
             if posts_only and msg.get('service'):
@@ -351,17 +404,31 @@ class TelegramSource:
             state['lane'] = 'live'
             publications = chosen
         else:
-            batch = await self.client.page(self.account, self.peer, state['after'], state['since'])
+            batch = await self._page(state)
             publications = [p for p in self.publications(batch['messages']) if max(p.members) > state['after']]
-            state['after'] = max([state['after'], batch.get('next_after', 0)] + [m for p in publications for m in p.members])
+            state['after'] = self._after(state, batch, publications)
             state['lane'] = 'live' if batch['more'] else 'history'
         self.more = bool(batch.get('more')) or (not state['scan_complete'] and not config.get('paused'))
         self.gap = batch.get('gap')
         return publications, json.dumps(state)
 
-    async def fetch(self, publication: Publication) -> Material:
+    async def fetch(self, publication: Publication, *, staging: DownloadStage | None = None) -> Material:
+        if staging and not staging.admitted():
+            raise asyncio.CancelledError
+        material = (await self.client.fetch(publication,staging) if isinstance(self.client,WebTelegram)
+                    else await self._fetch_client(publication,staging))
+        if staging and not staging.admitted():
+            raise asyncio.CancelledError
+        return await enrich(material,publication.teaser,staging,self.http_transport)
+
+    async def _fetch_client(self, publication: Publication, staging: DownloadStage | None) -> Material:
+        if isinstance(self.client,WebTelegram):
+            raise ValueError('client adapter required')
         await self.resolve()
         rows = await self.client.messages(self.account, self.peer, list(publication.members) or [int(publication.id)])
+        if staging and not staging.admitted():
+            raise asyncio.CancelledError
+        rows.sort(key=lambda row:row['id'])
         teaser = publication.teaser or Material('Публикация недоступна', '')
         if not rows:
             if publication.teaser and publication.teaser.full:
@@ -376,6 +443,8 @@ class TelegramSource:
                 raise SourceDeleted()
             reasons.append('Часть альбома недоступна в Telegram')
         for msg in rows:
+            if staging and not staging.admitted():
+                raise asyncio.CancelledError
             media = msg['media']
             if not media:
                 continue
@@ -383,20 +452,44 @@ class TelegramSource:
                 reasons.append('Тип вложения пока не поддерживается')
                 continue
             try:
-                data = await self.client.download(self.account, self.peer, msg['id'])
+                name = f"media-{msg['id']}.{media['extension']}"
+                data: bytes | StagedPayload = (await self.client.download_to(self.account,self.peer,msg['id'],staging,name)
+                    if staging and isinstance(self.client,LocalTelegram) else await self.client.download(self.account, self.peer, msg['id']))
                 if not data:
                     raise SourceError('Пустое вложение Telegram')
                 attachments.append(Attachment(f"media-{msg['id']}.{media['extension']}", data, media['kind'], media['mime']))
             except SourceError as error:
                 record_caught('source.fetch')
                 reasons.append(error.label)
-                if not isinstance(error, SourceDeleted):
+                if isinstance(error,SourceDeleted) or error.remote_type in ('OverflowError','FileNotFoundError'):
+                    error = SourceError(error.label,code='media-too-large' if error.remote_type=='OverflowError' else 'media-not-found',retryable=False)
+                if collection_error is None or error.retryable:
                     collection_error = error
         names = {a.name for a in attachments}
         failed_names = {f"media-{m['id']}.{m['media']['extension']}" for m in rows if m['media'] and m['media']['kind'] != 'unsupported'}
-        attachments.extend(a for a in teaser.attachments if a.name not in names and (a.name in failed_names or int(a.name.split('-')[1].split('.')[0]) not in {m['id'] for m in rows}))
+        expected_names = failed_names | {f"media-{member}." for member in set(publication.members)-{m['id'] for m in rows}}
+        attachments.extend(a for a in teaser.attachments if a.name not in names and (a.name in failed_names or any(a.name.startswith(prefix) for prefix in expected_names if prefix.endswith('.'))))
         if any(msg['group'] and time.time()-msg['date'] < 5 for msg in rows):
             reasons.append('Альбом ещё публикуется; повторите загрузку')
             collection_error = SourceError('Альбом ещё публикуется', 5)
-        return Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, not reasons,
-                        '; '.join(dict.fromkeys(reasons)), attachments=tuple(attachments), members=tuple(sorted({m['id'] for m in rows} | set(publication.members))), collection_error=collection_error)
+        by_name = {attachment.name:attachment for attachment in attachments}
+        resources: list[ResourceManifest] = []
+        for msg in rows:
+            media = msg['media']
+            if not media:
+                continue
+            name = f"media-{msg['id']}.{media['extension']}"
+            attachment = by_name.get(name)
+            fingerprint = (attachment.data.sha256 if isinstance(attachment.data,StagedPayload) else hashlib.sha256(attachment.data).hexdigest()) if attachment else None
+            resources.append(ResourceManifest(key='telegram-client:'+str(self.peer)+':'+str(msg['id']),
+                origin='telegram:'+str(self.peer)+'/'+str(msg['id']),order=len(resources),name=name,
+                kind=media['kind'],mime=media['mime'],status='loaded' if attachment else 'unsupported' if media['kind']=='unsupported' else 'missing',
+                reason='' if attachment else '; '.join(dict.fromkeys(reasons)),sha256=fingerprint))
+        manifest = SourceManifest(source_url=self.url(min(m['id'] for m in rows)),post=dict(text=text,baseline_text='\n\n'.join(m.get('original_text',m['text']) for m in rows if m.get('original_text',m['text'])),edits=[dict(id=m['id'],at=m.get('edited')) for m in rows],members=sorted({m['id'] for m in rows}|set(publication.members)),
+            resources=[dict(key=r.key,kind=r.kind) for r in resources]),resources=tuple(resources))
+        complete = not reasons
+        same_source = teaser.source_manifest.post==manifest.post if teaser.source_manifest else teaser.text==text
+        if teaser.full and same_source and all(resource.status=='loaded' for resource in resources) and not any(msg['group'] and time.time()-msg['date']<5 for msg in rows):
+            complete = True
+        return Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, complete,
+                        '; '.join(dict.fromkeys(reasons)), attachments=tuple(attachments), members=tuple(sorted({m['id'] for m in rows} | set(publication.members))), collection_error=collection_error, source_manifest=manifest)

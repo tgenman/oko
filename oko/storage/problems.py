@@ -53,7 +53,7 @@ class Problems:
         groups: dict[str, dict[str, Any]] = {}
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
         youtube = self.store.youtube.status(now)
-        jobs = self.db.execute("SELECT jobs.*,items.feed_id,items.viewed FROM jobs LEFT JOIN items ON items.id=jobs.item WHERE jobs.status IN ('pending','running') AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)").fetchall()
+        jobs = self.db.execute("SELECT jobs.*,items.feed_id,items.viewed FROM jobs LEFT JOIN items ON items.id=jobs.item WHERE (jobs.status IN ('pending','running') OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL)) AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)").fetchall()
         for job in jobs:
             code = job['problem_code']
             if code == 'codex-choice':
@@ -83,7 +83,7 @@ class Problems:
                 action = dict(kind='settings', page='llamacpp' if code == 'processor-config' else 'models') if settings_action else dict(kind='collect' if kind == 'discover' else 'feed-settings' if kind == 'read' else 'theses-retry' if kind == 'theses' else 'filter-retry' if kind == 'filter' else 'retry', id=obj['id'])
                 groups[identity] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
                     consequence='Сохранённое содержимое остаётся доступным.' if kind != 'delete' else 'Око продолжает попытки удаления.',
-                    next_step='Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
+                    next_step='Повторите загрузку вручную.' if job['status']=='done' else 'Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
                     objects=[],action=None if kind == 'delete' else action,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
                 if kind != 'delete' and job['error']:
                     groups[identity]['reason'] = job['error']

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import json
 from oko.diagnostics import exception_details
 import logging
+from urllib.parse import urlsplit
 import os
 from pathlib import Path
 import sys
@@ -17,6 +18,44 @@ from typing import Any
 from oko.collection.telegram.topics import history, message_topic, topic_info, read_state, read_window
 
 MAX_MEDIA = 200 * 1024 * 1024
+
+
+def message_text(message: Any) -> str:
+    raw = message.message or ''
+    encoded = raw.encode('utf-16-le')
+    links = []
+    fallback = []
+    for entity in (getattr(message,'entities',None) or []):
+        url = getattr(entity,'url',None)
+        if not isinstance(url,str):
+            continue
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme not in ('http','https') or not parsed.hostname:
+                continue
+        except ValueError:
+            continue
+        start,end = entity.offset*2,(entity.offset+entity.length)*2
+        if not 0<=start<end<=len(encoded):
+            fallback.append(url)
+            continue
+        links.append((start,end,url))
+    output = []
+    offset = 0
+    for start,end,url in sorted(links):
+        if start<offset:
+            fallback.append(url)
+            continue
+        try:
+            prefix = encoded[offset:start].decode('utf-16-le')
+            label = encoded[start:end].decode('utf-16-le')
+        except UnicodeError:
+            fallback.append(url)
+            continue
+        output.append(prefix+'['+label+']('+url.replace('(','%28').replace(')','%29')+')')
+        offset = end
+    output.append(encoded[offset:].decode('utf-16-le'))
+    return ''.join(output)+''.join('\n\nСсылка: '+url for url in dict.fromkeys(fallback))
 
 
 def record(msg: Any) -> dict[str, Any]:
@@ -37,8 +76,10 @@ def record(msg: Any) -> dict[str, Any]:
         media = dict(kind=kind, mime=mime if extension != 'bin' else 'application/octet-stream', extension=extension)
     elif msg.media and type(msg.media).__name__ != 'MessageMediaWebPage':
         media = dict(kind='unsupported', mime='application/octet-stream', extension='bin')
-    return dict(id=msg.id, date=msg.date.timestamp(), text=msg.message or '',
-                group=msg.grouped_id, media=media, service=False)
+    edited = getattr(msg,'edit_date',None)
+    return dict(id=msg.id, date=msg.date.timestamp(), text=message_text(msg), original_text=msg.message or '',
+                group=msg.grouped_id, media=media, service=False,
+                edited=edited.timestamp() if edited else None)
 
 
 async def main() -> None:

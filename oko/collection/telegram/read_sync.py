@@ -2,6 +2,7 @@
 import json
 from dataclasses import dataclass
 from oko.collection.contracts import SourceError
+from oko.collection.telegram.contracts import HistoryEnvelope
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -38,11 +39,12 @@ class ReadSync:
 
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:
         db = self.store.db
+        envelope = HistoryEnvelope.decode(cursor, adapter='client')
         db.execute('INSERT OR IGNORE INTO telegram_read_state(feed,since) VALUES (?,?)',
-                   (feed, json.loads(cursor)['since']))
-        selection = json.loads(cursor)
-        if 'scan_complete' in selection and selection['scan_complete'] and selection.get('oldest'):
-            db.execute('UPDATE telegram_read_state SET initial=? WHERE feed=? AND initial IS NULL', (selection['oldest'] - 1, feed))
+                   (feed, envelope.selection.since))
+        selection = envelope.selection
+        if selection.scan_complete and selection.oldest:
+            db.execute('UPDATE telegram_read_state SET initial=? WHERE feed=? AND initial IS NULL', (selection.oldest - 1, feed))
         db.execute('UPDATE telegram_read_state SET signature=NULL WHERE feed=?', (feed,))
         db.executemany('INSERT INTO telegram_read_members(feed,member) VALUES (?,?) ON CONFLICT(feed,member) DO UPDATE SET missing=0',
                        [(feed, member) for member in members])

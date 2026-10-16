@@ -176,8 +176,9 @@ def test_unexpected_topic_migration_refuses_before_database_changes(tmp_path):
 
 def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
     import httpx
-    from pathlib import Path
-    raw = (Path(__file__).resolve().parents[1]/'fixtures/telegram/public.html').read_bytes()
+    from tests.support.telegram import settled
+    from tests.support.telegram_web import page
+    raw = page([(392, 'Public post')]).replace('fixture', 'telegram').encode()
     calls = []
     def reply(request):
         calls.append(str(request.url))
@@ -187,9 +188,11 @@ def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
         assert response.status_code == 200, response.text
         feed = response.json()['feed_id']
         assert response.json()['access'] == {'kind':'web', 'username':'telegram', 'preview_url':'https://t.me/s/telegram'}
-        assert len(calls) == 1
+        assert settled(client)[0]['members'] == [392]
+        collected_calls = len(calls)
+        assert collected_calls >= 1
         assert client.post('/api/v3/telegram/connect', json={'source_locator':'@TELEGRAM', 'folder':'Other'}).status_code == 409
-        assert len(calls) == 1
+        assert len(calls) == collected_calls
         state = client.get('/api/v3/subscriptions').json()['feeds'][0]
         assert state['id'] == feed and 'auto_read' not in state
         assert client.patch('/api/v3/feeds/'+feed, json={'auto_read':False}).status_code == 400

@@ -6,8 +6,9 @@ Worktree: `telegram-remaining/oko`, ветка `codex/telegram-remaining`.
 
 1. #19 workers/lanes/read sync — реализовано и проверено; отчёт
    [workers-verification-20261015.md](workers-verification-20261015.md).
-2. #20 web/history/Telegraph/media — следующая задача; читать актуальное issue и comments.
-3. #5 Telegram API/UI — после предметных модулей.
+2. #20 web/history/Telegraph/media — реализовано и проверено; отчёт
+   [web-verification-20261016.md](web-verification-20261016.md).
+3. #5 Telegram API/UI — следующая задача; актуальное issue/comments прочитаны 2026-10-16.
 4. #21 итоговая Telegram-приёмка — после #5.
 5. #6 состояние работы/восстановление — после Telegram.
 6. #7 финальная интеграция/переход — последняя, затем общий PR.

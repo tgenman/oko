@@ -7,10 +7,10 @@ import re
 import shutil
 from typing import TYPE_CHECKING, Any
 
-from oko.collection.contracts import Material, SourceError
+from oko.collection.contracts import Material, SourceError, StagedPayload, DownloadStage, SourceManifest
 
 if TYPE_CHECKING:
-    from oko.storage.store import Store
+    from oko.storage.store import Store, Job
 
 
 class Versions:
@@ -38,13 +38,38 @@ class Versions:
         return self.store.root / 'content' / item / str(number if number is not None else self.number(item) or 1) / 'original.md'
 
     @staticmethod
+    def file_digest(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open('rb') as source:
+            while part := source.read(1024*1024):
+                digest.update(part)
+        return digest.hexdigest()
+
+    @staticmethod
     def fingerprint(directory: Path) -> str:
         digest = hashlib.sha256()
         for path in sorted(directory.iterdir()):
             if path.name != 'original.md' and not path.name.startswith(('image-', 'media-')):
                 continue
             digest.update(path.name.encode() + b'\0')
-            digest.update(hashlib.sha256(path.read_bytes()).digest())
+            if path.name == 'original.md':
+                raw,text = path.read_text().split('\n\n',1)
+                header = json.loads(raw)
+                if 'source_manifest' in header:
+                    # Attempts and local completeness are metadata, not new
+                    # processing inputs when available text/bytes are unchanged.
+                    header.pop('full',None)
+                    header.pop('reason',None)
+                    manifest = header['source_manifest']
+                    manifest.pop('source_url',None)
+                    for resource in manifest.get('resources',[]):
+                        resource.pop('reason',None)
+                        resource.pop('status',None)
+                    for article in manifest.get('articles',[]):
+                        article.pop('reason',None)
+                    digest.update(hashlib.sha256((json.dumps(header,sort_keys=True)+'\n\n'+text).encode()).digest())
+                    continue
+            digest.update(bytes.fromhex(Versions.file_digest(path)))
         return digest.hexdigest()
 
     def _register(self, item: str, number: int, fingerprint: str, visible: bool) -> None:
@@ -60,10 +85,41 @@ class Versions:
         digest = hashlib.sha256((json.dumps(header, sort_keys=True) + '\n\n' + text).encode())
         for path in sorted(directory.iterdir()):
             if path.name.startswith(('image-', 'media-')):
-                digest.update(path.name.encode() + b'\0' + hashlib.sha256(path.read_bytes()).digest())
+                digest.update(path.name.encode() + b'\0' + bytes.fromhex(Versions.file_digest(path)))
         return digest.hexdigest()
 
-    def prepare(self, item: str, material: Material) -> tuple[int, str, bool]:
+    @staticmethod
+    def source_progress(previous: Path, current: Path) -> bool | None:
+        old_raw,old_text = (previous/'original.md').read_text().split('\n\n',1)
+        new_raw,_ = (current/'original.md').read_text().split('\n\n',1)
+        old_header,new_header = json.loads(old_raw),json.loads(new_raw)
+        if 'source_manifest' not in new_header:
+            return None
+        new = SourceManifest.model_validate_json(json.dumps(new_header['source_manifest']))
+        if 'source_manifest' not in old_header:
+            # First reliable manifest is a baseline only when previously known
+            # text and common local bytes remain unchanged.
+            if old_text not in (new.post.get('text'),new.post.get('baseline_text')):
+                return False
+            common = {p.name for p in previous.iterdir() if p.name.startswith(('media-','image-'))} & {p.name for p in current.iterdir()}
+            return all(Versions.file_digest(previous/name)==Versions.file_digest(current/name) for name in common)
+        old = SourceManifest.model_validate_json(json.dumps(old_header['source_manifest']))
+        if old.post!=new.post:
+            return False
+        resources = {resource.key:resource for resource in old.resources}
+        for resource in new.resources:
+            known = resources.get(resource.key)
+            if known and known.sha256 and resource.sha256 and known.sha256!=resource.sha256:
+                return False
+        articles = {article.url:article for article in old.articles}
+        for article in new.articles:
+            known_article = articles.get(article.url)
+            if known_article and known_article.text is not None and article.text is not None:
+                if (known_article.title,known_article.text,known_article.resource_keys)!=(article.title,article.text,article.resource_keys):
+                    return False
+        return True
+
+    def prepare(self, item: str, material: Material, job: 'Job | None' = None, staging: DownloadStage | None = None) -> tuple[int, str, bool]:
         stage = self.store.root / 'staging' / item
         if stage.exists():
             shutil.rmtree(stage)
@@ -72,6 +128,8 @@ class Versions:
                       attachments=[dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments])
         if material.description:
             header['description'] = material.description
+        if material.source_manifest:
+            header['source_manifest'] = material.source_manifest.model_dump(mode='json')
         payload = json.dumps(header, ensure_ascii=False) + '\n\n' + material.text
         self._write(stage / 'original.md', payload.encode())
         for image in material.images:
@@ -81,13 +139,19 @@ class Versions:
         for attachment in material.attachments:
             if not re.fullmatch(r'media-[0-9]+\.[a-z0-9]+', attachment.name):
                 raise ValueError('attachment name')
-            self._write(stage / attachment.name, attachment.data)
+            if isinstance(attachment.data, StagedPayload):
+                self._write_staged(stage / attachment.name, attachment.data, job, staging)
+            else:
+                self._write(stage / attachment.name, attachment.data)
         fingerprint = self.fingerprint(stage)
         number = self.number(item)
-        if number and self.path(item).is_file() and self.fingerprint(self.path(item).parent) == fingerprint:
+        if number and self.path(item).is_file() and self.fingerprint(self.path(item).parent) == fingerprint and (stage/'original.md').read_bytes()==self.path(item).read_bytes():
             shutil.rmtree(stage)
             return number, fingerprint, False
-        progress_only = bool(number and self.path(item).is_file() and self.payload_fingerprint(stage) == self.payload_fingerprint(self.path(item).parent))
+        progress_only = False
+        if number and self.path(item).is_file():
+            source_progress = self.source_progress(self.path(item).parent,stage)
+            progress_only = source_progress if source_progress is not None else self.payload_fingerprint(stage)==self.payload_fingerprint(self.path(item).parent)
         accepted_full = bool(progress_only and json.loads(self.path(item).read_text().split('\n\n', 1)[0]).get('full'))
         if accepted_full and not material.full:
             shutil.rmtree(stage)
@@ -102,6 +166,27 @@ class Versions:
         for directory in (destination, parent, parent.parent, self.store.root / 'staging'):
             self._fsync(directory)
         return number, fingerprint, progress_only
+
+    def _write_staged(self, target: Path, payload: StagedPayload, job: 'Job | None', staging: DownloadStage | None) -> None:
+        allowed = self.store.root/'staging'/'_downloads'
+        if not job or not staging or (staging.job,staging.generation)!=(job.id,job.generation) or staging.path.parent.resolve()!=allowed.resolve() or not self.store.valid(job):
+            raise ValueError('unowned download staging')
+        if payload.path.is_symlink() or payload.path.resolve().parent!=staging.path.resolve() or not payload.path.is_file():
+            raise ValueError('unowned staged file')
+        if not 0<payload.size<=200*1024*1024 or payload.path.stat().st_size!=payload.size:
+            raise ValueError('staged file size')
+        digest,size = hashlib.sha256(),0
+        with payload.path.open('rb') as source, target.open('wb') as output:
+            while part := source.read(1024*1024):
+                size += len(part)
+                if size>200*1024*1024:
+                    raise ValueError('staged file too large')
+                digest.update(part)
+                output.write(part)
+            output.flush()
+            os.fsync(output.fileno())
+        if size!=payload.size or digest.hexdigest()!=payload.sha256:
+            raise ValueError('staged file changed')
 
     @staticmethod
     def _write(path: Path, data: bytes) -> None:

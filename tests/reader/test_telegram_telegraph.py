@@ -1,0 +1,224 @@
+"""One Telegraph enrichment path shared by web and verified client collection."""
+import httpx
+import pytest
+
+from tests.support.app import create_app
+from tests.support.telegram import Telegram, settled
+from tests.support.telegram_web import page
+from tests.support.v3 import TestClient
+
+POST = 'Original post https://telegra.ph/One https://www.telegra.ph/One https://telegra.ph/Two'
+
+
+class TelegraphClient(Telegram):
+    post_text = POST
+    async def page(self, account, peer, after, since):
+        rows = (await super().page(account,peer,after,since))['messages']
+        rows[0]['text'] = self.post_text
+        return dict(messages=rows,more=False)
+
+    async def messages(self, account, peer, ids):
+        return (await self.page(account,peer,0,0))['messages']
+
+    async def history_page(self, account, peer, upper, before, since):
+        return dict(messages=(await self.page(account,peer,0,0))['messages'],upper=11,next_before=11,more=False)
+
+
+@pytest.mark.parametrize('access',['web','client'])
+def test_direct_articles_are_complete_local_and_unique_without_recursive_crawling(tmp_path,access):
+    calls = []
+    async def response(request):
+        calls.append(str(request.url))
+        assert 'authorization' not in request.headers and 'cookie' not in request.headers
+        if request.url.host == 'api.telegra.ph':
+            assert request.url.params['return_content'] == 'true'
+            name = request.url.path.split('/')[-1]
+            content = [{'tag':'p','children':['Article '+name+' ', {'tag':'a','attrs':{'href':'https://example.org/no-follow'},'children':['ordinary link']}]}]
+            if name == 'One':
+                content.append({'tag':'figure','children':[{'tag':'img','attrs':{'src':'/file/photo.jpg'}},{'tag':'figcaption','children':['Photo caption']}]})
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Title '+name,'content':content}})
+        if request.url.host == 'telegra.ph':
+            return httpx.Response(200,content=b'article-photo',headers={'content-type':'image/jpeg'})
+        assert request.url.host == 't.me'
+        return httpx.Response(200,text=page([(11,POST)]))
+    options = dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
+    if access == 'client':
+        options['telegram_client'] = TelegraphClient()
+    with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
+        body = dict(source_locator='@fixture',folder='Inbox')
+        if access == 'client':
+            client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
+            body['access'] = {'kind':'client','profile':'personal'}
+        assert client.post('/api/v3/telegram/connect',json=body).status_code == 200
+        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
+        assert material['text'].startswith(POST)
+        assert material['text'].count('Article One') == 1
+        assert material['text'].count('Article Two') == 1
+        assert 'Photo caption' in material['text']
+        assert material['full'] is True
+        assert len(material['attachments']) == 1
+        assert client.get(material['attachments'][0]['url']).content == b'article-photo'
+        assert not any('example.org' in url for url in calls)
+        assert sum('/getPage/One?' in url for url in calls) == 1
+        assert sum('/getPage/Two?' in url for url in calls) == 1
+
+
+@pytest.mark.parametrize('access',['web','client'])
+def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_path,access):
+    import time
+    post = 'Original https://telegra.ph/One'
+    phase = [0]
+    async def response(request):
+        if request.url.host == 'api.telegra.ph':
+            if phase[0]==0:
+                return httpx.Response(200,json={'ok':False,'error':'PAGE_NOT_FOUND'})
+            if phase[0]==2:
+                return httpx.Response(503)
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[
+                {'tag':'p','children':['Version two' if phase[0]==3 else 'Version one']},
+                {'tag':'img','attrs':{'src':'https://cdn.example/image?signature='+str(phase[0])}}]}})
+        if request.url.host == 'cdn.example':
+            return httpx.Response(200,content=b'known-article-image')
+        return httpx.Response(200,text=page([(11,post)]))
+    telegram = TelegraphClient()
+    telegram.post_text = post
+    options = dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
+    if access=='client':
+        options['telegram_client'] = telegram
+    with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
+        body = dict(source_locator='@fixture',folder='Inbox')
+        if access=='client':
+            client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
+            body['access'] = {'kind':'client','profile':'personal'}
+        client.post('/api/v3/telegram/connect',json=body)
+        deadline = time.monotonic()+2
+        pending = None
+        while time.monotonic()<deadline:
+            cards = client.get('/api/cards').json()
+            if cards:
+                pending = client.get('/api/materials/'+cards[0]['id']).json()
+                if 'Статья Telegraph недоступна' in pending.get('reason',''):
+                    break
+            time.sleep(.02)
+        assert pending and 'Статья Telegraph недоступна' in pending['reason']
+        identity = pending['id']
+        phase[0] = 1
+        client.post('/api/materials/'+identity+'/retry')
+        settled(client)
+        loaded = client.get('/api/materials/'+identity).json()
+        assert loaded['full'] is True and loaded['previous'] == []
+        assert 'Version one' in loaded['text']
+        assert loaded['version'] != pending['version']
+        image = loaded['attachments'][0]['url']
+        phase[0] = 2
+        client.post('/api/materials/'+identity+'/retry')
+        deadline = time.monotonic()+2
+        while time.monotonic()<deadline:
+            if any('Не удалось загрузить' in error for error in client.get('/api/status').json()['errors']):
+                break
+            time.sleep(.02)
+        else:
+            raise AssertionError('Article retry error was not observable')
+        retained = client.get('/api/materials/'+identity).json()
+        assert retained['text'] == loaded['text'] and retained['full'] is True
+        assert retained['previous'] == [] and retained['version']==loaded['version']
+        assert client.get(image).content == b'known-article-image'
+        phase[0] = 3
+        client.post('/api/materials/'+identity+'/retry')
+        settled(client)
+        changed = client.get('/api/materials/'+identity).json()
+        assert 'Version two' in changed['text'] and len(changed['previous'])==1
+
+
+def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
+    calls = []
+    async def response(request):
+        calls.append(request.url.host)
+        if request.url.host == 'api.telegra.ph':
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Embed','content':[
+                {'tag':'p','children':['Available text']},
+                {'tag':'iframe','attrs':{'src':'http://127.0.0.1/private'}}]}})
+        assert request.url.host == 't.me'
+        return httpx.Response(200,text=page([(11,'Original https://telegra.ph/Embed')]))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
+                    headers={'Authorization':'Bearer test'}) as client:
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
+        assert material['full'] is False
+        assert 'Available text' in material['text'] and 'http://127.0.0.1/private' in material['text']
+        assert '<iframe' not in material['text']
+        assert 'Внешнее встраивание' in material['reason']
+        assert '127.0.0.1' not in calls
+
+
+def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_path):
+    import asyncio
+    import threading
+    import time
+    started,cancelled,release = threading.Event(),threading.Event(),threading.Event()
+    assets = []
+    async def response(request):
+        if request.url.host == 'api.telegra.ph':
+            started.set()
+            try:
+                while not release.is_set():
+                    await asyncio.sleep(.01)
+            except asyncio.CancelledError:
+                cancelled.set()
+                while not release.is_set():
+                    await asyncio.sleep(.01)
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Late','content':[
+                {'tag':'img','attrs':{'src':'https://cdn.example/late.jpg'}}]}})
+        if request.url.host == 'cdn.example':
+            assets.append(str(request.url))
+            return httpx.Response(200,content=b'late')
+        return httpx.Response(200,text=page([(11,'Original https://telegra.ph/Late')]))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
+                    headers={'Authorization':'Bearer test'}) as client:
+        result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        assert started.wait(2)
+        try:
+            assert client.delete('/api/v3/feeds/'+result.json()['feed_id']).status_code == 200
+            assert cancelled.is_set()
+            release.set()
+            deadline = time.monotonic()+2
+            while time.monotonic()<deadline and (client.get('/api/v3/subscriptions').json()['feeds'] or list((tmp_path/'staging').rglob('incoming-*'))):
+                time.sleep(.02)
+            time.sleep(.05)
+            assert not client.get('/api/cards').json()
+            assert not assets
+        finally:
+            release.set()
+    assert not list((tmp_path/'staging').rglob('incoming-*'))
+
+
+def test_installed_sdk_text_url_entities_preserve_utf16_labels_and_collect_article(tmp_path,monkeypatch):
+    from oko.collection.telegram.source import LocalTelegram
+    from tests.support.telegram_forum_sdk import forum_sdk
+    env,trace = forum_sdk(tmp_path,monkeypatch)
+    sdk = env.parent/'sitecustomize.py'
+    sdk.write_text(sdk.read_text()+'''
+original_rows = FakeClient.rows
+def linked_rows(self):
+    row = next(message for message in original_rows(self) if message.id==131)
+    row.message = '😀 Читать статью'
+    row.entities = [types.MessageEntityTextUrl(offset=3,length=13,url='https://telegra.ph/Article')]
+    return [row]
+FakeClient.rows = linked_rows
+''')
+    calls = []
+    async def response(request):
+        calls.append(str(request.url))
+        assert request.url.host=='api.telegra.ph'
+        return httpx.Response(200,json={'ok':True,'result':{'title':'Linked','content':[{'tag':'p','children':['Full linked article']}]}})
+    root = tmp_path/'reader'
+    with TestClient(create_app(root,token='test',api_only=True,telegram_client=LocalTelegram(env,root),rss_transport=httpx.MockTransport(response)),
+                    headers={'Authorization':'Bearer test'}) as client:
+        client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@forum',folder='Forum',
+                    access={'kind':'client','profile':'personal'},initial_history={'mode':'count','count':'1'}))
+        material = client.get('/api/materials/'+settled(client)[0]['id']).json()
+        assert material['text'].startswith('😀 [Читать статью](https://telegra.ph/Article)')
+        assert 'Full linked article' in material['text'] and material['full'] is True
+        assert len(calls)==1
+        assert trace.is_file()

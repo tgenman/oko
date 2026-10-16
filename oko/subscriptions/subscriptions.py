@@ -9,6 +9,8 @@ from urllib.parse import urlsplit, urlunsplit, parse_qs
 
 from oko.subscriptions.history import History, InitialHistory
 from oko.subscriptions.telegram import TelegramAccess
+from oko.collection.telegram.contracts import HistoryEnvelope
+from oko.collection.contracts import SourceError
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -145,7 +147,13 @@ class Subscriptions:
                     cursor = json.loads(saved['value']) if saved else {}
                 except json.JSONDecodeError:
                     cursor = {}  # Adapters may own opaque, non-JSON cursors.
-                feed['legacy_since'] = cursor.get('since') if isinstance(cursor, dict) else None
+                if feed['transport']=='telegram' and saved:
+                    try:
+                        feed['legacy_since'] = HistoryEnvelope.decode(saved['value'],adapter='client').selection.since
+                    except SourceError:
+                        feed['legacy_since'] = None
+                else:
+                    feed['legacy_since'] = cursor.get('since') if isinstance(cursor,dict) else None
             for field in ('public_ai', 'read_history', 'auto_read'):
                 feed[field] = None if feed[field] is None else bool(feed[field])
             result.append(feed)

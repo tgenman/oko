@@ -96,7 +96,7 @@ def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
         source.initial_history = dict(mode='count',count=20,since=None,paused=True)
         items, cursor = await source.discover(None)
         assert not items
-        assert json.loads(cursor)['upper'] == 6
+        assert json.loads(cursor)['position']['upper'] == 6
         archive.rows.append(dict(id=7,date=1759350007,text='new',group=None,media=None))
         items, cursor = await source.discover(cursor)
         assert [p.members for p in items] == [(7,)]
