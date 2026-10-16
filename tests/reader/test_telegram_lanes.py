@@ -3,6 +3,7 @@ import asyncio
 import threading
 import time
 import httpx
+import pytest
 from tests.support.telegram_web import page
 
 from tests.support.app import create_app
@@ -292,3 +293,24 @@ def test_partial_forum_ack_survives_restart_without_replaying_successful_topics(
             client.get('/api/v3/status')
             time.sleep(.02)
         assert telegram.acks == [(1,11),(20,12),(30,13),(50,14)]
+
+
+@pytest.mark.parametrize('revalidate_first', [True, False])
+def test_profile_revalidation_during_worker_start_does_not_contend_for_own_session(tmp_path, monkeypatch, revalidate_first):
+    from oko.collection.telegram.source import LocalTelegram
+    from tests.support.telegram_forum_sdk import forum_sdk
+    env, _ = forum_sdk(tmp_path, monkeypatch)
+
+    async def scenario():
+        client = LocalTelegram(env, tmp_path/'data')
+        client.expected_users['fixture'] = 10001
+        try:
+            calls = [client.identity('fixture'), client.info('fixture', '@forum')]
+            replies = await asyncio.gather(*(calls if revalidate_first else calls[::-1]), return_exceptions=True)
+            identity, info = replies if revalidate_first else replies[::-1]
+            assert identity == 10001, str(identity)
+            assert isinstance(info, dict), str(info)
+            assert info['peer'] == -1001234567890
+        finally:
+            await client.close()
+    asyncio.run(scenario())
