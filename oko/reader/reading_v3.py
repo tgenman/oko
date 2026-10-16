@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, Request
 from fastapi.responses import Response
 
 from oko.reader import projection_v3 as project
@@ -287,9 +287,17 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     @router.post('/api/v3/collect', response_model=wire.CommandAcknowledgement)
-    async def collect(request: Request) -> wire.CommandAcknowledgement:
-        async with track(runtime, request, wire.CommandContext(wire.CommandCollect(operation='collect', target=wire.CollectionTarget(wire.AllCollectionTarget(scope='all'))))):
-            await runtime.collect()
+    async def collect(request: Request, body: wire.CollectionTarget = Body(default=wire.CollectionTarget(wire.AllCollectionTarget(scope='all')))) -> wire.CommandAcknowledgement:
+        async with track(runtime, request, wire.CommandContext(wire.CommandCollect(operation='collect',target=body))):
+            feed = body.root.feed_id.root if isinstance(body.root,wire.FeedCollectionTarget) else None
+            try:
+                await runtime.collect(feed)
+            except ActionError as error:
+                if feed and error.kind=='missing':
+                    raise missing(wire.AffectedResource(wire.FeedResource(kind='feed',feed_id=wire.FeedId(feed)))) from None
+                if feed and error.code=='deletion_in_progress':
+                    raise ApiError(409,wire.ErrorEnvelope(wire.DeletionInProgressError(code='deletion_in_progress',message='Фид удаляется',details=wire.DeletionInProgressErrorDetails(feed_id=wire.FeedId(feed)),command_id=None,diagnostic_id=None))) from None
+                raise
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     # Each route supplies its domain intent explicitly; no path/body inference.

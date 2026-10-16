@@ -192,3 +192,17 @@ def test_discriminator_mappings_use_wire_literals_for_every_variant():
                 assert value not in expected, (name, value)
                 expected[value] = ref
         assert discriminator.get('mapping') == expected, name
+
+
+def test_recovery_variants_require_their_domain_targets_and_reject_reconnect():
+    for invalid in [
+        {'kind':'reconnect_feed','feed_id':'old'},
+        {'kind':'configure_telegram_profile'},
+        {'kind':'retry_material'},
+        {'kind':'retry_material','material_ids':[]},
+        {'kind':'change_setting','target':{'scope':'oko','owner':'global'}},
+        {'kind':'retry_collection','target':{'scope':'feed'}},
+    ]:
+        assert not accepts('RecoveryIntent',invalid)
+    assert accepts('RecoveryIntent',{'kind':'configure_telegram_profile','role':'personal'})
+    assert accepts('RecoveryIntent',{'kind':'retry_collection','target':{'scope':'feed','feed_id':'saved'}})

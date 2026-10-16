@@ -1,8 +1,6 @@
 import {createClient} from './legacy-generated/client';
-import {status} from './legacy-generated/sdk.gen';
 import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop, collect} from './generated/sdk.gen';
 import type {CommandContext,RuntimeStatus} from './generated/types.gen';
-import type {Status} from './legacy-generated/types.gen';
 import {ReaderError,decodeJson} from './errors';
 import {isBinaryOperation} from './generated/media.gen';
 export {ReaderError} from './errors';
@@ -10,7 +8,6 @@ export {ReaderError} from './errors';
 export type ActionRecord = {id:string};
 export type ActionTracker = {
   beginCommand?(context:CommandContext): ActionRecord;
-  begin(path:string, method:string, body:unknown): ActionRecord | null;
   succeeded(record:ActionRecord | null): void;
   failed(record:ActionRecord | null, error:unknown): void;
 };
@@ -35,8 +32,6 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
       const headers = new Headers(request.headers);
       headers.set('Authorization','Bearer '+token);
       const body = request.body ? await request.text() : undefined;
-      const record = !url.pathname.startsWith('/api/v3/') && !headers.has('X-Oko-Action') ? tracker?.begin(url.pathname.slice('/api/'.length), request.method, body === undefined ? undefined : JSON.parse(body)) ?? null : null;
-      if (record) headers.set('X-Oko-Action', record.id);
       // The adapter keeps the same public fetch boundary as the previous
       // reader, including controlled delayed replies used by browser checks.
       try {
@@ -46,10 +41,8 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
           ...(body === undefined ? {} : {body}),
         });
         if(!response.ok || !isBinaryOperation(url.pathname,request.method))await decodeJson(response.clone());
-        tracker?.succeeded(record);
         return response;
       } catch(error) {
-        tracker?.failed(record,error);
         if (onError && !['/api/debug','/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {
           if (error instanceof Error) {
             Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : []});
@@ -74,15 +67,15 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
     },
     setActionTracker(value:ActionTracker) {tracker = value;},
     wasReported(error:unknown) {return typeof error === 'object' && error !== null && reported.has(error);},
-    async status(signal?: AbortSignal): Promise<Status> {
-      const reply = await status({client, signal});
+    async status(signal?: AbortSignal): Promise<RuntimeStatus> {
+      const reply = await runtimeStatus({client, signal});
       return reply.data;
     },
     lifetime: compatible,
     async createSession() {return (await createClientSession({client})).data;},
     async renewSession(identity: string) {return (await renewClientSession({client, path:{identity}})).data;},
     async closeSession(identity: string) {return (await closeClientSession({client, path:{identity}, keepalive:true})).data;},
-    async collect() {return this.command({operation:'collect',target:{scope:'all'}},async headers=>(await collect({client,headers})).data);},
+    async collect(target:import('./generated/types.gen').CollectionTarget={scope:'all'}) {return this.command({operation:'collect',target},async headers=>(await collect({client,headers,body:target})).data);},
     async stop(actionId?: string) {return (await stop({client, headers:actionId ? {'X-Oko-Action':actionId} : {}})).data;},
   };
 }

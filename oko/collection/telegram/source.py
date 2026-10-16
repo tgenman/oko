@@ -279,7 +279,7 @@ class TelegramSource:
             info = await self.client.info(self.account, '@' + self.username)
             self.identity_info = info
             if info['peer'] != self.peer:
-                raise SourceError('Username Telegram теперь принадлежит другому источнику; переподключите фид', code='source-reconnect')
+                raise SourceError('Username Telegram теперь принадлежит другому источнику; проверьте привязку', code='source_identity_conflict')
 
     def url(self, id: int) -> str:
         return f'https://t.me/c/{-self.peer-1000000000000}/{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'

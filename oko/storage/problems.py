@@ -48,10 +48,29 @@ class Problems:
                                 title='Не выбрана модель Codex', consequence='Тезисы пока не создаются.',
                                 next_step='Выберите и сохраните модель для каждого действия.',
                                 objects=[dict(kind='settings', id='global', label='Настройки Око')],
-                                action=dict(kind='settings', page='codex'), created_at=now,
+                                action=None, created_at=now,
                                 state='current', finished_at=None, outcome=None, next_at=None))
         groups: dict[str, dict[str, Any]] = {}
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
+        for saved_feed in feeds.values():
+            if saved_feed['kind'] != 'telegram' or saved_feed['connection'] == 'deleting':
+                continue
+            binding = self.store.subscriptions.telegram.binding(saved_feed['id'])
+            if not binding or binding['kind'] not in ('legacy_client','client'):
+                continue
+            role = binding.get('role')
+            profile = self.store.subscriptions.telegram.profile(role) if role else None
+            if binding['kind'] == 'client' and profile and profile['state'] == 'ready':
+                continue
+            code = 'identity-unconfirmed' if not role or not profile else 'account_identity_mismatch' if profile['state'] == 'identity_mismatch' else 'profile_unavailable'
+            identity = 'profile:' + (role or saved_feed['id'])
+            if identity not in groups:
+                groups[identity] = dict(id=identity,code=code,section='action',title='Требуется проверка профиля Telegram',
+                    consequence='Сбор и отметки этого аккаунта приостановлены; локальные материалы доступны.',
+                    next_step='Сопоставьте существующую конфигурацию и подтвердите прежнюю личность.',
+                    reason=profile.get('message','') if profile else 'Прежний alias ещё не сопоставлен роли.',
+                    objects=[],action=None,operation='producer:profile',created_at=now,state='current',finished_at=None,outcome=None,next_at=None)
+            groups[identity]['objects'].append(dict(kind='feed',id=saved_feed['id']))
         youtube = self.store.youtube.status(now)
         jobs = self.db.execute("SELECT jobs.*,items.feed_id,items.viewed FROM jobs LEFT JOIN items ON items.id=jobs.item WHERE (jobs.status IN ('pending','running') OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL)) AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)").fetchall()
         for job in jobs:
@@ -66,29 +85,31 @@ class Problems:
                 continue
             code = code or 'legacy-' + job['kind']
             feed = job['feed_id'] or job['item'] or 'demo'
-            if job['viewed'] and job['kind'] != 'delete':
+            if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and any(identity.startswith('profile:') and any(obj['id']==feed for obj in group['objects']) for identity,group in groups.items()):
+                continue
+            if job['viewed'] and job['kind'] not in ('delete','feed-delete'):
                 continue
             shared = code in ('processor-config', 'ai-permission') or code.startswith('source-')
             identity = 'job:' + code + ':' + feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
             if code == 'processor-config':
                 identity = 'processor:configuration'
             settings_action = code in ('processor-config', 'ai-permission')
-            obj = dict(kind='feed' if job['kind'] in ('discover', 'read') else 'material', id=feed if job['kind'] in ('discover', 'read') else job['item'])
+            obj = dict(kind='feed' if job['kind'] in ('discover', 'read', 'feed-delete') else 'material', id=feed if job['kind'] in ('discover', 'read', 'feed-delete') else job['item'])
             if identity not in groups:
                 kind = job['kind']
-                title = {'fetch':'Не удалось загрузить материал', 'discover':'Не удалось обновить источник',
+                title = {'feed-delete':'Удаление фида не завершено', 'fetch':'Не удалось загрузить материал', 'discover':'Не удалось обновить источник',
                          'read':'Не удалось подтвердить чтение в Telegram', 'delete':'Удаление не завершено'}.get(kind, 'Не удалось обработать материал')
                 if settings_action:
                     title = 'Требуется настройка обработчика'
-                action = dict(kind='settings', page='llamacpp' if code == 'processor-config' else 'models') if settings_action else dict(kind='collect' if kind == 'discover' else 'feed-settings' if kind == 'read' else 'theses-retry' if kind == 'theses' else 'filter-retry' if kind == 'filter' else 'retry', id=obj['id'])
+                action = None
                 groups[identity] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
-                    consequence='Сохранённое содержимое остаётся доступным.' if kind != 'delete' else 'Око продолжает попытки удаления.',
+                    consequence='Сохранённое содержимое остаётся доступным.' if kind not in ('delete','feed-delete') else 'Око продолжает попытки удаления.',
                     next_step='Повторите загрузку вручную.' if job['status']=='done' else 'Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
-                    objects=[],action=None if kind == 'delete' else action,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                    objects=[],action=action,operation='producer:'+kind,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
                 if kind != 'delete' and job['error']:
                     groups[identity]['reason'] = job['error']
                 if code == 'source-reconnect':
-                    groups[identity].update(section='action', next_step='Переподключите источник.', action=dict(kind='feed-settings', id=feed, page='reconnect'))
+                    groups[identity].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
             if job['kind'] != 'delete' and obj not in groups[identity]['objects']:
                 groups[identity]['objects'].append(obj)
         if youtube['paused']:
@@ -96,7 +117,7 @@ class Problems:
                        if feeds.get(self.store.item_feed(row['id']), {}).get('kind') == 'youtube']
             groups['youtube:admission'] = dict(id='youtube:admission',code='youtube-admission',section='wait',title='YouTube ограничил запросы',
                 consequence=f'Ожидают субтитров: {len(objects)}.',next_step='Око повторит получение после паузы.',
-                objects=objects,action=dict(kind='objects'),created_at=now,state='current',finished_at=None,outcome=None,next_at=youtube['next_at'])
+                objects=objects,action=None,created_at=now,state='current',finished_at=None,outcome=None,next_at=youtube['next_at'])
         affected = {obj['id'] for group in groups.values() for obj in group['objects'] if obj['kind'] == 'material'}
         for row in self.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 AND complete=1').fetchall():
             if row['id'] in affected or self.store.versions.deleted(row['id']):
@@ -113,7 +134,7 @@ class Problems:
             if identity not in groups:
                 groups[identity] = dict(id=identity,code='material-incomplete',section='object',title='Материал сохранён не полностью',
                     consequence='Доступная часть остаётся пригодной для чтения.',next_step='Повторите загрузку или откройте доступную часть.',
-                    objects=[],action=dict(kind='retry',id=row['id']),created_at=now,state='current',finished_at=None,outcome=None,next_at=None)
+                    objects=[],action=None,created_at=now,state='current',finished_at=None,outcome=None,next_at=None)
                 if header.get('reason'):
                     groups[identity]['reason'] = header['reason']
             groups[identity]['objects'].append(dict(kind='material',id=row['id']))
@@ -129,11 +150,18 @@ class Problems:
             receipt_action: dict[str, Any] | None = context['action']
             if unknown and receipt_action and receipt_action['kind'] not in ('settings', 'feed-settings', 'material', 'add'):
                 receipt_action = None
+            operation = receipt['identity']
+            if context.get('command_context'):
+                try:
+                    error = json.loads(context['command_error']) if context.get('command_error') else None
+                except (ValueError,TypeError):
+                    error = None
+                operation = json.dumps(dict(context=context['command_context'],error=error))
             current.append(dict(id='action:' + receipt['identity'],code='action-unknown' if unknown else 'action-failed',section='wait' if unknown else 'action',
                 title='Результат действия пока неизвестен' if unknown else context['title'],
                 consequence='Око сверяет результат; действие не повторяется автоматически.' if unknown else 'Не удалось подтвердить выполнение действия.',
                 next_step='Проверьте состояние после восстановления связи.' if unknown else 'Вернитесь к действию, чтобы исправить проблему.',
-                objects=context['objects'],action=receipt_action,operation=receipt['identity'],request_id=receipt['id'],
+                objects=context['objects'],action=receipt_action,operation=operation,request_id=receipt['id'],
                 state='retrying' if receipt['result'] == 'pending' and not unknown else 'current',created_at=receipt['started'],finished_at=None,outcome=None,next_at=None))
         return self.reconcile(current, now)
 
@@ -231,11 +259,13 @@ class Problems:
                     body = json.loads(row['body'])
                     irrelevant = body['code'] == 'codex-choice' and self.store.codex_config() is None
                     irrelevant = irrelevant or any(obj['kind'] == 'material' and self.store.versions.deleted(obj['id']) for obj in body['objects'])
-                    irrelevant = irrelevant or any(obj['kind'] == 'feed' and not any(feed['id'] == obj['id'] for feed in self.store.subscriptions.feeds()) for obj in body['objects'])
+                    irrelevant = irrelevant or any(obj['kind'] == 'feed' and not any(feed['id'] == obj['id'] and feed['connection'] != 'deleting' for feed in self.store.subscriptions.feeds()) for obj in body['objects'])
                     self.db.execute('UPDATE reader_problems SET finished=?,outcome=? WHERE id=?', (now, 'irrelevant' if irrelevant else 'resolved', row['id']))
             for candidate in candidates:
+                if not candidate['id'].startswith('action:'):
+                    candidate.setdefault('operation','producer:status')
                 identity = candidate['id']
-                body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome', 'reason')}
+                body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome')}
                 # Object labels are hydrated at read time, never an archive of titles.
                 body['objects'] = [{key: value for key, value in obj.items() if key != 'label'} for obj in candidate['objects']]
                 row = self.db.execute('SELECT id FROM reader_problems WHERE identity=? AND finished IS NULL', (identity,)).fetchone()
@@ -260,8 +290,7 @@ class Problems:
             problem.update(id=row['id'], created_at=row['created'], finished_at=row['finished'],
                            outcome=row['outcome'], state='finished' if row['finished'] is not None else problem['state'])
             if row['finished'] is not None:
-                problem['consequence'] = 'Проблема больше не актуальна.' if row['outcome'] == 'irrelevant' else 'Причина устранена.'
-                problem['next_step'] = ''
+                pass  # Keep the recorded consequence and cause; outcome owns completion.
             (recent if row['finished'] is not None else current).append(problem)
         return dict(current=current, recent=recent, count=len(current), updated_at=now)
 

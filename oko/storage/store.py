@@ -35,6 +35,16 @@ class Job:
     generation: int
 
 
+@dataclass(frozen=True)
+class WorkSummary:
+    kind: str
+    status: str
+    feed: str | None
+    count: int
+    error_code: str | None
+    retry_at: float | None
+
+
 class Store:
     """SQLite owns identity/lifecycle; files own all publication content."""
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic) -> None:
@@ -492,6 +502,19 @@ class Store:
 
     def cards(self, show_hidden: bool = False) -> list[dict[str, Any]]:
         return self.reading.cards(show_hidden)
+
+    def work_summary(self) -> list[WorkSummary]:
+        rows = self.db.execute("""SELECT jobs.kind,jobs.status,jobs.problem_code,count(*) AS count,
+            CASE WHEN jobs.kind IN ('discover','read','feed-delete') THEN NULLIF(jobs.item,'') ELSE items.feed_id END AS feed,
+            min(jobs.next) AS next,sum(jobs.error IS NOT NULL) AS errors
+            FROM jobs LEFT JOIN items ON items.id=jobs.item
+            WHERE jobs.status IN ('pending','running')
+            GROUP BY jobs.kind,jobs.status,jobs.problem_code,feed ORDER BY min(jobs.id)""").fetchall()
+        now, wall = self.clock(), self.wall_clock()
+        return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
+                    row['problem_code'] or ('legacy-'+row['kind'] if row['errors'] else None),
+                    wall+max(0,row['next']-now) if row['status']=='pending' and row['errors'] and row['next'] else None)
+                for row in rows]
 
     def status(self) -> dict[str, Any]:
         rows = self.db.execute('SELECT kind,status,error,count(*) AS count FROM jobs GROUP BY kind,status,error').fetchall()

@@ -247,7 +247,7 @@ class Runtime:
             self._viewed_ids = [row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')]
         state['problems'] = self._last_problems
         if self._error:
-            state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',section='action',title='Хранилище недоступно',
+            state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',operation='producer:storage',section='action',title='Хранилище недоступно',
                 consequence='Сбор и обработка остановлены.',next_step='Проверьте доступность хранилища; состояние не сбрасывается.',
                 objects=[],action=None,created_at=self._wall_clock(),next_at=None,state='current',finished_at=None,outcome=None)],recent=[],count=1,updated_at=self._wall_clock())
         state['viewed_ids'] = self._viewed_ids
@@ -318,12 +318,19 @@ class Runtime:
             if not self._closed:
                 await self._cancel()
 
-    async def collect(self) -> None:
+    async def collect(self, feed: str | None = None) -> None:
         async with self._actions:
             current = self.require_store()
             self._sync_sources()
-            for feed in self._sources:
-                current.enqueue_discovery(feed)
+            if feed is not None:
+                saved = next((entry for entry in current.subscriptions.feeds() if entry['id']==feed),None)
+                if saved is None:
+                    raise ActionError('missing','Фид недоступен')
+                if saved['connection']=='deleting':
+                    raise ActionError('conflict','Фид удаляется',code='deletion_in_progress')
+            for source_feed in self._sources:
+                if feed is None or feed==source_feed:
+                    current.enqueue_discovery(source_feed)
 
     async def retry_material(self, item: str) -> None:
         async with self._actions:
@@ -1030,8 +1037,17 @@ class Runtime:
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
                     if isinstance(error, SourceError):
                         self._account_wait(feed, error)
-                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,
-                                  code=error.code if isinstance(error, (SourceError, TelegramConflict)) and error.code else job.kind + ':' + (getattr(error, 'remote_type', '') or type(error).__name__))
+                    if isinstance(error, SourceError):
+                        code = error.code or 'source-unavailable'
+                    elif isinstance(error, TelegramConflict):
+                        code = error.code
+                    elif job.kind == 'fetch' and isinstance(error, FileNotFoundError):
+                        code = 'material-read-failed'
+                    elif job.kind == 'fetch' and isinstance(error, OSError):
+                        code = 'material-save-failed'
+                    else:
+                        code = job.kind + ':' + type(error).__name__
+                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code)
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):

@@ -300,18 +300,19 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/subscriptions')!.body);
+    const domainStatus=await r.api('v3/status');
     let catalogRead = 0, statusRead = 0;
     let heldCatalog: Route | undefined, heldStatus: Route | undefined;
     await r.page.route('**/api/subscriptions', async route => {
       if (++catalogRead === 1) heldCatalog = route;
       else await route.fulfill({json:subscriptions});
     });
-    await r.page.route('**/api/status', async route => {
+    await r.page.route('**/api/v3/status', async route => {
       if (++statusRead === 1) heldStatus = route;
-      else await route.fulfill({json:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1}});
+      else await route.fulfill({json:domainStatus});
     });
     await r.page.evaluate(() => {
-      readerTransport.native.add('/api/status');
+      readerTransport.native.add('/api/v3/status');
       readerTransport.native.add('/api/subscriptions');
       readerTransport.replies.set('PATCH /api/v3/feeds/one',{body:{}});
     });
@@ -366,4 +367,18 @@ test('a completed RSS addition preserves changes typed after submission', async 
     }
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
+});
+
+test('confirmed feed removal wins over stale catalogue snapshots without deleting siblings',async()=>{
+ const r=await reader();try{
+  await r.start([]);await objects(r);
+  await r.page.evaluate(()=>readerTransport.replies.set('DELETE /api/v3/feeds/one',{body:{feed_id:'one',state:'deleted'}}));
+  await r.page.locator('#feeds-open').click();await r.page.locator('#feed-tree [data-owner="feed/one"]').click();await feedOptions(r.page);
+  await r.page.locator('#feed-delete').click();await r.page.locator('#feed-delete-confirm-action').click();
+  await expect(r.page.locator('#feed-tree [data-owner="feed/one"]')).toHaveCount(0);
+  await expect(r.page.locator('#feed-tree [data-owner="feed/two"]')).toHaveCount(1);
+  await r.page.locator('#feeds-close').click();await r.page.locator('#feeds-open').click();
+  await expect(r.page.locator('#feed-tree [data-owner="feed/one"]')).toHaveCount(0);
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
 });

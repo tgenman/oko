@@ -40,8 +40,31 @@ async function reader() {
       const youtube=(value:unknown)=>{const v=value as import('../../frontend/src/api/legacy-generated/types.gen').YouTube|undefined;return {mode:v?.mode||'direct',address:v?.address||'',has_username:!!v?.has_username,has_password:!!v?.has_password,admission:v?.paused?'paused':v?.next_at?'waiting':'ready',retry_at:v?.next_at?new Date(v.next_at*1000).toISOString():null,strikes:v?.strikes||0,reason:v?.reason?'youtube_rate_limited':null};};
       const v3Reply=(url:string,method:string,body:unknown):unknown=>{
         if(url==='/api/v3/status'){
+          if(body&&typeof body==='object'&&'api_version'in body&&'runtime_state'in body)return body;
           const v=body as import('../../frontend/src/api/legacy-generated/types.gen').Status;
-          return {api_version:'3.0.0',lifetime:{kind:'client_presence',lease_seconds:60,grace_seconds:60,renew_after_seconds:20},initial_histories:(v.initial_histories||[]).map(h=>({feed_id:h.feed_id,history:history(h)})),youtube:youtube(v.youtube)};
+          const problem=(p:import('../../frontend/src/api/legacy-generated/types.gen').Problem)=>{
+            const codes:Record<string,string>={'codex-choice':'processor_not_configured','processor-config':'processor_not_configured','ai-permission':'public_ai_not_allowed','source-connection':'source_unavailable','material-incomplete':'material_incomplete','action-failed':'command_failed','action-unknown':'command_outcome_unknown','youtube-admission':'youtube_rate_limited','storage-unavailable':'storage_unavailable'};
+            const code=codes[p.code]||'legacy_problem';
+            let affected=p.objects.map<import('../../frontend/src/api/generated/types.gen').AffectedResource>(o=>o.kind==='material'?{kind:'material',material_id:o.id}:o.kind==='feed'?{kind:'feed',feed_id:o.id}:{kind:'runtime'});
+            const recovery:import('../../frontend/src/api/generated/types.gen').RecoveryIntent[]=[];
+            const action=p.action,ids=p.objects.filter(o=>o.kind==='material').map(o=>o.id);
+            if(code!=='legacy_problem'&&action){
+              if(action.kind==='settings'&&(action.page==='codex'||action.page==='llamacpp')){recovery.push({kind:'configure_processor',processor_id:action.page});affected=[{kind:'processor',processor_id:action.page}];}
+              else if(action.kind==='settings'){
+                const keys=['originals','theses','prompt_theses','prompt_filters','processor']as const;
+                const key=keys.find(key=>'field/'+key===action.page);
+                if(key)recovery.push({kind:'change_setting',target:action.scope==='feed'||action.scope==='folder'?{scope:action.scope,owner:action.id||'fixture'}:{scope:'oko',owner:'global'},keys:[key]});
+              }
+              else if(action.kind==='collect')recovery.push({kind:'retry_collection',target:{scope:'all'}});
+              else if(action.kind==='retry'&&ids.length)recovery.push({kind:'retry_material',material_ids:ids});
+              else if(action.kind==='theses-retry'&&ids.length)recovery.push({kind:'retry_theses',material_ids:ids});
+              else if(action.kind==='filter-retry'&&ids.length)recovery.push({kind:'retry_filter',material_ids:ids});
+              else if(action.kind==='objects'&&ids.length)recovery.push({kind:'inspect_materials',material_ids:ids});
+            }
+            return {id:p.id,code,...(code==='legacy_problem'?{raw_code:p.code}:{}),command_id:p.request_id||null,title:p.title,message:p.reason||p.next_step,consequence:p.consequence,affected,recovery:p.state==='finished'?[]:recovery,created_at:new Date(p.created_at*1000).toISOString(),state:p.state,...(p.state==='finished'?{finished_at:new Date((p.finished_at||p.created_at)*1000).toISOString(),outcome:p.outcome}:p.state==='retrying'?{retry_at:p.next_at?new Date(p.next_at*1000).toISOString():null}:{})};
+          };
+          const current=(v.problems?.current||[]).map(problem),recent=(v.problems?.recent||[]).map(problem);
+          return {api_version:'3.0.0',runtime_state:v.stopped?'stopped':v.error?'unavailable':'running',work_allowed:!v.stopped,active_client_sessions:1,lifetime:{kind:'client_presence',lease_seconds:60,grace_seconds:60,renew_after_seconds:20},initial_histories:(v.initial_histories||[]).map(h=>({feed_id:h.feed_id,history:history(h)})),youtube:youtube(v.youtube),work:!v.jobs?.some(j=>j.status==='pending'||j.status==='running')?[{phase:'idle'}]:(v.jobs||[]).filter(j=>j.status==='pending'||j.status==='running').map(j=>j.kind==='filter'||j.kind==='theses'?{phase:'processing',operation:j.kind,progress:{completed:0,total:j.count}}:{phase:j.kind==='delete'?'deleting':'collecting',feed_id:null,progress:{completed:0,total:j.count}}),sources:(v.sources||[]).map(source=>({feed_id:source.feed_id,title:source.title,state:source.error?'unavailable':'ready',reason:source.error?'source_unavailable':null,message:source.error||null,gap:source.gap||null,changes:source.changes||null})),ready_sources:v.ready_sources||0,total_sources:v.total_sources||0,problems:{current,recent,count:current.length,updated_at:new Date((v.problems?.updated_at||0)*1000).toISOString()},diagnostic_count:v.debug_count||0,diagnostic_persistence_error:v.debug_persistence_error||null,viewed_ids:v.viewed_ids||[],telegram_reads:[]};
         }
         if(url==='/api/v3/youtube'&&body&&typeof body==='object'&&!('admission' in body))return youtube(body);
         if(url==='/api/v3/feeds/verify'&&body&&typeof body==='object'&&!('state' in body)){const v=body as import('../../frontend/src/api/legacy-generated/types.gen').FeedVerification;return v.existing?{state:'existing',existing_feed:v.existing}:{state:'new',verification:v.verification,candidate:{url:v.url,title:v.title,kind:v.kind}};}
@@ -88,7 +111,7 @@ async function reader() {
         if (window.readerTransport.native.has(key)) return nativeFetch(url, options);
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
         const method = options?.method || 'GET', pathname = key.split('?')[0];
-        const reply = (key==='/api/v3/status'?replies.get('/api/status'):undefined) || replies.get(method + ' ' + key) || replies.get(key) || replies.get(method + ' ' + pathname) || replies.get(pathname);
+        const reply = replies.get(method + ' ' + key) || replies.get(key) || (key==='/api/v3/status'?replies.get('/api/status'):undefined) || replies.get(method + ' ' + pathname) || replies.get(pathname);
         if (reply) {
           for (const [route, next] of reply.next || []) replies.set(route, next);
           if (reply.base64) return new Response(Uint8Array.from(atob(reply.base64), c => c.charCodeAt(0)), {headers: {'Content-Type': reply.mime || 'application/octet-stream'}});

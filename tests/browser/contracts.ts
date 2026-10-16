@@ -12,7 +12,7 @@ addFormats(ajv);
 const routes: Record<string, string> = {
   navigation: '/api/navigation', cards: '/api/cards',
   material: '/api/materials/{item}', version: '/api/materials/{item}/versions/{number}', status: '/api/status',
-  navigation_v3: '/api/v3/reading-composition', cards_v3: '/api/v3/cards',
+  navigation_v3: '/api/v3/reading-composition', cards_v3: '/api/v3/cards', status_v3:'/api/v3/status',
   material_v3: '/api/v3/materials/{item}', version_v3: '/api/v3/materials/{item}/versions/{number}',
 };
 const loaded = new Set<string>();
@@ -20,6 +20,7 @@ const validators = new Map<string, ValidateFunction>();
 function contractFor(url: string, method = 'GET') {
   if (method !== 'GET') return null;
   const pathname = new URL(url, 'http://localhost').pathname;
+  if (pathname === '/api/v3/status') return 'status_v3';
   if (pathname === '/api/v3/cards') return 'cards_v3';
   if (pathname === '/api/v3/reading-composition') return 'navigation_v3';
   if (/^\/api\/v3\/materials\/[^/]+$/.test(pathname)) return 'material_v3';

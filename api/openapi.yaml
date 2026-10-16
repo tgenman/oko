@@ -7747,6 +7747,13 @@ paths:
         description: Command correlation only, never execution idempotency. Missing
           value generates an ID; supplied invalid value returns 422. Echoed for tracked
           mutations.
+      requestBody:
+        required: false
+        description: Omitted target schedules all admissible sources; a feed target is re-admitted before scheduling.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectionTarget'
       responses:
         '200':
           description: Schedule collection of admissible sources; acknowledgement
@@ -7773,7 +7780,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeStoppedError'
+                $ref: '#/components/schemas/Collect409Errors'
               examples:
                 RuntimeStoppedError:
                   value:
@@ -7920,6 +7927,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: example
+                    details:
+                      resource:
+                        kind: material
+                        material_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+
   /api/v3/materials/{item}/retry:
     post:
       summary: Retry material
@@ -10720,6 +10756,7 @@ components:
       - storage_unavailable
       - client_presence_required
       - retry_scheduled
+      - telegram_read_frontier
       examples:
       - processor_unavailable
     HistoryDiscovering:
@@ -14945,6 +14982,27 @@ components:
       examples:
       - kind: configure_processor
         processor_id: codex
+    Collect409Errors:
+      oneOf:
+      - $ref: '#/components/schemas/RuntimeStoppedError'
+      - $ref: '#/components/schemas/DeletionInProgressError'
+      discriminator:
+        propertyName: code
+        mapping:
+          runtime_stopped: '#/components/schemas/RuntimeStoppedError'
+          deletion_in_progress: '#/components/schemas/DeletionInProgressError'
+      examples:
+      - code: runtime_stopped
+        message: example
+        details: null
+        diagnostic_id: null
+        command_id: null
+      - code: deletion_in_progress
+        message: example
+        details:
+          feed_id: example
+        diagnostic_id: null
+        command_id: null
     ProblemCode:
       type: string
       enum:
@@ -14963,6 +15021,13 @@ components:
       - material_read_failed
       - feed_delete_failed
       - telegram_read_failed
+      - profile_not_configured
+      - profile_unavailable
+      - account_identity_mismatch
+      - source_identity_conflict
+      - duplicate_source
+      - profile_in_use
+      - profile_account_conflict
       examples:
       - processor_not_configured
     CurrentProblem:

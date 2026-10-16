@@ -373,6 +373,12 @@ export type CodexUnavailable = {
     version: string | null;
 };
 
+export type Collect409Errors = ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError) | ({
+    code: 'deletion_in_progress';
+} & DeletionInProgressError);
+
 export type CollectionTarget = ({
     scope: 'all';
 } & AllCollectionTarget) | ({
@@ -1650,7 +1656,7 @@ export type PreviousVersionReference = {
 
 export type Problem = CurrentProblem | LegacyCurrentProblem | RetryingProblem | LegacyRetryingProblem | FinishedProblem | LegacyFinishedProblem;
 
-export type ProblemCode = 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed';
+export type ProblemCode = 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed' | 'profile_not_configured' | 'profile_unavailable' | 'account_identity_mismatch' | 'source_identity_conflict' | 'duplicate_source' | 'profile_in_use' | 'profile_account_conflict';
 
 export type ProblemId = string;
 
@@ -2526,7 +2532,7 @@ export type VersionUnavailableErrorDetails = {
     number: number;
 };
 
-export type WaitingReason = 'processor_unavailable' | 'processor_not_configured' | 'public_ai_not_allowed' | 'source_unavailable' | 'youtube_rate_limited' | 'profile_unavailable' | 'storage_unavailable' | 'client_presence_required' | 'retry_scheduled';
+export type WaitingReason = 'processor_unavailable' | 'processor_not_configured' | 'public_ai_not_allowed' | 'source_unavailable' | 'youtube_rate_limited' | 'profile_unavailable' | 'storage_unavailable' | 'client_presence_required' | 'retry_scheduled' | 'telegram_read_frontier';
 
 export type WorkCollecting = {
     feed_id: FeedId | null;
@@ -2825,7 +2831,10 @@ export type RenewClientSessionResponses = {
 export type RenewClientSessionResponse = RenewClientSessionResponses[keyof RenewClientSessionResponses];
 
 export type CollectData = {
-    body?: never;
+    /**
+     * Omitted target schedules all admissible sources; a feed target is re-admitted before scheduling.
+     */
+    body?: CollectionTarget;
     headers?: {
         /**
          * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
@@ -2845,7 +2854,11 @@ export type CollectErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeStoppedError;
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: Collect409Errors;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */

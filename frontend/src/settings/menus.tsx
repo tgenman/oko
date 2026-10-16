@@ -1,6 +1,6 @@
 import {mountSurface} from '../renderer';
 import type {ReaderApi} from '../api/reader';
-import type {Status,SourceStatus} from '../api/legacy-generated/types.gen';
+import type {RuntimeStatus,SourceState,RecoveryIntent,AffectedResource} from '../api/generated/types.gen';
 import {Models} from './models';
 import {YouTubeSettings,YouTubeSummary} from './youtube';
 import {MenusOwner,type DialogName,type Discard} from './owner';
@@ -26,5 +26,15 @@ export function createMenus({readerApi,api,onChanged}:{readerApi:ReaderApi;api:{
  const sync=()=>{for(const page of legacyPages)page.hidden=owner.active!=='settings'||page.dataset.settingsPage!==owner.page;for(const name of ['settings','feeds'])document.getElementById(name+'-dialog')!.dataset.settingsView=owner.page;};owner.subscribe(sync);
  for(const button of document.querySelectorAll<HTMLButtonElement>('[data-settings-target]'))if(!button.closest('#settings-editor'))button.onclick=()=>owner.navigate(button.dataset.settingsTarget!,button);
  for(const name of ['add','feeds','settings']as const){document.getElementById(name+'-open')!.onclick=event=>void owner.open(name,event.currentTarget as HTMLElement);const dialog=document.getElementById(name+'-dialog')as HTMLDialogElement;dialog.addEventListener('cancel',()=>owner.close(name));dialog.addEventListener('close',()=>{if(!dialog.open)owner.close(name);});}
- return {status:(state:Status)=>owner.status(state),sources:(sources:SourceStatus[])=>{owner.sources=sources;owner.changed();},openFeed:(id:string,trigger?:HTMLElement)=>owner.open('feeds',trigger,'feed/'+id),async openStatus(target:{kind:string;scope?:string;id?:string;page?:string},trigger?:HTMLElement){if(target.kind==='feed-settings'){const intent=await owner.open('feeds',trigger,'feed/'+target.id);if(!intent?.current)return;if(target.page)owner.navigate(target.page,trigger);return;}if(target.kind==='add'){const intent=await owner.open('add',trigger);if(!intent?.current)return;owner.tab=target.page||'rss';owner.changed();for(const callback of owner.onTabChange)callback(owner.tab);return;}const intent=await owner.open(target.scope&&target.scope!=='oko'?'feeds':'settings',trigger,target.scope&&target.scope!=='oko'?target.scope+'/'+target.id:undefined);if(!intent?.current)return;owner.navigate(target.page||'home',trigger);},stop(){owner.stop();}};
+ return {statusRevision:()=>owner.statusRevision,status:(state:RuntimeStatus,revision?:number)=>owner.status(state,revision),sources:(sources:SourceState[])=>{owner.sources=sources;owner.changed();},openFeed:(id:string,trigger?:HTMLElement)=>owner.open('feeds',trigger,'feed/'+id),async openStatus(target:RecoveryIntent|AffectedResource,trigger?:HTMLElement){
+  if(target.kind==='connect_source'){const intent=await owner.open('add',trigger);if(!intent?.current)return;owner.tab=target.source_kind==='telegram'?'telegram':'rss';owner.changed();for(const callback of owner.onTabChange)callback(owner.tab);return;}
+  let path:string|undefined,page='home';
+  if(target.kind==='feed'){path='feed/'+target.feed_id;page='feed-connection';}
+  else if(target.kind==='folder')path='folder/'+target.folder_id;
+  else if(target.kind==='change_setting'||target.kind==='settings'){const settings=target.target;if(settings.scope!=='oko')path=settings.scope+'/'+settings.owner;if(target.kind==='change_setting'&&target.keys.length===1)page='field/'+target.keys[0];}
+  else if(target.kind==='configure_processor'||target.kind==='processor')page=target.processor_id;
+  else if(target.kind==='configure_telegram_profile'||target.kind==='telegram_profile')page='telegram-profiles';
+  else return;
+  const intent=await owner.open(path?'feeds':'settings',trigger,path);if(!intent?.current)return;owner.navigate(page,trigger);if(target.kind==='configure_telegram_profile'||target.kind==='telegram_profile'){const focus=owner.operations.capture();queueMicrotask(()=>{if(focus.current)document.getElementById('telegram-profile-'+target.role)?.focus({preventScroll:false});});}
+ },stop(){owner.stop();}};
 }

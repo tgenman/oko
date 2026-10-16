@@ -89,6 +89,9 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
     @app.get('/api/v3/status', response_model=wire.RuntimeStatus)
     async def status() -> wire.RuntimeStatus:
         old = previous.Status.model_validate(runtime.status())
+        current = runtime._store if not runtime.stopped else None
+        bindings = {feed['id']: wire.TelegramAccess.model_validate(binding) for feed in current.subscriptions.feeds() if (binding := current.subscriptions.telegram.binding(feed['id']))} if current else {}
+        material_feeds = {row['id']:row['feed_id'] for row in current.db.execute('SELECT id,feed_id FROM items WHERE viewed=0')} if current else {}
         policy: wire.ExplicitLifetimePolicy | wire.ClientPresenceLifetimePolicy
         if lifetime.mode == 'explicit':
             policy = wire.ExplicitLifetimePolicy(kind='explicit')
@@ -97,7 +100,7 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
                 grace_seconds=lifetime.grace_seconds, renew_after_seconds=lifetime.renew_after_seconds)
         return wire.RuntimeStatus(api_version='3.0.0', runtime_state='stopped' if runtime.stopped else 'unavailable' if old.error else 'running',
             lifetime=wire.LifetimePolicy(policy), work_allowed=not runtime.stopped and lifetime.admitted(), active_client_sessions=lifetime.active_clients,
-            work=project.work(old.jobs if isinstance(old.jobs, list) else []),
+            work=[wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('storage_unavailable'),retry_at=None))] if old.error else [wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('client_presence_required'),retry_at=None))] if not lifetime.admitted() and not runtime.stopped else project.work(current.work_summary() if current else []),
             sources=[wire.SourceState(feed_id=wire.FeedId(value.feed_id), title=value.title,
                 state='unavailable' if isinstance(value.error, str) and value.error else 'ready',
                 reason=wire.WaitingReason('source_unavailable') if isinstance(value.error, str) and value.error else None,
@@ -109,8 +112,8 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
             telegram_reads=[wire.TelegramReadState(feed_id=wire.FeedId(value.feed_id),
                 initial=wire.TelegramMessageId(str(value.initial)) if value.initial else None,
                 confirmed=wire.TelegramMessageId(str(value.confirmed)) if value.confirmed else None, pending=value.pending,
-                waiting=wire.WaitingReason('profile_unavailable') if value.waiting else None, error=value.error or None) for value in old.telegram_reads] if isinstance(old.telegram_reads, list) else [],
-            problems=project.problems(old.problems) if isinstance(old.problems, previous.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
+                waiting=wire.WaitingReason('telegram_read_frontier') if value.waiting else None, error=value.error or None) for value in old.telegram_reads] if isinstance(old.telegram_reads, list) else [],
+            problems=project.problems(old.problems,bindings,material_feeds) if isinstance(old.problems, previous.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
             diagnostic_count=len(journal.records), diagnostic_persistence_error=journal.persistence_error or None,
             viewed_ids=[wire.MaterialId(value) for value in old.viewed_ids] if isinstance(old.viewed_ids, list) else [])
 

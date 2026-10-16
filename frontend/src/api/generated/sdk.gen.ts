@@ -51,7 +51,14 @@ export const renewClientSession = <ThrowOnError extends boolean = true>(options:
  *
  * Schedule collection of admissible sources; acknowledgement does not promise completed downloads. Repeated commands are not execution-deduplicated. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
-export const collect = <ThrowOnError extends boolean = true>(options?: Options<CollectData, ThrowOnError>) => (options?.client ?? client).post<CollectResponses, CollectErrors, ThrowOnError>({ url: '/api/v3/collect', ...options });
+export const collect = <ThrowOnError extends boolean = true>(options?: Options<CollectData, ThrowOnError>) => (options?.client ?? client).post<CollectResponses, CollectErrors, ThrowOnError>({
+    url: '/api/v3/collect',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers
+    }
+});
 
 /**
  * Observe command

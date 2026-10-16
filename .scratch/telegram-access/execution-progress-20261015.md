@@ -12,7 +12,7 @@ Worktree: `telegram-remaining/oko`, ветка `codex/telegram-remaining`.
    [api-ui-verification-20261016.md](api-ui-verification-20261016.md).
 4. #21 предметная Telegram-приёмка — проверена; отчёт
    [acceptance-verification-20261016.md](acceptance-verification-20261016.md). Итоговый full gate остаётся после #7.
-5. #6 состояние работы/восстановление — следующая задача; читать актуальное issue/comments.
+5. #6 состояние работы/восстановление — реализовано и проверено; отчёт ../independent-api/verification-status-20261016.md.
 6. #7 финальная интеграция/переход — последняя, затем общий PR.
 
 Каждый следующий шаг начинает с текущего git status и этого checkpoint.
@@ -27,3 +27,5 @@ TypesPASS, browser6PASS; подробности и ограничения в о�
 #5: 24 HTTP PASS, 27 linked browser PASS, 14 final browser PASS; отдельные legacy и Telegraph UI PASS; оба ревью без оставшихся замечаний.
 
 #5: коммит `d51ed76`. #21: исправлены metadata-only derivatives и provenance одного принятого файла; финальный связанный набор32Python+6browserPASS, ревью0. Полный gate не запускался.
+
+#21: коммит `0fa766b`. #6: финальный набор39Python+30browserPASS, оба ревью0; следующая #7, затем полный gate и один PR.

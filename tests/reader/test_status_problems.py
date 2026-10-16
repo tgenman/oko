@@ -66,17 +66,16 @@ def test_model_problem_history_survives_restart_and_expires_from_completion(tmp_
 
 def test_missing_model_is_one_current_problem_and_settings_fix_it(tmp_path):
     with TestClient(create_app(tmp_path, token='test', codex_client=CodexService()), headers=HEADERS) as client:
-        response = client.get('/api/status')
+        response = client.get('/api/v3/status')
         assert response.status_code == 200
         problems = response.json()['problems']
         assert len(problems['current']) == 1
         problem = problems['current'][0]
-        assert problem['code'] == 'codex-choice'
-        assert problem['section'] == 'action'
-        assert problem['action'] == {'kind': 'settings', 'page': 'codex'}
+        assert problem['code'] == 'processor_not_configured'
+        assert problem['recovery'] == [{'kind':'configure_processor','processor_id':'codex'}]
         assert problems['count'] == 1
         configure_codex(client)
-        fixed = client.get('/api/status').json()['problems']
+        fixed = client.get('/api/v3/status').json()['problems']
         assert fixed['current'] == []
         assert fixed['count'] == 0
 
@@ -85,19 +84,20 @@ def test_settings_error_is_durable_and_successful_retry_completes_it(tmp_path):
     options = dict(token='test', codex_client=CodexService())
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         configure_codex(client)
-        response = client.patch('/api/settings/oko/global', json={'theses':'invalid'})
+        response = client.patch('/api/v3/settings/oko/global', json={'theses':'invalid'})
         assert response.status_code == 422
-        problems = client.get('/api/status').json()['problems']
+        client.post('/api/v3/command-observations',json={'id':'invalid-setting','context':{'operation':'settings_patch','target':{'scope':'oko','owner':'global'},'keys':['theses']},'result':'failed'})
+        problems = client.get('/api/v3/status').json()['problems']
         assert problems['count'] == 1
         problem = problems['current'][0]
-        assert problem['code'] == 'action-failed'
-        assert problem['action'] == {'kind':'settings','page':'field/theses'}
+        assert problem['code'] == 'command_failed'
+        assert problem['recovery'] == [{'kind':'change_setting','target':{'scope':'oko','owner':'global'},'keys':['theses']}]
         assert client.delete('/api/debug').status_code == 200
-        assert client.get('/api/status').json()['problems']['count'] == 1
+        assert client.get('/api/v3/status').json()['problems']['count'] == 1
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/status').json()['problems']['current'][0]['id'] == problem['id']
-        assert client.patch('/api/settings/oko/global', json={'theses':False}).status_code == 200
-        result = client.get('/api/status').json()['problems']
+        assert client.get('/api/v3/status').json()['problems']['current'][0]['id'] == problem['id']
+        assert client.patch('/api/v3/settings/oko/global', json={'theses':False}).status_code == 200
+        result = client.get('/api/v3/status').json()['problems']
         assert result['count'] == 0
         assert result['recent'][0]['outcome'] == 'resolved'
 

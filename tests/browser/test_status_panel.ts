@@ -161,9 +161,9 @@ test('panel reorders only on reopening and remains a nonmodal desktop sidebar',a
     const newer={...modelProblem,id:'newer',title:'Новая проблема',created_at:1800000010};
     await status(r,[newer,modelProblem]);
     await expect(r.page.locator('.status-problem')).toHaveCount(2);
-    await expect(r.page.locator('.status-problem h3').first()).toHaveText(modelProblem.title);
+    await expect(r.page.locator('.status-problem').first()).toHaveAttribute('data-problem-id',modelProblem.id);
     await r.page.locator('#status-close').click();await r.page.locator('#status-toggle').click();
-    await expect(r.page.locator('.status-problem h3').first()).toHaveText(newer.title);
+    await expect(r.page.locator('.status-problem').first()).toHaveAttribute('data-problem-id',newer.id);
     await expect(r.page.locator('#status-panel')).toHaveAttribute('role','complementary');
     await expect(r.page.locator('#status-panel')).not.toHaveAttribute('aria-modal','true');
     await r.page.keyboard.press('Escape');
@@ -200,9 +200,9 @@ test('adding an affected object preserves keyboard focus in expanded details',as
     const problem: Problem={...modelProblem,id:'source',code:'source-connection',section:'object',objects:[{kind:'material',id:'one',label:'Первый материал'}],action:{kind:'objects'}};
     await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');await r.page.locator('#status-toggle').click();
     await r.page.locator('.status-details summary').click();await r.page.locator('.status-object').focus();
-    await status(r,[{...problem,objects:[...problem.objects,{kind:'material',id:'two',label:'Второй материал'}]}]);
+    await status(r,[{...problem,objects:[{kind:'material',id:'two',label:'Второй материал'},...problem.objects]}]);
     await expect(r.page.locator('.status-object')).toHaveCount(2);
-    await expect(r.page.getByRole('button',{name:'Первый материал',exact:true})).toBeFocused();
+    await expect(r.page.locator('[data-resource-key="material:one"]')).toBeFocused();
   } finally {await r.close();}
 });
 
