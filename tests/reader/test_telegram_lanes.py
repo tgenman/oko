@@ -2,6 +2,8 @@
 import asyncio
 import threading
 import time
+import httpx
+from tests.support.telegram_web import page
 
 from tests.support.app import create_app
 from tests.support.telegram import Telegram
@@ -12,6 +14,7 @@ class TwoAccounts(Telegram):
     def __init__(self):
         self.downloading = threading.Event()
         self.release = threading.Event()
+        self.cancelled = threading.Event()
 
     async def accounts(self):
         return ['one', 'two']
@@ -35,14 +38,19 @@ class TwoAccounts(Telegram):
 
     async def download(self, account, peer, id):
         self.downloading.set()
-        while not self.release.is_set():
-            await asyncio.sleep(.01)
+        try:
+            while not self.release.is_set():
+                await asyncio.sleep(.01)
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
         return b'fixture'
 
 
-def test_blocked_personal_download_does_not_block_collection_account(tmp_path):
+def test_blocked_personal_download_keeps_web_and_collection_live_until_stop(tmp_path):
     telegram = TwoAccounts()
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=telegram),
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=telegram,
+                    rss_transport=httpx.MockTransport(lambda r: httpx.Response(200,text=page([(11,'Web completed')])))),
                     headers={'Authorization': 'Bearer test'}) as client:
         for role, account in [('personal', 'one'), ('collection', 'two')]:
             assert client.put('/api/v3/telegram/profiles/'+role,
@@ -57,16 +65,23 @@ def test_blocked_personal_download_does_not_block_collection_account(tmp_path):
                 feeds.append(response.json()['feed_id'])
                 if role == 'personal':
                     assert telegram.downloading.wait(2)
+            web = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web'))
+            assert web.status_code == 200, web.text
+            feeds.append(web.json()['feed_id'])
             assert telegram.downloading.wait(2)
             deadline = time.monotonic()+2
             while time.monotonic() < deadline:
                 cards = client.get('/api/cards').json()
-                if any(c['feed_id'] == feeds[1] and c['complete'] for c in cards):
+                if all(any(c['feed_id']==feed and c['complete'] for c in cards) for feed in feeds[1:]):
                     break
                 time.sleep(.02)
             else:
-                raise AssertionError('Collection account stalled behind personal download')
+                raise AssertionError('Web or collection account stalled behind personal download')
             assert not telegram.release.is_set()
+            assert client.post('/api/v3/stop').status_code == 200
+            assert telegram.cancelled.wait(2)
+            assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
+            assert not list(tmp_path.rglob('*.jpg'))
         finally:
             telegram.release.set()
 

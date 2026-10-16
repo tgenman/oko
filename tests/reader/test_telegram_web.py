@@ -391,3 +391,21 @@ def test_retry_and_save_do_not_read_all_retained_media_into_ram(tmp_path,monkeyp
         assert not calls
         monkeypatch.setattr(Path,'read_bytes',read_bytes)
         assert client.get(material['attachments'][0]['url']).content==b'known-bytes'
+
+
+def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync(tmp_path,monkeypatch):
+    from oko.collection.telegram.source import _TelegramWorker
+    from oko.collection.telegram.read_sync import ReadSync
+    def forbidden(*args,**kwargs):
+        raise AssertionError('Web must never allocate a Telegram worker or register read eligibility')
+    monkeypatch.setattr(_TelegramWorker,'__init__',forbidden)
+    monkeypatch.setattr(ReadSync,'observed',forbidden)
+    with TestClient(create_app(tmp_path,token='test',api_only=True,
+            rss_transport=httpx.MockTransport(lambda r:httpx.Response(200,text=page([(11,'Public')])))),
+            headers={'Authorization':'Bearer test'}) as client:
+        connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web'))
+        assert connected.status_code==200,connected.text
+        card=settled(client)[0]
+        assert client.post('/api/v3/materials/'+card['id']+'/viewed').status_code==200
+        assert client.get('/api/v3/status').json()['telegram_reads']==[]
+        assert client.delete('/api/v3/feeds/'+connected.json()['feed_id']).status_code==200

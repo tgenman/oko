@@ -152,6 +152,15 @@ class Versions:
         if number and self.path(item).is_file():
             source_progress = self.source_progress(self.path(item).parent,stage)
             progress_only = source_progress if source_progress is not None else self.payload_fingerprint(stage)==self.payload_fingerprint(self.path(item).parent)
+        if number and self.version(item) == fingerprint:
+            # Operational metadata can need a new immutable directory while the
+            # processing input stays identical. Carry only committed results;
+            # files moved by an interrupted attempt are not accepted results.
+            for kind in ('filter', 'theses'):
+                result = self.path(item).parent / (kind + '.md')
+                done = self.store.db.execute("SELECT 1 FROM jobs WHERE item=? AND kind=? AND status='done'", (item,kind)).fetchone()
+                if done and result.is_file():
+                    self._write(stage / result.name, result.read_bytes())
         accepted_full = bool(progress_only and json.loads(self.path(item).read_text().split('\n\n', 1)[0]).get('full'))
         if accepted_full and not material.full:
             shutil.rmtree(stage)

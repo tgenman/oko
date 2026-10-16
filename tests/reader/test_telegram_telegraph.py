@@ -222,3 +222,144 @@ FakeClient.rows = linked_rows
         assert 'Full linked article' in material['text'] and material['full'] is True
         assert len(calls)==1
         assert trace.is_file()
+
+
+@pytest.mark.parametrize('filtered',[False,True])
+@pytest.mark.parametrize('regenerating',[False,True])
+def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalidates_them(tmp_path,filtered,regenerating):
+    import asyncio
+    import json
+    import threading
+    from tests.support.filters import transport
+    from tests.support.reader import wait_for
+    calls=[]
+    phase=[1]
+    block_ai=[False]
+    regeneration_started=threading.Event()
+    regeneration_finished=threading.Event()
+    native=transport(calls,theses=True)
+    async def model(request):
+        late = False
+        if request.url.path=='/v1/chat/completions':
+            late=regenerating and block_ai[0] and not regeneration_started.is_set()
+            if late:
+                regeneration_started.set()
+            while block_ai[0]:
+                try:
+                    await asyncio.sleep(.005)
+                except asyncio.CancelledError:
+                    if not late:
+                        raise
+        result=native.handler(request)
+        if request.url.path=='/v1/chat/completions':
+            task=json.loads(json.loads(request.content)['messages'][1]['content'])
+            if task['operation']=='theses':
+                payload=result.json()
+                generated=json.loads(payload['choices'][0]['message']['content'])
+                generated['points'][0]['text']='Actual edit' if 'Actual edit' in task['sources'][0]['text'] else 'Original article'
+                payload['choices'][0]['message']['content']=json.dumps(generated)
+                result=httpx.Response(200,json=payload)
+        if late:
+            regeneration_finished.set()
+        return result
+    def response(request):
+        if request.url.host=='api.telegra.ph':
+            if phase[0]==2:
+                return httpx.Response(503)
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[
+                {'tag':'p','children':['Actual edit' if phase[0]==3 else 'Original article']}]}})
+        return httpx.Response(200,text=page([(11,'Post https://telegra.ph/Article')]))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response),
+            ai_transport=httpx.MockTransport(model)),headers={'Authorization':'Bearer test'}) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':'Убирай рекламу' if filtered else '','processor':'llamacpp'})
+        assert client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True}).status_code==200
+        assert client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web')).status_code==200
+        identity=settled(client)[0]['id']
+        path='/api/v3/materials/'+identity
+        initial=wait_for(client,lambda: v if (v:=client.get(path).json())['theses']['result'] else None)
+        accepted=initial['theses']['result']
+        if regenerating:
+            block_ai[0]=True
+            assert client.post(path+'/regenerate').status_code==200
+            assert regeneration_started.wait(2)
+        phase[0]=2
+        assert client.post(path+'/retry').status_code==200
+        wait_for(client,lambda: client.get('/api/status').json()['errors'])
+        retained=client.get(path).json()
+        assert retained['content']['revision_id']==initial['content']['revision_id']
+        assert retained['theses']['result']==accepted
+        assert retained['filter']['result']==initial['filter']['result']
+        assert len([r for r in calls if r.url.path=='/v1/chat/completions'])==(2 if filtered else 1)
+        assert retained['content']['text']==initial['content']['text']
+        phase[0]=3
+        block_ai[0]=True
+        try:
+            assert client.post(path+'/retry').status_code==200
+            changed=wait_for(client,lambda: v if (v:=client.get(path).json())['content']['revision_id']!=initial['content']['revision_id'] else None)
+            assert 'Actual edit' in changed['content']['text']
+            assert changed['content']['changed'] is True
+            assert changed['theses']['result'] is None
+        finally:
+            block_ai[0]=False
+        regenerated=wait_for(client,lambda: client.get(path).json()['theses']['result'])
+        assert 'Actual edit' in regenerated['points'][0]['text']
+        if regenerating:
+            assert regeneration_finished.wait(2)
+            assert client.get(path).json()['theses']['result']==regenerated
+        completed=[r for r in calls if r.url.path=='/v1/chat/completions']
+        expected=4 if filtered else 2
+        # An explicitly requested regeneration may already have reached the
+        # external model when its cancellation races the actual source edit.
+        assert expected<=len(completed)<=expected+int(regenerating)
+
+
+
+def test_retained_theses_and_provenance_come_from_the_same_committed_bytes(tmp_path):
+    import asyncio
+    import threading
+    from tests.support.codex import CodexService
+    from tests.support.reader import wait_for
+    class HoldingCodex(CodexService):
+        hold=False
+        async def catalog(self):
+            models=await super().catalog()
+            models[0]['fast_supported']=True
+            return models
+        async def complete(self,prompt,schema,directory,choice):
+            while self.hold:
+                await asyncio.sleep(.005)
+            return await super().complete(prompt,schema,directory,choice)
+    codex=HoldingCodex()
+    fail=[False]
+    moved=threading.Event()
+    missing=[False]
+    def fault(point):
+        if fail[0] and point=='after_theses_move':
+            moved.set()
+            raise OSError('synthetic uncommitted theses')
+    def response(request):
+        if request.url.host=='api.telegra.ph':
+            return httpx.Response(503) if missing[0] else httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Saved article']}]}})
+        return httpx.Response(200,text=page([(11,'https://telegra.ph/Article')]))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,codex_client=codex,fault=fault,
+            rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        config={kind:dict(model='synthetic',reasoning_effort='low',fast=False) for kind in ('filter','theses')}
+        assert client.put('/api/v3/processors/codex',json=config).status_code==200
+        client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':'','processor':'codex'})
+        created=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web')).json()
+        client.patch('/api/v3/feeds/'+created['feed_id'],json={'public_ai':True})
+        identity=settled(client)[0]['id']
+        path='/api/v3/materials/'+identity
+        accepted=wait_for(client,lambda: client.get(path).json()['theses']['result'])
+        config['theses']['fast']=True
+        assert client.put('/api/v3/processors/codex',json=config).status_code==200
+        codex.hold=True
+        assert client.post(path+'/regenerate').status_code==200
+        missing[0]=True
+        assert client.post(path+'/retry').status_code==200
+        wait_for(client,lambda: client.get('/api/status').json()['errors'])
+        fail[0]=True
+        codex.hold=False
+        assert moved.wait(3)
+        current=client.get(path).json()['theses']['result']
+        assert current==accepted

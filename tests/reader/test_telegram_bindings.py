@@ -428,3 +428,33 @@ def test_late_discovery_cannot_complete_a_recreated_feed_job(tmp_path):
     finally:
         old_release.set()
         new_release.set()
+
+
+def test_stopped_pending_connect_cannot_commit_a_late_binding(tmp_path):
+    import asyncio
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    started, release = threading.Event(), threading.Event()
+    class LateMetadata(Accounts):
+        async def info(self, account, peer):
+            started.set()
+            while not release.is_set():
+                try:
+                    await asyncio.sleep(.005)
+                except asyncio.CancelledError:
+                    pass
+            return await super().info(account, peer)
+    with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=LateMetadata()),headers=HEADERS) as client:
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        with ThreadPoolExecutor(1) as pool:
+            connecting=pool.submit(client.post,'/api/v3/telegram/connect',json=dict(source_locator='@late',folder='Late',access={'kind':'client','profile':'personal'}))
+            try:
+                assert started.wait(2)
+                assert client.post('/api/v3/stop').status_code==200
+            finally:
+                release.set()
+            result=connecting.result(3)
+        assert result.status_code==409,result.text
+        assert client.get('/api/v3/status').json()['runtime_state']=='stopped'
+    with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=Accounts()),headers=HEADERS) as client:
+        assert client.get('/api/v3/subscriptions').json()['feeds']==[]
