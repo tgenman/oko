@@ -34,6 +34,7 @@
     "api:lint": "node --import tsx scripts/generate-api.mts validate",
     "api:docs": "node --import tsx scripts/generate-api.mts docs",
     "typecheck:browser": "tsc -p tsconfig.browser-tests.json",
-    "typecheck:tooling": "tsc -p tsconfig.tooling.json"
+    "typecheck:tooling": "tsc -p tsconfig.tooling.json",
+    "prototype:news-menu": "vite --config frontend/src/reading/news-menu.prototype.config.ts"
   }
 }
