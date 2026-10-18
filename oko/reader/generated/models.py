@@ -200,6 +200,11 @@ class CompleteContent(WireModel):
     state: Literal["complete"]
 
 
+class CompleteFeedRequest(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    token: StrictStr = Field(..., max_length=100, min_length=1)
+
+
 class CompleteFolderRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     token: StrictStr = Field(..., max_length=100, min_length=1)
@@ -1205,6 +1210,12 @@ class CommandAcknowledgement(WireModel):
     ok: Annotated[Literal[True], BeforeValidator(boolean_constant)]
 
 
+class CommandCompleteFeed(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    feed_id: FeedId
+    operation: Literal["complete_feed"]
+
+
 class CommandCompleteFolder(WireModel):
     model_config = ConfigDict(extra="forbid")
     folder_id: FolderId
@@ -2127,6 +2138,7 @@ class CommandContext(
         | CommandHistoryPause
         | CommandHistoryCancel
         | CommandCollect
+        | CommandCompleteFeed
         | CommandCompleteFolder
         | CommandStop
         | CommandRegenerate
@@ -2156,6 +2168,7 @@ class CommandContext(
         | CommandHistoryPause
         | CommandHistoryCancel
         | CommandCollect
+        | CommandCompleteFeed
         | CommandCompleteFolder
         | CommandStop
         | CommandRegenerate

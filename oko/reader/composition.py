@@ -110,6 +110,12 @@ class ReadingComposition:
         members = tuple((row['id'], row['members']) for row in rows if feeds.get(row['feed_id']) == folder)
         return FolderContents(members, tuple(sorted(card['id'] for card in owned)))
 
+    def feed_contents(self, feed: str) -> FolderContents:
+        self._store.subscriptions.check_owner('feed', feed)
+        rows = self._store.db.execute('SELECT id,members FROM items WHERE viewed=0 AND feed_id=? ORDER BY id', (feed,)).fetchall()
+        return FolderContents(tuple((row['id'], row['members']) for row in rows),
+                              tuple(sorted(card['id'] for card in self.cards(True, feed=feed))))
+
     def material(self, identity: str) -> dict[str, Any] | None:
         return self._store.material(identity)
 

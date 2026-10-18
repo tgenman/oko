@@ -70,7 +70,7 @@ class Runtime:
         self._sources: dict[str, Source] = {source_feed: source} if source else {}
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
-        self._completions: dict[str, tuple[str, FolderContents | None]] = {}
+        self._completions: dict[str, tuple[tuple[str, str], FolderContents | None]] = {}
         self._feed_checks: dict[str, str] = {}
         self._stop_requested = asyncio.Event()
         self._closed = False
@@ -363,9 +363,9 @@ class Runtime:
                 self.diagnostics.forget_materials(members)
             await self._drain_deletions(current)
 
-    def _completion_preview(self, folder: str, current: Store) -> dict[str, Any]:
+    def _completion_preview(self, folder: str, current: Store, scope: Literal['folder', 'feed'] = 'folder') -> dict[str, Any]:
         try:
-            contents = current.folder_contents(folder)
+            contents = current.reading.feed_contents(folder) if scope == 'feed' else current.folder_contents(folder)
         except LookupError as error:
             record_caught('runtime._completion_preview')
             raise ActionError('missing', str(error)) from None
@@ -374,32 +374,39 @@ class Runtime:
         # Bound their lifetime to this run and their number to 128 previews.
         if len(self._completions) >= 128:
             del self._completions[next(iter(self._completions))]
-        self._completions[token] = (folder, contents)
+        self._completions[token] = ((scope, folder), contents)
         return dict(token=token, cards=len(contents.cards), originals=len(contents.members))
 
     async def preview_completion(self, folder: str) -> dict[str, Any]:
         async with self._actions:
             return self._completion_preview(folder, self.require_store())
 
-    async def complete_folder(self, folder: str, token: str) -> None:
+    async def preview_feed_completion(self, feed: str) -> dict[str, Any]:
+        async with self._actions:
+            return self._completion_preview(feed, self.require_store(), 'feed')
+
+    async def complete_feed(self, feed: str, token: str) -> None:
+        await self.complete_folder(feed, token, scope='feed')
+
+    async def complete_folder(self, folder: str, token: str, *, scope: Literal['folder', 'feed'] = 'folder') -> None:
         async with self._actions:
             current = self.require_store()
             saved = self._completions.get(token)
-            if not saved or saved[0] != folder:
-                raise ActionError('conflict', dict(message='Подтверждение устарело. Проверьте количество снова.', preview=self._completion_preview(folder, current)))
+            if not saved or saved[0] != (scope, folder):
+                raise ActionError('conflict', dict(message='Подтверждение устарело. Проверьте количество снова.', preview=self._completion_preview(folder, current, scope)))
             contents = saved[1]
             if contents is not None:
                 try:
-                    latest = current.folder_contents(folder)
+                    latest = current.reading.feed_contents(folder) if scope == 'feed' else current.folder_contents(folder)
                 except LookupError as error:
                     record_caught('runtime.complete_folder')
                     raise ActionError('missing', str(error)) from None
                 if latest != contents:
-                    raise ActionError('conflict', dict(message='Состав папки изменился. Подтвердите новое количество.', preview=self._completion_preview(folder, current)))
+                    raise ActionError('conflict', dict(message='Состав фида изменился. Подтвердите новое количество.' if scope == 'feed' else 'Состав папки изменился. Подтвердите новое количество.', preview=self._completion_preview(folder, current, scope)))
                 current.viewed_set([identity for identity, _ in contents.members])
                 if self.diagnostics:
                     self.diagnostics.forget_materials({identity for identity, _ in contents.members} | set(contents.cards))
-                self._completions[token] = (folder, None)
+                self._completions[token] = ((scope, folder), None)
             await self._drain_deletions(current)
             if current.status()['deleting']:
                 raise ActionError('unavailable', 'Удаление не завершено. Око повторит попытку; ошибка видна в статусе.')

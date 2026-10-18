@@ -7,6 +7,7 @@ import {createTransport} from './api/transport';
 import {createStatusPanel} from './status/panel';
 import {workText} from './status/recovery';
 import {createReaderActions} from './status/actions';
+import {createFeedActions} from './reading/feed-actions';
 import {createFolderActions} from './reading/folder-actions';
 import {createReaderApi} from './api/reader';
 import {createReaderSession} from './reader-session';
@@ -63,7 +64,8 @@ statusPanel = createStatusPanel({debug, actions,resourceName:resource=>resource.
     }
     refresh();
   }, onRefresh:()=>refresh()});
-const tree = createReadingTree({readerApi,fetchMedia:transport.media,onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
+const feedActions=createFeedActions({readerApi,isStopped:()=>stopped,onSettings:(id,trigger)=>{void menus.openFeed(id,trigger);},onChanged:()=>{contentEpoch++;void refresh();},onCompleted:feed=>{contentEpoch++;session.post({kind:'feed-viewed',feed});},onMove:id=>menus.feedMoved(id),removeFeed:id=>menus.removeFeed(id)});
+const tree = createReadingTree({readerApi,fetchMedia:transport.media,onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedMenu:(feed,folders,x,y,trigger)=>feedActions.open(feed,folders,x,y,trigger),onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
 function stopUi(message:string) {
   session.dispose();
   menus.stop();
@@ -78,6 +80,7 @@ function stopUi(message:string) {
   button('collect').disabled = true;
   button('folder-viewed').disabled = true;
   folderActions.stop();
+  feedActions.stop();
 
   void debug.refresh();
 }
@@ -85,7 +88,7 @@ function readerMessage(data:ReaderMessage) {
   if (data === 'stop') stopUi('Око остановлено');
   else if (typeof data==='object') {
     contentEpoch++;
-    opened.folderCompleted(data.folder);
+    if(data.kind==='folder-viewed')opened.folderCompleted(data.folder);
     refresh();
   } else {
     contentEpoch++;
@@ -116,6 +119,7 @@ async function updateReader() {
     const navigation = await tree.load();
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     readingCatalog = navigation;
+    feedActions.update(navigation);
     if (tree.update(navigation, state.sources || [])) return;
     list.setArea(tree.selection, navigation);
     if (state.runtime_state==='unavailable') { opened.clear(); list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Хранилище недоступно'); return; }

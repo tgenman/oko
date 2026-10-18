@@ -63,16 +63,17 @@ export class MenusOwner {
     if(this.selected===path)this.selected=null;
     if(this.currentPath===path){this.navigationRevision++;this.operations.invalidate();this.currentPath=null;this.page='home';this.stack=[];for(const callback of this.onPageChange)callback('owner-change');}
   }
-  async removeFeed(feed:{id:string}){
+  async removeFeed(feed:{id:string},propagate=false){
     if(this.deletions.has(feed.id)||this.stopped)return;
     const context=this.operations.capture();this.deletions.add(feed.id);this.changed();
     let result:RemoveFeedResult;
     try{result=(await this.api.command({operation:'remove_feed',feed_id:feed.id},headers=>settings.removeFeed({headers,client:this.api.client,path:{identity:feed.id}}))).data;}
-    catch(error){this.deletions.delete(feed.id);context.commit(()=>{this.settingsMessage=message(error);});this.changed();return;}
+    catch(error){this.deletions.delete(feed.id);context.commit(()=>{this.settingsMessage=message(error);});this.changed();if(propagate)throw error;return;}
     if(result.state==='deleted'){context.commit(()=>{this.settingsMessage='Фид удалён';});this.finishRemoval(feed.id);}
     else context.commit(()=>{this.settingsMessage='Фид удаляется. Локальная очистка продолжится после перезапуска.';});
     this.onChanged();this.changed();
     try{await this.refresh();}catch(error){context.commit(()=>{this.settingsMessage='Удаление принято; не удалось обновить каталог: '+message(error);this.changed();});}
+    return result;
   }
   setHistory(id:string,history:HistoryState){this.invalidateStatus();this.histories=[...(this.histories||[]).filter(h=>h.feed_id!==id),{history,feed_id:id}];}
   getHistory(feed:{id:string}){const current=this.histories.find(h=>h.feed_id===feed.id)?.history;const saved=this.values.get('feed/'+feed.id);return current||(saved?.scope==='feed'?saved.feed.history:undefined);}

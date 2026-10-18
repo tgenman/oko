@@ -21,7 +21,7 @@ def context_record(context: wire.CommandContext) -> dict[str, object]:
     if isinstance(value, wire.CommandSettingsPatch):
         target = value.target.root
         objects = [{'kind': 'settings', 'id': target.owner if isinstance(target.owner, str) else target.owner.root}]
-    elif isinstance(value, (wire.CommandFeedPatch, wire.CommandRemoveFeed, wire.CommandHistoryPause, wire.CommandHistoryStart, wire.CommandHistoryCancel)):
+    elif isinstance(value, (wire.CommandCompleteFeed, wire.CommandFeedPatch, wire.CommandRemoveFeed, wire.CommandHistoryPause, wire.CommandHistoryStart, wire.CommandHistoryCancel)):
         objects = [{'kind':'feed', 'id':value.feed_id.root}]
     elif isinstance(value, (wire.CommandCodexSave, wire.CommandCodexCheck, wire.CommandProcessorSave, wire.CommandProcessorCheck)):
         objects = [{'kind': 'settings', 'id': 'global'}]
@@ -131,6 +131,9 @@ def action_error(error: ActionError, context: wire.CommandContext, identity: str
     if stopped:
         return ApiError(409, wire.ErrorEnvelope(wire.RuntimeStoppedError(code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=command_id)))
     value = context.root
+    if error.kind == 'missing' and isinstance(value, wire.CommandCompleteFeed):
+        resource = wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=value.feed_id))
+        return ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), details=wire.ResourceNotFoundErrorDetails(resource=resource), diagnostic_id=None, command_id=command_id)))
     if error.kind == 'missing' and isinstance(value, (wire.CommandViewed, wire.CommandRegenerate, wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandRestoreFilter, wire.CommandCompleteFolder)):
         resource = wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=value.folder_id) if isinstance(value, wire.CommandCompleteFolder) else wire.MaterialResource(kind='material', material_id=value.material_id))
         return ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), details=wire.ResourceNotFoundErrorDetails(resource=resource), diagnostic_id=None, command_id=command_id)))

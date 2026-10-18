@@ -97,6 +97,7 @@ def test_delete_reserves_claim_until_restart_cleanup_then_readd_has_fresh_id(tmp
             time.sleep(.02)
         assert not client.get('/api/v3/subscriptions').json()['feeds']
         assert not (tmp_path/'content'/material).exists()
+        assert client.get('/api/v3/telegram/profiles').json()['personal']['configuration_ref'] == 'one'
         added = client.post('/api/v3/telegram/connect', json=body)
         assert added.status_code == 200, added.text
         assert added.json()['feed_id'] != feed
