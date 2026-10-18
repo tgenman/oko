@@ -1,3 +1,4 @@
+import {createNewsActions} from './reading/news-actions';
 import {createMaterialList} from './reading/list';
 import {createReadingTree} from './reading/tree';
 import {createMenus} from './settings/menus';
@@ -47,7 +48,8 @@ const opened = createOpenedMaterial({
   onViewed: id => { contentEpoch++; debug.forgetMaterials([id]); statusPanel.forgetMaterials([id]); opened.viewed(id); list.removed(id); session.post(id); refresh(); },
   onChanged: changed => { if (changed) contentEpoch++; refresh(); },
 });
-const list = createMaterialList({readerApi,onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
+const list = createMaterialList({readerApi,onContext:(card,context,x,y,trigger)=>newsActions.open(card,context,x,y,trigger),onOpen: card => opened.open(card), onRetry: () => refresh(), fetchMedia: transport.media});
+const newsActions=createNewsActions({readerApi,isStopped:()=>stopped,onViewed:id=>{contentEpoch++;debug.forgetMaterials([id]);statusPanel.forgetMaterials([id]);opened.viewed(id);list.removed(id);session.post(id);},onRefresh:()=>{contentEpoch++;void refresh();},onPreview:ids=>list.preview(ids)});
 const folderActions = createFolderActions({readerApi,getFolder:()=>folderId,isStopped:()=>stopped,onRefresh:refresh,onCompleted:folder=>{contentEpoch++;opened.folderCompleted(folder);if(folderId===folder)list.clear();session.post({kind:'folder-viewed',folder});}});
 list.bindCommands(folderActions);
 const menus = createMenus({api, readerApi, onChanged: () => {contentEpoch++; refresh();}});
@@ -65,7 +67,7 @@ statusPanel = createStatusPanel({debug, actions,resourceName:resource=>resource.
     refresh();
   }, onRefresh:()=>refresh()});
 const feedActions=createFeedActions({readerApi,isStopped:()=>stopped,onSettings:(id,trigger)=>{void menus.openFeed(id,trigger);},onChanged:()=>{contentEpoch++;void refresh();},onCompleted:feed=>{contentEpoch++;session.post({kind:'feed-viewed',feed});},onMove:id=>menus.feedMoved(id),removeFeed:id=>menus.removeFeed(id)});
-const tree = createReadingTree({readerApi,fetchMedia:transport.media,onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedMenu:(feed,folders,x,y,trigger)=>feedActions.open(feed,folders,x,y,trigger),onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
+const tree = createReadingTree({readerApi,fetchMedia:transport.media,onSelect: selection => {newsActions.close(false);folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedMenu:(feed,folders,x,y,trigger)=>feedActions.open(feed,folders,x,y,trigger),onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
 function stopUi(message:string) {
   session.dispose();
   menus.stop();
@@ -81,6 +83,7 @@ function stopUi(message:string) {
   button('folder-viewed').disabled = true;
   folderActions.stop();
   feedActions.stop();
+  newsActions.stop();
 
   void debug.refresh();
 }
@@ -131,6 +134,7 @@ async function updateReader() {
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
     opened.reconcile(cards);
     list.update(cards, opened.selection?.id);
+    newsActions.update(list.context());
 
   } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) {opened.clear();statusPanel.unavailable();} list.error(errorMessage(error)); progress(statusAvailable?'Чтение временно недоступно':'Нет связи с Око'); } }
 }
@@ -149,10 +153,10 @@ function renderCommands(){for(const [id,label,run] of [
 }}
 renderCommands();
 document.querySelector('.reader-toolbar-scroll')!.addEventListener('focusin',event=>{const control=event.target instanceof Element?event.target.closest('button'):null;control?.scrollIntoView({block:'nearest',inline:'nearest'});});
-byId('sort').onchange = () => { contentEpoch++; refresh(); };
+byId('sort').onchange = () => { newsActions.close(false); contentEpoch++; refresh(); };
 const session = createReaderSession({api:readerApi,onRefresh:updateReader,onMessage:readerMessage,
   onUnavailable:error=>{reportError(error,'Интерфейс Око');if(!stopped){opened.clear();statusPanel.unavailable();list.error(errorMessage(error));progress('Нет связи с Око');}},
-  onClosed:()=>{contentEpoch++;opened.clear();list.clear();},onCloseError:error=>reportError(error,'Закрытие вкладки')});
+  onClosed:()=>{newsActions.close(false);contentEpoch++;opened.clear();list.clear();},onCloseError:error=>reportError(error,'Закрытие вкладки')});
 session.start();
 
-byId('show-hidden').onchange = () => { contentEpoch++; opened.clear(); refresh(); };
+byId('show-hidden').onchange = () => { newsActions.close(false); contentEpoch++; opened.clear(); refresh(); };
