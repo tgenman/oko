@@ -59,9 +59,9 @@ def test_target_registry_and_examples_are_complete():
     spec = contract()
     operations = [(path, method, op) for path, methods in spec['paths'].items() for method, op in methods.items() if method in {'get', 'post', 'put', 'patch', 'delete'}]
     assert spec['info']['version'] == '3.0.0'
-    assert len(operations) == 50
+    assert len(operations) == 51
     assert all(path.startswith('/api/v3/') for path, _, _ in operations)
-    assert len({op['operationId'] for _, _, op in operations}) == 50
+    assert len({op['operationId'] for _, _, op in operations}) == 51
     for path, method, operation in operations:
         assert operation['description'], (path, method)
         assert '422' in operation['responses'], (path, method)

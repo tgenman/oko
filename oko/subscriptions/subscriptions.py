@@ -48,7 +48,7 @@ class FeedPatch(BaseModel):
 
 
 DEFAULTS: dict[str, Any] = dict(
-    originals=True, theses=True, prompt_theses='Выдели основные тезисы публикации.',
+    originals=True, theses=False, prompt_theses='Выдели основные тезисы публикации.',
     prompt_filters='', processor='codex')
 
 
@@ -133,6 +133,9 @@ class Subscriptions:
         for row in self.db.execute(query, (identity,) if identity is not None else ()):
             feed = dict(row)
             feed.pop('telegram_topic', None)
+            avatar = self.db.execute('SELECT digest FROM telegram_avatars WHERE feed=?', (feed['id'],)).fetchone() if feed['kind'] == 'telegram' else None
+            if avatar:
+                feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar[0]
             feed['original_urls'] = json.loads(feed['original_urls'])
             binding = self.telegram.binding(feed['id'])
             if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
@@ -170,9 +173,9 @@ class Subscriptions:
         with self.db:
             folder = key('folder:' + body.folder)
             self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (folder, body.folder, len(self.folders())))
-            self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport)
-                            VALUES (?,?,?,?,?,?,?,?)''',
-                            (key(identity), identity, title, kind, folder, json.dumps([body.url]), connection, kind))
+            self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,public_ai)
+                            VALUES (?,?,?,?,?,?,?,?,?)''',
+                            (key(identity), identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
             self.history.configure(key(identity), body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
 
@@ -189,6 +192,7 @@ class Subscriptions:
 
     def effective(self, scope: str, owner: str) -> dict[str, Any]:
         self.check_owner(scope, owner)
+        feed = self.feeds(owner)[0] if scope == 'feed' else None
         chain = [('oko', 'global')]
         if scope == 'feed':
             folder = self.db.execute('SELECT folder_id FROM feeds WHERE id=?', (owner,)).fetchone()[0]
@@ -196,6 +200,8 @@ class Subscriptions:
         if scope != 'oko':
             chain.append((scope, owner))
         values = {field: dict(value=value, scope='default', owner=None) for field, value in DEFAULTS.items()}
+        if feed is not None and feed['kind'] == 'youtube':
+            values['theses']['value'] = True
         overrides = {}
         for level, identity in chain:
             for row in self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (level, identity)):
@@ -207,7 +213,8 @@ class Subscriptions:
                     overrides[row['field']] = value
         result = dict(effective=values, overrides=overrides)
         if scope == 'feed':
-            result['feed'] = self.feeds(owner)[0]
+            assert feed is not None
+            result['feed'] = feed
         return result
 
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> dict[str, Any]:

@@ -183,6 +183,7 @@ def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         configure_codex(client)
         feed = subscribe(client)
+        client.patch('/api/v3/feeds/'+feed,json={'public_ai':False})
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
         material = wait(client, lambda m: m['theses']['diagnostic_message'])
@@ -340,7 +341,7 @@ def test_default_theses_request_youtube_captions_without_high_importance(tmp_pat
         settings = client.get('/api/v3/settings/feed/' + feed).json()
         assert settings['effective']['theses']['value'] is True
         assert settings['feed']['importance'] == 'normal'
-        assert settings['feed']['public_ai'] is False
+        assert settings['feed']['public_ai'] is True
         presence(client, 'reader')
         material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['content']['loading'])
         assert material['content']['text'] == 'Модель принимает только текст. Источники сохраняются точно.'

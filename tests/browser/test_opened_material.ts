@@ -206,3 +206,20 @@ test('title opens original in a new tab and resets for other cards', async () =>
     assert.deepEqual(r.errors, []);
   } finally { await r.close(); }
 });
+
+test('background processing updates keep long material visible and preserve scroll while waiting', async () => {
+ const r=await reader();try {
+  await r.start([material('long',{text:'Длинный текст\n'.repeat(500)})]);
+  await r.page.locator('[data-card="long"]').click();
+  await expect(r.page.locator('#text')).toContainText('Длинный текст');
+  await r.page.locator('article').evaluate(node=>node.scrollTop=700);
+  const before=await r.page.locator('article').evaluate(node=>node.scrollTop);expect(before).toBeGreaterThan(100);
+  await r.page.evaluate(()=>{const t=readerTransport;t.held.set('/api/v3/materials/long',true);t.replies.get('/api/v3/cards')!.body![0].ai={status:'pending',error:'Запрещена публичная AI-обработка'};});
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/materials/long'));
+  await expect(r.page.locator('#text')).toContainText('Длинный текст');
+  expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(before);
+  await r.page.evaluate(()=>readerTransport.release('/api/v3/materials/long',readerTransport.replies.get('/api/v3/materials/long')!.body));
+  await expect(r.page.locator('#text')).toContainText('Длинный текст');
+  expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(before);
+ }finally{await r.close();}
+});

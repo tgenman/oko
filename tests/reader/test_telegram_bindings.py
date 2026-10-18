@@ -459,3 +459,18 @@ def test_stopped_pending_connect_cannot_commit_a_late_binding(tmp_path):
         assert client.get('/api/v3/status').json()['runtime_state']=='stopped'
     with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=Accounts()),headers=HEADERS) as client:
         assert client.get('/api/v3/subscriptions').json()['feeds']==[]
+
+
+def test_telegram_theses_default_is_off_and_explicit_inheritance_is_preserved(tmp_path):
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()), headers=HEADERS) as client:
+        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
+        response = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture',folder='Telegram',access={'kind':'client','profile':'personal'}))
+        assert response.status_code == 200, response.text
+        feed = response.json()['feed_id']
+        settings = client.get('/api/v3/settings/feed/'+feed).json()
+        assert settings['effective']['theses']['value'] is False
+        assert settings['effective']['theses']['origin']['scope'] == 'default'
+        client.patch('/api/v3/settings/feed/'+feed, json={'theses': True})
+        assert client.get('/api/v3/settings/feed/'+feed).json()['effective']['theses']['value'] is True
+        client.patch('/api/v3/settings/feed/'+feed, json={'theses': None})
+        assert client.get('/api/v3/settings/feed/'+feed).json()['effective']['theses']['value'] is False

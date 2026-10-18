@@ -50,6 +50,7 @@ def test_model_problem_history_survives_restart_and_expires_from_completion(tmp_
     wall = [1800000000.0]
     options = dict(token='test', codex_client=CodexService(), wall_clock=lambda: wall[0])
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':True})
         first = client.get('/api/v3/status').json()['problems']['current'][0]
         wall[0] += 60
         assert client.get('/api/v3/status').json()['problems']['current'][0]['created_at'] == first['created_at']
@@ -68,6 +69,7 @@ def test_model_problem_history_survives_restart_and_expires_from_completion(tmp_
 
 def test_missing_model_is_one_current_problem_and_settings_fix_it(tmp_path):
     with TestClient(create_app(tmp_path, token='test', codex_client=CodexService()), headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':True})
         response = client.get('/api/v3/status')
         assert response.status_code == 200
         problems = response.json()['problems']

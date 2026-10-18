@@ -258,3 +258,22 @@ def test_feed_settings_preserve_configured_history_on_read_and_patch(tmp_path):
         response = client.patch(path, json={'theses': False})
         assert response.status_code == 200, response.text
         assert response.json()['feed']['history']['selection'] == history['selection']
+
+
+def test_general_theses_off_youtube_defaults_on_with_public_ai_and_explicit_denial_survives(tmp_path):
+    from tests.support.subscriptions import add_source
+    import httpx
+    from tests.support.youtube import feed_xml
+    options = dict(token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(lambda request:httpx.Response(200,text=feed_xml())))
+    with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
+        assert client.get('/api/v3/settings/oko/global').json()['effective']['theses']['value'] is False
+        feed = add_source(client,'https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw')
+        path = '/api/v3/settings/feed/'+feed['id']
+        assert feed['public_ai'] is True
+        assert client.get(path).json()['effective']['theses'] == {'value':True,'origin':{'scope':'default'}}
+        client.patch('/api/v3/settings/folder/'+feed['folder_id'],json={'theses':False})
+        assert client.get(path).json()['effective']['theses']['value'] is False
+        client.patch('/api/v3/feeds/'+feed['id'],json={'public_ai':False})
+    with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
+        assert client.get(path).json()['effective']['theses']['value'] is False
+        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['public_ai'] is False

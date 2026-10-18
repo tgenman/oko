@@ -182,7 +182,7 @@ def work(jobs: list['WorkSummary']) -> list[wire.WorkEntry]:
         if job.status=='pending' and job.error_code:
             code=producer_code(job.error_code,job.kind)
             reason: Literal['processor_not_configured','public_ai_not_allowed','profile_unavailable','retry_scheduled'] = 'processor_not_configured' if code=='processor_not_configured' else 'public_ai_not_allowed' if code=='public_ai_not_allowed' else 'profile_unavailable' if code in ('profile_not_configured','profile_unavailable','account_identity_mismatch') else 'retry_scheduled'
-            result.append(wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason(reason),retry_at=timestamp(job.retry_at) if job.retry_at else None)))
+            result.append(wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason(reason),retry_at=timestamp(job.retry_at) if job.retry_at and reason != 'public_ai_not_allowed' else None)))
         elif job.kind in ('theses','filter'):
             result.append(wire.WorkEntry(wire.WorkProcessing(phase='processing',operation='filter' if job.kind=='filter' else 'theses',progress=progress)))
         elif job.kind in ('delete','feed-delete'):

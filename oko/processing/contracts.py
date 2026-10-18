@@ -98,4 +98,5 @@ def processing_instruction(request: ProcessingRequest) -> str:
 class ProcessingError(Exception):
     def __init__(self, label: str, *, code: str = 'processing-failed') -> None:
         self.label, self.code = label, code
+        self.diagnostic_skip = code == 'ai-permission'
         super().__init__(label)

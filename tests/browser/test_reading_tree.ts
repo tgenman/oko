@@ -144,3 +144,26 @@ test('refresh keeps tree scroll and pointer resizing uses saved width', async ()
   await r.page.reload(); await expect(r.page.locator('#sidebar-resize')).toHaveAttribute('aria-valuenow','340');
  } finally {await r.close();}
 });
+
+test('Telegram avatar is small, reused across polling and replaced by icon when removed', async () => {
+ const r=await reader();try {
+  const url='/api/v3/feeds/feed/avatar/'+'a'.repeat(64);
+  await r.start([material('one')]);
+  await r.page.evaluate(url=>{const t=readerTransport;
+   t.replies.set('/api/v3/reading-composition',{body:{count:1,folders:[{id:'f',title:'Каналы',position:0,count:1}],feeds:[{count:1,feed:{id:'feed',title:'Канал с аватаром',folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent',legacy_since:null},avatar_url:url}}]}});
+   t.replies.set(url,{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
+  },url);
+  const avatar=r.page.locator('[data-feed="feed"] img');
+  await expect(avatar).toBeVisible();
+  await expect(avatar).toHaveJSProperty('naturalWidth',1);
+  expect((await avatar.boundingBox())!.width).toBe(24);
+  const before=await r.page.evaluate(url=>readerTransport.requests.filter(r=>r.url===url).length,url);
+  await r.page.waitForTimeout(1100);
+  expect(await r.page.evaluate(url=>readerTransport.requests.filter(r=>r.url===url).length,url)).toBe(before);
+  await r.page.screenshot({path:artifactPath('telegram-avatar.png')});
+  await r.page.evaluate(()=>{const body=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=body.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object'&&'avatar_url' in entry.feed)delete entry.feed.avatar_url;});
+  await expect(avatar).toHaveCount(0);
+  await expect(r.page.locator('[data-feed="feed"] .source-icon.telegram')).toBeVisible();
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});
