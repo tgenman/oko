@@ -46,7 +46,7 @@ test('reading tree has separate trailing disclosure controls and usable two-line
   try {
     await r.page.setViewportSize({width:1280,height:900});
     await r.start([]);
-    await r.page.evaluate(() => readerTransport.replies.set('/api/v3/reading-composition',{body:{count:79,folders:[{id:'f',title:'Наука',count:52},{id:'p',title:'Физика',count:27}],feeds:[{id:'long',title:'Kurzgesagt — In a Nutshell, научный канал',kind:'youtube',folder_id:'f',count:26}]}}));
+    await r.page.evaluate(() => readerTransport.replies.set('/api/v3/reading-composition',{body:{count:79,folders:[{id:'f',title:'Наука',count:52},{id:'p',title:'Физика',count:27}],feeds:[{id:'long',title:'Kurzgesagt — In a Nutshell, научный канал',kind:'youtube',folder_id:'f',count:26},{id:'physics',title:'Физика',kind:'rss',folder_id:'p',count:27}]}}));
     const folder = r.page.locator('#folders [data-folder="f"]');
     await expect(folder).toContainText('Наука');
     const toggle = r.page.locator('#folders').getByRole('button',{name:'Свернуть Наука',exact:true});

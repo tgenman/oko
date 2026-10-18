@@ -33,3 +33,43 @@ def test_navigation_counts_loading_publications_and_empty_feeds(tmp_path):
         wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 3)
         assert all(not (card['availability'] == 'available') for card in client.get('/api/v3/cards').json())
         assert client.get('/api/v3/reading-composition').json()['count'] == 3
+        assert client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'] is True
+
+
+def test_completion_metadata_includes_hidden_and_survives_restart(tmp_path):
+    from tests.support.filters import FilterSource, transport, setup_filters
+    from tests.support.reader import wait_for
+    options = dict(source=FilterSource(), token='test', api_only=True, ai_transport=transport([]))
+    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
+        setup_filters(client)
+        cards = wait_for(client, lambda: (rows if len(rows := client.get('/api/v3/cards').json())==2 and all(r['filter']['attempt']['state']=='ready' for r in rows) else None))
+        for card in cards:
+            assert client.post('/api/v3/materials/'+card['id']+'/viewed').status_code == 200
+        nav = client.get('/api/v3/reading-composition').json()
+        assert nav['feeds'][0]['count'] == 0
+        assert nav['feeds'][0]['has_unviewed'] is True
+        assert len(client.get('/api/v3/cards?show_hidden=true').json()) == 1
+        preview = client.post('/api/v3/folders/demo/completion/preview').json()
+        assert client.post('/api/v3/folders/demo/completion',json={'token':preview['token']}).status_code == 200
+        assert client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'] is False
+        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == 'demo'
+    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
+        assert client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'] is False
+
+
+def test_new_arrival_makes_completed_feed_unviewed_again(tmp_path):
+    import httpx
+    from tests.support.rss import rss, import_feed, wait_cards as rss_cards
+    from tests.support.reader import wait_for
+    current = [rss()]
+    def respond(request):
+        return httpx.Response(200,text=current[0] if request.url.path=='/feed' else '<article>Материал</article>')
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(respond)),headers=HEADERS) as client:
+        feed = import_feed(client)['id']
+        first = rss_cards(client,1)[0]
+        client.post('/api/v3/materials/'+first['id']+'/viewed')
+        assert client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'] is False
+        current[0] = rss(guid='new',url='https://source.test/new')
+        client.post('/api/v3/collect')
+        wait_for(client,lambda: client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'])
+        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == feed

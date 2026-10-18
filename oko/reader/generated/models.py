@@ -3346,6 +3346,10 @@ class NavigationFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     count: StrictInt = Field(..., ge=0, le=9007199254740991)
     feed: SubscriptionFeed
+    has_unviewed: StrictBool = Field(
+        ...,
+        description="True while any known publication in this feed is not viewed in Oko, including hidden, loading and unavailable publications. Independent of the visible count and Telegram read state.",
+    )
 
 
 class PendingReadableMaterial(WireModel):

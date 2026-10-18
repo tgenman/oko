@@ -91,6 +91,7 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
    readerTransport.replies.set('/api/v3/reading-composition',{body:{count:45,folders:[{id:'f',title:'Наука',count:45},{id:'empty',title:'Пустая',count:0}],feeds:[{id:'b',title:'Бета',kind:'telegram',folder_id:'f',count:20},{id:'a',title:'Альфа — очень длинное название синтетического YouTube-канала',kind:'youtube',folder_id:'f',count:25},{id:'c',title:'Вести',kind:'rss',folder_id:'f',count:0}]}});
   });
   await expect(r.page.locator('#all-folders .tree-count')).toHaveText('45');
+  await r.page.locator('#read-feeds-toggle').click();
   await expect(r.page.locator('[data-folder="empty"] .tree-count')).toHaveText('');
   await expect(r.page.locator('[data-feed]')).toHaveCount(3);
   expect(await r.page.locator('[data-feed]').evaluateAll(ns=>ns.map(n=>n.dataset.feed))).toEqual(['a','b','c']);
@@ -150,7 +151,7 @@ test('Telegram avatar is small, reused across polling and replaced by icon when 
   const url='/api/v3/feeds/feed/avatar/'+'a'.repeat(64);
   await r.start([material('one')]);
   await r.page.evaluate(url=>{const t=readerTransport;
-   t.replies.set('/api/v3/reading-composition',{body:{count:1,folders:[{id:'f',title:'Каналы',position:0,count:1}],feeds:[{count:1,feed:{id:'feed',title:'Канал с аватаром',folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent',legacy_since:null},avatar_url:url}}]}});
+   t.replies.set('/api/v3/reading-composition',{body:{count:1,folders:[{id:'f',title:'Каналы',position:0,count:1}],feeds:[{count:1,has_unviewed:true,feed:{id:'feed',title:'Канал с аватаром',folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent',legacy_since:null},avatar_url:url}}]}});
    t.replies.set(url,{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
   },url);
   const avatar=r.page.locator('[data-feed="feed"] img');
@@ -164,6 +165,43 @@ test('Telegram avatar is small, reused across polling and replaced by icon when 
   await r.page.evaluate(()=>{const body=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=body.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object'&&'avatar_url' in entry.feed)delete entry.feed.avatar_url;});
   await expect(avatar).toHaveCount(0);
   await expect(r.page.locator('[data-feed="feed"] .source-icon.telegram')).toBeVisible();
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});
+
+test('completed feeds toggle persists and keeps a selected completed feed until selection changes', async () => {
+ const r=await reader();try {
+  await r.start([material('one'),material('two',{feed_id:'second'})]);
+  await r.page.evaluate(()=>{const t=readerTransport;const nav=t.replies.get('/api/v3/reading-composition')!.body!;
+   if(!('feed' in nav.feeds[0]))nav.feeds[0].has_unviewed=true;
+   nav.folders.push({id:'read-folder',title:'Архив',count:0});
+   nav.feeds.push({id:'read',title:'Прочитанный',kind:'rss',folder_id:'read-folder',count:0,has_unviewed:false},{id:'hidden',title:'Скрытые материалы',kind:'rss',folder_id:'f',count:0,has_unviewed:true});
+   t.replies.set('/api/v3/cards?sort=newest&feed=read',{body:[]});
+   t.replies.set('/api/v3/cards?sort=newest&feed=feed',{body:[t.replies.get('/api/v3/cards')!.body![0]]});
+  });
+  await expect(r.page.locator('[data-feed="hidden"]')).toBeVisible();
+  await expect(r.page.locator('[data-feed="read"]')).toHaveCount(0);
+  await expect(r.page.locator('[data-folder="read-folder"]')).toHaveCount(0);
+  const toggle=r.page.locator('#read-feeds-toggle');
+  await expect(toggle).toHaveAttribute('aria-pressed','false');
+  await toggle.click();
+  await expect(r.page.locator('[data-feed="read"]')).toBeVisible();
+  await r.page.reload();
+  await expect(toggle).toHaveAttribute('aria-pressed','true');
+  // Set up the read fixture again after reload, which recreates synthetic responses.
+  await r.page.evaluate(()=>{const t=readerTransport;const nav=t.replies.get('/api/v3/reading-composition')!.body!;
+   nav.feeds.push({id:'read',title:'Прочитанный',kind:'rss',folder_id:'f',count:0,has_unviewed:false});
+   t.replies.set('/api/v3/cards?sort=newest&feed=read',{body:[]});
+  });
+  await r.page.locator('[data-feed="read"]').click();
+  await expect(r.page.locator('#list-title')).toHaveText('Прочитанный');
+  await toggle.click();
+  await expect(r.page.locator('[data-feed="read"]')).toBeVisible();
+  await expect(r.page.locator('[data-feed="read"]')).toHaveAttribute('aria-pressed','true');
+  await r.page.locator('#all-folders').click();
+  await expect(r.page.locator('[data-feed="read"]')).toHaveCount(0);
+  await r.page.evaluate(()=>{const body=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=body.feeds.find(f=>f.id==='read');if(entry&&!('feed' in entry))entry.has_unviewed=true;});
+  await expect(r.page.locator('[data-feed="read"]')).toBeVisible();
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

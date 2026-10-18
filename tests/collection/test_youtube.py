@@ -181,10 +181,11 @@ def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
     captions, codex = Captions(), CodexService()
     kwargs = dict(token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, codex_client=codex)
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':False})
         configure_codex(client)
         feed = subscribe(client)
-        client.patch('/api/v3/feeds/'+feed,json={'public_ai':False})
-        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
+        client.patch('/api/v3/feeds/'+feed,json={'public_ai':False,'importance':'high'})
+        client.patch('/api/v3/settings/oko/global',json={'theses':True})
         presence(client, 'reader')
         material = wait(client, lambda m: m['theses']['diagnostic_message'])
         assert 'Запрещена публичная' in material['theses']['diagnostic_message']

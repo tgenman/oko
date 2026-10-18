@@ -71,3 +71,34 @@ test('unconfirmed commands for two materials remain separate and do not replay',
   await expect(page.locator('.status-problem').filter({hasText:'Результат действия пока неизвестен'})).toHaveCount(2);
   expect(sent).toBe(2);
 });
+
+test('real HTTP completed feed stays selected, then hides and can be shown without changing reading', {timeout:25000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await addSources(api,[["https://a.test/feed","Альфа","Новости"],["https://b.test/feed","Бета","Новости"]]);
+ const catalog=await api('v3/subscriptions');
+ const a=catalog.feeds.find(f=>f.title==='Альфа')!,b=catalog.feeds.find(f=>f.title==='Бета')!;
+ await page.goto(origin+'/#token='+token);
+ await expect(page.locator('#cards button')).toHaveCount(2);
+ await page.locator('[data-feed="'+a.id+'"]').click();
+ await expect(page.locator('#cards button')).toHaveCount(1);
+ await page.locator('#cards button').click();
+ await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await page.locator('#viewed').click();
+ await expect(page.locator('[data-feed="'+a.id+'"] .feed-completed-label')).toHaveText('Всё просмотрено');
+ await expect(page.locator('[data-feed="'+a.id+'"]')).toHaveAttribute('aria-pressed','true');
+ await page.locator('#all-folders').click();
+ await expect(page.locator('[data-feed="'+a.id+'"]')).toHaveCount(0);
+ await expect(page.locator('#cards button')).toHaveCount(1);
+ await page.locator('#read-feeds-toggle').click();
+ await expect(page.locator('[data-feed="'+a.id+'"]')).toBeVisible();
+ await page.locator('[data-feed="'+b.id+'"]').click();
+ await page.locator('#cards button').click();
+ await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ const text=await page.locator('#text').textContent();
+ const screenshot=artifactPath('read-feeds-toggle-a.png');await page.screenshot({path:screenshot});console.log('Completed feeds screenshot: '+screenshot);
+ await page.locator('#read-feeds-toggle').click();
+ await expect(page.locator('[data-feed="'+a.id+'"]')).toHaveCount(0);
+ await expect(page.locator('[data-feed="'+b.id+'"]')).toHaveAttribute('aria-pressed','true');
+ await expect(page.locator('#text')).toHaveText(text!);
+ expect((await api('v3/subscriptions')).feeds).toHaveLength(2);
+});

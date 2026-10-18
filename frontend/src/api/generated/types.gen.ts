@@ -1515,6 +1515,10 @@ export type MediaUrl = string;
 export type NavigationFeed = {
     count: number;
     feed: SubscriptionFeed;
+    /**
+     * True while any known publication in this feed is not viewed in Oko, including hidden, loading and unavailable publications. Independent of the visible count and Telegram read state.
+     */
+    has_unviewed: boolean;
 };
 
 export type NewFeedVerification = {
