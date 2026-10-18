@@ -261,6 +261,32 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     async def version_media(item: str, number: str, kind: Literal['images','media'], name: str) -> Response:
         return read_media(item, kind, name, positive_version(number))
 
+    @router.post('/api/v3/feeds/{feed}/completion/preview', response_model=wire.CompletionPreview)
+    async def preview_feed_completion(feed: str) -> wire.CompletionPreview:
+        try:
+            wire.FeedId(feed)
+        except ValueError:
+            raise ApiError(422, invalid('path', 'feed')) from None
+        try:
+            return preview(facts.CompletionPreview.model_validate(await runtime.preview_feed_completion(feed)))
+        except ActionError as error:
+            if error.kind == 'missing':
+                raise missing(wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(feed)))) from None
+            raise
+
+    @router.post('/api/v3/feeds/{feed}/completion', response_model=wire.CommandAcknowledgement)
+    async def complete_feed(request: Request, feed: str, body: wire.CompleteFeedRequest) -> wire.CommandAcknowledgement:
+        context = wire.CommandContext(wire.CommandCompleteFeed(operation='complete_feed', feed_id=wire.FeedId(feed)))
+        async with track(runtime, request, context):
+            try:
+                await runtime.complete_feed(feed, body.token)
+            except ActionError as error:
+                if error.kind == 'conflict':
+                    value = facts.CompletionConflict.model_validate(error.detail)
+                    raise ApiError(409, wire.ErrorEnvelope(wire.CompositionChangedError(code='composition_changed', message=value.message, details=wire.CompositionChangedErrorDetails(preview=preview(value.preview)), command_id=wire.CommandId(request.state.command_id), diagnostic_id=None))) from None
+                raise
+        return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
+
     @router.post('/api/v3/folders/{folder}/completion/preview', response_model=wire.CompletionPreview)
     async def preview_completion(folder: str) -> wire.CompletionPreview:
         try:

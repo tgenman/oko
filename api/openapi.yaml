@@ -7279,6 +7279,205 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+  /api/v3/feeds/{feed}/completion/preview:
+    post:
+      summary: Preview completion
+      operationId: preview_feed_completion
+      description: Capture the exact current reading composition into a completion
+        token without deleting or marking anything viewed. All operations require
+        bearer authorization, allowed Host and, when present, matching Origin. Structural
+        input errors are 422 before mutation. Client cancellation ends waiting, not
+        already committed effects. A lost response leaves outcome unknown; reconcile
+        tracked commands instead of replaying. Standard HTTP headers remain allowed.
+        Unknown query keys and duplicate scalar query parameters return 422.
+      tags:
+      - feeds
+      parameters:
+      - name: feed
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque
+          IDs are not parsed by clients.
+      - name: X-Oko-Action
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/CommandId'
+        description: Command correlation only, never execution idempotency. Missing
+          value generates an ID; supplied invalid value returns 422. Echoed for tracked
+          mutations.
+      responses:
+        '200':
+          description: Capture the exact current reading composition into a completion
+            token without deleting or marking anything viewed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletionPreview'
+              example:
+                token: example
+                cards_count: 0
+                publications_count: 0
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: example
+                    details:
+                      resource:
+                        kind: material
+                        material_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
   /api/v3/folders/{folder}/completion/preview:
     post:
       summary: Preview completion
@@ -7478,6 +7677,252 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+  /api/v3/feeds/{feed}/completion:
+    post:
+      summary: Complete feed
+      operationId: complete_feed
+      description: Complete the exact feed composition identified by the token,
+        including hidden publications. Composition changes return a fresh preview
+        without completing the old composition. Success deletes completed local content
+        and permits safe Telegram read acknowledgement. All operations require bearer
+        authorization, allowed Host and, when present, matching Origin. Structural
+        input errors are 422 before mutation. Client cancellation ends waiting, not
+        already committed effects. A lost response leaves outcome unknown; reconcile
+        tracked commands instead of replaying. Standard HTTP headers remain allowed.
+        Unknown query keys and duplicate scalar query parameters return 422.
+      tags:
+      - feeds
+      parameters:
+      - name: feed
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque
+          IDs are not parsed by clients.
+      - name: X-Oko-Action
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/CommandId'
+        description: Command correlation only, never execution idempotency. Missing
+          value generates an ID; supplied invalid value returns 422. Echoed for tracked
+          mutations.
+      responses:
+        '200':
+          description: Complete the exact feed composition identified by the token,
+            including hidden publications. Composition changes return a fresh preview
+            without completing the old composition. Success deletes completed local
+            content and permits safe Telegram read acknowledgement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAcknowledgement'
+              example:
+                ok: true
+                command_id: example
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: example
+                    details:
+                      resource:
+                        kind: material
+                        material_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteFolder409Errors'
+              examples:
+                CompositionChangedError:
+                  value:
+                    code: composition_changed
+                    message: example
+                    details:
+                      preview:
+                        token: example
+                        cards_count: 0
+                        publications_count: 0
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeStoppedError:
+                  value:
+                    code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteFeedRequest'
+            example:
+              token: example
   /api/v3/folders/{folder}/completion:
     post:
       summary: Complete folder
@@ -14778,6 +15223,18 @@ components:
       - token: example
         cards_count: 0
         publications_count: 0
+    CompleteFeedRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 100
+      required:
+      - token
+      additionalProperties: false
+      examples:
+      - token: example
     CompleteFolderRequest:
       type: object
       properties:
@@ -17684,6 +18141,21 @@ components:
       - operation: collect
         target:
           scope: all
+    CommandCompleteFeed:
+      type: object
+      properties:
+        operation:
+          type: string
+          const: complete_feed
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+      required:
+      - operation
+      - feed_id
+      additionalProperties: false
+      examples:
+      - operation: complete_feed
+        feed_id: example
     CommandCompleteFolder:
       type: object
       properties:
@@ -17815,6 +18287,7 @@ components:
       - $ref: '#/components/schemas/CommandHistoryPause'
       - $ref: '#/components/schemas/CommandHistoryCancel'
       - $ref: '#/components/schemas/CommandCollect'
+      - $ref: '#/components/schemas/CommandCompleteFeed'
       - $ref: '#/components/schemas/CommandCompleteFolder'
       - $ref: '#/components/schemas/CommandStop'
       - $ref: '#/components/schemas/CommandRegenerate'
@@ -17843,6 +18316,7 @@ components:
           history_pause: '#/components/schemas/CommandHistoryPause'
           history_cancel: '#/components/schemas/CommandHistoryCancel'
           collect: '#/components/schemas/CommandCollect'
+          complete_feed: '#/components/schemas/CommandCompleteFeed'
           complete_folder: '#/components/schemas/CommandCompleteFolder'
           stop: '#/components/schemas/CommandStop'
           regenerate: '#/components/schemas/CommandRegenerate'

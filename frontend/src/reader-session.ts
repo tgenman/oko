@@ -2,7 +2,7 @@ import {ReaderError} from './api/errors';
 import type {ClientSession} from './api/generated/types.gen';
 import type {ReaderApi} from './api/reader';
 
-export type ReaderMessage = string | {kind:'folder-viewed'; folder:string};
+export type ReaderMessage = string | {kind:'folder-viewed'; folder:string} | {kind:'feed-viewed'; feed:string};
 type Options = {
   api: ReaderApi;
   onRefresh: () => Promise<void>;
@@ -91,6 +91,7 @@ export function createReaderSession(options: Options) {
         const data: unknown = event.data;
         if (typeof data === 'string') options.onMessage(data);
         else if (data && typeof data === 'object' && 'kind' in data && data.kind === 'folder-viewed' && 'folder' in data && typeof data.folder === 'string') options.onMessage({kind:'folder-viewed',folder:data.folder});
+        else if(data&&typeof data==='object'&&'kind'in data&&data.kind==='feed-viewed'&&'feed'in data&&typeof data.feed==='string')options.onMessage({kind:'feed-viewed',feed:data.feed});
       };
       window.addEventListener('pagehide',pagehide);
       window.addEventListener('pageshow',pageshow);

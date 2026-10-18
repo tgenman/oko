@@ -1,0 +1,54 @@
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
+import {completeFeed,previewFeedCompletion,feedPatch} from '../api/generated/sdk.gen';
+import type {CompletionPreview,RemoveFeedResult} from '../api/generated/types.gen';
+import {ReaderError,type ReaderApi} from '../api/reader';
+import {mountSurface} from '../renderer';
+import {reportError} from '../status/debug';
+import {createStore,useStore,errorMessage} from './store';
+import type {Navigation} from './tree';
+type Feed=Navigation['feeds'][number];
+type Target={feed:Feed;folders:Navigation['folders'];x:number;y:number;trigger:HTMLElement};
+type State={target:Target|null;dialog:'read'|'delete'|null;preview:CompletionPreview|null;busy:boolean;message:string;generation:number};
+function changedPreview(error:unknown):CompletionPreview|null {
+ if(!(error instanceof ReaderError)||error.code!=='composition_changed')return null;
+ const detail=error.detail;if(!detail||typeof detail!=='object'||!('preview'in detail))return null;
+ const value=detail.preview;if(!value||typeof value!=='object'||!('token'in value)||typeof value.token!=='string'||!('cards_count'in value)||typeof value.cards_count!=='number'||!('publications_count'in value)||typeof value.publications_count!=='number')return null;
+ return {token:value.token,cards_count:value.cards_count,publications_count:value.publications_count};
+}
+export function createFeedActions({readerApi,isStopped,onSettings,onChanged,onCompleted,onMove,removeFeed}:{readerApi:ReaderApi;isStopped:()=>boolean;onSettings:(id:string,trigger:HTMLElement)=>void;onChanged:()=>void;onCompleted:(feed:string)=>void;onMove:(feed:string)=>Promise<void>;removeFeed:(id:string)=>Promise<RemoveFeedResult|undefined>}){
+ const store=createStore<State>({target:null,dialog:null,preview:null,busy:false,message:'',generation:0});
+ const pending=new Set<string>();let catalog:Navigation={folders:[],feeds:[],count:0};
+ const current=(state:State)=>!isStopped()&&store.get().generation===state.generation&&store.get().target?.feed.id===state.target?.feed.id;
+ function close(focus=true){const state=store.get();store.set({...state,target:null,dialog:null,preview:null,message:'',busy:false,generation:state.generation+1});if(focus&&state.target?.trigger.isConnected)state.target.trigger.focus({preventScroll:true});}
+ async function prepareRead(){const state=store.get();if(!state.target||isStopped())return;store.set({...state,dialog:'read',busy:true,message:'',preview:null});try{const {data}=await previewFeedCompletion({client:readerApi.client,path:{feed:state.target.feed.id}});if(current(state))store.set({...store.get(),preview:data,busy:false});}catch(error){reportError(error,'Прочитать фид');if(current(state))store.set({...store.get(),message:errorMessage(error),busy:false});}}
+ async function mutate(action:'read'|'delete'|'move',folder?:string){
+  const state=store.get(),target=state.target;if(!target||state.busy||isStopped())return;
+  const id=target.feed.id;if(pending.has(id)||action==='read'&&!state.preview)return;
+  pending.add(id);store.set({...state,busy:true,message:''});
+  try{
+   if(action==='read'){await readerApi.command({operation:'complete_feed',feed_id:id},headers=>completeFeed({client:readerApi.client,headers,path:{feed:id},body:{token:state.preview!.token}}));onCompleted(id);}
+   else if(action==='delete'){const result=await removeFeed(id);if(!result)throw new Error('Удаление не выполнено');}
+   else{await readerApi.command({operation:'feed_patch',feed_id:id,fields:['folder_id']},headers=>feedPatch({client:readerApi.client,headers,path:{identity:id},body:{folder_id:folder!}}));await onMove(id);}
+   if(current(state))close();
+  }catch(error){reportError(error,'Действие фида');const preview=changedPreview(error);if(current(state))store.set({...store.get(),busy:false,message:errorMessage(error),preview:preview||state.preview});}
+  finally{pending.delete(id);if(store.get().target?.feed.id===id)store.set({...store.get(),busy:false});onChanged();}
+ }
+ function FolderMenu({target,busy}:{target:Target;busy:boolean}){
+  const [open,setOpen]=useState(false),[left,setLeft]=useState(false),[top,setTop]=useState(0);const ref=useRef<HTMLDivElement>(null);
+  function expand(){if(busy)return;const box=ref.current!.getBoundingClientRect();setLeft(box.right+232>innerWidth-8);setTop(Math.min(0,innerHeight-8-box.top-Math.min(320,target.folders.length*38+12)));setOpen(true);}
+  return <div className="feed-folder-action" ref={ref} onMouseEnter={expand} onMouseLeave={()=>setOpen(false)} onKeyDown={event=>{if(event.key==='ArrowRight'){event.preventDefault();event.stopPropagation();expand();queueMicrotask(()=>ref.current?.querySelector<HTMLButtonElement>('[role=menuitemradio]:not(:disabled)')?.focus());}if((event.key==='ArrowLeft'||event.key==='Escape')&&open){event.preventDefault();event.stopPropagation();setOpen(false);ref.current?.querySelector<HTMLButtonElement>('button')?.focus();}}}><button role="menuitem" disabled={busy} aria-haspopup="menu" aria-expanded={open} onClick={()=>open?setOpen(false):expand()}><span aria-hidden="true">▱</span>Move to Folder<span className="feed-submenu-arrow" aria-hidden="true">›</span></button>{open&&<div role="menu" aria-label="Move to Folder" className={'feed-folder-menu '+(left?'left':'')} style={{top}}>{target.folders.map(folder=><button role="menuitemradio" aria-checked={folder.id===target.feed.folder_id} key={folder.id} disabled={busy||folder.id===target.feed.folder_id} onClick={()=>void mutate('move',folder.id)}><span className="feed-folder-check" aria-hidden="true">{folder.id===target.feed.folder_id?'✓':''}</span>{folder.title}</button>)}</div>}</div>;
+ }
+ function Surface(){
+  const state=useStore(store),{target,dialog,busy}=state;const ref=useRef<HTMLDivElement>(null),modal=useRef<HTMLDialogElement>(null);
+  useLayoutEffect(()=>{if(target&&!dialog)ref.current?.querySelector<HTMLButtonElement>('[role=menuitem]:not(:disabled)')?.focus();},[target?.feed.id,state.generation,dialog]);
+  useLayoutEffect(()=>{const node=modal.current;if(dialog&&node&&!node.open)node.showModal();},[dialog,state.generation]);
+  useEffect(()=>{if(!target||dialog)return;const pointer=(event:PointerEvent)=>{if(!ref.current?.contains(event.target as Node))close(false);};const scroll=(event:Event)=>{if(!ref.current?.contains(event.target as Node))close(false);};window.addEventListener('pointerdown',pointer);window.addEventListener('resize',closeMenu);window.addEventListener('scroll',scroll,true);function closeMenu(){close(false);}return()=>{window.removeEventListener('pointerdown',pointer);window.removeEventListener('resize',closeMenu);window.removeEventListener('scroll',scroll,true);};},[target?.feed.id,dialog]);
+  if(!target)return null;
+  const disabled=busy||isStopped()||pending.has(target.feed.id)||target.feed.connection==='deleting';
+  function keys(event:React.KeyboardEvent){const node=event.target as HTMLElement;if(event.key==='Escape'){event.preventDefault();close();return;}if(event.key==='Tab'){close(false);return;}if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const owner=node.closest('[role=menu]');const options=[...owner!.querySelectorAll<HTMLButtonElement>(':scope > button:not(:disabled), :scope > .feed-folder-action > button:not(:disabled)')];const index=options.indexOf(node as HTMLButtonElement),next=event.key==='Home'?0:event.key==='End'?options.length-1:(index+(event.key==='ArrowDown'?1:options.length-1))%options.length;options[next]?.focus();}}
+  return createPortal(<>{!dialog?<div ref={ref} id="feed-context-menu" role="menu" aria-label={target.feed.title} className="feed-context-menu" style={{left:Math.max(8,Math.min(target.x,innerWidth-260)),top:Math.max(8,Math.min(target.y,innerHeight-255))}} onKeyDown={keys}><h3>{target.feed.title}</h3><button role="menuitem" disabled={disabled||!target.feed.has_unviewed} onClick={()=>void prepareRead()}><span aria-hidden="true">✓</span>Mark All as Read</button><button role="menuitem" disabled={disabled} onClick={()=>{close(false);onSettings(target.feed.id,target.trigger);}}><span aria-hidden="true">⚙</span>Settings…</button><FolderMenu key={state.generation} target={target} busy={disabled}/><hr/><button role="menuitem" className="danger" disabled={disabled} onClick={()=>store.set({...state,dialog:'delete',message:''})}><span aria-hidden="true">⌫</span>Delete…</button>{state.message&&<p role="status">{state.message}</p>}</div>:<dialog id="feed-action-dialog" ref={modal} aria-labelledby="feed-action-heading" onCancel={event=>{event.preventDefault();close();}} onClose={()=>{if(store.get().dialog)close();}}><h2 id="feed-action-heading">{dialog==='read'?'Mark All as Read':'Delete Feed'} · {target.feed.title}</h2>{dialog==='read'?<><p id="feed-completion-count">{state.preview?`Материалов: ${state.preview.publications_count}, включая скрытые и незагруженные.`:'Подсчёт…'}</p><p>Удалятся собранные тексты, версии, медиа и результаты обработки этого фида. Фид остаётся подключённым. Прочитанное в Telegram синхронизируется по действующим правилам.</p></>:<><p>Из Око удалятся фид, собранные материалы, версии, медиа, результаты обработки и настройки.</p><p>{target.feed.kind==='telegram'&&target.feed.access.kind!=='web'?'Подключённый аккаунт и подписка на канал в Telegram сохранятся. Сообщения не удаляются и не отмечаются прочитанными, выхода из канала не будет.':target.feed.kind==='telegram'?'Веб-подписка будет удалена из Око целиком. Аккаунт Telegram для неё не используется.':'Внешний источник останется доступным; повторное добавление начнёт новый сбор.'}</p></>}<div className="feed-dialog-actions"><button id="feed-action-cancel" onClick={()=>close()}>Cancel</button><button id="feed-action-confirm" className={dialog==='delete'?'danger':''} disabled={disabled||dialog==='read'&&!state.preview?.publications_count} onClick={()=>void mutate(dialog)}>{dialog==='read'?'Mark All as Read':'Delete Feed'}</button></div><p role="status">{state.message}</p></dialog>}</>,document.body);
+ }
+ const host=document.createElement('div');document.body.append(host);mountSurface(host,<Surface/>);
+ return {open(feed:Feed,folders:Navigation['folders'],x:number,y:number,trigger:HTMLElement){if(isStopped())return;store.set({target:{feed,folders,x,y,trigger},dialog:null,preview:null,message:'',busy:pending.has(feed.id),generation:store.get().generation+1});},update(next:Navigation){catalog=next;const state=store.get();if(!state.target)return;const feed=catalog.feeds.find(f=>f.id===state.target!.feed.id);if(!feed){close(false);return;}store.set({...state,target:{...state.target,feed,folders:catalog.folders}});},stop(){close(false);}};
+}

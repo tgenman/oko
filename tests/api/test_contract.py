@@ -26,7 +26,7 @@ def test_v3_contract_covers_all_real_reader_routes_and_responses(tmp_path):
         routes = {(path,method) for path, methods in client.app.openapi()['paths'].items() if path.startswith('/api/v3/') for method in methods if method in {'get','post','put','patch','delete'}}
         described = {(path, method) for path, operations in spec['paths'].items() for method in operations if method in {'get','post','put','patch','delete'}}
         assert described == routes
-        assert len(routes) == 51
+        assert len(routes) == 53
         assert len({operation['operationId'] for operations in spec['paths'].values() for operation in operations.values()}) == len(routes)
         for path in ['/api/v3/status', '/api/v3/reading-composition', '/api/v3/cards', '/api/v3/subscriptions', '/api/v3/settings/oko/global', '/api/v3/youtube', '/api/v3/diagnostics']:
             response = client.get(path, headers={'Authorization':'Bearer synthetic'})

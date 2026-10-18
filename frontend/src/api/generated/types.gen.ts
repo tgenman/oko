@@ -453,6 +453,11 @@ export type CommandCollect = {
     target: CollectionTarget;
 };
 
+export type CommandCompleteFeed = {
+    feed_id: FeedId;
+    operation: 'complete_feed';
+};
+
 export type CommandCompleteFolder = {
     folder_id: FolderId;
     operation: 'complete_folder';
@@ -485,6 +490,8 @@ export type CommandContext = ({
 } & CommandHistoryCancel) | ({
     operation: 'collect';
 } & CommandCollect) | ({
+    operation: 'complete_feed';
+} & CommandCompleteFeed) | ({
     operation: 'complete_folder';
 } & CommandCompleteFolder) | ({
     operation: 'stop';
@@ -679,6 +686,10 @@ export type CommandYoutubeConfigure = {
 
 export type CompleteContent = {
     state: 'complete';
+};
+
+export type CompleteFeedRequest = {
+    token: string;
 };
 
 export type CompleteFolder409Errors = ({
@@ -3251,6 +3262,114 @@ export type FeedAvatarResponses = {
 };
 
 export type FeedAvatarResponse = FeedAvatarResponses[keyof FeedAvatarResponses];
+
+export type CompleteFeedData = {
+    body: CompleteFeedRequest;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        feed: string;
+    };
+    query?: never;
+    url: '/api/v3/feeds/{feed}/completion';
+};
+
+export type CompleteFeedErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: CompleteFolder409Errors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type CompleteFeedError = CompleteFeedErrors[keyof CompleteFeedErrors];
+
+export type CompleteFeedResponses = {
+    /**
+     * Complete the exact feed composition identified by the token, including hidden publications. Composition changes return a fresh preview without completing the old composition. Success deletes completed local content and permits safe Telegram read acknowledgement.
+     */
+    200: CommandAcknowledgement;
+};
+
+export type CompleteFeedResponse = CompleteFeedResponses[keyof CompleteFeedResponses];
+
+export type PreviewFeedCompletionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        feed: string;
+    };
+    query?: never;
+    url: '/api/v3/feeds/{feed}/completion/preview';
+};
+
+export type PreviewFeedCompletionErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type PreviewFeedCompletionError = PreviewFeedCompletionErrors[keyof PreviewFeedCompletionErrors];
+
+export type PreviewFeedCompletionResponses = {
+    /**
+     * Capture the exact current reading composition into a completion token without deleting or marking anything viewed.
+     */
+    200: CompletionPreview;
+};
+
+export type PreviewFeedCompletionResponse = PreviewFeedCompletionResponses[keyof PreviewFeedCompletionResponses];
 
 export type RemoveFeedData = {
     body?: never;

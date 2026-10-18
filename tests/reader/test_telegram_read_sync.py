@@ -176,6 +176,22 @@ def test_folder_completion_confirms_unique_message_set(tmp_path):
         assert client.get('/api/v3/cards').json() == []
 
 
+def test_feed_completion_uses_existing_safe_telegram_frontier(tmp_path):
+    network = ReadTelegram()
+    with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
+        presence(client, 'test')
+        client.patch('/api/v3/settings/oko/global', json={})
+        feed = connect(client)
+        settled(client, 2)
+        preview = client.post('/api/v3/feeds/' + feed['id'] + '/completion/preview').json()
+        assert preview['publications_count'] == 2
+        response = client.post('/api/v3/feeds/' + feed['id'] + '/completion', json={'token': preview['token']})
+        assert response.status_code == 200
+        wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s['telegram_reads']))
+        assert network.acks == [29]
+        assert client.get('/api/v3/cards').json() == []
+
+
 @pytest.mark.parametrize('action', ['stop', 'close', 'delete'])
 def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
     import asyncio
