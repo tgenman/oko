@@ -100,3 +100,5 @@ body{display:flex;flex-direction:column;height:100vh}body>header{flex:none}main{
 @media(max-width:640px){#feeds-layout{grid-template-columns:minmax(0,1fr);gap:12px}#feed-list{border-right:0;border-bottom:1px solid #dce1d8;padding:0 0 12px;max-height:180px;overflow:auto}}
 
 .source-avatar{width:24px;height:24px;flex:0 0 24px;border-radius:50%;object-fit:cover;}
+
+.reading-tree-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:0 12px 14px}#reading-nav .reading-tree-heading h2{margin:0}#read-feeds-toggle{display:inline-flex;align-items:center;gap:5px;padding:6px 8px;border:0;border-radius:7px;font-size:11px;background:#e8edf5;color:#58687c}#read-feeds-toggle svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5;flex-shrink:0}#read-feeds-toggle.showing-read{background:#e5f0ff;color:#007aff}.read-feeds-count{font-variant-numeric:tabular-nums;padding-left:2px}.feed-completed:not(.active){color:#8e8e93}.feed-completed-label{display:block;font-size:10px;font-weight:400;color:#8e8e93;margin-top:3px}.feed-completed:not(.active) .source-avatar,.feed-completed:not(.active) .source-icon{opacity:.6}

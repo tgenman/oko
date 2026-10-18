@@ -85,15 +85,19 @@ class ReadingComposition:
         folder_members: dict[str, set[str]] = {folder['id']: set() for folder in folders}
         feed_members: dict[str, set[str]] = {feed['id']: set() for feed in feeds}
         visible = set()
+        unviewed_feeds: set[str] = set()
         for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0'):
-            if row['feed_id'] not in by_feed or self._store.filters.read(row['id'])['hidden']:
+            if row['feed_id'] not in by_feed:
+                continue
+            unviewed_feeds.add(row['feed_id'])
+            if self._store.filters.read(row['id'])['hidden']:
                 continue
             identity = row['id']
             visible.add(identity)
             feed_members[row['feed_id']].add(identity)
             folder_members[by_feed[row['feed_id']]['folder_id']].add(identity)
         return dict(folders=[dict(folder, count=len(folder_members[folder['id']])) for folder in folders],
-                    feeds=[dict(feed, count=len(feed_members[feed['id']])) for feed in feeds],
+                    feeds=[dict(feed, count=len(feed_members[feed['id']]), has_unviewed=feed['id'] in unviewed_feeds) for feed in feeds],
                     count=len(visible))
 
     def folder_contents(self, folder: str) -> FolderContents:

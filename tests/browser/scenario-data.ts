@@ -214,6 +214,7 @@ export type EffectiveValues = {
  * Feed
  */
 export type Feed = {
+    has_unviewed?: boolean;
     /**
      * Auto Read
      */

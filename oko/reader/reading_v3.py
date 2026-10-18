@@ -159,7 +159,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         current = runtime.require_store()
         value = facts.Navigation.model_validate(current.reading.navigation())
         owners = feeds()
-        return wire.ReadingComposition(count=value.count, folders=[wire.ReadingFolder(id=wire.FolderId(f.id), title=f.title, position=f.position if isinstance(f.position, int) else 0, count=f.count) for f in value.folders], feeds=[wire.NavigationFeed(feed=owners[f.id], count=f.count) for f in value.feeds])
+        return wire.ReadingComposition(count=value.count, folders=[wire.ReadingFolder(id=wire.FolderId(f.id), title=f.title, position=f.position if isinstance(f.position, int) else 0, count=f.count) for f in value.folders], feeds=[wire.NavigationFeed(feed=owners[f.id], count=f.count, has_unviewed=f.has_unviewed) for f in value.feeds])
 
     @router.get('/api/v3/reading-composition', response_model=wire.ReadingComposition)
     async def navigation() -> wire.ReadingComposition:

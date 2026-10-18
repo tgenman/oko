@@ -394,6 +394,7 @@ class EffectiveSettings(WireModel):
     overrides: SettingOverrides
 
 class Feed(WireModel):
+    has_unviewed: StrictBool
     avatar_url: StrictStr | MISSING = MISSING
     model_config = ConfigDict(extra='forbid')
     auto_read: StrictBool | None | MISSING = Field(default=MISSING, title='Auto Read')
