@@ -21,7 +21,7 @@ test('v3 reading uses real media and reconciles a lost viewed response without r
   await page.locator('#cards button').first().click();
   await expect(page.locator('#text')).toContainText('Открылась библиотека');
   await expect(page.locator('#images img')).toHaveCount(1);
-  await expect(page.locator('#cards .card-kind').filter({hasText:'Загружается'})).toHaveCount(0);
+  await expect(page.locator('#cards .card-kind').filter({hasText:'Loading'})).toHaveCount(0);
   await expect(page.locator('#cards img')).toHaveCount(2);
   const desktop=artifactPath('reading-v3-desktop.png');
   await page.screenshot({path:desktop,fullPage:true});
@@ -47,7 +47,7 @@ test('v3 reading uses real media and reconciles a lost viewed response without r
     return (await response.json()).outcome;
   }).toBe('succeeded');
   await page.locator('#status-toggle').click();
-  await expect(page.locator('#status-panel')).not.toContainText('Результат действия пока неизвестен');
+  await expect(page.locator('#status-panel')).not.toContainText('Action outcome unknown');
   expect(sent).toBe(1);
   expect(invalid).toEqual([]);
 });
@@ -68,7 +68,7 @@ test('unconfirmed commands for two materials remain separate and do not replay',
     await expect(page.locator('#message')).not.toBeEmpty();
   }
   await page.locator('#status-toggle').click();
-  await expect(page.locator('.status-problem').filter({hasText:'Результат действия пока неизвестен'})).toHaveCount(2);
+  await expect(page.locator('.status-problem').filter({hasText:'Action outcome unknown'})).toHaveCount(2);
   expect(sent).toBe(2);
 });
 
@@ -84,7 +84,7 @@ test('real HTTP completed feed stays selected, then hides and can be shown witho
  await page.locator('#cards button').click();
  await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await page.locator('#viewed').click();
- await expect(page.locator('[data-feed="'+a.id+'"] .feed-completed-label')).toHaveText('Всё просмотрено');
+ await expect(page.locator('[data-feed="'+a.id+'"] .feed-completed-label')).toHaveText('All Read');
  await expect(page.locator('[data-feed="'+a.id+'"]')).toHaveAttribute('aria-pressed','true');
  await page.locator('#all-folders').click();
  await expect(page.locator('[data-feed="'+a.id+'"]')).toHaveCount(0);

@@ -17,14 +17,14 @@ test('history can pause and resume in feed settings without offering restart aft
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
     await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Приостановить историю',exact:true}).click();
-    await expect(r.page.locator('#history-progress')).toContainText('приостановлена');
-    await expect(r.page.getByRole('button',{name:'Продолжить историю',exact:true})).toBeVisible();
+    await r.page.getByRole('button',{name:'Pause History',exact:true}).click();
+    await expect(r.page.locator('#history-progress')).toContainText('paused');
+    await expect(r.page.getByRole('button',{name:'Resume History',exact:true})).toBeVisible();
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url==='/api/v3/feeds/rss/history'));
     expect(request!.body).toEqual({paused:true});
     await r.page.evaluate(() => readerTransport.replies.set('/api/v3/feeds/rss/history',{body:window.readerFixtures.history({mode:'count',count:20,count_text:'20',loaded:20,available:20,state:'done',frozen:true,paused:false})}));
-    await r.page.getByRole('button',{name:'Продолжить историю',exact:true}).click();
-    await expect(r.page.locator('#history-progress')).toContainText('завершена');
+    await r.page.getByRole('button',{name:'Resume History',exact:true}).click();
+    await expect(r.page.locator('#history-progress')).toContainText('complete');
     await expect(r.page.locator('#history-toggle')).toBeHidden();
   } finally {await r.close();}
 });

@@ -88,7 +88,7 @@ function stopUi(message:string) {
   void debug.refresh();
 }
 function readerMessage(data:ReaderMessage) {
-  if (data === 'stop') stopUi('Око остановлено');
+  if (data === 'stop') stopUi('Oko stopped');
   else if (typeof data==='object') {
     contentEpoch++;
     if(data.kind==='folder-viewed')opened.folderCompleted(data.folder);
@@ -112,12 +112,12 @@ async function updateReader() {
     statusAvailable = true;
     debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
     menus.status(state,settingsRevision);
-    if (state.runtime_state==='stopped') { stopUi('Око остановлено'); return; }
+    if (state.runtime_state==='stopped') { stopUi('Oko stopped'); return; }
     statusPanel.update(state.problems, state);
     debug.forgetMaterials(state.viewed_ids || []);
     statusPanel.forgetMaterials(state.viewed_ids || []);
     void actions.flush();
-    progress(`${workText(state)} · источники ${state.ready_sources}/${state.total_sources}`);
+    progress(`${workText(state)} · sources ${state.ready_sources}/${state.total_sources}`);
     menus.sources(state.sources || []);
     const navigation = await tree.load();
     if (stopped || epoch !== contentEpoch || sequence !== refreshSequence) return;
@@ -125,7 +125,7 @@ async function updateReader() {
     feedActions.update(navigation);
     if (tree.update(navigation, state.sources || [])) return;
     list.setArea(tree.selection, navigation);
-    if (state.runtime_state==='unavailable') { opened.clear(); list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Хранилище недоступно'); return; }
+    if (state.runtime_state==='unavailable') { opened.clear(); list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable'); return; }
     const params = new URLSearchParams({sort: input('sort').value});
     if (input('show-hidden').checked) params.set('show_hidden', 'true');
     if (folderId) params.set('folder', folderId);
@@ -136,16 +136,16 @@ async function updateReader() {
     list.update(cards, opened.selection?.id);
     newsActions.update(list.context());
 
-  } catch (error) { reportError(error, 'Интерфейс Око'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) {opened.clear();statusPanel.unavailable();} list.error(errorMessage(error)); progress(statusAvailable?'Чтение временно недоступно':'Нет связи с Око'); } }
+  } catch (error) { reportError(error, 'Oko interface'); if (!stopped && epoch === contentEpoch && sequence === refreshSequence) { if (!statusAvailable) {opened.clear();statusPanel.unavailable();} list.error(errorMessage(error)); progress(statusAvailable?'Reading temporarily unavailable':'No connection to Oko'); } }
 }
 
 function Command({id,label,run,disabled}:{id:string;label:string;run:()=>Promise<unknown>;disabled:boolean}) {
   const [message,setMessage]=useState('');
-  return <><button id={id} type="button" disabled={disabled} onClick={async()=>{setMessage('');try{await run();}catch(error){reportError(error,'Интерфейс Око');setMessage(errorMessage(error));}}}><span className="reader-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{id==='collect'?<path d="M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5L4 10m16 4-3 3a7 7 0 0 1-12-5"/>:<rect x="6" y="6" width="12" height="12" rx="2"/>}</svg></span>{label}</button><span className="header-command-error" role="status" hidden={!message}>{message}</span></>;
+  return <><button id={id} type="button" disabled={disabled} onClick={async()=>{setMessage('');try{await run();}catch(error){reportError(error,'Oko interface');setMessage(errorMessage(error));}}}><span className="reader-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{id==='collect'?<path d="M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5L4 10m16 4-3 3a7 7 0 0 1-12-5"/>:<rect x="6" y="6" width="12" height="12" rx="2"/>}</svg></span>{label}</button><span className="header-command-error" role="status" hidden={!message}>{message}</span></>;
 }
 function renderCommands(){for(const [id,label,run] of [
-  ['collect','Обновить источники',async()=>{await readerApi.collect();await refresh();}],
-  ['stop','Остановить Око',async()=>{await readerApi.stop();session.post('stop');stopUi('Око остановлено');}],
+  ['collect','Refresh Sources',async()=>{await readerApi.collect();await refresh();}],
+  ['stop','Stop Oko',async()=>{await readerApi.stop();session.post('stop');stopUi('Oko stopped');}],
 ] as const) {
   let host=commandHosts.get(id);
   if(!host){const control=byId(id);host=document.createElement('span');host.className='header-command';control.replaceWith(host);commandHosts.set(id,host);}
@@ -155,8 +155,8 @@ renderCommands();
 document.querySelector('.reader-toolbar-scroll')!.addEventListener('focusin',event=>{const control=event.target instanceof Element?event.target.closest('button'):null;control?.scrollIntoView({block:'nearest',inline:'nearest'});});
 byId('sort').onchange = () => { newsActions.close(false); contentEpoch++; refresh(); };
 const session = createReaderSession({api:readerApi,onRefresh:updateReader,onMessage:readerMessage,
-  onUnavailable:error=>{reportError(error,'Интерфейс Око');if(!stopped){opened.clear();statusPanel.unavailable();list.error(errorMessage(error));progress('Нет связи с Око');}},
-  onClosed:()=>{newsActions.close(false);contentEpoch++;opened.clear();list.clear();},onCloseError:error=>reportError(error,'Закрытие вкладки')});
+  onUnavailable:error=>{reportError(error,'Oko interface');if(!stopped){opened.clear();statusPanel.unavailable();list.error(errorMessage(error));progress('No connection to Oko');}},
+  onClosed:()=>{newsActions.close(false);contentEpoch++;opened.clear();list.clear();},onCloseError:error=>reportError(error,'Closing tab')});
 session.start();
 
 byId('show-hidden').onchange = () => { newsActions.close(false); contentEpoch++; opened.clear(); refresh(); };

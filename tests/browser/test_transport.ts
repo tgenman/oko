@@ -100,12 +100,12 @@ test('transport preserves error detail and diagnostic identity without retrying 
       return {errors,count};
     });
     expect(errors.count).toBe(6);
-    expect(errors.errors[0]).toEqual({name:'Error',message:'Связь с Око потеряна',detail:{message:'Подтвердите изменившийся состав',preview:{cards:2}},diagnosticId:'diagnostic-1'});
+    expect(errors.errors[0]).toEqual({name:'Error',message:'Connection to Oko lost',detail:{message:'Подтвердите изменившийся состав',preview:{cards:2}},diagnosticId:'diagnostic-1'});
     expect(errors.errors[1].name).toBe('AbortError');
     expect(errors.errors[2].diagnosticId).toBe('diagnostic-2');
-    expect(errors.errors[3].message).toBe('Некорректный ответ Око');
+    expect(errors.errors[3].message).toBe('Invalid response from Oko');
     expect(errors.errors[4].message).toBe('Network unavailable');
-    expect(errors.errors[5].message).toBe('Проверьте значения настроек');
+    expect(errors.errors[5].message).toBe('Check your settings');
   } finally {await r.close();}
 });
 
@@ -117,15 +117,15 @@ test('reader shows malformed responses and failed diagnostics retry only the ori
     await r.page.route('**/api/v3/diagnostics', route => route.request().method() === 'POST'
       ? route.fulfill({status:503,contentType:'text/html',body:'<html>offline</html>'}) : route.continue());
     await r.page.locator('#collect').click();
-    await expect(r.page.locator('.header-command-error:not([hidden])')).toContainText('Некорректный ответ Око');
+    await expect(r.page.locator('.header-command-error:not([hidden])')).toContainText('Invalid response from Oko');
     await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
-    await expect(r.page.locator('#debug-errors')).toContainText('Некорректный ответ Око');
-    await expect(r.page.locator('#debug-errors')).toContainText('не сохранено');
+    await expect(r.page.locator('#debug-errors')).toContainText('Invalid response from Oko');
+    await expect(r.page.locator('#debug-errors')).toContainText('not saved');
     await expect.poll(() => r.page.evaluate(() => readerTransport.requests.filter(request => request.url === '/api/v3/diagnostics' && request.method === 'POST').length)).toBeGreaterThan(1);
     const requests = await r.page.evaluate(() => readerTransport.requests.filter(request => request.url === '/api/v3/diagnostics' && request.method === 'POST').map(request => request.body));
     expect(new Set(requests.map(body => body!.event_id)).size).toBe(1);
-    expect(requests.every(body => body!.message === 'Некорректный ответ Око')).toBe(true);
+    expect(requests.every(body => body!.message === 'Invalid response from Oko')).toBe(true);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });

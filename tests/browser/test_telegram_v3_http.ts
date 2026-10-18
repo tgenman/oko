@@ -20,7 +20,7 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await page.locator('#telegram-add').click();
  const old=(await (await created).json()).feed_id;
  await expect(page.locator('#feeds-dialog')).toBeVisible();await feedOptions(page);
- await expect(page.locator('#feed-options')).toContainText('Веб-доступ');
+ await expect(page.locator('#feed-options')).toContainText('Web Access');
  await expect(page.locator('#feed-auto')).toHaveCount(0);
  await expect(page.locator('#history-progress')).toContainText('20');
  await page.locator('#feeds-close').click();
@@ -28,7 +28,7 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await expect(page.locator('#text')).toContainText('Веб-публикация без аккаунта');
  await expect(page.locator('#text')).toContainText('Полный текст статьи сохранён локально.');
  await expect(page.locator('#images img')).toBeVisible();
- await expect(page.locator('#completeness')).toContainText('Внешнее встраивание не сохранено локально');
+ await expect(page.locator('#completeness')).toContainText('External embed not saved locally');
  await page.locator('#settings-open').click();await page.locator('#settings-dialog').getByRole('button',{name:'Telegram',exact:true}).click();
  await page.locator('#telegram-profile-personal').selectOption('one');
  await page.locator('#telegram-profile-personal-save').click();
@@ -46,12 +46,12 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
  await page.locator('#telegram-peer').fill('https://t.me/s/fixture/11');
  await page.locator('#telegram-add').click();
- await expect(page.getByRole('dialog',{name:'Источник уже добавлен'})).toBeVisible();
- await expect(page.locator('#telegram-duplicate')).toContainText('Веб-доступ');
+ await expect(page.getByRole('dialog',{name:'Source already added'})).toBeVisible();
+ await expect(page.locator('#telegram-duplicate')).toContainText('Web Access');
  await page.screenshot({path:artifactPath('telegram-duplicate-mobile.png')});
  await page.locator('#telegram-duplicate-close').click();await page.locator('#add-close').click();
  await page.locator('#feeds-open').click();await page.locator('#feed-tree [data-owner="feed/'+old+'"]').click();await feedOptions(page);
- await page.locator('#feed-delete').click();await expect(page.locator('#feed-delete-confirm')).toContainText('не отмечаются прочитанными');
+ await page.locator('#feed-delete').click();await expect(page.locator('#feed-delete-confirm')).toContainText('will not be deleted or marked as read');
  await page.screenshot({path:artifactPath('telegram-delete-mobile.png')});
  await page.locator('#feed-delete-confirm-action').click();
  await expect(page.locator('#feed-tree [data-owner="feed/'+old+'"]')).toHaveCount(0);

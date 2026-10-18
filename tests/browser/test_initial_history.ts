@@ -26,7 +26,7 @@ test('RSS connection selects count or inclusive date and displays saved history 
     await r.page.waitForFunction(() => readerTransport.requests.some(request => request.url === '/api/v3/feeds' && request.method === 'POST'));
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/feeds' && r.method === 'POST'));
     expect(request!.body!.initial_history).toEqual({mode: 'date', date: '2025-10-01', timezone: await r.page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)});
-    await expect(r.page.locator('#feed-options')).toContainText('Загружено 7 публикаций с 01.10.2025');
+    await expect(r.page.locator('#feed-options')).toContainText('Loaded 7 publications since 01.10.2025');
   } finally { await r.close(); }
 });
 
@@ -69,13 +69,13 @@ test('finite history warning and unknown date are visible in settings and materi
       t.replies.set('/api/v3/settings/feed/rss', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
       t.replies.set('/api/v3/materials/unknown', {body: {...card, originals: true, images: [], attachments: []}});
     }, card);
-    await expect(r.page.locator('#cards')).toContainText('Дата неизвестна');
+    await expect(r.page.locator('#cards')).toContainText('Unknown date');
     await r.page.locator('#cards button').first().click();
-    await expect(r.page.locator('#date')).toHaveText('Дата неизвестна');
+    await expect(r.page.locator('#date')).toHaveText('Unknown date');
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
     await feedOptions(r.page);
-    await expect(r.page.locator('#feed-options')).toContainText('Запрошено 100, доступно 15');
-    await expect(r.page.locator('#feed-options')).toContainText('точность выбора последних N не подтверждена');
+    await expect(r.page.locator('#feed-options')).toContainText('Requested 100, available 15');
+    await expect(r.page.locator('#feed-options')).toContainText('the accuracy of the latest N selection is not confirmed');
   } finally { await r.close(); }
 });

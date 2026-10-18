@@ -13,10 +13,10 @@ class SurfaceBoundary extends Component<{children:ReactNode; name:string}, {fail
   state = {failed:false};
   static getDerivedStateFromError() {return {failed:true};}
   componentDidCatch(error:Error, _info:ErrorInfo) {
-    const source = 'Показ интерфейса: '+this.props.name;
+    const source = 'Rendering interface: '+this.props.name;
     queueMicrotask(() => reportRenderError(error,source));
   }
-  render() {return this.state.failed ? <p role="alert">Не удалось показать интерфейс Око. Подробности в диагностике.</p> : this.props.children;}
+  render() {return this.state.failed ? <p role="alert">Could not display Oko. See diagnostics for details.</p> : this.props.children;}
 }
 
 function render() {
@@ -25,7 +25,7 @@ function render() {
     if (!host) throw new Error('Reader React root is missing');
     root = createRoot(host);
   }
-  flushSync(() => root!.render(<>{shell}{[...surfaces].map(([host,node]) => createPortal(<SurfaceBoundary name={host.id || host.parentElement?.id || 'Область интерфейса'}>{node}</SurfaceBoundary>,host,portalKeys.get(host)))}</>));
+  flushSync(() => root!.render(<>{shell}{[...surfaces].map(([host,node]) => createPortal(<SurfaceBoundary name={host.id || host.parentElement?.id || 'Interface section'}>{node}</SurfaceBoundary>,host,portalKeys.get(host)))}</>));
 }
 
 // Composition only: each surface keeps its own React state and resources.

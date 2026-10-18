@@ -20,7 +20,7 @@ test('single RSS connection sends an exact history count and displays the persis
  await expect(page.locator('#feeds-dialog')).toBeVisible();
  await feedOptions(page);
  await expect(page.locator('#history-progress')).toContainText('9007199254740993');
- await expect(page.locator('#history-progress')).toContainText('Начальная история завершена');
+ await expect(page.locator('#history-progress')).toContainText('Initial history complete');
  await page.setViewportSize({width:1400,height:950});
  await page.screenshot({path:artifactPath('connections-v3-desktop.png')});
  await page.setViewportSize({width:390,height:844});

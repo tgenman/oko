@@ -10,7 +10,7 @@ test('reader header keeps every action beside Oko and progress below on desktop'
     const state=await r.api('v3/status');
     state.work=[{phase:'processing',operation:'theses',progress:{completed:0,total:10}},{phase:'processing',operation:'filter',progress:{completed:0,total:10}},{phase:'collecting',feed_id:null,progress:{completed:0,total:10}},{phase:'deleting',feed_id:null,progress:{completed:0,total:10}},{phase:'waiting',reason:'retry_scheduled',retry_at:null}];
     await r.page.evaluate(state=>readerTransport.replies.set('/api/v3/status',{body:state}),state);
-    await expect(r.page.locator('#progress')).toContainText('Подготовка тезисов · Фильтрация · Сбор источников · Локальная очистка · Ожидание');
+    await expect(r.page.locator('#progress')).toContainText('Generating summary · Filtering · Collecting Sources · Local Cleanup · Waiting');
     const wide = artifactPath('reader-header-wide.png');
     await r.page.screenshot({path:wide}); console.info('Header screenshot:',wide);
     const brand = await r.page.locator('header .brand').boundingBox();
@@ -60,8 +60,8 @@ test('reader card appearance preserves the compact layout, metadata and real pre
         titleSize:title.fontSize,titleLines:title.webkitLineClamp,snippetSize:snippet.fontSize,snippetLines:snippet.webkitLineClamp};
     });
     expect(geometry).toEqual({padding:'16px',minHeight:'112px',radius:'0px',margin:'0px',titleSize:'15px',titleLines:'2',snippetSize:'14px',snippetLines:'2'});
-    await expect(row.locator('.card-kind')).toHaveText('Изменено');
-    await expect(r.page.locator('[data-card="three"] .card-kind')).toHaveText('Изменено · Загружается');
+    await expect(row.locator('.card-kind')).toHaveText('Updated');
+    await expect(r.page.locator('[data-card="three"] .card-kind')).toHaveText('Updated · Loading');
     await expect(row.locator('.card-source')).toHaveText('GetAClass — Физика в опытах и экспериментах');
     await expect(row.locator('.card-date')).not.toHaveText('');
     await expect(r.page.locator('.date-group')).toHaveCount(3);

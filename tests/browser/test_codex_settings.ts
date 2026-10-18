@@ -22,12 +22,12 @@ test('Codex has two explicit choices; Fast starts off and unsupported effort is 
     await r.page.locator('#codex-theses-fast').check();
     await r.page.locator('#codex-theses-model').selectOption('large');
     await expect(r.page.locator('#codex-theses-effort')).toHaveValue('low');
-    await expect(r.page.locator('#codex-choice-status')).toContainText('не поддерживает');
+    await expect(r.page.locator('#codex-choice-status')).toContainText('does not support');
     await expect(r.page.locator('#codex-save')).toBeDisabled();
     await r.page.locator('#codex-theses-effort').selectOption('high');
     await r.page.locator('#codex-theses-fast').uncheck();
     await r.page.locator('#codex-save').click();
-    await expect(r.page.locator('#codex-choice-status')).toContainText('сохранены');
+    await expect(r.page.locator('#codex-choice-status')).toContainText('saved');
     const saved = await r.page.evaluate(() => readerTransport.requests.find(c=>c.url==='/api/v3/processors/codex'&&c.method==='PUT'));
     expect(saved!.body!.theses).toEqual({model:'large',reasoning_effort:'high',fast:false});
     expect(saved!.body!.filter).toEqual({model:'small',reasoning_effort:'low',fast:false});
@@ -82,7 +82,7 @@ test('ready material displays old model and offers explicit recreation', async (
     await r.page.locator('#processing-details summary').click();
     await expect(r.page.locator('#processing-provenance')).toContainText('old-model');
     await expect(r.page.locator('#processing-provenance')).toContainText('high');
-    await expect(r.page.locator('#processing-provenance')).toContainText('Fast выключен');
+    await expect(r.page.locator('#processing-provenance')).toContainText('Fast disabled');
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/one/regenerate',{body:{ok:true}}));
     await r.page.locator('#regenerate').click();
     await r.page.waitForFunction(()=>readerTransport.requests.some(c=>c.url==='/api/v3/materials/one/regenerate'&&c.method==='POST'));
@@ -137,9 +137,9 @@ test('llama.cpp keeps connection drafts and concurrent save does not suppress av
     await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/processors/llamacpp/check'));
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/processors/llamacpp',{body:{ok:true}}));
     await r.page.locator('#llamacpp-save').click();
-    await expect(r.page.locator('#llamacpp-status')).toContainText('сохранено');
+    await expect(r.page.locator('#llamacpp-status')).toContainText('saved');
     await r.page.evaluate(()=>readerTransport.release('/api/v3/processors/llamacpp/check',{locality:'local',model:'new',models:['new']}));
-    await expect(r.page.locator('#llamacpp-check-status')).toContainText('Локальная модель');
+    await expect(r.page.locator('#llamacpp-check-status')).toContainText('Local Model');
     await r.page.locator('#llamacpp-model').fill('draft');
     await r.page.keyboard.press('Escape');
     await r.page.locator('#settings-open').click();
@@ -171,7 +171,7 @@ test('llama.cpp distinguishes newer unsaved input and ignores a check from a pre
     await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/processors/llamacpp'));
     await r.page.locator('#llamacpp-model').fill('new draft');
     await r.page.evaluate(()=>readerTransport.release('/api/v3/processors/llamacpp',{}));
-    await expect(r.page.locator('#llamacpp-status')).toContainText('Новый ввод ещё не сохранён');
+    await expect(r.page.locator('#llamacpp-status')).toContainText('Your new input has not been saved yet');
     await expect(r.page.locator('#llamacpp-model')).toHaveValue('new draft');
     await r.page.evaluate(()=>readerTransport.held.set('/api/v3/processors/llamacpp/check',true));
     await r.page.locator('#llamacpp-check').click();

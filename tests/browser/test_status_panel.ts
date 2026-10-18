@@ -4,8 +4,8 @@ import {test} from 'node:test';
 import {reader, material, expect} from './support.ts';
 import {artifactPath} from './artifacts.ts';
 
-const modelProblem: Problem = {id:'processor:codex-choice',code:'codex-choice',section:'action',title:'Не выбрана модель Codex',
-  consequence:'Тезисы пока не создаются.',next_step:'Выберите модель.',objects:[{kind:'settings',id:'global',label:'Настройки Око'}],
+const modelProblem: Problem = {id:'processor:codex-choice',code:'codex-choice',section:'action',title:'No Codex Model Selected',
+  consequence:'Тезисы пока не создаются.',next_step:'Выберите модель.',objects:[{kind:'settings',id:'global',label:'Oko Settings'}],
   action:{kind:'settings',page:'codex'},created_at:1800000000,next_at:null,state:'current',finished_at:null,outcome:null};
 async function status(r: ReaderFixture,current: Problem[],recent: Problem[]=[]) {
   await r.page.evaluate(({current,recent})=>readerTransport.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,
@@ -16,10 +16,10 @@ test('late status-target opening cannot navigate a reopened settings menu',async
   const r=await reader();
   try {
     await r.start([]);await status(r,[modelProblem]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#status-toggle').click();
     await r.page.evaluate(()=>readerTransport.held.set('/api/v3/subscriptions',true));
-    await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
+    await r.page.getByRole('button',{name:'Configure Model',exact:true}).click();
     await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/v3/subscriptions'))).toBe(true);
     await r.page.locator('#settings-close').click();
     await r.page.evaluate(()=>{
@@ -40,12 +40,12 @@ test('status-target continuation respects a newer page in the same menu',async()
   const r=await reader();
   try {
     await r.start([]);await status(r,[modelProblem]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#status-toggle').click();
     await r.page.evaluate(()=>readerTransport.held.set('/api/v3/subscriptions',true));
-    await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
+    await r.page.getByRole('button',{name:'Configure Model',exact:true}).click();
     await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/v3/subscriptions'))).toBe(true);
-    await r.page.getByRole('button',{name:'Модели',exact:true}).click();
+    await r.page.getByRole('button',{name:'Models',exact:true}).click();
     await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','models');
     await r.page.evaluate(()=>readerTransport.release('/api/v3/subscriptions',{folders:[],feeds:[]}));
     await r.page.waitForTimeout(150);
@@ -58,26 +58,26 @@ test('missing model opens the selected panel without moving reading and navigate
   try {
     await r.start([material('one',{text:'Текст '.repeat(1000)})]);
     await status(r,[modelProblem]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await expect(r.page.locator('#status-panel')).toBeHidden();
     await r.page.locator('#cards button').click();
     await r.page.locator('article').evaluate(node=>node.scrollTop=200);
     const scroll=await r.page.locator('article').evaluate(node=>node.scrollTop);
     await r.page.locator('#status-toggle').click();
     await expect(r.page.locator('#status-panel')).toBeVisible();
-    await expect(r.page.locator('#status-panel')).toContainText('Не выбрана модель Codex');
+    await expect(r.page.locator('#status-panel')).toContainText('No Codex Model Selected');
     await expect(r.page.locator('#title')).toHaveText('one');
     expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(scroll);
     const desktop = artifactPath('status-panel-desktop.png');
     await r.page.screenshot({path:desktop}); console.info('Status panel screenshot:',desktop);
-    await r.page.getByRole('button',{name:'Настроить модель',exact:true}).click();
+    await r.page.getByRole('button',{name:'Configure Model',exact:true}).click();
     await expect(r.page.locator('#settings-dialog')).toBeVisible();
     await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','codex');
     await r.page.locator('#settings-close').click();
     await expect(r.page.locator('#status-panel')).toBeVisible();
     await status(r,[]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Состояние');
-    await expect(r.page.locator('#status-panel')).toContainText('Всё в порядке');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Status');
+    await expect(r.page.locator('#status-panel')).toContainText('All Clear');
     await r.page.locator('#status-close').click();
     await expect(r.page.locator('#status-toggle')).toBeFocused();
     expect(r.errors).toEqual([]);
@@ -97,7 +97,7 @@ test('late failed settings write is visible once in the panel and explicit draft
     await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/settings/oko/global'));
     await r.page.locator('#settings-close').click();
     await r.page.evaluate(()=>readerTransport.release('/api/v3/settings/oko/global',{detail:'Сохранение не удалось'},500));
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await expect(r.page.locator('#status-panel')).toBeHidden();
     await r.page.locator('#status-toggle').click();
     await expect(r.page.locator('.status-problem')).toHaveCount(1);
@@ -106,7 +106,7 @@ test('late failed settings write is visible once in the panel and explicit draft
     await expect(r.page.locator('#setting-theses')).not.toBeChecked();
     await r.page.locator('#setting-discard-theses').click();
     await r.page.locator('#settings-close').click();
-    await expect(r.page.locator('#status-toggle')).toHaveText('Состояние');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Status');
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
@@ -115,20 +115,20 @@ test('offline state keeps last problems without a false zero and distinguishes a
   const r=await reader();
   try {
     await r.start([]);await status(r,[modelProblem]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#status-toggle').click();
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'offline'}}));
-    await expect(r.page.locator('#status-panel')).toContainText('Состояние может быть устаревшим');
-    await expect(r.page.locator('#status-panel')).toContainText('Не выбрана модель Codex');
+    await expect(r.page.locator('#status-panel')).toContainText('Status may be outdated');
+    await expect(r.page.locator('#status-panel')).toContainText('No Codex Model Selected');
     await expect(r.page.locator('.status-action')).toBeDisabled();
     await status(r,[modelProblem]);
     await expect(r.page.locator('.status-action')).toBeEnabled();
     await r.page.locator('#status-close').click();
     await expect(r.page.locator('#status-panel')).toBeHidden();
     await r.page.evaluate(()=>readerTransport.replies.get('/api/v3/status')!.body!.stopped=true);
-    await expect(r.page.locator('#progress')).toHaveText('Око остановлено');
+    await expect(r.page.locator('#progress')).toHaveText('Oko stopped');
     await r.page.locator('#status-toggle').click();
-    await expect(r.page.locator('#status-panel')).toContainText('Око остановлено');
+    await expect(r.page.locator('#status-panel')).toContainText('Oko stopped');
     await expect(r.page.locator('.status-action')).toBeDisabled();
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
@@ -138,11 +138,11 @@ test('expanded completion stays in place until collapsed and new problems do not
   const r=await reader();
   try {
     await r.start([]);await status(r,[modelProblem]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#status-toggle').click();
     const summary=r.page.locator('.status-details summary');await summary.click();
     await status(r,[],[{...modelProblem,state:'finished',finished_at:1800000010,outcome:'resolved'}]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Состояние');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Status');
     await expect(summary).toBeFocused();
     await expect(r.page.locator('.status-group .status-finished')).toHaveCount(1);
     await summary.click();
@@ -156,7 +156,7 @@ test('panel reorders only on reopening and remains a nonmodal desktop sidebar',a
   const r=await reader();
   try {
     await r.start([]); await status(r,[modelProblem]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#status-toggle').click();
     const newer={...modelProblem,id:'newer',title:'Новая проблема',created_at:1800000010};
     await status(r,[newer,modelProblem]);
@@ -185,10 +185,10 @@ test('discarding a failed processor draft restores its saved values',async()=>{
     await r.page.locator('#codex-theses-effort').selectOption('high');
     await r.page.evaluate(()=>readerTransport.replies.set('PUT /api/v3/processors/codex',{status:500,body:{detail:'synthetic failure'}}));
     await r.page.locator('#codex-save').click();
-    await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#codex-discard').click();
     await expect(r.page.locator('#codex-theses-effort')).toHaveValue('low');
-    await expect(r.page.locator('#status-toggle')).toHaveText('Состояние');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Status');
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });
@@ -198,7 +198,7 @@ test('adding an affected object preserves keyboard focus in expanded details',as
   try {
     await r.start([material('one'),material('two')]);
     const problem: Problem={...modelProblem,id:'source',code:'source-connection',section:'object',objects:[{kind:'material',id:'one',label:'Первый материал'}],action:{kind:'objects'}};
-    await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');await r.page.locator('#status-toggle').click();
+    await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');await r.page.locator('#status-toggle').click();
     await r.page.locator('.status-details summary').click();await r.page.locator('.status-object').focus();
     await status(r,[{...problem,objects:[{kind:'material',id:'two',label:'Второй материал'},...problem.objects]}]);
     await expect(r.page.locator('.status-object')).toHaveCount(2);
@@ -211,11 +211,11 @@ test('viewing in another tab removes expanded and stale problem references',asyn
   try {
     await r.start([material('one')]);const other=await r.context.newPage();await r.start([material('one')],other);
     const problem: Problem={...modelProblem,id:'source',code:'material-incomplete',section:'object',objects:[{kind:'material',id:'one',label:'Заголовок удаляемого материала'}],action:{kind:'material',id:'one'}};
-    await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Проблемы · 1');await r.page.locator('#status-toggle').click();await r.page.locator('.status-details summary').click();
+    await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');await r.page.locator('#status-toggle').click();await r.page.locator('.status-details summary').click();
     await other.locator('#cards button').click();
     await other.evaluate(()=>readerTransport.replies.set('POST /api/v3/materials/one/viewed',{body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
-    await other.getByRole('button',{name:'Просмотрено',exact:true}).click();
-    await expect(r.page.locator('#status-toggle')).toHaveText('Состояние');
+    await other.getByRole('button',{name:'Mark as Read',exact:true}).click();
+    await expect(r.page.locator('#status-toggle')).toHaveText('Status');
     await expect(r.page.locator('#status-panel')).not.toContainText('Заголовок удаляемого материала');
     await status(r,[problem]);
     await expect(r.page.locator('.status-object')).toHaveCount(0);

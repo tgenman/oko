@@ -23,19 +23,19 @@ export function createFolderActions({readerApi,getFolder,isStopped,onRefresh,onC
     const folder=getFolder();if(!folder||isStopped())return;
     const state:CompletionState={open:true,folder,preview:null,message:'',busy:true,generation:completion.get().generation+1};completion.set(state);
     try {const preview=(await previewCompletion({client:readerApi.client,path:{folder}})).data;if(completionActive(state))completion.set({...completion.get(),preview,busy:false});}
-    catch(error){reportError(error,'Завершение папки');if(completionActive(state))completion.set({...completion.get(),message:errorMessage(error),busy:false});}
+    catch(error){reportError(error,'Folder completion');if(completionActive(state))completion.set({...completion.get(),message:errorMessage(error),busy:false});}
   }
   async function confirmCompletion() {
     const state=completion.get();if(!state.folder||!state.preview||state.busy||!completionActive(state))return;
     completion.set({...state,busy:true,message:''});
     try {await readerApi.command({operation:'complete_folder',folder_id:state.folder},headers=>completeFolder({client:readerApi.client,headers,path:{folder:state.folder!},body:{token:state.preview!.token}}));onCompleted(state.folder);if(completionActive(state))closeCompletion();onRefresh();}
-    catch(error){reportError(error,'Завершение папки');const changed=conflict(error);if(!changed)onCompleted(state.folder);onRefresh();if(completionActive(state))completion.set({...completion.get(),message:changed?.message||errorMessage(error),preview:changed?.preview||state.preview,busy:false});}
+    catch(error){reportError(error,'Folder completion');const changed=conflict(error);if(!changed)onCompleted(state.folder);onRefresh();if(completionActive(state))completion.set({...completion.get(),message:changed?.message||errorMessage(error),preview:changed?.preview||state.preview,busy:false});}
   }
   function Completion() {
     const state=useStore(completion);
     useLayoutEffect(()=>{const dialog=host('completion-dialog') as HTMLDialogElement;if(state.open&&!dialog.open)dialog.showModal();else if(!state.open&&dialog.open)dialog.close();},[state.open]);
     useEffect(()=>{const dialog=host('completion-dialog');const close=()=>{if(!(dialog as HTMLDialogElement).open&&completion.get().open)closeCompletion();};dialog.addEventListener('close',close);return()=>dialog.removeEventListener('close',close);},[]);
-    return <><h1 id="completion-heading">Завершить разбор папки</h1><p id="completion-count">{state.preview?`Карточек: ${state.preview.cards_count}. Исходных публикаций: ${state.preview.publications_count}.`:'Подсчёт…'}</p><p>Удалятся тексты, медиа и тезисы всей папки, включая скрытые материалы. Другие папки останутся.</p><button id="completion-confirm" disabled={isStopped()||state.busy||!state.preview?.publications_count} onClick={()=>void confirmCompletion()}>Подтвердить просмотр</button><button id="completion-close" onClick={closeCompletion}>Отмена</button><p id="completion-message" role="status">{state.message}</p></>;
+    return <><h1 id="completion-heading">Mark Folder as Read</h1><p id="completion-count">{state.preview?`Cards: ${state.preview.cards_count}. Original publications: ${state.preview.publications_count}.`:'Counting…'}</p><p>Text, media and summaries for this entire folder, including hidden items, will be deleted. Other folders will be kept.</p><button id="completion-confirm" disabled={isStopped()||state.busy||!state.preview?.publications_count} onClick={()=>void confirmCompletion()}>Mark as Read</button><button id="completion-close" onClick={closeCompletion}>Cancel</button><p id="completion-message" role="status">{state.message}</p></>;
   }
   mountSurface(host('completion-dialog'),<Completion/>);
   return {

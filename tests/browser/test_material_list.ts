@@ -4,8 +4,8 @@ import {reader, material, expect} from './support.ts';
 test('compact rows show excerpts and current area with actions in menu', async () => {
  const r=await reader(); try {
   await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('article',{title:'Статья',snippet:'Текст статьи'})]);
-  await expect(r.page.locator('#list-title')).toHaveText('Все материалы');
-  await expect(r.page.locator('#count-label')).toHaveText('2 карточки');
+  await expect(r.page.locator('#list-title')).toHaveText('All Items');
+  await expect(r.page.locator('#count-label')).toHaveText('2 items');
   await expect(r.page.locator('#cards .card-snippet').first()).toHaveText('Описание сохранённого видео');
   await expect(r.page.locator('#cards .card-kind')).toHaveCount(0);
   await expect(r.page.locator('#cards .card-preview')).toHaveCount(2);
@@ -45,7 +45,7 @@ test('keyboard focus does not open content and viewing focuses next without open
   await expect(r.page.locator('[data-card="one"]')).toBeFocused();
   await r.page.keyboard.press('Enter');
   await r.page.locator('#viewed').click();
-  await expect(r.page.locator('#list-status')).toHaveText('Нет материалов');
+  await expect(r.page.locator('#list-status')).toHaveText('No items');
   await expect(r.page.locator('#list-menu-toggle')).toBeFocused();
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
@@ -55,12 +55,12 @@ test('date groups, saved sorting and displayed hidden card count use current row
  const r=await reader(); try {
   const now=Date.now()/1000;
   await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false})]);
-  await expect(r.page.locator('.date-group')).toHaveText(['Сегодня','Вчера','Дата неизвестна']);
-  await expect(r.page.locator('#count-label')).toHaveText('3 карточки');
+  await expect(r.page.locator('.date-group')).toHaveText(['Today','Yesterday','Unknown date']);
+  await expect(r.page.locator('#count-label')).toHaveText('3 items');
   await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/v3/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/v3/cards')!.body![0],{...t.replies.get('/api/v3/cards')!.body![0],id:'hidden',filter:{status:'done',hidden:true,restored:false,reason:'Синтетический фильтр',removed:[]}},...t.replies.get('/api/v3/cards')!.body!.slice(1)]});});
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
-  await expect(r.page.locator('#count-label')).toHaveText('4 карточки');
+  await expect(r.page.locator('#count-label')).toHaveText('4 items');
   await r.page.locator('#sort').selectOption('importance');
   await expect(r.page.locator('.date-group')).toHaveCount(0);
   await r.page.reload();
@@ -166,7 +166,7 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
   await r.page.evaluate(()=>readerTransport.held.set('/api/v3/cards?sort=newest&feed=feed',true));
   await r.page.locator('[data-feed="feed"]').click();
   await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/cards?sort=newest&feed=feed'));
-  await expect(r.page.locator('#list-status')).toHaveText('Загрузка материалов…');
+  await expect(r.page.locator('#list-status')).toHaveText('Loading items…');
   await expect(r.page.locator('#cards button')).toHaveCount(0);
   await r.page.locator('[data-feed="second"]').click();
   await expect(r.page.locator('[data-card="two"]')).toBeVisible();
@@ -204,14 +204,14 @@ test('incomplete materials and unavailable previews keep usable rows and diagnos
  const r=await reader(); try {
   await r.page.addInitScript(()=>readerTransport.replies.set('/api/v3/materials/broken/images/image-1.png',{status:500,body:{detail:'Превью недоступно'}}));
   await r.start([material('pending',{complete:false}),material('broken',{images:['/api/v3/materials/broken/images/image-1.png']})]);
-  await expect(r.page.locator('[data-card="pending"] .card-kind')).toHaveText('Загружается');
+  await expect(r.page.locator('[data-card="pending"] .card-kind')).toHaveText('Loading');
   await expect(r.page.locator('[data-card="broken"] .card-preview')).toBeVisible();
   await expect(r.page.locator('[data-card="broken"] img')).toHaveCount(0);
   await r.page.locator('[data-card="broken"]').click();
   await expect(r.page.locator('#title')).toHaveText('broken');
   await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
-  await expect(r.page.locator('#debug-errors')).toContainText('Не удалось загрузить превью');
+  await expect(r.page.locator('#debug-errors')).toContainText('Could not load preview');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });

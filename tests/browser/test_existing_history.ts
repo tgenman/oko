@@ -18,11 +18,11 @@ test('legacy feed shows only known history settings and saving does not change i
     await r.page.locator('#rss-url').fill('https://source.test/feed');
     await r.page.locator('#rss-check').click();
     await feedOptions(r.page);
-    await expect(r.page.locator('#feed-options')).toContainText('Сохранённая настройка глубины: 7 дней; фактическая граница не сохранена');
-    await expect(r.page.locator('#feed-options')).toContainText('Количество и прогресс начальной загрузки не сохранены');
+    await expect(r.page.locator('#feed-options')).toContainText('Saved history depth: 7 days; the actual boundary was not saved');
+    await expect(r.page.locator('#feed-options')).toContainText('The initial download count and progress were not saved');
     await expect(r.page.locator('#feed-options input[type=number]')).toHaveCount(0);
-    await expect(r.page.locator('#feed-options')).not.toContainText('Загружено 0');
-    await r.page.locator('#feed-options button').filter({hasText: 'Сохранить фид'}).click();
+    await expect(r.page.locator('#feed-options')).not.toContainText('Loaded 0');
+    await r.page.locator('#feed-options button').filter({hasText: 'Save Feed'}).click();
     await r.page.waitForFunction(() => readerTransport.requests.some(request => request.url === '/api/v3/feeds/legacy' && request.method === 'PATCH'));
     const patch = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/feeds/legacy' && r.method === 'PATCH'));
     expect(patch!.body).not.toHaveProperty('initial_days');
@@ -42,8 +42,8 @@ test('legacy settings show the actual frozen boundary instead of mutable days', 
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/legacy"]').click();
     await feedOptions(r.page);
-    await expect(r.page.locator('#feed-options')).toContainText('Зафиксированное начало истории:');
-    await expect(r.page.locator('#feed-options')).not.toContainText('7 дней');
-    await expect(r.page.locator('#feed-options')).not.toContainText('Загружено');
+    await expect(r.page.locator('#feed-options')).toContainText('Captured history start:');
+    await expect(r.page.locator('#feed-options')).not.toContainText('7 days');
+    await expect(r.page.locator('#feed-options')).not.toContainText('Loaded');
   } finally {await r.close();}
 });

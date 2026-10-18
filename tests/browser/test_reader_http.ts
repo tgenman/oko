@@ -19,7 +19,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   const alpha=plan.feeds.find(feed=>feed.title==='Альфа'), beta=plan.feeds.find(feed=>feed.title==='Бета'), empty=plan.feeds.find(feed=>feed.title==='Пустой');
   const navigation=await api('reading-composition'), folder=navigation.folders.find(folder=>folder.title==='Наука');
   await page.locator(`[data-folder="${folder!.id}"]`).click();
-  await expect(page.locator('#count-label')).toHaveText('2 карточки');
+  await expect(page.locator('#count-label')).toHaveText('2 items');
   for(const feed of [alpha,beta]){
    await page.locator(`[data-feed="${feed!.id}"]`).click();
    await expect(page.locator('#cards button')).toHaveCount(1);
@@ -32,9 +32,9 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   await page.locator('#read-feeds-toggle').click();
   await page.locator(`[data-feed="${empty!.id}"]`).click();
   await expect(page.locator('#cards button')).toHaveCount(0);
-  await expect(page.locator('#list-status')).toHaveText('Нет материалов');
+  await expect(page.locator('#list-status')).toHaveText('No items');
   await page.locator(`[data-folder="${folder!.id}"]`).click();
-  await expect(page.locator('#count-label')).toHaveText('2 карточки');
+  await expect(page.locator('#count-label')).toHaveText('2 items');
   await expect(page.locator(`[data-folder="${folder!.id}"] .tree-count`)).toHaveText('2');
   await page.locator('#cards button').first().click();
   await expect(page.locator('#title')).toContainText('Статья');

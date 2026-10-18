@@ -7,14 +7,14 @@ test('switch clears old material immediately and ignores late opening errors', a
   const r = await reader();
   try {
     await r.start([material('A'), material('B'), material('C')]);
-    await r.page.getByRole('button', {name: /^A/}).click();
+    await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.evaluate(() => { readerTransport.held.set('/api/v3/materials/B', true); readerTransport.held.set('/api/v3/materials/C', true); });
     await r.page.getByRole('button', {name: /^B/}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/B'));
     await expect(r.page.locator('#text')).toHaveText('');
-    await expect(r.page.locator('#empty')).toHaveText('Загрузка материала…');
-    await r.page.getByRole('button', {name: /^C/}).click();
+    await expect(r.page.locator('#empty')).toHaveText('Loading item…');
+    await r.page.locator('#cards').getByRole('button', {name: /^C/}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/C'));
     await r.page.evaluate(body => readerTransport.release('/api/v3/materials/C', body), material('C'));
     await expect(r.page.locator('#text')).toHaveText('Текст C');
@@ -30,7 +30,7 @@ test('late success of an old opening cannot replace the selected card', async ()
   try {
     await r.start([material('A'), material('B')]);
     await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/A', true));
-    await r.page.getByRole('button', {name: /^A/}).click();
+    await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A'));
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст B');
@@ -50,7 +50,7 @@ test('previous version and media delivered after switching never reach the new c
   try {
     await r.start([material('A', {images: ['/api/v3/materials/A/images/image-1.png'], previous: [{url: '/api/v3/materials/A/versions/1'}]}), material('B')]);
     await r.page.evaluate(() => { readerTransport.held.set('/api/v3/materials/A/images/image-1.png', true); readerTransport.held.set('/api/v3/materials/A/versions/1', true); });
-    await r.page.getByRole('button', {name: /^A/}).click();
+    await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/images/image-1.png'));
     await r.page.locator('#versions summary').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/versions/1'));
@@ -106,7 +106,7 @@ test('viewing during media loading stops playback, releases URLs and rejects lat
       readerTransport.replies.set('/api/v3/materials/A/media/media-1.webm', {base64, mime: 'video/webm'});
       readerTransport.held.set('/api/v3/materials/A/media/media-2.webm', true);
     }, {base64, png});
-    await r.page.getByRole('button', {name: /^A/}).click();
+    await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/media/media-2.webm'));
     await expect(r.page.locator('#images img')).toBeVisible();
     await expect(r.page.locator('#images video').first()).toHaveAttribute('src', /^blob:/);
@@ -120,7 +120,7 @@ test('viewing during media loading stops playback, releases URLs and rejects lat
       testVideo.muted = true; testVideo.loop = true; await testVideo.play();
     });
     await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
-    await r.page.getByRole('button', {name: 'Просмотрено', exact: true}).click();
+    await r.page.getByRole('button', {name: 'Mark as Read', exact: true}).click();
     await expect(r.page.locator('#material')).toBeHidden();
     assert.equal(await r.page.evaluate(() => testVideo.paused && !testVideo.hasAttribute('src')), true);
     assert.equal(await r.page.evaluate(() => browserResources.created.length), 2);
@@ -146,11 +146,11 @@ test('viewing a publication in another tab closes its pending opening but preser
     await otherTab.getByRole('button', {name: /^source/}).click();
     await expect(otherTab.locator('#text')).toHaveText('Текст source');
     await otherTab.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/source/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
-    await otherTab.getByRole('button', {name: 'Просмотрено', exact: true}).click();
-    await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
+    await otherTab.getByRole('button', {name: 'Mark as Read', exact: true}).click();
+    await expect(r.page.locator('#empty')).toHaveText('Select an item');
     await r.page.evaluate(body => readerTransport.release('/api/v3/materials/source', body), source);
     await settle(r.page);
-    await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
+    await expect(r.page.locator('#empty')).toHaveText('Select an item');
     await r.page.getByRole('button', {name: /^other/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст other');
     await otherTab.evaluate(() => { const channel = new BroadcastChannel('oko-reader'); channel.postMessage({kind: 'folder-viewed', folder: 'f'}); channel.close(); });
@@ -166,13 +166,13 @@ for (const interruption of ['stop', 'connection loss']) {
     try {
       await r.start([material('A')]);
       await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/A', true));
-      await r.page.getByRole('button', {name: /^A/}).click();
+      await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
       await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A'));
-      if (interruption === 'stop') await r.page.getByRole('button', {name: 'Остановить Око'}).click();
+      if (interruption === 'stop') await r.page.getByRole('button', {name: 'Stop Oko'}).click();
       else {
         await r.page.evaluate(() => readerTransport.replies.set('/api/v3/status', {status: 503, body: {detail: 'Связь потеряна'}}));
       }
-      await expect(r.page.locator('#empty')).toHaveText('Выберите материал');
+      await expect(r.page.locator('#empty')).toHaveText('Select an item');
       await r.page.evaluate(body => readerTransport.release('/api/v3/materials/A', body), material('A'));
       await settle(r.page);
       await expect(r.page.locator('#text')).toHaveText('');
@@ -187,7 +187,7 @@ test('title opens original in a new tab and resets for other cards', async () =>
   try {
     await r.context.route('https://example.org/**', route => route.fulfill({body: '<h1>Original</h1>', contentType: 'text/html'}));
     await r.start([material('A'), material('B')]);
-    await r.page.getByRole('button', {name: /^A/}).click();
+    await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
     const link = r.page.locator('#title a');
     await expect(link).toHaveAttribute('href', 'https://example.org/A');
     await expect(link).toHaveText('A');

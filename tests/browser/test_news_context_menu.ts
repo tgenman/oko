@@ -48,7 +48,7 @@ test('range failure stops remaining writes and never retries the failed publicat
  const r=await reader();try{
   await r.start(['a','b','c','d'].map(id=>material(id)));
   await r.page.evaluate(()=>{const t=readerTransport;t.replies.set('/api/v3/materials/a/viewed',{body:{ok:true}});t.replies.set('/api/v3/materials/b/viewed',{status:503,body:{code:'storage_unavailable',message:'Disk unavailable',details:{retry_at:null},command_id:null,diagnostic_id:null}});});
-  await r.page.locator('[data-card="d"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();await r.page.locator('#news-read-confirm').click();await expect(r.page.locator('#news-read-dialog [role=status]')).toContainText('Выполнено 1 из 3');await expect(r.page.locator('#news-read-confirm')).toBeDisabled();
+  await r.page.locator('[data-card="d"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();await r.page.locator('#news-read-confirm').click();await expect(r.page.locator('#news-read-dialog [role=status]')).toContainText('Completed 1 of 3');await expect(r.page.locator('#news-read-confirm')).toBeDisabled();
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/viewed')).map(q=>q.url))).toEqual(['/api/v3/materials/a/viewed','/api/v3/materials/b/viewed']);await r.page.locator('#news-read-cancel').click();expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });
