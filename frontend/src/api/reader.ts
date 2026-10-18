@@ -18,7 +18,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
   let versionCheck: Promise<RuntimeStatus> | undefined;
   async function compatible(): Promise<RuntimeStatus> {
     if (!versionCheck) versionCheck = runtimeStatus({client}).then(reply => {
-      if (reply.data.api_version.split('.')[0] !== '3') throw new ReaderError('Версия API Око не поддерживается');
+      if (reply.data.api_version.split('.')[0] !== '3') throw new ReaderError('Unsupported Oko API version');
       return reply.data;
     }).catch(error => {versionCheck=undefined; throw error;});
     return versionCheck;
@@ -27,7 +27,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
     fetch: async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
       const url = new URL(request.url);
-      if (url.origin !== origin) throw new ReaderError('Посторонний адрес API');
+      if (url.origin !== origin) throw new ReaderError('Unexpected API address');
       if (!['GET','HEAD'].includes(request.method)) await compatible();
       const headers = new Headers(request.headers);
       headers.set('Authorization','Bearer '+token);

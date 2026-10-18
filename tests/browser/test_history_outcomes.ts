@@ -16,10 +16,10 @@ test('initial history shows partial, retry and unavailable outcomes with errors'
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
     await feedOptions(r.page);
-    await expect(r.page.locator('#feed-options')).toContainText('Загружено 18 из 20');
-    await expect(r.page.locator('#feed-options')).toContainText('2 неполных');
-    await expect(r.page.locator('#feed-options')).toContainText('1 ожидает повторной попытки');
-    await expect(r.page.locator('#feed-options')).toContainText('1 окончательно недоступно');
+    await expect(r.page.locator('#feed-options')).toContainText('Loaded 18 of 20');
+    await expect(r.page.locator('#feed-options')).toContainText('2 incomplete');
+    await expect(r.page.locator('#feed-options')).toContainText('1 awaiting retry');
+    await expect(r.page.locator('#feed-options')).toContainText('1 permanently unavailable');
     await expect(r.page.locator('#feed-options')).toContainText('Источник недоступен');
   } finally {await r.close();}
 });
@@ -38,9 +38,9 @@ test('count selection does not announce shortfall before metadata scan completes
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
     await feedOptions(r.page);
-    await expect(r.page.locator('#feed-options')).not.toContainText('доступно 10');
-    await expect(r.page.locator('#feed-options')).toContainText('Выбираются публикации начальной истории');
+    await expect(r.page.locator('#feed-options')).not.toContainText('available 10');
+    await expect(r.page.locator('#feed-options')).toContainText('Discovering initial history');
     await expect(r.page.locator('#feed-options')).toContainText('Архив недоступен');
-    await expect(r.page.locator('#feed-options')).toContainText('повторная попытка');
+    await expect(r.page.locator('#feed-options')).toContainText('retry after');
   } finally {await r.close();}
 });

@@ -23,7 +23,7 @@ test('add URL uses one form and automatically shows YouTube connection', async (
     await r.page.locator('#rss-add').click();
     await expect(r.page.locator('#feeds-dialog')).toBeVisible();
     await expect(r.page.locator('#rss-url')).toHaveValue('');
-    await expect(r.page.locator('#feed-options')).toContainText('YouTube подключён');
+    await expect(r.page.locator('#feed-options')).toContainText('YouTube connected');
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/feeds' && r.method === 'POST'));
     await r.page.keyboard.press('Escape');
     await r.page.locator('#add-open').click();
@@ -84,7 +84,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
     });
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#feeds-dialog')).toBeVisible();
-    await expect(r.page.locator('#owner-heading')).toHaveText('Фид: Старое имя');
+    await expect(r.page.locator('#owner-heading')).toHaveText('Feed: Старое имя');
     expect(await r.page.evaluate(() => readerTransport.requests.filter(r => r.url === '/api/v3/feeds' && r.method === 'POST').length)).toBe(0);
   } finally { await r.close(); }
 });
@@ -105,12 +105,12 @@ test('offline browser errors group, retain material scroll, and retry the same d
     await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('offline-js');
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
-    await expect(r.page.locator('#debug-errors')).toContainText('не сохранено');
+    await expect(r.page.locator('#debug-errors')).toContainText('not saved');
     await expect(r.page.locator('#title')).toHaveText('one');
     expect(await r.page.locator('article').evaluate(node => node.scrollTop)).toBe(scroll);
     const event = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/diagnostics' && r.method === 'POST')!.body!.event_id);
     await r.page.evaluate(() => readerTransport.replies.delete('POST /api/v3/diagnostics'));
-    await expect(r.page.locator('#debug-errors')).not.toContainText('не сохранено', {timeout: 6000});
+    await expect(r.page.locator('#debug-errors')).not.toContainText('not saved', {timeout: 6000});
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
     expect(await r.page.evaluate(id => readerTransport.requests.filter(r => r.url === '/api/v3/diagnostics' && r.method === 'POST' && r.body!.event_id === id).length, event)).toBeGreaterThan(1);
     await r.page.locator('#status-close').click();

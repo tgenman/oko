@@ -15,19 +15,19 @@ test('a completed field write reconciles after Back without discarding a newer d
     });
     await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
     await r.page.locator('#setting-originals').uncheck();
-    await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
+    await r.page.getByRole('button',{name:'Save',exact:true}).click();
     await expect.poll(()=>Boolean(held)).toBe(true);
     await r.page.locator('#setting-originals').check();
     await r.page.locator('#settings-dialog .settings-back').click();
     await held!.continue(); held=null;
-    await expect(r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true})).toContainText('Выключено');
-    await expect(r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true})).toBeFocused();
-    await r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true}).click();
+    await expect(r.page.getByRole('button',{name:'Show Original Publication',exact:true})).toContainText('Disabled');
+    await expect(r.page.getByRole('button',{name:'Show Original Publication',exact:true})).toBeFocused();
+    await r.page.getByRole('button',{name:'Show Original Publication',exact:true}).click();
     await expect(r.page.locator('#setting-originals')).toBeChecked();
     await expect(r.page.locator('.setting-row:visible details summary')).toBeVisible();
     await r.page.locator('.setting-row:visible details summary').click();
-    await expect(r.page.locator('.setting-row:visible details')).toContainText('Выключено');
-    await expect(r.page.locator('#settings-message')).not.toContainText('Настройка сохранена');
+    await expect(r.page.locator('.setting-row:visible details')).toContainText('Disabled');
+    await expect(r.page.locator('#settings-message')).not.toContainText('Setting saved');
   } finally {if(held)await (held as Route).abort();await r.close();}
 });
 
@@ -35,14 +35,14 @@ test('Back restores the current field and section links after a saved editor rer
   const r=await reader();try{
     await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
     await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
-    await r.page.locator('#setting-originals').uncheck();await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
-    await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
+    await r.page.locator('#setting-originals').uncheck();await r.page.getByRole('button',{name:'Save',exact:true}).click();
+    await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
     await r.page.locator('#settings-dialog .settings-back').click();
-    const field=r.page.getByRole('button',{name:'Показывать исходную публикацию',exact:true});
+    const field=r.page.getByRole('button',{name:'Show Original Publication',exact:true});
     await expect(field).toBeFocused();
-    await expect(field).toHaveAccessibleDescription('Выключено');
+    await expect(field).toHaveAccessibleDescription('Disabled');
     await r.page.locator('#settings-dialog .settings-back').click();
-    await expect(r.page.getByRole('button',{name:'Чтение',exact:true})).toBeFocused();
+    await expect(r.page.getByRole('button',{name:'Reading',exact:true})).toBeFocused();
   }finally{await r.close();}
 });
 
@@ -100,7 +100,7 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
     });
     await r.page.locator('#settings-open').click();
     await r.page.locator('[data-settings-target="youtube"]').click();
-    await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
+    await expect(r.page.locator('#youtube-connection')).toHaveText('Direct connection');
     await r.page.locator('#youtube-mode').selectOption('proxy');
     await r.page.locator('#youtube-address').fill('http://first.test:8000');
     await r.page.locator('#youtube-password').fill('first-password');

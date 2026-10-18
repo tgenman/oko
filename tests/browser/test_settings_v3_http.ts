@@ -29,12 +29,12 @@ test('lost v3 settings response is reconciled without replay and keeps a newer d
   await expect(page.locator('#setting-prompt_theses')).toHaveValue('Более новый черновик');
   await page.locator('#settings-close').click();
   await page.locator('#status-toggle').click();
-  await expect(page.locator('#status-panel')).toContainText('Результат действия пока неизвестен');
+  await expect(page.locator('#status-panel')).toContainText('Action outcome unknown');
   const screenshot=artifactPath('settings-v3-desktop.png');
   await page.screenshot({path:screenshot,fullPage:true});
   console.log('Settings desktop screenshot: '+screenshot);
   online=true;
-  await expect(page.locator('#status-panel')).not.toContainText('Результат действия пока неизвестен',{timeout:8000});
+  await expect(page.locator('#status-panel')).not.toContainText('Action outcome unknown',{timeout:8000});
   expect(sent).toBe(1);
   const response=await page.request.get(origin+'/api/v3/settings/oko/global',{headers:{Authorization:'Bearer '+token}});
   expect((await response.json()).effective.prompt_theses.value).toBe('Сохранённый текст');

@@ -18,12 +18,12 @@ test('real HTTP settings load three YouTube materials and keep viewed IDs on a s
   await page.locator('#youtube-history-count').fill('3');
   await page.locator('#youtube-history-start').click();
   await expect.poll(async()=>{const value=await history();return value.state==='absent'?0:value.progress.loaded;},{timeout:20000}).toBe(3);
-  await expect(page.locator('#history-progress')).toContainText('Загружено 3 из 3');
+  await expect(page.locator('#history-progress')).toContainText('Loaded 3 of 3');
   await expect(page.locator('#youtube-history-start')).toBeEnabled();
   await page.locator('#feeds-close').click();
   await page.locator(`button[data-feed="${feed.id}"]`).click();
   await expect(page.locator('#cards button')).toHaveCount(3);
-  await expect(page.locator('#cards .card-date').first()).toHaveText('Дата неизвестна');
+  await expect(page.locator('#cards .card-date').first()).toHaveText('Unknown date');
   const latest=(await api('cards')).find(card=>card.source_url.endsWith('v0000000060'));
   expect(latest).toBeDefined();
   await page.locator(`button[data-card="${latest!.id}"]`).click();

@@ -35,7 +35,7 @@ test('YouTube settings start N history and waiting resumes manually without chan
     await r.page.locator('#feed-tree [data-owner="feed/yt"]').click();
     await feedOptions(r.page);
     await expect(r.page.locator('#history-progress')).toContainText('YouTube недоступен');
-    await expect(r.page.locator('#history-toggle')).toHaveText('Продолжить историю');
+    await expect(r.page.locator('#history-toggle')).toHaveText('Resume History');
     await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
     await r.page.locator('#history-toggle').click();
     await r.page.waitForFunction(() => readerTransport.requests.some(request => request.method==='PATCH'&&request.url==='/api/v3/feeds/yt/history'));
@@ -57,10 +57,10 @@ test('YouTube date selection explains that RSS does not provide the full archive
     await r.page.locator('#rss-url').fill('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa');
     await r.page.locator('#rss-check').click();
     await r.page.locator('#rss-history-mode').selectOption('date');
-    await expect(r.page.locator('#rss-history-warning')).toContainText('История по дате ограничена доступным окном RSS');
+    await expect(r.page.locator('#rss-history-warning')).toContainText('Date-based history is limited to the available RSS window');
     await r.page.locator('#rss-history-mode').selectOption('count');
-    await expect(r.page.locator('#rss-history-warning')).toContainText('без Shorts');
-    await expect(r.page.locator('#rss-history-warning')).not.toContainText('История по дате');
+    await expect(r.page.locator('#rss-history-warning')).toContainText('excluding Shorts');
+    await expect(r.page.locator('#rss-history-warning')).not.toContainText('Date-based history');
   } finally {await r.close();}
 });
 
@@ -113,7 +113,7 @@ test('reopened first history gets progress and resume after a late response', as
  await r.page.evaluate(()=>{
   const t=readerTransport,history=window.readerFixtures.history({feed_id:'A',mode:'count',count:60,loaded:0,available:0,state:'waiting',paused:false,discovery_error:'limit'});
   t.replies.get('/api/v3/subscriptions')!.body!.feeds[0].initial_history=history;
-  t.replies.set('/api/v3/status',{body:{stage:'Ожидание',errors:[],ready_sources:1,total_sources:1,initial_histories:[history],sources:[]}});
+  t.replies.set('/api/v3/status',{body:{stage:'Waiting',errors:[],ready_sources:1,total_sources:1,initial_histories:[history],sources:[]}});
   t.release('/api/v3/feeds/A/history',history);
  });
  await expect(r.page.locator('#youtube-history-start')).toBeDisabled();

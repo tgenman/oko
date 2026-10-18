@@ -55,5 +55,5 @@ test('independent SDK accepts compatible versions and rejects another major befo
     return results;
   });
   for(const entry of result.slice(0,2)) {assert.equal(entry.error,'');assert.deepEqual(entry.methods,['GET','POST']);}
-  assert.deepEqual(result[2]!.methods,['GET']);assert.match(result[2]!.error,/Версия API/);
+  assert.deepEqual(result[2]!.methods,['GET']);assert.match(result[2]!.error,/Unsupported Oko API version/);
 });

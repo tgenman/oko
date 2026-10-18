@@ -13,19 +13,19 @@ test('compact settings navigate to reading and persist only explicitly through H
       readerTransport.native.add('/api/v3/settings/oko/global');
     });
     await r.page.locator('#settings-open').click();
-    await expect(r.page.getByRole('button',{name:'Чтение',exact:true})).toBeVisible();
+    await expect(r.page.getByRole('button',{name:'Reading',exact:true})).toBeVisible();
     await expect(r.page.locator('#setting-originals')).toBeHidden();
-    await r.page.getByRole('button',{name:'Чтение',exact:true}).click();
-    await r.page.getByRole('button',{name:/Показывать исходную публикацию/}).click();
-    await r.page.getByRole('switch',{name:'Показывать исходную публикацию'}).uncheck();
+    await r.page.getByRole('button',{name:'Reading',exact:true}).click();
+    await r.page.getByRole('button',{name:/Show Original Publication/}).click();
+    await r.page.getByRole('switch',{name:'Show Original Publication'}).uncheck();
     expect((await r.api('settings/oko/global')).effective.originals.value).toBe(true);
-    await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
-    await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
+    await r.page.getByRole('button',{name:'Save',exact:true}).click();
+    await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
     expect((await r.api('settings/oko/global')).effective.originals.value).toBe(false);
     await r.page.keyboard.press('Escape');
     await r.page.locator('#settings-open').click();
-    await r.page.getByRole('button',{name:'Чтение',exact:true}).click();
-    await expect(r.page.getByRole('button',{name:/Показывать исходную публикацию/})).toContainText('Выключено');
+    await r.page.getByRole('button',{name:'Reading',exact:true}).click();
+    await expect(r.page.getByRole('button',{name:/Show Original Publication/})).toContainText('Disabled');
     expect(await r.page.locator('#settings-dialog').evaluate(n=>n.scrollWidth<=n.clientWidth)).toBe(true);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
@@ -48,7 +48,7 @@ test('folder field resets preserve other overrides and new drafts', async () => 
     await r.page.locator('#feed-tree').getByRole('button',{name:'Наука',exact:true}).click();
     await editSetting(r.page,'prompt_theses');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Folder prompt');
-    await r.page.getByRole('button',{name:'Сбросить',exact:true}).click();
+    await r.page.getByRole('button',{name:'Reset',exact:true}).click();
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Global prompt');
     const result = await r.api(`settings/folder/${folder.id}`);
     expect(result.overrides.originals).toBe(false);
@@ -57,7 +57,7 @@ test('folder field resets preserve other overrides and new drafts', async () => 
     await r.page.locator('#feed-tree').getByRole('button',{name:'Источник',exact:true}).click();
     await expect(r.page.getByRole('button',{name:'Объединение событий',exact:true})).toHaveCount(0);
     await expect(r.page.locator('#feed-folder')).toBeHidden();
-    await r.page.getByRole('button',{name:'Подключение и параметры',exact:true}).click();
+    await r.page.getByRole('button',{name:'Connection and Options',exact:true}).click();
     await expect(r.page.locator('#feed-folder')).toBeVisible();
     await r.page.locator('#feed-tree').getByRole('button',{name:'Наука',exact:true}).click();
     await editSetting(r.page,'prompt_theses');
@@ -81,8 +81,8 @@ test('prompts, empty filtering save via HTTP without saving adjacent drafts', as
     await r.page.locator('#setting-prompt_theses').fill('Мой черновик');
     await editSetting(r.page,'prompt_filters');
     await r.page.locator('#setting-prompt_filters').fill('');
-    await r.page.getByRole('button',{name:'Сохранить',exact:true}).click();
-    await expect(r.page.locator('#settings-message')).toHaveText('Настройка сохранена');
+    await r.page.getByRole('button',{name:'Save',exact:true}).click();
+    await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
     expect((await r.api('settings/oko/global')).effective.prompt_filters.value).toBe('');
     await editSetting(r.page,'prompt_theses');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Мой черновик');

@@ -20,7 +20,7 @@ test('folder completion conflict keeps material and requires the refreshed token
     await expect(r.page.locator('#completion-confirm')).toBeEnabled();
     await r.page.locator('#completion-confirm').click();
     await expect(r.page.locator('#completion-message')).toHaveText('Состав папки изменился');
-    await expect(r.page.locator('#completion-count')).toContainText('Карточек: 2');
+    await expect(r.page.locator('#completion-count')).toContainText('Cards: 2');
     await expect(r.page.locator('#text')).toContainText('Текст a');
     await r.page.screenshot({path:artifactPath('folder-completion-conflict.png')});
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/folders/f/completion',{body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
@@ -51,7 +51,7 @@ test('late folder completion preserves another folder material and confirmation 
     await r.page.locator('[data-card="b"]').click();
     await expect(r.page.locator('#text')).toContainText('Текст b');
     await r.page.locator('#folder-viewed').click();
-    await expect(r.page.locator('#completion-count')).toContainText('Карточек: 1');
+    await expect(r.page.locator('#completion-count')).toContainText('Cards: 1');
     await r.page.evaluate(()=>readerTransport.release('/api/v3/folders/f/completion',{ok:true}));
     await r.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     await expect(r.page.locator('#completion-dialog')).toBeVisible();

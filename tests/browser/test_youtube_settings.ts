@@ -44,7 +44,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await page.goto(origin + '/#token=' + token);
     await page.locator('#settings-open').click();
     await page.locator('[data-settings-target="youtube"]').click();
-    await expect(page.locator('#youtube-connection')).toHaveText('Прямое подключение');
+    await expect(page.locator('#youtube-connection')).toHaveText('Direct connection');
     await expect(page.locator('#youtube-address')).not.toBeVisible();
     await page.locator('#youtube-mode').selectOption('proxy');
     await expect(page.locator('#youtube-address')).toBeVisible();
@@ -59,9 +59,9 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await page.locator('[data-settings-target="youtube"]').click();
     await expect(page.locator('#youtube-password')).toHaveValue('fixture-password');
     await page.locator('#youtube-save').click();
-    await expect(page.locator('#youtube-message')).toHaveText('Настройки сохранены');
+    await expect(page.locator('#youtube-message')).toHaveText('Settings saved');
     await expect(page.locator('#youtube-password')).toHaveValue('');
-    await expect(page.locator('#youtube-password')).toHaveAttribute('placeholder', 'Пароль сохранён');
+    await expect(page.locator('#youtube-password')).toHaveAttribute('placeholder', 'Password saved');
     await page.locator('#youtube-address').fill('http://proxy.test:8001');
     await page.locator('#youtube-password').fill('temporary-edit');
     await page.locator('#youtube-password').fill('');
@@ -84,13 +84,13 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await page.locator('#youtube-mode').selectOption('direct');
     await page.locator('#youtube-save').click();
     await expect.poll(async () => (await api('youtube')).mode).toBe('direct');
-    const plan = await addSources(api, [["https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa", "YouTube", "Без папки"]]);
+    const plan = await addSources(api, [["https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa", "YouTube", "No Folder"]]);
     await api('feeds/' + plan.feeds[0].id, 'PATCH', {importance:'high'});
     await expect.poll(async () => (await api('youtube')).admission==='paused').toBe(true);
-    await expect(page.locator('#youtube-pause')).toContainText('Получение субтитров приостановлено');
-    await expect(page.locator('#youtube-pause')).toContainText('Следующая попытка не раньше');
+    await expect(page.locator('#youtube-pause')).toContainText('Subtitle downloads paused');
+    await expect(page.locator('#youtube-pause')).toContainText('Next attempt no earlier than');
     assert.ok(!JSON.stringify(await api('diagnostics')).includes('fixture-password'));
-    await expect(page.locator('#youtube-short-status')).toHaveText('Приостановлено');
+    await expect(page.locator('#youtube-short-status')).toHaveText('Paused');
     await page.setViewportSize({width:1200, height:940});
     await page.screenshot({path:artifactPath('youtube-desktop.png')});
     assert.deepEqual(errors, []);
@@ -114,7 +114,7 @@ test('YouTube connection errors preserve input and late loads cannot replace a r
     await r.start([]);
     await r.page.locator('#settings-open').click();
     await r.page.locator('[data-settings-target="youtube"]').click();
-    await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
+    await expect(r.page.locator('#youtube-connection')).toHaveText('Direct connection');
     await r.page.locator('#youtube-mode').selectOption('proxy');
     await r.page.locator('#youtube-address').fill('http://draft.test:8000');
     await r.page.locator('#youtube-password').fill('draft-password');
@@ -139,7 +139,7 @@ test('YouTube connection errors preserve input and late loads cannot replace a r
     await r.page.locator('#youtube-address').fill('http://new-draft.test:8000');
     await r.page.evaluate(config => window.lateYouTubeReply(new Response(JSON.stringify({...config, mode:'proxy', address:'http://old.test:8000'}), {headers:{'Content-Type':'application/json'}})), config);
     await expect(r.page.locator('#youtube-address')).toHaveValue('http://new-draft.test:8000');
-    await expect(r.page.locator('#youtube-connection')).toHaveText('Прямое подключение');
+    await expect(r.page.locator('#youtube-connection')).toHaveText('Direct connection');
     await expect(r.page.locator('#youtube-message')).toHaveText('');
     assert.deepEqual(r.errors, []);
   } finally {await r.close();}

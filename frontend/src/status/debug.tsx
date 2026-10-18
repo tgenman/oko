@@ -23,9 +23,9 @@ function byId(id: string) { return document.getElementById(id)!; }
 function ErrorDetails({ entry, identity }: {
     entry: Entry;
     identity: string;
-}) { const [open, setOpen] = useState(false); return <details data-key={identity} open={open} onToggle={event => setOpen(event.currentTarget.open)}><summary>{`${new Date(entry.last_at).toLocaleString()} · ${entry.source} · ${entry.message} · ×${entry.count}${entry.pending ? ' · не сохранено' : ''}`}</summary><p>{`Первое: ${new Date(entry.first_at).toLocaleString()} · Последнее: ${new Date(entry.last_at).toLocaleString()} · ${entry.error_type}`}</p><pre>{entry.traceback || entry.message}</pre></details>; }
+}) { const [open, setOpen] = useState(false); return <details data-key={identity} open={open} onToggle={event => setOpen(event.currentTarget.open)}><summary>{`${new Date(entry.last_at).toLocaleString()} · ${entry.source} · ${entry.message} · ×${entry.count}${entry.pending ? ' · not saved' : ''}`}</summary><p>{`First: ${new Date(entry.first_at).toLocaleString()} · Last: ${new Date(entry.last_at).toLocaleString()} · ${entry.error_type}`}</p><pre>{entry.traceback || entry.message}</pre></details>; }
 let reporter: (error: unknown, source: string, newOccurrence: boolean) => void = () => { };
-export function reportError(error: unknown, source = 'Браузер', newOccurrence = false) { reporter(error, source, newOccurrence); }
+export function reportError(error: unknown, source = 'Browser', newOccurrence = false) { reporter(error, source, newOccurrence); }
 export function createDebugPanel({ token, readerApi }: {
     token: string | null;
     readerApi: ReaderApi;
@@ -67,7 +67,7 @@ export function createDebugPanel({ token, readerApi }: {
                 groups.set(identity, { ...entry, id: entry.event_id, streams: {}, first_at: entry.first_at, last_at: entry.occurred_at, pending: true });
         }
         const entries = [...groups.values()].sort((a, b) => b.last_at.localeCompare(a.last_at)).slice(0, 100);
-        mountSurface(panel, <><div className="debug-heading"><h2>Исключения <span id="debug-count">{Math.max(serverCount, entries.length)}</span></h2><button id="debug-clear" type="button" disabled={clearing} onClick={() => { void clear(); }}>Очистить историю ошибок</button></div><p>Последние 100 групп ошибок сохраняются локально и доступны после перезапуска.</p><p id="debug-status" role="status">{storageError ? 'Журнал не сохранён на диск: ' + clean(storageError) : transportError}</p><p id="debug-empty" hidden={entries.length > 0}>Ошибок пока нет</p><div id="debug-errors">{entries.map(entry => <ErrorDetails key={key(entry)} identity={key(entry)} entry={entry}/>)}</div></>);
+        mountSurface(panel, <><div className="debug-heading"><h2>Exceptions <span id="debug-count">{Math.max(serverCount, entries.length)}</span></h2><button id="debug-clear" type="button" disabled={clearing} onClick={() => { void clear(); }}>Clear Error History</button></div><p>The last 100 error groups are saved locally and remain available after restart.</p><p id="debug-status" role="status">{storageError ? 'Journal not saved to disk: ' + clean(storageError) : transportError}</p><p id="debug-empty" hidden={entries.length > 0}>No errors yet</p><div id="debug-errors">{entries.map(entry => <ErrorDetails key={key(entry)} identity={key(entry)} entry={entry}/>)}</div></>);
     }
     function flush() {
         if (sending || clearing || !pending.length)
@@ -97,7 +97,7 @@ export function createDebugPanel({ token, readerApi }: {
             transportError = '';
         }
         catch (error) {
-            transportError = clean(errorValue(error).message) + '. Ошибки пока доступны в этой вкладке.';
+            transportError = clean(errorValue(error).message) + '. Errors are still available in this tab.';
         }
         finally {
             sending = false;
@@ -149,7 +149,7 @@ export function createDebugPanel({ token, readerApi }: {
             const result = (await debugEntries({ client: readerApi.client })).data;
             const groups = result.groups;
             if (!Array.isArray(groups))
-                throw new Error('Некорректный ответ журнала');
+                throw new Error('Invalid journal response');
             if (stamp === revision) {
                 remote = groups.filter(retained);
                 serverCount = groups.length;
@@ -160,7 +160,7 @@ export function createDebugPanel({ token, readerApi }: {
         }
         catch (error) {
             if (stamp === revision) {
-                transportError = 'Журнал сервера недоступен: ' + clean(errorValue(error).message);
+                transportError = 'Server journal unavailable: ' + clean(errorValue(error).message);
                 render();
             }
         }
@@ -192,7 +192,7 @@ export function createDebugPanel({ token, readerApi }: {
             render();
         }
         catch (error) {
-            transportError = 'Не удалось очистить историю: ' + clean(errorValue(error).message);
+            transportError = 'Could not clear history: ' + clean(errorValue(error).message);
             render();
         }
         finally {
@@ -202,8 +202,8 @@ export function createDebugPanel({ token, readerApi }: {
         }
     }
     ;
-    window.addEventListener('error', event => reportError(event.error || new Error(event.message || 'Не загрузился ресурс'), event.filename || 'Браузер', true));
-    window.addEventListener('unhandledrejection', event => reportError(event.reason, 'Необработанный Promise', true));
+    window.addEventListener('error', event => reportError(event.error || new Error(event.message || 'Resource failed to load'), event.filename || 'Browser', true));
+    window.addEventListener('unhandledrejection', event => reportError(event.reason, 'Unhandled promise rejection', true));
     render();
     const timer = setInterval(refresh, 2000);
     window.addEventListener('pagehide', () => clearInterval(timer), { once: true });

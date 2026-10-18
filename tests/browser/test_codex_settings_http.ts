@@ -16,7 +16,7 @@ test('production HTTP saves choices, reads provenance and recreates material fro
   await page.locator('[data-settings-target="codex"]').click();
   await expect(page.locator('#codex-theses-model')).toHaveValue('synthetic');
   await page.locator('#codex-save').click();
-  await expect(page.locator('#codex-choice-status')).toContainText('сохранены');
+  await expect(page.locator('#codex-choice-status')).toContainText('saved');
   expect((await api('processors/codex')).configuration!.theses).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
   await page.locator('#settings-close').click();
   await api('feeds/'+feed.id,'PATCH',{public_ai:true});
@@ -25,11 +25,11 @@ test('production HTTP saves choices, reads provenance and recreates material fro
   await page.locator('#cards button').click();
   await page.locator('#processing-details summary').click();
   await expect(page.locator('#processing-provenance')).toContainText('synthetic');
-  await expect(page.locator('#processing-provenance')).toContainText('Fast выключен');
+  await expect(page.locator('#processing-provenance')).toContainText('Fast disabled');
   const completed=page.waitForResponse(response=>response.url().endsWith('/regenerate')&&response.request().method()==='POST');
   await page.locator('#regenerate').click();
   expect((await completed).status()).toBe(200);
-  await expect(page.locator('#ai-status')).toHaveText('Тезисы готовы');
+  await expect(page.locator('#ai-status')).toHaveText('Summary ready');
   expect(errors).toEqual([]);
 });
 
@@ -44,7 +44,7 @@ test('model screens save connection and independent Codex choices through produc
   await page.locator('#llamacpp-model').fill('synthetic-local');
   await page.locator('#llamacpp-local').check();
   await page.locator('#llamacpp-save').click();
-  await expect(page.locator('#llamacpp-status')).toContainText('сохранено');
+  await expect(page.locator('#llamacpp-status')).toContainText('saved');
   expect((await api('processors/llamacpp')).configuration).toMatchObject({endpoint:'http://127.0.0.1:18080',model:'synthetic-local',local_execution:true});
   await page.locator('#settings-dialog .settings-back').click();
   await page.getByRole('button',{name:'Codex',exact:true}).click();
@@ -52,7 +52,7 @@ test('model screens save connection and independent Codex choices through produc
   await expect(page.locator('#codex-theses-effort')).toHaveValue('low');
   await expect(page.locator('#codex-theses-fast')).not.toBeChecked();
   await page.locator('#codex-save').click();
-  await expect(page.locator('#codex-choice-status')).toContainText('сохранены');
+  await expect(page.locator('#codex-choice-status')).toContainText('saved');
   const config=(await api('processors/codex')).configuration;
   expect(config!.theses).toEqual({model:'synthetic',reasoning_effort:'low',fast:false});
   expect(Object.keys(config!).sort()).toEqual(['filter','theses']);

@@ -16,8 +16,8 @@ export function createReaderActions({readerApi,onChanged}:{readerApi:ReaderApi;o
   // Unknown outcomes expose navigation only; commands are never replayed.
   const recovery=unknown?resources.recovery.filter(isNavigation):resources.recovery;
   return {id:'local-'+request.id,code:unknown?'command_outcome_unknown':'command_failed',command_id:request.id,
-   title:unknown?'Результат действия пока неизвестен':'Не удалось выполнить действие',message:unknown?'Действие не повторяется автоматически; результат будет сверен после восстановления связи.':'Черновик остаётся у исходной формы.',
-   consequence:'Проверьте состояние действия.',affected:resources.affected,recovery,created_at:new Date().toISOString(),state:'current',saved:false};
+   title:unknown?'Action outcome unknown':'Action failed',message:unknown?'The action will not be retried automatically. Its result will be checked when the connection is restored.':'The draft stays in its original form.',
+   consequence:'Check the action status.',affected:resources.affected,recovery,created_at:new Date().toISOString(),state:'current',saved:false};
  }
  async function flush(){if(sending||!pending.size)return;sending=true;try{for(const[key,entry]of pending){const{id,context,result}=entry.request;await observeCommand({client:readerApi.client,body:{id,context,result}});const receipt=(await commandReceipt({client:readerApi.client,path:{identity:id}})).data;if(pending.get(key)!==entry)continue;if(receipt.outcome==='succeeded'||receipt.outcome==='abandoned')pending.delete(key);else entry.problem.saved=true;}}catch{/* The visible local outcome remains until a later status response. */}finally{sending=false;onChanged();}}
  function matchesDraft(problem:Problem,path:string,field:string):boolean{return problem.recovery.some(intent=>intent.kind==='change_setting'?path==='settings/'+intent.target.scope+'/'+intent.target.owner&&intent.keys.some(key=>key===field):intent.kind==='configure_processor'?path==='processors/'+intent.processor_id:false);}

@@ -1,52 +1,52 @@
 import type {AffectedResource,CommandContext,Problem,RecoveryIntent,RuntimeStatus} from '../api/generated/types.gen';
 export type Section='action'|'wait'|'object';
 const presentation:Record<Problem['code'],{section:Section;title:string}>={
- processor_not_configured:{section:'action',title:'Не выбрана модель'},
- processor_configuration_invalid:{section:'action',title:'Проверьте настройки модели'},
- public_ai_not_allowed:{section:'action',title:'Обработка не разрешена'},
- source_reconnect_required:{section:'action',title:'Проверьте доступ к источнику'},
- source_unavailable:{section:'object',title:'Источник временно недоступен'},
- material_incomplete:{section:'object',title:'Материал сохранён не полностью'},
- processing_failed:{section:'object',title:'Не удалось обработать материал'},
- youtube_rate_limited:{section:'wait',title:'YouTube ограничил запросы'},
- storage_unavailable:{section:'action',title:'Хранилище недоступно'},
- command_outcome_unknown:{section:'wait',title:'Результат действия пока неизвестен'},
- command_failed:{section:'action',title:'Не удалось выполнить действие'},
- material_save_failed:{section:'object',title:'Не удалось сохранить материал'},
- material_read_failed:{section:'object',title:'Не удалось прочитать локальный материал'},
- feed_delete_failed:{section:'object',title:'Удаление не завершено'},
- telegram_read_failed:{section:'object',title:'Не удалось подтвердить прочитанное'},
- profile_not_configured:{section:'action',title:'Настройте профиль Telegram'},
- profile_unavailable:{section:'action',title:'Проверьте профиль Telegram'},
- account_identity_mismatch:{section:'action',title:'Профиль указывает на другой аккаунт'},
- source_identity_conflict:{section:'action',title:'Конфликт привязки источника'},
- duplicate_source:{section:'action',title:'Источник уже подключён'},
- profile_in_use:{section:'action',title:'Аккаунт занятого профиля нельзя заменить'},
- profile_account_conflict:{section:'action',title:'Один аккаунт указан для двух ролей'},
- legacy_problem:{section:'object',title:'Сохранённая проблема'},
+ processor_not_configured:{section:'action',title:'No Model Selected'},
+ processor_configuration_invalid:{section:'action',title:'Check Model Settings'},
+ public_ai_not_allowed:{section:'action',title:'Processing Not Allowed'},
+ source_reconnect_required:{section:'action',title:'Check Source Access'},
+ source_unavailable:{section:'object',title:'Source Temporarily Unavailable'},
+ material_incomplete:{section:'object',title:'Item Not Fully Saved'},
+ processing_failed:{section:'object',title:'Processing Failed'},
+ youtube_rate_limited:{section:'wait',title:'YouTube Rate Limit Reached'},
+ storage_unavailable:{section:'action',title:'Storage unavailable'},
+ command_outcome_unknown:{section:'wait',title:'Action outcome unknown'},
+ command_failed:{section:'action',title:'Action failed'},
+ material_save_failed:{section:'object',title:'Could Not Save Item'},
+ material_read_failed:{section:'object',title:'Could Not Read Local Item'},
+ feed_delete_failed:{section:'object',title:'Deletion Incomplete'},
+ telegram_read_failed:{section:'object',title:'Could Not Acknowledge Read Status'},
+ profile_not_configured:{section:'action',title:'Configure Telegram Profile'},
+ profile_unavailable:{section:'action',title:'Check Telegram Profile'},
+ account_identity_mismatch:{section:'action',title:'Profile Points to Another Account'},
+ source_identity_conflict:{section:'action',title:'Source Binding Conflict'},
+ duplicate_source:{section:'action',title:'Source Already Connected'},
+ profile_in_use:{section:'action',title:'Cannot Replace an Account in Use'},
+ profile_account_conflict:{section:'action',title:'Same Account Assigned to Both Roles'},
+ legacy_problem:{section:'object',title:'Saved Problem'},
 };
 export const section=(problem:Problem):Section=>presentation[problem.code]?.section||'object';
-export const problemTitle=(problem:Problem)=>problem.code==='legacy_problem'?problem.title||presentation.legacy_problem.title:problem.code==='processor_not_configured'&&problem.affected.some(r=>r.kind==='processor'&&r.processor_id==='codex')?'Не выбрана модель Codex':presentation[problem.code]?.title||problem.title;
+export const problemTitle=(problem:Problem)=>problem.code==='legacy_problem'?problem.title||presentation.legacy_problem.title:problem.code==='processor_not_configured'&&problem.affected.some(r=>r.kind==='processor'&&r.processor_id==='codex')?'No Codex Model Selected':presentation[problem.code]?.title||problem.title;
 export const isNavigation=(intent:RecoveryIntent)=>['configure_processor','configure_telegram_profile','change_setting','connect_source','inspect_materials'].includes(intent.kind);
 export function recoveryLabel(intent:RecoveryIntent):string {
  switch(intent.kind){
- case 'configure_processor':return 'Настроить модель';
- case 'configure_telegram_profile':return 'Настроить профиль Telegram';
- case 'change_setting':return 'Открыть настройки';
- case 'connect_source':return 'Добавить источник';
- case 'inspect_materials':return 'Показать материалы';
- case 'retry_material':return 'Повторить загрузку';
- case 'retry_theses':return 'Повторить обработку';
- case 'retry_filter':return 'Повторить фильтрацию';
- case 'regenerate':return 'Пересоздать результат';
- case 'retry_collection':return intent.target.scope==='feed'?'Обновить источник':'Обновить источники';
+ case 'configure_processor':return 'Configure Model';
+ case 'configure_telegram_profile':return 'Configure Telegram Profile';
+ case 'change_setting':return 'Open Settings';
+ case 'connect_source':return 'Add Source';
+ case 'inspect_materials':return 'Show Items';
+ case 'retry_material':return 'Retry Download';
+ case 'retry_theses':return 'Retry Processing';
+ case 'retry_filter':return 'Retry Filtering';
+ case 'regenerate':return 'Regenerate Result';
+ case 'retry_collection':return intent.target.scope==='feed'?'Refresh Source':'Refresh Sources';
  }
 }
 export function workText(state:RuntimeStatus):string {
- if(state.runtime_state==='stopped')return 'Око остановлено';
- if(state.runtime_state==='unavailable')return 'Хранилище недоступно';
- const labels=state.work.flatMap(work=>{switch(work.phase){case 'idle':return [];case 'collecting':return ['Сбор источников'];case 'deleting':return ['Локальная очистка'];case 'processing':return [work.operation==='filter'?'Фильтрация':'Подготовка тезисов'];case 'waiting':return ['Ожидание'];}});
- return [...new Set(labels)].join(' · ')||'Готово';
+ if(state.runtime_state==='stopped')return 'Oko stopped';
+ if(state.runtime_state==='unavailable')return 'Storage unavailable';
+ const labels=state.work.flatMap(work=>{switch(work.phase){case 'idle':return [];case 'collecting':return ['Collecting Sources'];case 'deleting':return ['Local Cleanup'];case 'processing':return [work.operation==='filter'?'Filtering':'Generating summary'];case 'waiting':return ['Waiting'];}});
+ return [...new Set(labels)].join(' · ')||'Done';
 }
 export function commandResources(context:CommandContext):{affected:AffectedResource[];recovery:RecoveryIntent[]} {
  if(context.operation==='settings_patch')return {affected:[{kind:'settings',target:context.target}],recovery:context.keys.length?[{kind:'change_setting',target:context.target,keys:context.keys}]:[]};
