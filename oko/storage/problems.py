@@ -75,7 +75,7 @@ class Problems:
         jobs = self.db.execute("SELECT jobs.*,items.feed_id,items.viewed FROM jobs LEFT JOIN items ON items.id=jobs.item WHERE (jobs.status IN ('pending','running') OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL)) AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)").fetchall()
         for job in jobs:
             code = job['problem_code']
-            if code == 'codex-choice':
+            if code in ('codex-choice', 'ai-permission'):
                 continue
             if code is None and job['kind'] == 'fetch' and feeds.get(job['feed_id'], {}).get('kind') == 'youtube' and self.store.youtube.ready_at() > now:
                 continue

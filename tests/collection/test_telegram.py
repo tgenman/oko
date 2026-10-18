@@ -83,7 +83,7 @@ def test_paged_history_resumes_committed_position_and_errors_do_not_block_other_
     from oko.collection.contracts import SourceError
     class Pages(Telegram):
         async def info(self, account, peer):
-            return dict(peer=-1001234567891 if peer == '@denied' else -1001234567890, title=str(peer), kind='group', forum=False)
+            return dict(peer=peer if isinstance(peer,int) else -1001234567891 if peer == '@denied' else -1001234567890, title=str(peer), kind='group', forum=False)
         async def page(self, account, peer, after, since):
             if peer == -1001234567891:
                 raise SourceError('Нет доступа к Telegram-источнику', 120)

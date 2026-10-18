@@ -4,6 +4,9 @@ All mutations run on the existing Subscriptions SQLite connection under Runtime
 admission. No network, credentials, SDK or file deletion belongs here.
 """
 import json
+import base64
+import hashlib
+import binascii
 import re
 import secrets
 import sqlite3
@@ -48,6 +51,7 @@ class TelegramAccess:
         # No executescript here: migrations and their ownership rows are atomic.
         with db:
             db.execute('BEGIN IMMEDIATE')
+            db.execute('CREATE TABLE IF NOT EXISTS telegram_avatars (feed TEXT PRIMARY KEY, image BLOB NOT NULL, mime TEXT NOT NULL, digest TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS telegram_bindings (feed TEXT PRIMARY KEY, binding TEXT NOT NULL)')
             db.execute('''CREATE TABLE IF NOT EXISTS telegram_profiles (
                 role TEXT PRIMARY KEY, account TEXT, user_id INTEGER, generation INTEGER NOT NULL,
@@ -169,6 +173,7 @@ class TelegramAccess:
                  'telegram' if profile else None, info.get('peer'), profile['account'] if profile else None,
                  info.get('username'), auto_read if profile else None))
             self.put_binding(identity, binding)
+            self.save_avatar(identity, info)
             for claim in claims:
                 self.claim(identity, claim, 'verified client' if profile else 'public preview')
             if history is not None:
@@ -211,8 +216,29 @@ class TelegramAccess:
                     raise TelegramConflict('source_identity_conflict', dict(feed_id=feed), 'Новый alias уже занят другим фидом')
             for claim in claims:
                 self.claim(feed, claim, 'client metadata refresh')
+            self.save_avatar(feed, info)
+
+    def save_avatar(self, feed: str, info: dict[str, Any]) -> None:
+        if 'avatar' not in info:
+            return
+        if info['avatar'] is None:
+            self.db.execute('DELETE FROM telegram_avatars WHERE feed=?', (feed,))
+            return
+        try:
+            encoded = info['avatar']
+            if not isinstance(encoded, str) or len(encoded) > 180000:
+                return
+            image = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error):
+            return
+        mime = ('image/jpeg' if image.startswith(b'\xff\xd8\xff') else 'image/png' if image.startswith(b'\x89PNG\r\n\x1a\n') else 'image/webp' if image[:4] == b'RIFF' and image[8:12] == b'WEBP' else None)
+        if not mime or len(image) > 128*1024:
+            return
+        self.db.execute('INSERT INTO telegram_avatars VALUES (?,?,?,?) ON CONFLICT(feed) DO UPDATE SET image=excluded.image,mime=excluded.mime,digest=excluded.digest',
+                        (feed, image, mime, hashlib.sha256(image).hexdigest()))
 
     def release(self, feed: str) -> None:
+        self.db.execute('DELETE FROM telegram_avatars WHERE feed=?', (feed,))
         self.db.execute('DELETE FROM telegram_claim_owners WHERE feed=?', (feed,))
         self.db.execute('DELETE FROM telegram_source_claims WHERE NOT EXISTS (SELECT 1 FROM telegram_claim_owners o WHERE o.kind=telegram_source_claims.kind AND o.value=telegram_source_claims.value)')
         self.db.execute('DELETE FROM telegram_bindings WHERE feed=?', (feed,))

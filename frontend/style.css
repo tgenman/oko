@@ -98,3 +98,5 @@ body{display:flex;flex-direction:column;height:100vh}body>header{flex:none}main{
 #react-root{display:contents}
 
 @media(max-width:640px){#feeds-layout{grid-template-columns:minmax(0,1fr);gap:12px}#feed-list{border-right:0;border-bottom:1px solid #dce1d8;padding:0 0 12px;max-height:180px;overflow:auto}}
+
+.source-avatar{width:24px;height:24px;flex:0 0 24px;border-radius:50%;object-fit:cover;}

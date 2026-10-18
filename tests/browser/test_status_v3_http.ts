@@ -6,6 +6,7 @@ import {reader as fixtureReader} from './support';
 
 test('domain status opens the real processor form and retains an expanded finished problem',{timeout:20000},async t=>{
  const {page,api,origin,token}=await productionReader(t);
+ await api('v3/settings/oko/global','PATCH',{theses:true});
  const requests:string[]=[];page.on('request',request=>requests.push(new URL(request.url()).pathname));
  await page.goto(origin+'/#token='+token);
  await expect(page.locator('#status-toggle')).toContainText('Проблемы');

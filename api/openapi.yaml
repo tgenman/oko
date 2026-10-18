@@ -10411,6 +10411,192 @@ paths:
               $ref: '#/components/schemas/TelegramProfileRequest'
             example:
               configuration_ref: example
+  /api/v3/feeds/{feed}/avatar/{revision}:
+    get:
+      summary: Feed avatar
+      operationId: feed_avatar
+      description: Return the locally saved small Telegram source avatar. No external fetch
+        is performed. Bearer, Host and Origin checks apply. Missing or superseded avatars return
+        resource_not_found.
+      tags:
+      - subscriptions
+      parameters:
+      - name: feed
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/FeedId'
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Saved bytes; no JSON wrapper.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: Saved attachment disposition when applicable.
+            Cache-Control:
+              schema:
+                type: string
+              description: private, no-store
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: Аватар недоступен
+                    details:
+                      resource:
+                        kind: feed
+                        feed_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
 components:
   schemas:
     MaterialId:
@@ -10485,6 +10671,12 @@ components:
       maxLength: 4000
       examples:
       - https://example.test/post/1
+    FeedAvatarUrl:
+      examples:
+      - /api/v3/feeds/example/avatar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      type: string
+      pattern: ^/api/v3/feeds/[^/]+/avatar/[a-f0-9]{64}$
+      format: uri-reference
     MediaUrl:
       type: string
       pattern: ^/api/v3/materials/
@@ -11257,6 +11449,8 @@ components:
     TelegramUnconfiguredSubscriptionFeed:
       type: object
       properties:
+        avatar_url:
+          $ref: '#/components/schemas/FeedAvatarUrl'
         id:
           $ref: '#/components/schemas/FeedId'
         title:
@@ -11945,6 +12139,8 @@ components:
     TelegramWebSubscriptionFeed:
       type: object
       properties:
+        avatar_url:
+          $ref: '#/components/schemas/FeedAvatarUrl'
         id:
           $ref: '#/components/schemas/FeedId'
         title:
@@ -12017,6 +12213,8 @@ components:
     TelegramClientSubscriptionFeed:
       type: object
       properties:
+        avatar_url:
+          $ref: '#/components/schemas/FeedAvatarUrl'
         id:
           $ref: '#/components/schemas/FeedId'
         title:
@@ -12097,6 +12295,8 @@ components:
     TelegramLegacyClientSubscriptionFeed:
       type: object
       properties:
+        avatar_url:
+          $ref: '#/components/schemas/FeedAvatarUrl'
         id:
           $ref: '#/components/schemas/FeedId'
         title:

@@ -169,7 +169,7 @@ def test_upgrade_preserves_old_reader_and_pending_deletion(tmp_path: Path):
 
 
 
-def test_theses_are_enabled_by_default_for_all_feeds_and_can_be_disabled(tmp_path: Path):
+def test_theses_default_is_youtube_only_and_explicit_override_can_be_reset(tmp_path: Path):
     saved_sources(tmp_path, [('https://source.test/feed', 'RSS', 'Папка'), ('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa', 'YouTube', 'Папка'), ('https://t.me/example_channel', 'Telegram', 'Папка')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         result = client.get('/api/v3/subscriptions')
@@ -177,9 +177,9 @@ def test_theses_are_enabled_by_default_for_all_feeds_and_can_be_disabled(tmp_pat
         feeds = result.json()['feeds']
         for feed in feeds:
             url = '/api/v3/settings/feed/' + feed['id']
-            assert client.get(url).json()['effective']['theses'] == {'value': True, 'origin':{'scope':'default'}}
+            assert client.get(url).json()['effective']['theses'] == {'value': feed['kind']=='youtube', 'origin':{'scope':'default'}}
         url = '/api/v3/settings/feed/' + feeds[0]['id']
-        assert client.patch(url, json={'theses': False}).json()['effective']['theses']['value'] is False
+        assert client.patch(url, json={'theses': True}).json()['effective']['theses']['value'] is True
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
-        assert client.get(url).json()['effective']['theses']['value'] is False
-        assert client.patch(url, json={'theses': None}).json()['effective']['theses']['value'] is True
+        assert client.get(url).json()['effective']['theses']['value'] is True
+        assert client.patch(url, json={'theses': None}).json()['effective']['theses']['value'] is False

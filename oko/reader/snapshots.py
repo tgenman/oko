@@ -331,6 +331,7 @@ class Status(WireModel):
     youtube: YouTube | None | MISSING = MISSING
 
 class SubscriptionFeed(WireModel):
+    avatar_url: StrictStr | MISSING = MISSING
     model_config = ConfigDict(extra='forbid')
     auto_read: StrictBool | None | MISSING = Field(default=MISSING, title='Auto Read')
     connection: StrictStr | MISSING = Field(default=MISSING, title='Connection')
@@ -393,6 +394,7 @@ class EffectiveSettings(WireModel):
     overrides: SettingOverrides
 
 class Feed(WireModel):
+    avatar_url: StrictStr | MISSING = MISSING
     model_config = ConfigDict(extra='forbid')
     auto_read: StrictBool | None | MISSING = Field(default=MISSING, title='Auto Read')
     connection: StrictStr | MISSING = Field(default=MISSING, title='Connection')

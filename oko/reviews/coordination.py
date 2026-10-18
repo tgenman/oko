@@ -82,7 +82,7 @@ class ProcessingCoordination:
             reason = 'public_ai_not_allowed'
         else:
             reason = 'retry_scheduled'
-        return ProcessingWait(reason, wall_now + max(0, row['next'] - now) if row['next'] else None)
+        return ProcessingWait(reason, wall_now + max(0, row['next'] - now) if row['next'] and reason != 'public_ai_not_allowed' else None)
 
     def sync(self) -> None:
         """One owner of dependency order, also used after accepting a result."""

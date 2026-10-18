@@ -4,6 +4,7 @@ This worker only resolves peers, reads history and downloads originals with
 Telethon. It does not perform transcription or AI processing.
 """
 import asyncio
+import base64
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 import json
@@ -101,6 +102,7 @@ async def main() -> None:
     spool = Path(sys.argv[1])
     locks: dict[str, Any] = {}
     peers: dict[tuple[str, str], Any] = {}
+    avatars: dict[tuple[str, int], tuple[int | None, str | None]] = {}
 
     async def client_for(account: str) -> Any:
         cl = registry.client(account)
@@ -118,9 +120,9 @@ async def main() -> None:
                 raise
         return cl
 
-    async def entity_for(cl: Any, account: str, peer: str | int) -> Any:
+    async def entity_for(cl: Any, account: str, peer: str | int, *, refresh: bool = False) -> Any:
         cache_key = (account, str(peer))
-        if cache_key not in peers or isinstance(peer, str):
+        if refresh or cache_key not in peers or isinstance(peer, str):
             # Numeric private peers require an existing access_hash. Populate the
             # client's cache once, without exporting dialogs into Oko.
             try:
@@ -165,7 +167,7 @@ async def main() -> None:
                         continue
                     if 'expected_user_id' in body and int((await cl.get_me()).id) != body['expected_user_id']:
                         raise PermissionError('account-identity-mismatch')
-                    entity = await entity_for(cl, body['account'], body['peer'])
+                    entity = await entity_for(cl, body['account'], body['peer'], refresh=op == 'info')
                     topic_id = body.get('topic_id') if op in ('read_state', 'read_window', 'acknowledge') else None
                     if topic_id is not None and not getattr(entity, 'forum', False):
                         raise ValueError('topic requires forum')
@@ -173,6 +175,19 @@ async def main() -> None:
                         value = dict(peer=utils.get_peer_id(entity), title=entity.title,
                                      kind='channel' if getattr(entity, 'broadcast', False) else 'group', forum=bool(getattr(entity, 'forum', False)), username=getattr(entity, 'username', None),
                                      usernames=[u.username for u in (getattr(entity, 'usernames', None) or []) if u.active])
+                        photo_id = getattr(getattr(entity, 'photo', None), 'photo_id', None)
+                        key = (body['account'], utils.get_peer_id(entity))
+                        try:
+                            if key not in avatars or avatars[key][0] != photo_id:
+                                photo = await cl.download_profile_photo(entity, file=bytes, download_big=False) if photo_id else None
+                                if photo is not None and (not isinstance(photo, bytes) or len(photo) > 128*1024):
+                                    raise ValueError('avatar size')
+                                avatars[key] = (photo_id, base64.b64encode(photo).decode('ascii') if photo else None)
+                            value['avatar'] = avatars[key][1]
+                        except FloodWaitError:
+                            raise
+                        except Exception:
+                            pass  # Optional artwork must not stop collection or erase a cached avatar.
                     elif op == 'history_page':
                         upper, before = body['upper'], body['before']
                         first = not upper

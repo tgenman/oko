@@ -63,7 +63,7 @@ statusPanel = createStatusPanel({debug, actions,resourceName:resource=>resource.
     }
     refresh();
   }, onRefresh:()=>refresh()});
-const tree = createReadingTree({readerApi,onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
+const tree = createReadingTree({readerApi,fetchMedia:transport.media,onSelect: selection => {folderId = selection.kind === 'folder' ? selection.id : null; feedId = selection.kind === 'feed' ? selection.id : null; contentEpoch++; opened.clear(); list.setArea(selection, readingCatalog); refresh();}, onFeedSettings: (id, trigger) => menus.openFeed(id, trigger), onWarning: () => statusPanel.open()});
 function stopUi(message:string) {
   session.dispose();
   menus.stop();

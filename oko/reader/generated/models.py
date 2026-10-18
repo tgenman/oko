@@ -277,6 +277,17 @@ class ExplicitLifetimePolicy(WireModel):
     kind: Literal["explicit"]
 
 
+class FeedAvatarUrl(RootModel[StrictStr]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictStr = Field(
+        ...,
+        examples=[
+            "/api/v3/feeds/example/avatar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        pattern="^/api/v3/feeds/[^/]+/avatar/[a-f0-9]{64}$",
+    )
+
+
 class FeedConnectionUrl(RootModel[AnyUrl]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: AnyUrl = Field(..., examples=["https://example.test/feed.xml"])
@@ -2520,6 +2531,7 @@ class TelegramClientSubscriptionFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramClientAccess
     auto_read: StrictBool
+    avatar_url: FeedAvatarUrl | MISSING = MISSING
     connection: Literal["ready", "unavailable", "deleting"]
     folder_id: FolderId
     history: HistoryState
@@ -2569,6 +2581,7 @@ class TelegramConnectRequest(
 class TelegramLegacyClientSubscriptionFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramLegacyClientAccess
+    avatar_url: FeedAvatarUrl | MISSING = MISSING
     connection: Literal["needs_profile_confirmation", "deleting"]
     folder_id: FolderId
     history: HistoryState
@@ -2664,6 +2677,7 @@ class TelegramSourceReference(WireModel):
 class TelegramUnconfiguredSubscriptionFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramUnconfiguredAccess
+    avatar_url: FeedAvatarUrl | MISSING = MISSING
     connection: Literal["needs_connection", "deleting"]
     folder_id: FolderId
     history: HistoryState
@@ -2680,6 +2694,7 @@ class TelegramUnconfiguredSubscriptionFeed(WireModel):
 class TelegramWebSubscriptionFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramWebAccess
+    avatar_url: FeedAvatarUrl | MISSING = MISSING
     connection: Literal["ready", "needs_connection", "unavailable", "deleting"]
     folder_id: FolderId
     history: HistoryState

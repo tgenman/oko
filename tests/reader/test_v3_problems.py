@@ -13,6 +13,7 @@ HEADERS={'Authorization':'Bearer test'}
 
 def test_live_model_producer_has_domain_code_and_recovery_without_server_navigation(tmp_path):
     with TestClient(create_app(tmp_path,token='test',api_only=True),headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':True})
         problem=client.get('/api/v3/status').json()['problems']['current'][0]
         assert problem['code']=='processor_not_configured'
         assert problem['recovery']==[{'kind':'configure_processor','processor_id':'codex'}]

@@ -999,6 +999,8 @@ export type ExplicitLifetimePolicy = {
     kind: 'explicit';
 };
 
+export type FeedAvatarUrl = string;
+
 export type FeedCandidate = {
     kind: 'rss' | 'youtube';
     title: string;
@@ -2218,6 +2220,7 @@ export type TelegramClientConnectRequest = {
 export type TelegramClientSubscriptionFeed = {
     access: TelegramClientAccess;
     auto_read: boolean;
+    avatar_url?: FeedAvatarUrl;
     connection: 'ready' | 'unavailable' | 'deleting';
     folder_id: FolderId;
     history: HistoryState;
@@ -2278,6 +2281,7 @@ export type TelegramLegacyClientAccess = {
 
 export type TelegramLegacyClientSubscriptionFeed = {
     access: TelegramLegacyClientAccess;
+    avatar_url?: FeedAvatarUrl;
     connection: 'needs_profile_confirmation' | 'deleting';
     folder_id: FolderId;
     history: HistoryState;
@@ -2398,6 +2402,7 @@ export type TelegramUnconfiguredAccess = {
 
 export type TelegramUnconfiguredSubscriptionFeed = {
     access: TelegramUnconfiguredAccess;
+    avatar_url?: FeedAvatarUrl;
     connection: 'needs_connection' | 'deleting';
     folder_id: FolderId;
     history: HistoryState;
@@ -2435,6 +2440,7 @@ export type TelegramWebConnectRequest = {
 
 export type TelegramWebSubscriptionFeed = {
     access: TelegramWebAccess;
+    avatar_url?: FeedAvatarUrl;
     connection: 'ready' | 'needs_connection' | 'unavailable' | 'deleting';
     folder_id: FolderId;
     history: HistoryState;
@@ -3197,6 +3203,50 @@ export type VerifyFeedResponses = {
 };
 
 export type VerifyFeedResponse = VerifyFeedResponses[keyof VerifyFeedResponses];
+
+export type FeedAvatarData = {
+    body?: never;
+    path: {
+        feed: FeedId;
+        revision: string;
+    };
+    query?: never;
+    url: '/api/v3/feeds/{feed}/avatar/{revision}';
+};
+
+export type FeedAvatarErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type FeedAvatarError = FeedAvatarErrors[keyof FeedAvatarErrors];
+
+export type FeedAvatarResponses = {
+    /**
+     * Saved bytes; no JSON wrapper.
+     */
+    200: Blob | File;
+};
+
+export type FeedAvatarResponse = FeedAvatarResponses[keyof FeedAvatarResponses];
 
 export type RemoveFeedData = {
     body?: never;

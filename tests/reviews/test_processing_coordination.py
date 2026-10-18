@@ -85,7 +85,8 @@ def test_permission_revoked_during_processor_check_prevents_source_transfer(tmp_
             assert client.patch('/api/v3/feeds/demo', json={'public_ai': False}).status_code == 200
         finally:
             transport.release.set()
-        wait_for(client, lambda: client.get('/api/v3/status').json()['problems']['current'])
+        wait_for(client, lambda: any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status').json()['work']))
+        assert client.get('/api/v3/status').json()['problems']['current'] == []
         assert not any(r.url.path == '/v1/chat/completions' for r in transport.calls)
         assert all(c['theses']['result'] is None for c in client.get('/api/v3/cards').json())
 

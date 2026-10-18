@@ -7,6 +7,7 @@ See docs/licenses/RSSHub-AGPL-3.0.txt and docs/licenses/RSSHub-NOTICE.md.
 """
 from dataclasses import dataclass
 import hashlib
+import base64
 from datetime import datetime
 import re
 from typing import Any
@@ -27,6 +28,7 @@ class WebPage:
     description: str
     posts: tuple[TelegramPublication, ...]
     next_before: int | None
+    avatar_url: str | None = None
 
 
 def text(node: Tag | NavigableString) -> str:
@@ -189,7 +191,8 @@ def parse_page(data: bytes, username: str) -> WebPage:
         if not posts:
             raise SourceError('Пустая страница с неподтверждённым продолжением Telegram')
     return WebPage(title.get_text(' ',strip=True) if title else username,
-                   readable(description) if description else '',tuple(posts),next_before)
+                   readable(description) if description else '',tuple(posts),next_before,
+                   str(avatar.get('src')) if (avatar := document.select_one('.tgme_channel_info_photo img, .tgme_page_photo_image img, img.tgme_page_photo_image')) and avatar.get('src') else None)
 
 
 async def load(username: str, before: int, transport: httpx.AsyncBaseTransport | None) -> tuple[WebPage,str]:
@@ -225,15 +228,37 @@ async def load(username: str, before: int, transport: httpx.AsyncBaseTransport |
         raise SourceError('Публичный предпросмотр Telegram недоступен',delay,code='source_unavailable') from error
 
 
+async def avatar_metadata(page: WebPage, transport: httpx.AsyncBaseTransport | None) -> dict[str, Any]:
+    if not page.avatar_url:
+        return {'avatar': None}
+    try:
+        async with Downloader(transport).open(page.avatar_url) as response:
+            data = bytearray()
+            async for part in response.aiter_bytes():
+                data.extend(part)
+                if len(data) > 128*1024:
+                    return {}
+        return {'avatar': base64.b64encode(data).decode('ascii')}
+    except SourceError:
+        return {}  # Optional artwork; text/history remain available.
+
+
 async def preview(username: str, transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
     page,url = await load(username,0,transport)
-    return dict(username=username,title=page.title,preview_url=url)
+    return dict(username=username,title=page.title,preview_url=url,**await avatar_metadata(page,transport))
 
 
 class WebTelegram:
     """One bounded page per call; pagination state is returned for durable commit."""
     def __init__(self, username: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.username,self.transport = username,transport
+        self.identity_info: dict[str, Any] | None = None
+        self._avatar_url: str | None = None
+
+    async def metadata(self, page: WebPage) -> None:
+        avatar = await avatar_metadata(page,self.transport) if self.identity_info is None or page.avatar_url != self._avatar_url else {key:value for key,value in self.identity_info.items() if key == 'avatar'}
+        self.identity_info = dict(username=self.username,title=page.title,**avatar)
+        self._avatar_url = page.avatar_url
 
     @staticmethod
     def rows(posts: list[TelegramPublication]) -> list[dict[str, Any]]:
@@ -241,6 +266,7 @@ class WebTelegram:
 
     async def history_page(self, account: str, peer: int, upper: int, before: int, since: float) -> dict[str, Any]:
         page,_ = await load(self.username,before or (upper+1 if upper else 0),self.transport)
+        await self.metadata(page)
         upper = upper or max((max(p.publication.members) for p in page.posts),default=0)
         posts = [p for p in page.posts if max(p.publication.members)<=upper]
         return dict(messages=self.rows(posts),upper=upper,next_before=page.next_before or min((min(p.publication.members) for p in posts),default=before),more=page.next_before is not None)
@@ -249,6 +275,7 @@ class WebTelegram:
         progress = dict(position or {})
         before = progress.get('catchup_before',0)
         page,_ = await load(self.username,before,self.transport)
+        await self.metadata(page)
         upper = progress.get('catchup_upper') or max((max(p.publication.members) for p in page.posts),default=after)
         posts = [p for p in page.posts if after<max(p.publication.members)<=upper]
         reached = not page.next_before or any(min(p.publication.members)<=after for p in page.posts)

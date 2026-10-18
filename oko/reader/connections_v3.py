@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi.responses import Response
 from pydantic import ValidationError
 
 from oko.reader.generated import models as wire
@@ -33,6 +34,14 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     async def subscriptions() -> wire.SubscriptionCatalog:
         saved = runtime.require_store().subscriptions
         return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds()])
+
+    @router.get('/api/v3/feeds/{feed}/avatar/{revision}')
+    async def feed_avatar(feed: str, revision: str) -> Response:
+        current = runtime.require_store()
+        row = current.db.execute("SELECT a.image,a.mime FROM telegram_avatars a JOIN feeds f ON f.id=a.feed WHERE a.feed=? AND a.digest=? AND f.connection!='deleting'", (feed, revision)).fetchone()
+        if not row:
+            raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message='Аватар недоступен', details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed',feed_id=wire.FeedId(feed)))), command_id=None, diagnostic_id=None)))
+        return Response(bytes(row['image']), media_type=row['mime'])
 
     @router.post('/api/v3/feeds/verify', response_model=wire.FeedVerification)
     async def verify(request: Request, body: wire.FeedUrlRequest) -> wire.FeedVerification:

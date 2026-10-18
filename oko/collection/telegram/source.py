@@ -279,11 +279,10 @@ class TelegramSource:
         # Refill it in the current worker, but never change the feed's identity.
         if isinstance(self.client, WebTelegram):
             return
-        if self.username:
-            info = await self.client.info(self.account, '@' + self.username)
-            self.identity_info = info
-            if info['peer'] != self.peer:
-                raise SourceError('Username Telegram теперь принадлежит другому источнику; проверьте привязку', code='source_identity_conflict')
+        info = await self.client.info(self.account, '@' + self.username if self.username else self.peer)
+        self.identity_info = info
+        if info['peer'] != self.peer:
+            raise SourceError('Username Telegram теперь принадлежит другому источнику; проверьте привязку', code='source_identity_conflict')
 
     def url(self, id: int) -> str:
         return f'https://t.me/c/{-self.peer-1000000000000}/{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
@@ -296,6 +295,8 @@ class TelegramSource:
                 raise SourceError('Несовместимый курсор Telegram',code='telegram-cursor-incompatible')
         legacy = json.dumps(previous.progress_state()) if previous else None
         publications, raw = await self._discover(legacy)
+        if isinstance(self.client, WebTelegram):
+            self.identity_info = self.client.identity_info
         envelope = HistoryEnvelope.from_progress(json.loads(raw), adapter=self.adapter)
         selection = envelope.selection.model_copy(update={'paused': bool((self.initial_history or {}).get('paused'))})
         return publications, envelope.model_copy(update={'selection': selection}).encode()

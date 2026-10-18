@@ -291,7 +291,7 @@ class Store:
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True) -> Job | None:
-        query = "SELECT * FROM jobs WHERE status='pending' AND next<=?"
+        query = "SELECT * FROM jobs WHERE status='pending' AND next<=? AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL)"
         if ai_only:
             query += " AND kind IN ('filter','theses')"
         elif deleting_only:
@@ -464,7 +464,7 @@ class Store:
             if job.kind == 'fetch':
                 self.subscriptions.history.failed(job.item)
             self.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
-                            (now + delay, error, code or job.kind, job.id, job.generation))
+                            (0 if code == 'ai-permission' else now + delay, error, code or job.kind, job.id, job.generation))
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
         with self.db:

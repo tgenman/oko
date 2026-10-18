@@ -94,7 +94,7 @@ def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
     import json
     async def scenario():
         archive = Archive()
-        source = TelegramSource(archive, 'fixture', 123, 1)
+        source = TelegramSource(archive, 'fixture', -1001234567890, 1)
         source.initial_history = dict(mode='count',count=20,since=None,paused=True)
         items, cursor = await source.discover(None)
         assert not items
