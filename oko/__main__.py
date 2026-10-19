@@ -88,7 +88,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                 store.db.close()
         codex_client = None
         if args.codex_url:
-            from oko.processing.codex_bridge import RemoteCodex
+            from oko.processing.codex_bridge.client import RemoteCodex
             codex_client = RemoteCodex(args.codex_url, args.codex_token_file.read_text().strip())
         token = secrets.token_urlsafe(32)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

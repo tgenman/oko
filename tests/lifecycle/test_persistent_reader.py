@@ -12,8 +12,14 @@ def test_remembered_login_survives_restart_and_can_be_revoked(tmp_path: Path):
     options = dict(persistent=True, public_url='http://oko')
     with TestClient(create_app(tmp_path, token='bootstrap', **options), base_url='http://oko') as client:
         assert client.get('/api/v3/status').status_code == 403
-        login = client.get('/api/v3/status', headers={'Authorization': 'Bearer bootstrap'})
+        # Health/readiness probes must not allocate browser credentials.
+        for _ in range(40):
+            probe = client.get('/api/v3/status', headers={'Authorization': 'Bearer bootstrap'})
+            assert probe.status_code == 200
+            assert 'set-cookie' not in probe.headers
+        login = client.get('/api/v3/status', headers={'Authorization': 'Bearer bootstrap', 'X-Oko-Remember': '1'})
         assert login.status_code == 200
+        first_instance = login.headers['X-Oko-Instance']
         assert 'HttpOnly' in login.headers['set-cookie']
         assert 'SameSite=strict' in login.headers['set-cookie']
         cookie = client.cookies.get('oko_browser')
@@ -29,6 +35,7 @@ def test_remembered_login_survives_restart_and_can_be_revoked(tmp_path: Path):
         restarted.cookies.set('oko_browser', cookie)
         status = restarted.get('/api/v3/status')
         assert status.status_code == 200
+        assert status.headers['X-Oko-Instance'] != first_instance
         assert status.json()['runtime_state'] == 'disabled'
         assert status.json()['lifetime'] == {'kind': 'explicit'}
         revoked = restarted.delete('/api/v3/browser-session', headers={'Origin': 'http://oko'})

@@ -13,7 +13,7 @@ paths:
       operationId: revoke_browser_session
       description: Revoke the presented browser cookie. Bearer authorization remains
         available. Persistent web deployments issue an HttpOnly host-only SameSite=strict
-        cookie on a successful bearer-authenticated status request. Cookie-authenticated
+        cookie on a successful bearer-authenticated status request with the X-Oko-Remember header set to 1. Cookie-authenticated
         mutations require an exact matching Origin; explicit invalid bearer never falls
         back to cookies.
       parameters: []
@@ -641,6 +641,14 @@ paths:
                 diagnostic_persistence_error: null
                 viewed_ids: []
           headers:
+            X-Oko-Instance:
+              description: Process identity; an open browser must reload before further commands when this changes.
+              schema:
+                type: string
+            X-Oko-Browser-Session:
+              description: Present as remembered in persistent web profile; bearer browser bootstrap requires explicit X-Oko-Remember header set to 1.
+              schema:
+                type: string
             Cache-Control:
               schema:
                 type: string
@@ -21230,7 +21238,7 @@ components:
       type: apiKey
       in: cookie
       name: oko_browser
-      description: Persistent web profile only. Host-only remembered credential bootstrapped using process bearer; cookie mutations require matching Origin.
+      description: "Persistent web profile only. Host-only remembered credential bootstrapped using process bearer and X-Oko-Remember: 1; cookie mutations require matching Origin."
     ReaderSession:
       type: http
       scheme: bearer

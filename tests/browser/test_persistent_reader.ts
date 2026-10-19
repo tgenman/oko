@@ -25,7 +25,8 @@ test('remembered browser reopens without token and survives a reader restart', {
   await expect(reopened.locator('#stop')).toHaveText('Start');
   await page.close();
   await restart();
-  await reopened.reload();
+  await expect(reopened.getByRole('button',{name:'Reload Oko'})).toBeVisible();
+  await reopened.getByRole('button',{name:'Reload Oko'}).click();
   await expect(reopened.locator('#stop')).toBeEnabled();
   await expect(reopened.locator('#stop')).toHaveText('Start');
   await reopened.locator('#stop').click();

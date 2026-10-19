@@ -9,7 +9,9 @@ import time
 import httpx
 import uvicorn
 
-from oko.processing.codex_bridge import BridgeConfig, RemoteCodex, create_app
+from oko.processing.codex_bridge.protocol import BridgeConfig
+from oko.processing.codex_bridge.client import RemoteCodex
+from oko.processing.codex_bridge.service import create_app
 from oko.processing.execution import CodexChoice
 
 
@@ -313,6 +315,65 @@ def test_supervisor_crash_blocks_new_work_until_owned_process_cleanup(tmp_path):
                                  operation='check', deadline=time.time() + 30)
                 assert client.put('/v1/jobs/' + 'f' * 32, json=next_body).status_code == 503
                 assert marker.exists()
+            finally:
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
+class UnconfirmedStopCodex(SyntheticCodex):
+    """Synthetic OS boundary: SIGKILL reports success while the child remains."""
+    async def complete(self, prompt, schema, directory, choice):
+        import os
+        import signal
+        import sys
+        process = await asyncio.create_subprocess_exec(sys.executable, '-c',
+            'import time; time.sleep(120)', start_new_session=True,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        Path(prompt).write_text(str(process.pid))
+        real_killpg = os.killpg
+        def uncertain_killpg(pgid, sig):
+            if pgid == process.pid and sig == signal.SIGKILL:
+                return
+            return real_killpg(pgid, sig)
+        os.killpg = uncertain_killpg
+        return '{}'
+
+
+def test_unconfirmed_group_stop_preserves_marker_and_blocks_next_job(tmp_path):
+    import os
+    import signal
+    with running_bridge(tmp_path, UnconfirmedStopCodex) as url:
+        headers = job_headers(url)
+        pid_file = tmp_path / 'unconfirmed.pid'
+        with httpx.Client(base_url=url, headers=headers, trust_env=False) as client:
+            body = dict(boot_id=headers['X-Oko-Boot'], session_id=headers['X-Oko-Session'],
+                        operation='complete', deadline=time.time() + 60, prompt=str(pid_file),
+                        schema={}, choice={'model': 'synthetic', 'reasoning_effort': 'low'})
+            path = '/v1/jobs/' + '1' * 32
+            assert client.put(path, json=body).status_code == 200
+            pid = wait_file(pid_file)
+            try:
+                for _ in range(400):
+                    state = client.get(path).json()
+                    if state['state'] != 'running':
+                        break
+                    time.sleep(.01)
+                assert state['state'] == 'error'
+                assert 'result' not in state
+                assert (tmp_path / 'scratch' / 'active.json').exists()
+                next_body = dict(boot_id=headers['X-Oko-Boot'], session_id=headers['X-Oko-Session'],
+                                 operation='check', deadline=time.time() + 30)
+                # Terminal state can precede the supervisor's own exit by a
+                # scheduler tick: both busy and recovery-required block work.
+                for _ in range(200):
+                    blocked = client.put('/v1/jobs/' + '2' * 32, json=next_body)
+                    assert blocked.status_code in (409, 503)
+                    if blocked.status_code == 503:
+                        break
+                    time.sleep(.01)
+                assert blocked.status_code == 503
             finally:
                 try:
                     os.killpg(pid, signal.SIGKILL)

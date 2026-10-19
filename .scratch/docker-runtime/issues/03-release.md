@@ -9,6 +9,6 @@ Specification: [Docker runtime](../spec.md).
 ## Acceptance
 
 - [ ] Build clean explicit revision with locked dependencies and matching assets; exclude private data.
-- [ ] Publish only 127.0.0.1:80; install native helper outside checkout.
+- [ ] Publish only 127.0.0.1:8765; install native helper outside checkout.
 - [ ] Provide start/stop/open/status/update and consistent backups with protected rollback.
 - [ ] Verify Docker/Mac networking; leave personal migration until release passes checks.

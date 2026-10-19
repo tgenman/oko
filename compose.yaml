@@ -8,7 +8,7 @@ services:
     init: true
     read_only: true
     ports:
-      - "127.0.0.1:80:8765"
+      - "127.0.0.1:8765:8765"
     volumes:
       - type: bind
         source: ${OKO_HOME:?}/data

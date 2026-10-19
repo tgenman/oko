@@ -21,7 +21,7 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 /**
  * Revoke the remembered session of this browser
  *
- * Revoke the presented browser cookie. Bearer authorization remains available. Persistent web deployments issue an HttpOnly host-only SameSite=strict cookie on a successful bearer-authenticated status request. Cookie-authenticated mutations require an exact matching Origin; explicit invalid bearer never falls back to cookies.
+ * Revoke the presented browser cookie. Bearer authorization remains available. Persistent web deployments issue an HttpOnly host-only SameSite=strict cookie on a successful bearer-authenticated status request with the X-Oko-Remember header set to 1. Cookie-authenticated mutations require an exact matching Origin; explicit invalid bearer never falls back to cookies.
  */
 export const revokeBrowserSession = <ThrowOnError extends boolean = true>(options?: Options<RevokeBrowserSessionData, ThrowOnError>) => (options?.client ?? client).delete<RevokeBrowserSessionResponses, RevokeBrowserSessionErrors, ThrowOnError>({ url: '/api/v3/browser-session', ...options });
 

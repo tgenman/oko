@@ -37,7 +37,7 @@ def supervise(control: Connection, root_name: str, request_data: dict[str, Any],
     request = JobRequest.model_validate(request_data)
     work = root / ('job-' + str(os.getpid()))
     work.mkdir(mode=0o700)
-    groups: set[int] = set()
+    groups: dict[int, asyncio.subprocess.Process] = {}
     marker.write_text(json.dumps({'supervisor': os.getpid(), 'groups': []}))
     marker.chmod(0o600)
     lease_until = time.time() + LEASE_SECONDS
@@ -49,9 +49,30 @@ def supervise(control: Connection, root_name: str, request_data: dict[str, Any],
         process = await original_spawn(*args, **kwargs)
         # Existing LocalCodex uses a new session for every subprocess.
         if kwargs.get('start_new_session'):
-            groups.add(process.pid)
+            groups[process.pid] = process
             marker.write_text(json.dumps({'supervisor': os.getpid(), 'groups': sorted(groups)}))
         return process
+
+    def group_exists(pid: int) -> bool:
+        try:
+            os.killpg(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
+            # Permission or another uncertain kernel result is not proof of exit.
+            return True
+
+    async def retire_exited_groups() -> None:
+        # Retain actual owned Process objects while alive. Drop a group ID as
+        # soon as its leader is reaped and the whole group has disappeared, so
+        # later probes do not retain known-stale PGIDs throughout the request.
+        while True:
+            for pid, process in list(groups.items()):
+                if process.returncode is not None and not group_exists(pid):
+                    del groups[pid]
+                    marker.write_text(json.dumps({'supervisor': os.getpid(), 'groups': sorted(groups)}))
+            await asyncio.sleep(.02)
 
     async def execute() -> Any:
         adapter = factory()
@@ -74,6 +95,7 @@ def supervise(control: Connection, root_name: str, request_data: dict[str, Any],
         nonlocal lease_until, mono_until
         loop = asyncio.get_running_loop()
         task = asyncio.create_task(execute())
+        reaper = asyncio.create_task(retire_exited_groups())
         def monitor() -> None:
             nonlocal lease_until, mono_until
             while not finished.is_set():
@@ -113,14 +135,29 @@ def supervise(control: Connection, root_name: str, request_data: dict[str, Any],
         finally:
             finished.set()
             watcher.join(1)
+        reaper.cancel()
+        await asyncio.gather(reaper, return_exceptions=True)
         for pid in groups:
             try:
                 os.killpg(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        shutil.rmtree(work, ignore_errors=False)
-        marker.unlink()
-        # A terminal response confirms group termination and scratch cleanup.
+            except OSError:
+                # Keep the marker below when termination cannot be confirmed.
+                pass
+        # SIGKILL delivery does not prove exit. Allow the child watcher to reap
+        # owned leaders and require every tracked group to disappear before
+        # clearing the recovery barrier or returning a successful result.
+        stop_deadline = time.monotonic() + 2
+        while any(group_exists(pid) for pid in groups) and time.monotonic() < stop_deadline:
+            await asyncio.sleep(.02)
+        if any(group_exists(pid) for pid in groups):
+            outcome = {'state': 'error', 'error': 'Codex process stop not confirmed; recovery required'}
+        else:
+            shutil.rmtree(work, ignore_errors=False)
+            marker.unlink()
+        # Success/cancellation confirms group termination and scratch cleanup;
+        # an uncertain stop retains both the marker and owned scratch.
         try:
             control.send(outcome)
         except (BrokenPipeError, EOFError, OSError):

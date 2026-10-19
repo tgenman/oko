@@ -51,7 +51,7 @@ if pathlib.Path(sys.argv[0]).name == 'launchctl' and 'print' in sys.argv: sys.ex
 if pathlib.Path(sys.argv[0]).name == 'uv':
     target=pathlib.Path('.venv/bin'); target.mkdir(parents=True); (target/'python').symlink_to(sys.executable)
 '''.format(python=sys.executable)
-    for name in ('docker', 'uv', 'launchctl'):
+    for name in ('docker', 'uv', 'launchctl', 'open'):
         path = binary / name
         path.write_text(tool)
         path.chmod(0o755)
@@ -183,3 +183,59 @@ def test_rollback_preserves_modified_data_and_does_not_start_old_version(tmp_pat
     assert any((home / 'backups').glob('*/data/material'))
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert not any('bootstrap' in call or 'up' in call for call in calls)
+
+
+def test_stop_blocks_on_abandoned_supervisor_marker_and_preserves_it(tmp_path):
+    repo, home, env, log, commit = prepared(tmp_path)
+    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
+    marker = home / 'scratch/active.json'
+    marker.write_text('{"supervisor":999999,"groups":[]}')
+    result = invoke(repo, home, 'stop', env=env)
+    assert result.returncode != 0
+    assert 'cleanup is unconfirmed' in result.stderr
+    assert marker.exists()
+    assert not (home / 'backups').exists()
+
+
+@pytest.mark.parametrize('command', ['backup', 'update', 'migrate'])
+def test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch(tmp_path, command):
+    repo, home, env, log, commit = prepared(tmp_path)
+    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
+    (home / 'scratch/active.json').write_text('{"supervisor":999999,"groups":[]}')
+    args = [command]
+    if command == 'update':
+        args += ['--release', commit]
+    elif command == 'migrate':
+        source = tmp_path / 'old-data'
+        source.mkdir()
+        (source / 'state.sqlite').write_text('synthetic data')
+        args += ['--source', str(source)]
+    result = invoke(repo, home, *args, env=env)
+    assert result.returncode != 0
+    assert 'cleanup is unconfirmed' in result.stderr
+    assert not (home / 'backups').exists()
+    assert not (home / 'data/state.sqlite').exists()
+    assert json.loads((home / 'current.json').read_text())['release'] == commit
+
+
+def test_owned_execution_lock_blocks_backup_even_without_marker(tmp_path):
+    import fcntl
+    repo, home, env, log, commit = prepared(tmp_path)
+    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
+    with (home / 'scratch/execution.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = invoke(repo, home, 'backup', env=env)
+    assert result.returncode != 0
+    assert 'execution lock is still owned' in result.stderr
+    assert not (home / 'backups').exists()
+
+
+def test_open_launches_localhost_8765_without_logging_reader_credential(tmp_path):
+    repo, home, env, log, commit = prepared(tmp_path)
+    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
+    (home / 'data/runtime.json').write_text(json.dumps({'token': 'synthetic-private-token'}))
+    result = invoke(repo, home, 'open', env=env)
+    assert result.returncode == 0, result.stderr
+    assert 'synthetic-private-token' not in result.stdout + result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert calls[-1] == ['open', 'http://localhost:8765/#token=synthetic-private-token']

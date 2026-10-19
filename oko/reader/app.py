@@ -50,6 +50,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     lifetime = Lifetime('explicit' if api_only or persistent else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
     browser_sessions = BrowserSessions(root, wall_clock) if persistent else None
     token = token or secrets.token_urlsafe(32)
+    instance_id = secrets.token_hex(16)
     runtime = Runtime(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
     journal = Journal(root, token)
     runtime.diagnostics = journal
@@ -197,7 +198,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
-        if browser_sessions and request.url.path == '/api/v3/status' and response.status_code == 200 and bearer and not remembered:
+        if v3:
+            response.headers['X-Oko-Instance'] = instance_id
+        if browser_sessions and request.url.path == '/api/v3/status' and response.status_code == 200 and bearer and not remembered and request.headers.get('X-Oko-Remember') == '1':
             response.set_cookie(COOKIE, browser_sessions.create(), max_age=MAX_AGE,
                                 httponly=True, samesite='strict', path='/')
         if browser_sessions and request.url.path == '/api/v3/status' and response.status_code == 200:

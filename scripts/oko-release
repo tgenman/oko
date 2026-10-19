@@ -148,6 +148,26 @@ def stop(home):
         autostart.unlink()
     if helper_loaded(home):
         run(['launchctl', 'bootout', domain() + '/' + label(home)])
+    confirm_helper_stopped(home, wait=30)
+
+
+def confirm_helper_stopped(home, wait=0):
+    scratch = home / 'scratch'
+    deadline = time.monotonic() + wait
+    if not scratch.exists():
+        return
+    with (scratch / 'execution.lock').open('a') as lock:
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ValueError('Codex cleanup is unconfirmed: execution lock is still owned; release switch blocked')
+                time.sleep(.1)
+                continue
+            if (scratch / 'active.json').exists():
+                raise ValueError('Codex cleanup is unconfirmed: active.json requires verified process recovery; release switch blocked')
+            return
 
 
 def available(port):
@@ -163,8 +183,8 @@ def readiness(home, timeout=30):
     while time.monotonic() < deadline:
         try:
             runtime = read(home / 'data/runtime.json')
-            request = urllib.request.Request('http://127.0.0.1/api/v3/status',
-                        headers={'Host': 'oko', 'Authorization': 'Bearer ' + runtime['token']})
+            request = urllib.request.Request('http://127.0.0.1:8765/api/v3/status',
+                        headers={'Host': 'localhost:8765', 'Authorization': 'Bearer ' + runtime['token']})
             with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=2) as response:
                 result = json.load(response)
                 if result.get('runtime_state') in ('running', 'disabled'):
@@ -177,7 +197,7 @@ def readiness(home, timeout=30):
 def start(home):
     running = bool(compose(home, 'ps', '--status', 'running', '--quiet', capture=True).strip())
     if not running:
-        available(80)
+        available(8765)
     autostart = Path(read(home / 'installation.json')['launchagents']) / (label(home) + '.plist')
     autostart.parent.mkdir(parents=True, exist_ok=True)
     if autostart.exists() or autostart.is_symlink():
@@ -221,6 +241,7 @@ def tree_digest(root):
 
 
 def backup(home):
+    confirm_helper_stopped(home)
     # Caller must stop container before copying. Refuse if any owned container runs.
     active = compose(home, 'ps', '--status', 'running', '--quiet', capture=True)
     if active.strip():
@@ -243,6 +264,7 @@ def backup(home):
 
 def migrate(args):
     release(args.home)
+    confirm_helper_stopped(args.home)
     source = args.source.resolve()
     destination = args.home / 'data'
     if destination.exists() and any(destination.iterdir()):
@@ -303,7 +325,7 @@ def main():
     for name in ('install', 'update', 'rollback'):
         command = commands.add_parser(name)
         command.add_argument('--release', required=True)
-    for name in ('start', 'stop', 'open', 'status', 'backup', 'hosts-plan'):
+    for name in ('start', 'stop', 'open', 'status', 'backup'):
         commands.add_parser(name)
     restoring = commands.add_parser('restore')
     restoring.add_argument('--backup', required=True)
@@ -320,7 +342,7 @@ def main():
             raise ValueError('prepare requires a clean tracked checkout; unrelated untracked files are not included')
         args.home.mkdir(parents=True, exist_ok=True, mode=0o700)
     operation_lock = None
-    if args.home.exists() and args.command not in ('hosts-plan', 'status'):
+    if args.home.exists() and args.command != 'status':
         operation_lock = (args.home / '.operation.lock').open('a')
         try:
             fcntl.flock(operation_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -328,14 +350,12 @@ def main():
             raise ValueError('Another release operation is active') from exc
     if args.command == 'prepare':
         prepare(args)
-    elif args.command == 'hosts-plan':
-        print('Review /etc/hosts and add exactly: 127.0.0.1 oko\nAdministrative change is separate; this command changes nothing.')
     elif args.command == 'install':
         if (args.home / 'current.json').exists():
             raise ValueError('Already installed; use update')
         configure(args.home, args.release)
         save(args.home / 'installation.json', dict(launchagents=str(args.launchagents.expanduser().resolve())))
-        print('Prepared installation. Review hosts-plan, migrate if needed, then start explicitly.')
+        print('Prepared installation. Migrate if needed, then start explicitly at http://localhost:8765.')
     elif args.command in ('update', 'rollback'):
         release(args.home, args.release)
         old = read(args.home / 'current.json')['release']
@@ -361,7 +381,7 @@ def main():
     elif args.command == 'open':
         runtime = read(args.home / 'data/runtime.json')
         # Token travels only in launcher argument, never printed to logs.
-        run(['open', 'http://oko/#token=' + runtime['token']])
+        run(['open', 'http://localhost:8765/#token=' + runtime['token']])
     elif args.command == 'status':
         _, manifest = release(args.home)
         output = compose(args.home, 'ps', '--format', 'json', capture=True).strip()

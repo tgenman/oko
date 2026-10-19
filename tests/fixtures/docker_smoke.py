@@ -5,7 +5,6 @@ Run with .venv/bin/python tests/fixtures/docker_smoke.py --image IMAGE.
 No host DNS, launchd, credentials or personal sources are touched.
 """
 import argparse
-import asyncio
 import json
 import os
 from pathlib import Path
@@ -23,7 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 import httpx
 import uvicorn
-from oko.processing.codex_bridge import BridgeConfig, create_app
+from oko.processing.codex_bridge.protocol import BridgeConfig
+from oko.processing.codex_bridge.service import create_app
 from tests.support.codex import CodexService
 
 
@@ -33,7 +33,7 @@ def docker(*args):
     return result.stdout.strip()
 
 
-def smoke(image, evidence):
+def smoke(image, evidence, reader_port=8765, bridge_port=8767):
     os.umask(0o077)
     evidence.mkdir(parents=True, exist_ok=True)
     report = {'image': docker('image', 'inspect', '--format', '{{.Id}}', image), 'checks': []}
@@ -49,9 +49,9 @@ def smoke(image, evidence):
         secret.write_text(secrets.token_urlsafe(48))
         secret.chmod(0o600)
         sock = socket.socket()
-        sock.bind(('127.0.0.1', 0))
+        sock.bind(('127.0.0.1', bridge_port))
         bridge_port = sock.getsockname()[1]
-        app = create_app(BridgeConfig(token_file=secret, scratch_root=work / 'scratch', release='synthetic-docker'),
+        app = create_app(BridgeConfig(token_file=secret, scratch_root=work / 'scratch', release='synthetic-docker', port=bridge_port),
                          adapter_factory=CodexService)
         server = uvicorn.Server(uvicorn.Config(app, access_log=False, log_level='error'))
         thread = threading.Thread(target=server.run, kwargs={'sockets': [sock]}, daemon=True)
@@ -62,10 +62,10 @@ def smoke(image, evidence):
             time.sleep(.01)
         assert server.started, 'synthetic Mac bridge failed to start'
         with socket.socket() as listener:
-            listener.bind(('127.0.0.1', 0))
+            listener.bind(('127.0.0.1', reader_port))
             reader_port = listener.getsockname()[1]
         report['host_ports'] = {'reader': reader_port, 'bridge_loopback': bridge_port}
-        arguments = ['--persistent', '--host', '0.0.0.0', '--port', '8765', '--public-url', 'http://oko',
+        arguments = ['--persistent', '--host', '0.0.0.0', '--port', '8765', '--public-url', 'http://localhost:8765',
                      '--codex-url', f'http://host.docker.internal:{bridge_port}',
                      '--codex-token-file', '/run/secrets/codex', '--data', '/data', '--no-browser', '--initially-disabled']
 
@@ -89,7 +89,7 @@ def smoke(image, evidence):
             raise AssertionError('container reader did not become ready')
 
         launch()
-        with httpx.Client(base_url=f'http://127.0.0.1:{reader_port}', headers={'Host': 'oko'},
+        with httpx.Client(base_url=f'http://127.0.0.1:{reader_port}', headers={'Host': 'localhost:8765'},
                           trust_env=False, timeout=15) as client:
             runtime, status = wait_status(client)
             assert status.json()['runtime_state'] == 'disabled', status.text
@@ -97,10 +97,10 @@ def smoke(image, evidence):
             report['checks'].append('reader persistent UI and initially disabled Store ready')
             assert client.get('/api/v3/status', headers={'Host': 'evil.invalid'}).status_code == 403
             assert client.get('/api/v3/status', headers={'Origin': 'http://evil.invalid'}).status_code == 403
-            assert client.get('/api/v3/status').status_code == 200  # remembered cookie from first status
+            assert client.get('/api/v3/status').status_code == 403  # probes never create browser credentials
             client.cookies.clear()
             assert client.get('/api/v3/status').status_code == 403
-            status = client.get('/api/v3/status', headers={'Authorization': 'Bearer ' + runtime['token']})
+            status = client.get('/api/v3/status', headers={'Authorization': 'Bearer ' + runtime['token'], 'X-Oko-Remember': '1'})
             assert status.status_code == 200 and 'HttpOnly' in status.headers['set-cookie']
             assert client.get('/api/v3/status').status_code == 200
             report['checks'].append('clean client denied; bearer establishes separate remembered cookie; Host and Origin rejected')
@@ -121,7 +121,7 @@ def smoke(image, evidence):
             prompt = 'Synthetic request\n' + json.dumps({'sources': [{'id': 'synthetic-source', 'url': 'https://example.invalid/synthetic'}]})
             code = '\n'.join([
                 'import asyncio,json; from pathlib import Path',
-                'from oko.processing.codex_bridge import RemoteCodex',
+                'from oko.processing.codex_bridge.client import RemoteCodex',
                 'from oko.processing.execution import CodexChoice',
                 'async def run():',
                 f' c=RemoteCodex("http://host.docker.internal:{bridge_port}",Path("/run/secrets/codex").read_text())',
@@ -173,5 +173,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image', default='oko-runtime-verification')
     parser.add_argument('--evidence', type=Path, required=True)
+    parser.add_argument('--reader-port', type=int, default=8765)
+    parser.add_argument('--bridge-port', type=int, default=8767)
     args = parser.parse_args()
-    smoke(args.image, args.evidence)
+    smoke(args.image, args.evidence, args.reader_port, args.bridge_port)
