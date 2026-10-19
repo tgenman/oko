@@ -15,7 +15,7 @@ test('feed context menu supports settings, nested folder move, read all and conf
  const row=(id:string)=>page.locator('#folders [data-feed="'+id+'"]');
  await row(beta.id).click();await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await row(alpha.id).click({button:'right'});await expect(row(beta.id)).toHaveAttribute('aria-pressed','true');
- expect(await page.locator('#feed-context-menu > button').allTextContents()).toEqual(['✓Mark All as Read','⚙Settings…','⌫Delete…']);
+ expect(await page.locator('#feed-context-menu > button').allTextContents()).toEqual(['↻Refresh','✓Mark All as Read','⚙Settings…','⌫Delete…']);
  await page.keyboard.press('Escape');await expect(row(alpha.id)).toBeFocused();await expect(page.locator('#feed-context-menu')).toHaveCount(0);
  await row(alpha.id).press('Shift+F10');await page.getByRole('menuitem',{name:'Settings…',exact:true}).click();
  await expect(page.locator('#owner-heading')).toContainText('Alpha');await expect(page.locator('#feeds-dialog')).toBeVisible();await page.locator('#feeds-close').click();

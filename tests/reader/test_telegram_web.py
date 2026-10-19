@@ -273,7 +273,7 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
         deadline = time.monotonic()+2
         while time.monotonic()<deadline and any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']):
             time.sleep(.02)
-        assert calls[0] == 2
+        assert calls[0] == (2 if telegraph else 3)
 
 
 def test_album_first_part_deletion_and_new_url_keep_one_card_and_tombstone(tmp_path):

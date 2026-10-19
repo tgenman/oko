@@ -136,7 +136,7 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
         eventually(lambda: len(captions.calls) == 3)
 
 
-def test_exhausted_blocked_material_needs_explicit_retry(tmp_path):
+def test_exhausted_blocked_material_can_be_retried_by_manual_refresh(tmp_path):
     clock = Clock()
     captions = Captions(clock, [CaptionsBlocked(), CaptionsBlocked(), CaptionsBlocked(), 'Успех'])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
@@ -146,13 +146,10 @@ def test_exhausted_blocked_material_needs_explicit_retry(tmp_path):
             eventually(lambda: len(captions.calls) == count and client.get('/api/v3/youtube').json()['strikes'] == count)
             assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + delay
             clock.advance(delay)
-        client.post('/api/v3/collect')
-        time.sleep(.15)
-        assert len(captions.calls) == 3
         item = materials(client)[0]
         assert item['source']['captions'] == 'error'
         assert not item['content']['loading']
-        client.post('/api/v3/materials/' + item['id'] + '/retry')
+        client.post('/api/v3/collect')
         eventually(lambda: materials(client)[0]['source'].get('captions') == 'available')
         assert len(captions.calls) == 4
 
@@ -184,9 +181,11 @@ def test_missing_and_network_failure_do_not_pause_or_automatically_retry(tmp_pat
         clock.advance(10)
         eventually(lambda: len(captions.calls) == 2)
         clock.advance(1000)
-        client.post('/api/v3/collect')
+        # Automatic discovery leaves the terminal attempt alone. Manual refresh retries it.
         time.sleep(.2)
         assert len(captions.calls) == 2
+        client.post('/api/v3/collect')
+        eventually(lambda:len(captions.calls)==3)
 
 
 def test_proxy_configuration_redacts_preserves_and_clears_secrets(tmp_path):

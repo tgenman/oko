@@ -174,12 +174,8 @@ class Store:
     def refresh_feed(self, feed: str) -> None:
         """Admit one manual refresh without restarting work already in progress."""
         discovery = '' if feed == 'demo' else feed
-        active = self.db.execute("""SELECT 1 FROM jobs WHERE
-            (status='running' OR (status='pending' AND error IS NULL AND NOT
-              (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed
-               WHERE h.paused=1 OR h.scan_complete=0)))) AND
-            ((kind='discover' AND item=?) OR (kind IN ('fetch','filter','theses') AND
-              item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0))) LIMIT 1""", (discovery, feed)).fetchone()
+        active = self.db.execute("""SELECT 1 FROM jobs WHERE kind='discover' AND item=?
+            AND (status='running' OR (status='pending' AND error IS NULL))""", (discovery,)).fetchone()
         if active:
             return
         with self.db:

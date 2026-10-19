@@ -11,6 +11,7 @@ test('power is shared across tabs, preserves reading and blocks external actions
   await page.goto(origin+'/#token='+token);
   await expect(page.locator('#cards button')).toHaveCount(1);
   await page.locator('#cards button').click();
+  await expect(page.locator('#title')).not.toHaveText('');
   const title=await page.locator('#title').textContent();
   const second=await context.newPage();
   await second.goto(origin+'/#token='+token);
