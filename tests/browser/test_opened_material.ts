@@ -168,7 +168,7 @@ for (const interruption of ['stop', 'connection loss']) {
       await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/A', true));
       await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
       await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A'));
-      if (interruption === 'stop') await r.page.getByRole('button', {name: 'Stop Oko'}).click();
+      if (interruption === 'stop') await r.page.getByRole('button', {name: 'Stop', exact: true}).click();
       else {
         await r.page.evaluate(() => readerTransport.replies.set('/api/v3/status', {status: 503, body: {detail: 'Связь потеряна'}}));
       }

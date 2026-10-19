@@ -145,7 +145,7 @@ function Command({id,label,run,disabled}:{id:string;label:string;run:()=>Promise
 }
 function renderCommands(){for(const [id,label,run] of [
   ['collect','Refresh Sources',async()=>{await readerApi.collect();await refresh();}],
-  ['stop','Stop Oko',async()=>{await readerApi.stop();session.post('stop');stopUi('Oko stopped');}],
+  ['stop','Stop',async()=>{await readerApi.stop();session.post('stop');stopUi('Oko stopped');}],
 ] as const) {
   let host=commandHosts.get(id);
   if(!host){const control=byId(id);host=document.createElement('span');host.className='header-command';control.replaceWith(host);commandHosts.set(id,host);}
