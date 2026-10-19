@@ -245,3 +245,40 @@ def test_refresh_retries_failed_filter_without_repeating_successful_filters(tmp_
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:all(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state']=='ready' for c in cards))
         assert len(model.calls)==len(old)+1 and model.calls[-1]==old[0]
+
+
+def test_one_attempt_survives_partial_material_with_forced_source_wait(tmp_path):
+    import time
+    from oko.collection.demo import DemoSource
+    from oko.collection.contracts import DiscoveryResult, Publication, SourceDeleted, SourceError, FetchResult, Material
+    from tests.support.reader import Clock
+    class Source(DemoSource):
+        calls=0
+        async def discover(self,cursor):
+            return DiscoveryResult((Publication('1','https://fixture.test/one',1800000000),) if cursor is None else (), '1')
+        async def fetch(self,p,resources=None):
+            self.calls+=1
+            if self.calls==1:
+                return FetchResult(Material('Saved','Old text',full=False))
+            if self.calls==2:
+                raise SourceDeleted()
+            if self.calls==3:
+                error=SourceError('Forced wait',delay=30)
+                error.remote_type='FloodWaitError'
+                return FetchResult(Material('Saved','Old text',full=False,collection_error=error))
+            raise SourceError('Still unavailable',delay=.03)
+    clock,source=Clock(),Source()
+    with TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+        wait_for(client,lambda:len(client.get('/api/v3/cards').json())==1 and client.get('/api/v3/cards').json()[0]['availability']=='available')
+        client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'})
+        wait_for(client,lambda:any('удалена' in p['message'] for p in client.get('/api/v3/status').json()['problems']['current']))
+        client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'})
+        wait_for(client,lambda:any(p['message']=='Forced wait' for p in client.get('/api/v3/status').json()['problems']['current']))
+        assert source.calls==3
+        clock.now+=31
+        wait_for(client,lambda:source.calls==4)
+        wait_for(client,lambda:any(p['message']=='Still unavailable' for p in client.get('/api/v3/status').json()['problems']['current']))
+        clock.now+=1
+        time.sleep(.12)
+        assert source.calls==4

@@ -415,8 +415,8 @@ class Store:
             self.db.execute("UPDATE jobs SET error=?,problem_code='source-deleted' WHERE id=?", (error.label, job.id))
         else:
             self.subscriptions.history.failed(job.item)
-            self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=? WHERE id=?",
-                ('pending' if error.retryable and (not once or error.remote_type=='FloodWaitError') else 'done',now+error.delay,error.label,error.code or job.kind+':'+(error.remote_type or type(error).__name__),job.id))
+            self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=?,manual_once=? WHERE id=?",
+                ('pending' if error.retryable and (not once or error.remote_type=='FloodWaitError') else 'done',now+error.delay,error.label,error.code or job.kind+':'+(error.remote_type or type(error).__name__),int(once),job.id))
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
