@@ -215,8 +215,10 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
                 except asyncio.CancelledError:
                     pass
             return 'Late captions must not return.'
+    from tests.support.reader import Clock
+    clock = Clock()
     captions = Late()
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, lease=.1, grace=.5), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, lease=.1, grace=.5, clock=clock), headers=HEADERS) as client:
         feed = subscribe(client)
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
@@ -228,7 +230,7 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             client.post('/api/v3/stop')
         else:
             close_presence(client, 'reader')
-            time.sleep(.15)
+            clock.now += .15
         captions.release.set()
         time.sleep(.05)
         assert not list((tmp_path / 'content').rglob('image-*'))

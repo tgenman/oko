@@ -18,10 +18,14 @@ class Captions:
 
 
 def test_youtube_description_survives_restart_without_requesting_captions(tmp_path):
+    import asyncio
     description = ['Описание из Atom &amp; детали.']
+    allow_source = [True]
     captions = Captions()
 
-    def reply(request):
+    async def reply(request):
+        while not allow_source[0]:
+            await asyncio.sleep(.01)
         if request.url.path == '/feeds/videos.xml':
             xml = feed_xml().replace('<media:thumbnail', '<media:description>' + description[0] + '</media:description><media:thumbnail')
             return httpx.Response(200, text=xml)
@@ -46,9 +50,11 @@ def test_youtube_description_survives_restart_without_requesting_captions(tmp_pa
         assert captions.calls == 1
 
     description[0] = 'Новое описание из обычного фида.'
+    allow_source[0] = False
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
         assert client.get('/api/v3/materials/' + item).json()['content']['description'] == 'Описание из Atom & детали.'
+        allow_source[0] = True
         client.post('/api/v3/collect')
         card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c.get('snippet') == description[0]), None))
         assert card['snippet'] == description[0]
