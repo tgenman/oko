@@ -1654,26 +1654,6 @@ class NewFeedVerification(WireModel):
     verification: StrictStr = Field(..., min_length=1)
 
 
-class OkoEffectiveSettingsValues(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    feed_refresh_minutes: EffectiveFeedRefreshMinutes
-    originals: EffectiveOriginals
-    processor: EffectiveProcessor
-    prompt_filters: EffectivePromptFilters
-    prompt_theses: EffectivePromptTheses
-    theses: EffectiveTheses
-
-
-class OkoStoredOverrides(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    feed_refresh_minutes: StrictInt | MISSING = Field(default=MISSING, ge=1, le=1440)
-    originals: StrictBool | MISSING = MISSING
-    processor: StoredProcessorSelection | MISSING = MISSING
-    prompt_filters: StrictStr | MISSING = Field(default=MISSING, max_length=20000)
-    prompt_theses: StrictStr | MISSING = Field(default=MISSING, max_length=20000)
-    theses: StrictBool | MISSING = MISSING
-
-
 class PersonalTelegramProfileIdentityMismatch(WireModel):
     model_config = ConfigDict(extra="forbid")
     checked_at: Timestamp
@@ -2544,8 +2524,8 @@ class HistoryState(
 
 class OkoSettingsSnapshot(WireModel):
     model_config = ConfigDict(extra="forbid")
-    effective: OkoEffectiveSettingsValues
-    overrides: OkoStoredOverrides
+    effective: EffectiveSettingsValues
+    overrides: StoredOverrides
     owner: Literal["global"]
     scope: Literal["oko"]
 
@@ -3808,10 +3788,6 @@ class EffectiveSettingsSnapshot(
         examples=[
             {
                 "effective": {
-                    "feed_refresh_minutes": {
-                        "origin": {"scope": "default"},
-                        "value": 15,
-                    },
                     "originals": {"origin": {"scope": "default"}, "value": False},
                     "processor": {"origin": {"scope": "default"}, "value": "codex"},
                     "prompt_filters": {

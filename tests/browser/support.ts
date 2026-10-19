@@ -77,7 +77,6 @@ async function reader() {
             if(!item||typeof item!=='object'||!('value' in item)||!('scope' in item))return [key,item];
             return [key,{value:item.value,origin:{scope:item.scope,...(item.scope==='default'?{}:{owner:'owner' in item?item.owner:'global'})}}];
           }));
-          if(scope==='oko')effective.feed_refresh_minutes={value:15,origin:{scope:'default'}};
           const feed=('feed' in body?body.feed:null)||replies.get('/api/v3/subscriptions')?.body?.feeds.find(f=>f.id===owner);
           return {scope,owner,effective,overrides:body.overrides,...(scope==='feed'&&feed&&typeof feed==='object'?{feed:{...feed,history:'initial_history' in feed&&feed.initial_history?history(feed.initial_history):{state:'absent',legacy_since:'legacy_since' in feed&&typeof feed.legacy_since==='number'?new Date(feed.legacy_since*1000).toISOString():null}}}:{})};
         }

@@ -281,18 +281,17 @@ def test_general_theses_off_youtube_defaults_on_with_public_ai_and_explicit_deni
 
 def test_global_feed_refresh_interval_persists_and_resets(tmp_path):
     path = '/api/v3/settings/oko/global'
+    read = '/api/v3/settings/feed-refresh'
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        assert client.get(path).json()['effective']['feed_refresh_minutes'] == {'value': 15, 'origin': {'scope': 'default'}}
+        assert client.get(read).json() == {'value': 15, 'origin': {'scope': 'default'}}
         saved = client.patch(path, json={'feed_refresh_minutes': 25})
         assert saved.status_code == 200, saved.text
-        assert saved.json()['effective']['feed_refresh_minutes'] == {'value': 25, 'origin': {'scope': 'oko', 'owner': 'global'}}
-        assert saved.json()['overrides']['feed_refresh_minutes'] == 25
+        assert client.get(read).json() == {'value': 25, 'origin': {'scope': 'oko', 'owner': 'global'}}
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        assert client.get(path).json()['effective']['feed_refresh_minutes']['value'] == 25
+        assert client.get(read).json()['value'] == 25
         reset = client.patch(path, json={'feed_refresh_minutes': None})
         assert reset.status_code == 200, reset.text
-        assert reset.json()['effective']['feed_refresh_minutes'] == {'value': 15, 'origin': {'scope': 'default'}}
-        assert 'feed_refresh_minutes' not in reset.json()['overrides']
+        assert client.get(read).json() == {'value': 15, 'origin': {'scope': 'default'}}
 
 
 def test_feed_refresh_interval_is_strict_and_global_only(tmp_path):
@@ -314,4 +313,20 @@ def test_feed_refresh_interval_is_strict_and_global_only(tmp_path):
             result = client.get(target_path).json()
             assert 'feed_refresh_minutes' not in result['effective']
             assert result['overrides'] == {}
-        assert client.get(path).json()['effective']['feed_refresh_minutes']['value'] == 1440
+        assert client.get('/api/v3/settings/feed-refresh').json()['value'] == 1440
+
+
+def test_existing_closed_settings_response_stays_compatible_after_interval_save(tmp_path):
+    import json
+    from pathlib import Path
+    from jsonschema import Draft202012Validator
+    pinned = json.loads((Path(__file__).parents[1] / 'fixtures/settings-v3-3.0.0.json').read_text())
+    validator = Draft202012Validator(pinned['schema'])
+    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
+        path = '/api/v3/settings/oko/global'
+        validator.validate(client.get(path).json())
+        for patch in ({'feed_refresh_minutes': 25}, {'theses': True}, {'feed_refresh_minutes': None}):
+            reply = client.patch(path, json=patch)
+            assert reply.status_code == 200, reply.text
+            validator.validate(reply.json())
+            validator.validate(client.get(path).json())

@@ -27,10 +27,10 @@ def test_v3_contract_covers_all_real_reader_routes_and_responses(tmp_path):
         described = {(path, method) for path, operations in spec['paths'].items() for method in operations if method in {'get','post','put','patch','delete'}}
         assert described == routes
         assert len({operation['operationId'] for operations in spec['paths'].values() for operation in operations.values()}) == len(routes)
-        for path in ['/api/v3/status', '/api/v3/reading-composition', '/api/v3/cards', '/api/v3/subscriptions', '/api/v3/settings/oko/global', '/api/v3/youtube', '/api/v3/diagnostics']:
+        for path in ['/api/v3/status', '/api/v3/reading-composition', '/api/v3/cards', '/api/v3/subscriptions', '/api/v3/settings/oko/global', '/api/v3/settings/feed-refresh', '/api/v3/youtube', '/api/v3/diagnostics']:
             response = client.get(path, headers={'Authorization':'Bearer synthetic'})
             assert response.status_code == 200
-            validate_reply(spec, '/api/v3/settings/{scope}/{owner}' if path.startswith('/api/v3/settings/') else path, 'get', response)
+            validate_reply(spec, '/api/v3/settings/{scope}/{owner}' if path == '/api/v3/settings/oko/global' else path, 'get', response)
         response = client.get('/api/v3/status')
         assert response.status_code == 403
         validate_reply(spec, '/api/v3/status', 'get', response)

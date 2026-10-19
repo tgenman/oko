@@ -44,6 +44,7 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('PUT', '/api/v3/processors/llamacpp'): models.LocalProcessorState,
     ('POST', '/api/v3/processors/llamacpp/check'): models.LocalProcessorCheck,
     ('GET', '/api/v3/reading-composition'): models.ReadingComposition,
+    ('GET', '/api/v3/settings/feed-refresh'): models.EffectiveFeedRefreshMinutes,
     ('GET', '/api/v3/settings/{scope}/{owner}'): models.EffectiveSettingsSnapshot,
     ('PATCH', '/api/v3/settings/{scope}/{owner}'): models.EffectiveSettingsSnapshot,
     ('GET', '/api/v3/status'): models.RuntimeStatus,

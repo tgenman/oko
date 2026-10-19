@@ -5119,10 +5119,6 @@ paths:
                 scope: oko
                 owner: global
                 effective:
-                  feed_refresh_minutes:
-                    value: 15
-                    origin:
-                      scope: default
                   originals:
                     value: false
                     origin:
@@ -5381,10 +5377,6 @@ paths:
                 scope: oko
                 owner: global
                 effective:
-                  feed_refresh_minutes:
-                    value: 15
-                    origin:
-                      scope: default
                   originals:
                     value: false
                     origin:
@@ -11510,6 +11502,160 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
 
+  /api/v3/settings/feed-refresh:
+    get:
+      summary: Feed refresh settings
+      operationId: feed_refresh_settings
+      description: Read the global feed refresh interval in minutes and its origin. All operations require
+        bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are
+        422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response
+        leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain
+        allowed. Unknown query keys and duplicate scalar query parameters return 422.
+      tags:
+      - settings
+      parameters: []
+      responses:
+        '200':
+          description: Read effective settings and explicit overrides. Scope is oko/folder/feed; oko requires
+            owner global, folder/feed require an existing resource. Feed metadata exists only in the feed
+            snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectiveFeedRefreshMinutes'
+              example:
+                value: 15
+                origin:
+                  scope: default
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
 components:
   schemas:
     MaterialId:
@@ -13727,7 +13873,8 @@ components:
           - $ref: '#/components/schemas/ProcessorSelection'
           - type: 'null'
         feed_refresh_minutes:
-          description: Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.
+          description: Global Oko setting only; minutes between automatic collection rounds. Null resets to
+            15.
           anyOf:
           - type: integer
             minimum: 1
@@ -13900,9 +14047,9 @@ components:
           type: string
           const: global
         effective:
-          $ref: '#/components/schemas/OkoEffectiveSettingsValues'
+          $ref: '#/components/schemas/EffectiveSettingsValues'
         overrides:
-          $ref: '#/components/schemas/OkoStoredOverrides'
+          $ref: '#/components/schemas/StoredOverrides'
       required:
       - scope
       - owner
@@ -13931,10 +14078,6 @@ components:
               scope: default
           processor:
             value: codex
-            origin:
-              scope: default
-          feed_refresh_minutes:
-            value: 15
             origin:
               scope: default
         overrides: {}
@@ -14119,10 +14262,6 @@ components:
               scope: default
           processor:
             value: codex
-            origin:
-              scope: default
-          feed_refresh_minutes:
-            value: 15
             origin:
               scope: default
         overrides: {}
@@ -20486,77 +20625,6 @@ components:
       - value: 15
         origin:
           scope: default
-    OkoEffectiveSettingsValues:
-      type: object
-      properties:
-        originals:
-          $ref: '#/components/schemas/EffectiveOriginals'
-        theses:
-          $ref: '#/components/schemas/EffectiveTheses'
-        prompt_theses:
-          $ref: '#/components/schemas/EffectivePromptTheses'
-        prompt_filters:
-          $ref: '#/components/schemas/EffectivePromptFilters'
-        processor:
-          $ref: '#/components/schemas/EffectiveProcessor'
-        feed_refresh_minutes:
-          $ref: '#/components/schemas/EffectiveFeedRefreshMinutes'
-      required:
-      - originals
-      - theses
-      - prompt_theses
-      - prompt_filters
-      - processor
-      - feed_refresh_minutes
-      additionalProperties: false
-      examples:
-      - originals:
-          value: false
-          origin:
-            scope: default
-        theses:
-          value: false
-          origin:
-            scope: default
-        prompt_theses:
-          value: example
-          origin:
-            scope: default
-        prompt_filters:
-          value: example
-          origin:
-            scope: default
-        processor:
-          value: codex
-          origin:
-            scope: default
-        feed_refresh_minutes:
-          value: 15
-          origin:
-            scope: default
-    OkoStoredOverrides:
-      type: object
-      properties:
-        originals:
-          type: boolean
-        theses:
-          type: boolean
-        prompt_theses:
-          type: string
-          maxLength: 20000
-        prompt_filters:
-          type: string
-          maxLength: 20000
-        processor:
-          $ref: '#/components/schemas/StoredProcessorSelection'
-        feed_refresh_minutes:
-          type: integer
-          minimum: 1
-          maximum: 1440
-      required: []
-      additionalProperties: false
-      examples:
-      - {}
   securitySchemes:
     ReaderSession:
       type: http

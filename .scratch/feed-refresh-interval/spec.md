@@ -28,7 +28,11 @@ GitHub: https://github.com/tgenman/oko/issues/46
 - Общие параметры чтения наследуются от Око папкам и фидам. Интервал должен оставаться глобальным параметром.
 - Текущий общий путь записи настроек отменяет выполняемую работу. При реализации интервала необходимо обеспечить согласованное отсутствие прерывания сбора.
 
-Источники: `oko/reader/runtime.py`, `oko/subscriptions/subscriptions.py`, `frontend/src/settings/owner.ts`, [владение настройками](ui-settings.md), [управление работой](reader-work.md).
+Источники: `oko/reader/runtime.py`, `oko/subscriptions/subscriptions.py`, `frontend/src/settings/owner.ts`, [владение настройками](../../docs/architecture/ui-settings.md), [управление работой](../../docs/architecture/reader-work.md).
+
+## HTTP-контракт
+
+Существующий закрытый ответ GET/PATCH `/api/v3/settings/{scope}/{owner}` сохраняет прежнюю форму. Интервал читается через отдельный GET `/api/v3/settings/feed-refresh` с эффективным значением и происхождением. Сохранение и сброс используют поле `feed_refresh_minutes` существующего PATCH только для `oko/global`. Изменение закрытого ответа было отклонено независимым ревью; совместимость проверяется закреплённой схемой из исходного коммита.
 
 ## План проверок реализации
 

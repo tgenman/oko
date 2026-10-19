@@ -1,0 +1,313 @@
+{
+  "source_commit": "9e9f206e4439d6c04091b41a90e33a132d055f3e",
+  "schema": {
+    "$ref": "#/components/schemas/OkoSettingsSnapshot",
+    "components": {
+      "schemas": {
+        "OkoSettingsSnapshot": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "oko"
+            },
+            "owner": {
+              "type": "string",
+              "const": "global"
+            },
+            "effective": {
+              "$ref": "#/components/schemas/EffectiveSettingsValues"
+            },
+            "overrides": {
+              "$ref": "#/components/schemas/StoredOverrides"
+            }
+          },
+          "required": [
+            "scope",
+            "owner",
+            "effective",
+            "overrides"
+          ],
+          "additionalProperties": false
+        },
+        "EffectiveSettingsValues": {
+          "type": "object",
+          "properties": {
+            "originals": {
+              "$ref": "#/components/schemas/EffectiveOriginals"
+            },
+            "theses": {
+              "$ref": "#/components/schemas/EffectiveTheses"
+            },
+            "prompt_theses": {
+              "$ref": "#/components/schemas/EffectivePromptTheses"
+            },
+            "prompt_filters": {
+              "$ref": "#/components/schemas/EffectivePromptFilters"
+            },
+            "processor": {
+              "$ref": "#/components/schemas/EffectiveProcessor"
+            }
+          },
+          "required": [
+            "originals",
+            "theses",
+            "prompt_theses",
+            "prompt_filters",
+            "processor"
+          ],
+          "additionalProperties": false
+        },
+        "EffectiveOriginals": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean"
+            },
+            "origin": {
+              "$ref": "#/components/schemas/SettingOrigin"
+            }
+          },
+          "required": [
+            "value",
+            "origin"
+          ],
+          "additionalProperties": false
+        },
+        "SettingOrigin": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/DefaultSettingOrigin"
+            },
+            {
+              "$ref": "#/components/schemas/OkoSettingOrigin"
+            },
+            {
+              "$ref": "#/components/schemas/FolderSettingOrigin"
+            },
+            {
+              "$ref": "#/components/schemas/FeedSettingOrigin"
+            }
+          ],
+          "discriminator": {
+            "propertyName": "scope",
+            "mapping": {
+              "default": "#/components/schemas/DefaultSettingOrigin",
+              "oko": "#/components/schemas/OkoSettingOrigin",
+              "folder": "#/components/schemas/FolderSettingOrigin",
+              "feed": "#/components/schemas/FeedSettingOrigin"
+            }
+          }
+        },
+        "DefaultSettingOrigin": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "default"
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "additionalProperties": false
+        },
+        "OkoSettingOrigin": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "oko"
+            },
+            "owner": {
+              "type": "string",
+              "const": "global"
+            }
+          },
+          "required": [
+            "scope",
+            "owner"
+          ],
+          "additionalProperties": false
+        },
+        "FolderSettingOrigin": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "folder"
+            },
+            "owner": {
+              "$ref": "#/components/schemas/FolderId"
+            }
+          },
+          "required": [
+            "scope",
+            "owner"
+          ],
+          "additionalProperties": false
+        },
+        "FolderId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "FeedSettingOrigin": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "feed"
+            },
+            "owner": {
+              "$ref": "#/components/schemas/FeedId"
+            }
+          },
+          "required": [
+            "scope",
+            "owner"
+          ],
+          "additionalProperties": false
+        },
+        "FeedId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "EffectiveTheses": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean"
+            },
+            "origin": {
+              "$ref": "#/components/schemas/SettingOrigin"
+            }
+          },
+          "required": [
+            "value",
+            "origin"
+          ],
+          "additionalProperties": false
+        },
+        "EffectivePromptTheses": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string",
+              "maxLength": 20000
+            },
+            "origin": {
+              "$ref": "#/components/schemas/SettingOrigin"
+            }
+          },
+          "required": [
+            "value",
+            "origin"
+          ],
+          "additionalProperties": false
+        },
+        "EffectivePromptFilters": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string",
+              "maxLength": 20000
+            },
+            "origin": {
+              "$ref": "#/components/schemas/SettingOrigin"
+            }
+          },
+          "required": [
+            "value",
+            "origin"
+          ],
+          "additionalProperties": false
+        },
+        "EffectiveProcessor": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "$ref": "#/components/schemas/StoredProcessorSelection"
+            },
+            "origin": {
+              "$ref": "#/components/schemas/SettingOrigin"
+            }
+          },
+          "required": [
+            "value",
+            "origin"
+          ],
+          "additionalProperties": false
+        },
+        "StoredProcessorSelection": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/ProcessorSelection"
+            },
+            {
+              "$ref": "#/components/schemas/LegacyProcessorSelection"
+            }
+          ]
+        },
+        "ProcessorSelection": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "codex",
+                "llamacpp"
+              ]
+            },
+            {
+              "type": "string",
+              "pattern": "^llamacpp:.+$",
+              "maxLength": 200
+            }
+          ]
+        },
+        "LegacyProcessorSelection": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "legacy"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "StoredOverrides": {
+          "type": "object",
+          "properties": {
+            "originals": {
+              "type": "boolean"
+            },
+            "theses": {
+              "type": "boolean"
+            },
+            "prompt_theses": {
+              "type": "string",
+              "maxLength": 20000
+            },
+            "prompt_filters": {
+              "type": "string",
+              "maxLength": 20000
+            },
+            "processor": {
+              "$ref": "#/components/schemas/StoredProcessorSelection"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

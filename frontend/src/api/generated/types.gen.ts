@@ -1596,23 +1596,14 @@ export type NewFeedVerification = {
     verification: string;
 };
 
-export type OkoEffectiveSettingsValues = {
-    feed_refresh_minutes: EffectiveFeedRefreshMinutes;
-    originals: EffectiveOriginals;
-    processor: EffectiveProcessor;
-    prompt_filters: EffectivePromptFilters;
-    prompt_theses: EffectivePromptTheses;
-    theses: EffectiveTheses;
-};
-
 export type OkoSettingOrigin = {
     owner: 'global';
     scope: 'oko';
 };
 
 export type OkoSettingsSnapshot = {
-    effective: OkoEffectiveSettingsValues;
-    overrides: OkoStoredOverrides;
+    effective: EffectiveSettingsValues;
+    overrides: StoredOverrides;
     owner: 'global';
     scope: 'oko';
 };
@@ -1620,15 +1611,6 @@ export type OkoSettingsSnapshot = {
 export type OkoSettingsTarget = {
     owner: 'global';
     scope: 'oko';
-};
-
-export type OkoStoredOverrides = {
-    feed_refresh_minutes?: number;
-    originals?: boolean;
-    processor?: StoredProcessorSelection;
-    prompt_filters?: string;
-    prompt_theses?: string;
-    theses?: boolean;
 };
 
 export type OriginNotAllowedError = {
@@ -4992,6 +4974,43 @@ export type ReadingCompositionResponses = {
 };
 
 export type ReadingCompositionResponse = ReadingCompositionResponses[keyof ReadingCompositionResponses];
+
+export type FeedRefreshSettingsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v3/settings/feed-refresh';
+};
+
+export type FeedRefreshSettingsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type FeedRefreshSettingsError = FeedRefreshSettingsErrors[keyof FeedRefreshSettingsErrors];
+
+export type FeedRefreshSettingsResponses = {
+    /**
+     * Read effective settings and explicit overrides. Scope is oko/folder/feed; oko requires owner global, folder/feed require an existing resource. Feed metadata exists only in the feed snapshot.
+     */
+    200: EffectiveFeedRefreshMinutes;
+};
+
+export type FeedRefreshSettingsResponse = FeedRefreshSettingsResponses[keyof FeedRefreshSettingsResponses];
 
 export type EffectiveSettingsData = {
     body?: never;

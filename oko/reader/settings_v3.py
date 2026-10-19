@@ -30,13 +30,10 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.E
     saved = value.overrides.model_dump(exclude_unset=True)
     if isinstance(saved.get('processor'), str):
         saved['processor'] = processor(saved['processor']).model_dump(mode='json')
-    if scope == 'oko':
-        interval = value.effective.feed_refresh_minutes
-        if not isinstance(interval, facts.FeedRefreshMinutes):
-            raise ValueError('Oko settings require a feed refresh interval')
-        global_values = wire.OkoEffectiveSettingsValues.model_validate({**values.model_dump(), 'feed_refresh_minutes': {'value': interval.value, 'origin': origin(interval.scope, interval.owner).model_dump()}})
-        return wire.EffectiveSettingsSnapshot(wire.OkoSettingsSnapshot(scope='oko', owner='global', effective=global_values, overrides=wire.OkoStoredOverrides.model_validate(saved)))
+    saved.pop('feed_refresh_minutes', None)
     overrides = wire.StoredOverrides.model_validate(saved)
+    if scope == 'oko':
+        return wire.EffectiveSettingsSnapshot(wire.OkoSettingsSnapshot(scope='oko', owner='global', effective=values, overrides=overrides))
     if scope == 'folder':
         return wire.EffectiveSettingsSnapshot(wire.FolderSettingsSnapshot(scope='folder', owner=wire.FolderId(owner), effective=values, overrides=overrides))
     from oko.reader.projection_v3 import subscription
@@ -66,6 +63,12 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message='Настройки не найдены', diagnostic_id=None, command_id=None,
                 details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.SettingsResource(kind='settings', target=result)))))) from None
         return result
+
+    @router.get('/api/v3/settings/feed-refresh', response_model=wire.EffectiveFeedRefreshMinutes)
+    async def feed_refresh_settings() -> wire.EffectiveFeedRefreshMinutes:
+        value = runtime.require_store().subscriptions.effective('oko', 'global')['effective']['feed_refresh_minutes']
+        return wire.EffectiveFeedRefreshMinutes.model_validate({
+            'value': value['value'], 'origin': {'scope': value['scope'], **({'owner': 'global'} if value['scope'] == 'oko' else {})}})
 
     @router.get('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def settings(scope: Literal['oko', 'folder', 'feed'], owner: str) -> wire.EffectiveSettingsSnapshot:
