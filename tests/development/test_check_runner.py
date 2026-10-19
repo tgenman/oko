@@ -43,7 +43,7 @@ sys.exit(0)
 ''')
     runtime.chmod(0o755)
     (tmp_path / 'git').symlink_to(runtime)
-    return {**os.environ, 'PATH': str(tmp_path) + os.pathsep + os.environ['PATH'], 'OKO_PYTHON': str(runtime), 'OKO_NODE': str(runtime),
+    return {**os.environ, 'CI': 'true', 'PATH': str(tmp_path) + os.pathsep + os.environ['PATH'], 'OKO_PYTHON': str(runtime), 'OKO_NODE': str(runtime),
             'OKO_BROWSER_EXECUTABLE': sys.executable}
 
 
@@ -336,7 +336,7 @@ if '--test' in sys.argv:
     print('not ok 1 - selected browser scenario')
     sys.exit(7)
 if 'pytest' in sys.argv:
-    print('FAILED tests/example.py::test_example - assertion')
+    print('FAILED tests/example.py::test_example[parameter with spaces] - assertion')
     print('ERROR tests/example.py::test_setup - setup')
     sys.exit(8)
 sys.exit(0)
@@ -350,7 +350,7 @@ sys.exit(0)
     assert report['exit_code'] == 1
     assert report['suites']['browser']['status'].startswith('FAIL')
     assert report['suites']['browser']['failures'] == ['selected browser scenario']
-    assert report['suites']['python-tests']['failures'] == ['tests/example.py::test_example', 'tests/example.py::test_setup']
+    assert report['suites']['python-tests']['failures'] == ['tests/example.py::test_example[parameter with spaces]', 'tests/example.py::test_setup']
     assert report['suites']['browser']['commands'][0]['exit_code'] == 7
     assert report['suites']['types']['status'].startswith('PASS')
     log = (first / 'output.log').read_text()
@@ -470,7 +470,7 @@ sys.exit(0)
 '''))
     result = subprocess.run([sys.executable,str(checkout/'scripts/check'),'browser','--report-dir',str(tmp_path/'reports')],env=env,capture_output=True,text=True)
     assert result.returncode == 1, result.stdout + result.stderr
-    assert 'Tests changed checkout files' in result.stdout
+    assert 'Checkout changed during checks' in result.stdout
     assert 'tests/browser/test_example.ts' in result.stdout
     assert tracked.read_text() == 'changed by test\n'  # The guard reports, it never resets user files.
     directory = next((tmp_path/'reports').iterdir())
@@ -504,7 +504,7 @@ sys.exit(0)
     assert list((checkout/'reports').glob('*/artifacts/python-tests/capture.png'))
     second=subprocess.run(command,env={**env,'CREATE_NEW':'1'},capture_output=True,text=True)
     assert second.returncode==1,second.stdout+second.stderr
-    assert 'Tests changed checkout files:\n  generated.txt' in second.stdout
+    assert 'Checkout changed during checks:\n  generated.txt' in second.stdout
     assert tracked.read_text()=='preexisting draft\n'
 
 
@@ -557,7 +557,7 @@ def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_
     pytest = [command for command in commands if 'pytest' in command]
     assert len(pytest) == 2
     modules = pytest[0][pytest[0].index('-q') + 1:]
-    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in [*modules, 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py']}
+    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in [*modules, 'tests/development/test_update_checkout.py', 'tests/development/test_check_report.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py']}
     record.write_text('')
     result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files',
                              'tests/reader/test_frontend_build.py'], env=env, capture_output=True, text=True)
@@ -717,8 +717,9 @@ def test_parallel_mutation_fails_both_groups_without_reverting_files(tmp_path):
     assert result.returncode == 1, result.stdout + result.stderr
     report = json.loads(next(reports.glob('*/report.json')).read_text())
     for name in ('browser', 'python-tests'):
-        assert report['suites'][name]['status'].startswith('FAIL')
+        assert report['suites'][name]['status'].startswith('PASS')
         assert report['suites'][name]['checkout_changes'] == ['frontend/app.ts']
+    assert report['checkout'] == {'status': 'FAIL', 'changed_files': ['frontend/app.ts']}
     assert tracked.read_text() == 'unexpected mutation'
 
 
@@ -816,3 +817,17 @@ def test_duplicate_tool_file_never_creates_empty_shard(tmp_path):
     commands = [ast.literal_eval(line) for line in record.read_text().splitlines()]
     selected = [command[command.index('-q') + 1:] for command in commands if 'pytest' in command]
     assert selected == [[str(ROOT / name)]]
+
+
+def test_compact_console_preserves_verbose_output_in_report_log(tmp_path):
+    import json
+    env = runtimes(tmp_path)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "print('full tool detail')\nsys.exit(0)"))
+    reports = tmp_path / 'reports'
+    result = subprocess.run([sys.executable, str(ROOT/'scripts/check'), 'syntax', '--compact', '--report-dir', str(reports)], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'full tool detail' not in result.stdout
+    assert 'PASS syntax' in result.stdout
+    report = json.loads(next(reports.glob('*/report.json')).read_text())
+    assert 'full tool detail' in Path(report['log']).read_text()

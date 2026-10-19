@@ -4,7 +4,7 @@
 
 ```sh
 ./scripts/check ui
-./scripts/check all
+./scripts/check all --compact
 ./scripts/check python types
 ./scripts/check http
 ./scripts/check browser
@@ -12,6 +12,12 @@
 ./scripts/check browser --files tests/browser/test_material_list.ts tests/browser/test_reader_http.ts
 ./scripts/check tools --files tests/development/test_hooks.py
 ```
+
+Полный локальный `all` использует снимок, новые исходники сначала добавляются в
+индекс. Флаг `--compact` сокращает только консоль, полный лог сохраняется.
+Обновление checkout и чтение сводки report.json:
+[процесс проверок](../../docs/development/check-workflow.md).
+
 
 [Runner](../../scripts/check) — источник состава режимов. Он обнаруживает актуальные JavaScript-модули и браузерные сценарии, печатает результаты и время, возвращает ненулевой код при падении, отсутствующей зависимости или прерывании. При прерывании завершает принадлежащие ему дочерние процессы. Проверка diff охватывает staged и unstaged изменения; успешная проверка не означает чистое рабочее дерево.
 

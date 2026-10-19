@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Fast-forward this checkout, then build and validate its prepared frontend."""
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main():
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    try:
+        dirty = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=ROOT)
+        if dirty:
+            raise RuntimeError('Tracked files have local changes; commit or isolate them before updating.')
+        subprocess.run(['git', 'pull', '--ff-only'], cwd=ROOT, check=True)
+        subprocess.run(['npm', 'run', 'build'], cwd=ROOT, check=True)
+        default_python = str(ROOT / '.venv/bin/python') if (ROOT / '.venv/bin/python').exists() else 'python3'
+        python = shutil.which(os.environ.get('OKO_PYTHON', default_python))
+        if not python:
+            raise RuntimeError('Python unavailable; set OKO_PYTHON to the prepared runtime.')
+        subprocess.run([python, '-c', 'from oko.reader.static import validate_frontend; validate_frontend()'], cwd=ROOT, check=True)
+        head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        print('Updated, built and validated:', head)
+        return 0
+    except subprocess.CalledProcessError as error:
+        print('Update stopped at:', ' '.join(error.cmd), file=sys.stderr)
+        return error.returncode if error.returncode > 0 else 1
+    except (OSError, RuntimeError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
