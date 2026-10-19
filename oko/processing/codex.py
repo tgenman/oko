@@ -95,7 +95,7 @@ async def diagnose() -> dict[str, Any]:
 # External CLI boundary. Tests replace the service; the real connection always
 # applies the OS profile and owns its child process and scratch directory.
 
-APPROVED_SHA256 = '0d5ac7aae20c4eda6242428d5e218c55ba96d8763fda2a271088ff37104b9d28'
+APPROVED_SHA256 = '1afb28c01d7d49e892bd75f11076b10f1451e34e0ee308a95e5ab7f69f9c84fe'
 FEATURES = ('shell_tool', 'unified_exec', 'plugins', 'apps', 'memories', 'hooks',
             'multi_agent', 'computer_use', 'browser_use', 'in_app_browser',
             'browser_use_external', 'code_mode', 'code_mode_only',
