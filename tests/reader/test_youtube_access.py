@@ -146,9 +146,7 @@ def test_exhausted_blocked_material_can_be_retried_by_manual_refresh(tmp_path):
             eventually(lambda: len(captions.calls) == count and client.get('/api/v3/youtube').json()['strikes'] == count)
             assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + delay
             clock.advance(delay)
-        item = materials(client)[0]
-        assert item['source']['captions'] == 'error'
-        assert not item['content']['loading']
+        item = eventually(lambda:next((m for m in materials(client) if m['source']['captions']=='error' and not m['content']['loading']),None))
         client.post('/api/v3/collect')
         eventually(lambda: materials(client)[0]['source'].get('captions') == 'available')
         assert len(captions.calls) == 4

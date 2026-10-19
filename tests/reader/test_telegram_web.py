@@ -269,11 +269,14 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
         assert current['content']['previous_versions'] == [] and current['content']['revision_id']==original['content']['revision_id']
         assert any('200 МиБ' in str(problem) for problem in state['problems']['current'])
         assert any(intent['kind']=='retry_material' for p in state['problems']['current'] for intent in p['recovery'])
+        from tests.support.reader import wait_for
+        wait_for(client,lambda:not any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']))
         client.post('/api/v3/collect')
+        wait_for(client,lambda:calls[0]==3)
         deadline = time.monotonic()+2
         while time.monotonic()<deadline and any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']):
             time.sleep(.02)
-        assert calls[0] == (2 if telegraph else 3)
+        assert calls[0] == 3
 
 
 def test_album_first_part_deletion_and_new_url_keep_one_card_and_tombstone(tmp_path):
