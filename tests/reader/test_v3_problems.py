@@ -1,4 +1,5 @@
 """Domain problem/recovery contracts at the reader HTTP boundary."""
+from oko.collection.contracts import DiscoveryResult, FetchRequirements, FetchResources
 import json
 import sqlite3
 import pytest
@@ -28,11 +29,13 @@ def test_live_model_producer_has_domain_code_and_recovery_without_server_navigat
 
 
 class Unavailable:
+    fetch_requirements = FetchRequirements()
+    changes = None
     failure_code='fetch:UnexpectedExternalException'
     async def discover(self,cursor):
-        return [Publication('one','https://source.test/one',1800000000)],'one'
+        return DiscoveryResult(tuple([Publication('one','https://source.test/one',1800000000)]), 'one')
 
-    async def fetch(self,publication):
+    async def fetch(self,publication, resources=FetchResources()):
         raise SourceError('Saved source reason',code=self.failure_code)
 
 

@@ -1,3 +1,4 @@
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 from datetime import datetime, timezone
 from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import add_sources
@@ -11,16 +12,18 @@ from oko.collection.contracts import Publication, SourceError, Material
 
 
 class FailedDownloads:
+    fetch_requirements = FetchRequirements()
+    changes = None
     fixed = False
 
     async def discover(self, cursor):
-        return ([Publication('one', 'https://source.test/one', 1800000000),
-                 Publication('two', 'https://source.test/two', 1800000001)] if cursor is None else []), 'done'
+        return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', 1800000000),
+                 Publication('two', 'https://source.test/two', 1800000001)] if cursor is None else []), 'done')
 
-    async def fetch(self, publication):
+    async def fetch(self, publication, resources=FetchResources()):
         if not self.fixed:
             raise SourceError('Синтетический сбой загрузки', code='source-connection')
-        return Material('Заголовок ' + publication.id, 'Текст')
+        return FetchResult(Material('Заголовок ' + publication.id, 'Текст'))
 
 
 def test_source_failures_group_objects_and_retry_is_not_completion(tmp_path):
@@ -180,8 +183,8 @@ def test_viewed_material_scrubs_problem_objects_but_failed_delete_remains_curren
 
 def test_partial_material_is_visible_with_available_text(tmp_path):
     class Partial(FailedDownloads):
-        async def fetch(self, publication):
-            return Material('Частичный материал', 'Доступный текст', full=False, reason='Вложение недоступно')
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material('Частичный материал', 'Доступный текст', full=False, reason='Вложение недоступно'))
     with TestClient(create_app(tmp_path, token='test', source=Partial()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         presence(client, 'reader')

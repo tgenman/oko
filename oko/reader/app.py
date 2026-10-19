@@ -21,7 +21,7 @@ from oko.collection.telegram.source import TelegramClient
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.lifetime import Lifetime
 from oko.reader import api_v3
-from oko.collection.youtube.source import CaptionsClient
+from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.diagnostics import Journal, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught
 

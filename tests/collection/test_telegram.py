@@ -615,7 +615,7 @@ def test_worker_service_actions_keep_read_ids_but_do_not_consume_post_count(tmp_
         try:
             source = TelegramSource(bridge, 'fixture', -1001234567890, 1)
             source.initial_history = dict(mode='count', count=1, since=None, paused=False)
-            publications, _ = await source.discover(None)
+            publications = (await source.discover(None)).publications
             assert [p.members for p in publications] == [(11, 12)]
             window = await bridge.read_window('fixture', -1001234567890, 0, 20)
             assert 20 in window['ids']

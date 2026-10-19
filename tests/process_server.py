@@ -1,3 +1,4 @@
+from oko.collection.contracts import FetchResources
 import asyncio
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ def fault(point: str) -> None:
 
 
 class ResistantSource(DemoSource):
-    async def fetch(self, publication):
+    async def fetch(self, publication, resources=FetchResources()):
         import sys
         root = Path(sys.argv[sys.argv.index('--data') + 1])
         (root / 'fetch-started').touch()

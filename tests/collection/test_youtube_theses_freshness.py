@@ -1,3 +1,4 @@
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 from tests.support.presence import presence, close_presence
 import json
 import httpx
@@ -105,13 +106,15 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
 
 def test_changed_caption_text_requires_new_theses(tmp_path):
     class SavedCaptions:
+        fetch_requirements = FetchRequirements()
+        changes = None
         text = 'First saved transcript'
 
         async def discover(self, cursor):
-            return [Publication(VIDEO, 'https://www.youtube.com/watch?v=' + VIDEO, 1800000000)], 'one'
+            return DiscoveryResult(tuple([Publication(VIDEO, 'https://www.youtube.com/watch?v=' + VIDEO, 1800000000)]), 'one')
 
-        async def fetch(self, publication):
-            return Material('Video', self.text, captions='available')
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material('Video', self.text, captions='available'))
 
     # Synthetic revisions exercise text freshness without querying real subtitles.
     saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'a'*22, 'Video', 'Видео')])

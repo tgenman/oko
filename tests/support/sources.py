@@ -1,11 +1,12 @@
+from oko.collection.contracts import FetchResult, FetchResources
 from oko.collection.contracts import Material
 import asyncio
 from oko.collection.demo import DemoSource
 
 
 class LateSource(DemoSource):
-    async def fetch(self, publication):
+    async def fetch(self, publication, resources=FetchResources()):
         try:
             await asyncio.sleep(60)
         except asyncio.CancelledError:
-            return Material('Late secret title', 'Late secret body')
+            return FetchResult(Material('Late secret title', 'Late secret body'))

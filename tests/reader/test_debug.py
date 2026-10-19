@@ -1,3 +1,4 @@
+from oko.collection.contracts import FetchRequirements, FetchResources
 from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import saved_sources
 import time
@@ -32,10 +33,12 @@ def test_failed_clear_keeps_debug_history(tmp_path):
 
 def test_debug_captures_background_traceback_and_survives_restart(tmp_path):
     class Broken:
+        fetch_requirements = FetchRequirements()
+        changes = None
         async def discover(self, cursor):
             raise RuntimeError('broken collector test-secret')
 
-        async def fetch(self, publication):
+        async def fetch(self, publication, resources=FetchResources()):
             raise AssertionError('not reached')
 
     with TestClient(create_app(tmp_path, source=Broken(), token='test-secret'), headers=HEADERS) as client:
@@ -74,11 +77,13 @@ def test_unexpected_http_error_is_visible_and_shutdown_cancellation_is_not(tmp_p
     import threading
 
     class Waiting:
+        fetch_requirements = FetchRequirements()
+        changes = None
         started = threading.Event()
         async def discover(self, cursor):
             self.started.set()
             await asyncio.Event().wait()
-        async def fetch(self, publication):
+        async def fetch(self, publication, resources=FetchResources()):
             raise AssertionError('not reached')
 
     source = Waiting()

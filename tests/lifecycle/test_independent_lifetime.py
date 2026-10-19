@@ -1,4 +1,5 @@
 """Independent execution observed through the reader HTTP interface."""
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 import time
 
 from fastapi.testclient import TestClient
@@ -118,17 +119,19 @@ def test_neutral_last_close_cancels_resistant_external_wait_and_prevents_late_co
 
     started, release = threading.Event(), threading.Event()
     class Source:
+        fetch_requirements = FetchRequirements()
+        changes = None
         async def discover(self, cursor):
-            return [Publication('late', 'https://synthetic.test/late', 100)], 'done'
+            return DiscoveryResult(tuple([Publication('late', 'https://synthetic.test/late', 100)]), 'done')
 
-        async def fetch(self, publication):
+        async def fetch(self, publication, resources=FetchResources()):
             started.set()
             while not release.is_set():
                 try:
                     await asyncio.sleep(.005)
                 except asyncio.CancelledError:
                     continue
-            return Material('Late', 'Must never be committed')
+            return FetchResult(Material('Late', 'Must never be committed'))
 
     with TestClient(create_app(tmp_path, token='test', source=Source()), headers=HEADERS) as client:
         session = client.post('/api/v3/client-sessions').json()

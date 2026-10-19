@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Protocol, Literal
+from copy import deepcopy
+from typing import Any, Protocol, Literal
 from collections.abc import Callable
 from pathlib import Path
 
@@ -90,9 +91,84 @@ class Material:
     source_manifest: SourceManifest | None = None
 
 
+@dataclass(frozen=True)
+class SourceIdentity:
+    """Detached Telegram claims/artwork; missing artwork differs from removal."""
+    peer: int | None
+    username: str | None
+    usernames: tuple[str, ...]
+    avatar_present: bool = False
+    avatar: str | None = None
+
+    @classmethod
+    def from_info(cls, info: dict[str, Any] | None) -> 'SourceIdentity | None':
+        if info is None:
+            return None
+        return cls(info.get('peer'), info.get('username'), tuple(info.get('usernames', ())),
+                   'avatar' in info, info.get('avatar'))
+
+    def as_info(self) -> dict[str, Any]:
+        value: dict[str, Any] = dict(peer=self.peer, username=self.username, usernames=list(self.usernames))
+        if self.avatar_present:
+            value['avatar'] = self.avatar
+        return value
+
+
+@dataclass(frozen=True)
+class SourceObservation:
+    gap: str | None = None
+    changes: str | None = None
+    identity: SourceIdentity | None = None
+
+
+@dataclass(frozen=True)
+class DiscoveryResult:
+    publications: tuple[Publication, ...]
+    cursor: str
+    observation: SourceObservation = SourceObservation()
+    continuation: float | None = None
+    retry_error: 'SourceError | None' = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'publications', deepcopy(self.publications))
+        object.__setattr__(self, 'retry_error', deepcopy(self.retry_error))
+
+
+class CaptionsClient(Protocol):
+    async def fetch(self, video: str) -> str | None: ...
+
+
+@dataclass(frozen=True)
+class FetchRequirements:
+    staging: bool = False
+    captions: bool = False
+
+
+@dataclass(frozen=True)
+class FetchResources:
+    staging: DownloadStage | None = None
+    captions: CaptionsClient | None = None
+    request_captions: bool = True
+
+
+@dataclass(frozen=True)
+class FetchResult:
+    material: Material
+    observation: SourceObservation = SourceObservation()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'material', deepcopy(self.material))
+
+
 class Source(Protocol):
-    async def discover(self, cursor: str | None) -> tuple[list[Publication], str]: ...
-    async def fetch(self, publication: Publication) -> Material: ...
+    @property
+    def fetch_requirements(self) -> FetchRequirements: ...
+
+    @property
+    def changes(self) -> str | None: ...
+
+    async def discover(self, cursor: str | None) -> DiscoveryResult: ...
+    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult: ...
 
 
 class SourceError(Exception):

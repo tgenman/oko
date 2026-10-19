@@ -1,3 +1,4 @@
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 from tests.support.presence import presence, close_presence
 import json, httpx
 from oko.collection.contracts import Material, Publication
@@ -6,12 +7,14 @@ from tests.support.reader import wait_for
 
 
 class FilterSource:
+    fetch_requirements = FetchRequirements()
+    changes = None
     async def discover(self, cursor):
-        return ([Publication(str(i), f'https://example.org/filter/{i}', 1800000000-i) for i in range(3)] if cursor is None else []), '3'
+        return DiscoveryResult(tuple([Publication(str(i), f'https://example.org/filter/{i}', 1800000000-i) for i in range(3)] if cursor is None else []), '3')
 
-    async def fetch(self, publication):
+    async def fetch(self, publication, resources=FetchResources()):
         texts = ['Реклама: купите курс.', 'Открылась библиотека. Реклама: купите курс.', 'Изменён закон о выборах.']
-        return Material('Материал ' + publication.id, texts[int(publication.id)])
+        return FetchResult(Material('Материал ' + publication.id, texts[int(publication.id)]))
 
 
 def transport(calls, *, theses=False):

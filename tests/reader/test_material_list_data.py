@@ -1,3 +1,4 @@
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 from tests.support.presence import presence, close_presence
 import httpx
 from fastapi.testclient import TestClient
@@ -17,10 +18,14 @@ class Captions:
 
 
 def test_youtube_description_survives_restart_without_requesting_captions(tmp_path):
+    import asyncio
     description = ['Описание из Atom &amp; детали.']
+    allow_source = [True]
     captions = Captions()
 
-    def reply(request):
+    async def reply(request):
+        while not allow_source[0]:
+            await asyncio.sleep(.01)
         if request.url.path == '/feeds/videos.xml':
             xml = feed_xml().replace('<media:thumbnail', '<media:description>' + description[0] + '</media:description><media:thumbnail')
             return httpx.Response(200, text=xml)
@@ -45,9 +50,11 @@ def test_youtube_description_survives_restart_without_requesting_captions(tmp_pa
         assert captions.calls == 1
 
     description[0] = 'Новое описание из обычного фида.'
+    allow_source[0] = False
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
         assert client.get('/api/v3/materials/' + item).json()['content']['description'] == 'Описание из Atom & детали.'
+        allow_source[0] = True
         client.post('/api/v3/collect')
         card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c.get('snippet') == description[0]), None))
         assert card['snippet'] == description[0]
@@ -60,15 +67,17 @@ def test_cards_have_plain_bounded_text_and_unknown_dates_are_last(tmp_path):
     from oko.collection.contracts import Material, Publication
 
     class Source:
+        fetch_requirements = FetchRequirements()
+        changes = None
         async def discover(self, cursor):
-            return ([] if cursor else [
+            return DiscoveryResult(tuple([] if cursor else [
                 Publication('old', 'https://example.org/old', 10),
                 Publication('new', 'https://example.org/new', 20),
                 Publication('unknown', 'https://example.org/unknown', 0, published_known=False),
-            ]), 'done'
+            ]), 'done')
 
-        async def fetch(self, publication):
-            return Material(publication.id, '<p>Краткий <b>текст</b> &amp; подробности.</p><script>secret()</script><style>secret-style</style>' + 'x' * 700)
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material(publication.id, '<p>Краткий <b>текст</b> &amp; подробности.</p><script>secret()</script><style>secret-style</style>' + 'x' * 700))
 
     with TestClient(create_app(tmp_path, source=Source(), token='test'), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={})

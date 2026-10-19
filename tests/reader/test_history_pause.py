@@ -96,14 +96,17 @@ def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
         archive = Archive()
         source = TelegramSource(archive, 'fixture', -1001234567890, 1)
         source.initial_history = dict(mode='count',count=20,since=None,paused=True)
-        items, cursor = await source.discover(None)
+        outcome = await source.discover(None)
+        items, cursor = outcome.publications, outcome.cursor
         assert not items
         assert json.loads(cursor)['position']['upper'] == 6
         archive.rows.append(dict(id=7,date=1759350007,text='new',group=None,media=None))
-        items, cursor = await source.discover(cursor)
+        outcome = await source.discover(cursor)
+        items, cursor = outcome.publications, outcome.cursor
         assert [p.members for p in items] == [(7,)]
         source.initial_history['paused'] = False
-        items, cursor = await source.discover(cursor)
+        outcome = await source.discover(cursor)
+        items, cursor = outcome.publications, outcome.cursor
         assert {p.members for p in items} == {(6,), (4,5)}
     asyncio.run(scenario())
 

@@ -1,4 +1,5 @@
 """Public web collection through the reader, without any Telegram configuration."""
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 import time
 
 import httpx
@@ -345,11 +346,13 @@ def test_store_rejects_unowned_staged_file_from_source(tmp_path):
     foreign = tmp_path/'foreign.bin'
     foreign.write_bytes(b'foreign-fixture')
     class BadSource:
+        fetch_requirements = FetchRequirements()
+        changes = None
         async def discover(self,cursor):
-            return [Publication('1','https://example.org/1',time.time(),Material('Preview','Preview'))],'{"after":1}'
-        async def fetch(self,publication):
-            return Material('Untrusted','Untrusted',attachments=(Attachment('media-1.bin',
-                StagedPayload(foreign,foreign.stat().st_size,hashlib.sha256(foreign.read_bytes()).hexdigest()),'file','application/octet-stream'),))
+            return DiscoveryResult(tuple([Publication('1','https://example.org/1',time.time(),Material('Preview','Preview'))]), '{"after":1}')
+        async def fetch(self,publication, resources=FetchResources()):
+            return FetchResult(Material('Untrusted','Untrusted',attachments=(Attachment('media-1.bin',
+                StagedPayload(foreign,foreign.stat().st_size,hashlib.sha256(foreign.read_bytes()).hexdigest()),'file','application/octet-stream'),)))
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=BadSource()),
                     headers={'Authorization':'Bearer test'}) as client:
         deadline = time.monotonic()+2
