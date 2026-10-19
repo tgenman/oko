@@ -10,7 +10,7 @@ export function createStore<T>(initial:T) {
     set(next:T) {snapshot=next;flushSync(()=>{for(const listener of listeners)listener();});},
   };
 }
-export function useStore<T>(store:ReturnType<typeof createStore<T>>) {return useSyncExternalStore(store.subscribe,store.get);}
+export function useStore<T>(store:{get:()=>T;subscribe:(listener:()=>void)=>()=>void}) {return useSyncExternalStore(store.subscribe,store.get);}
 export function saved(key:string,fallback:string) {try{return localStorage.getItem(key)||fallback;}catch{return fallback;}}
 export function save(key:string,value:string|number) {try{localStorage.setItem(key,String(value));}catch{/* Storage can be unavailable. */}}
 export function host(id:string) {const element=document.getElementById(id);if(!element)throw new Error('Missing reader surface '+id);return element;}

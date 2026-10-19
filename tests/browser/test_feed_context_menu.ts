@@ -69,3 +69,20 @@ test('late completion response preserves a new publication opened in the same fe
   await expect(r.page.locator('#text')).toContainText('Текст fresh');await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });
+
+test('unknown feed completion disables the old confirmation and reopening requires a fresh preview',async()=>{
+ const r=await reader();try{
+  await r.start([material('a')]);
+  await r.page.evaluate(()=>{const t=readerTransport;t.replies.set('/api/v3/feeds/feed/completion/preview',{body:{token:'first',cards_count:1,publications_count:1}});t.held.set('/api/v3/feeds/feed/completion',true);});
+  await r.page.locator('[data-feed="feed"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark All as Read',exact:true}).click();await expect(r.page.locator('#feed-action-confirm')).toBeEnabled();await r.page.locator('#feed-action-confirm').click();
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/feeds/feed/completion'));
+  await r.page.evaluate(()=>{const t=readerTransport,path='/api/v3/feeds/feed/completion';t.pending.get(path)!(Promise.reject(new TypeError('Connection lost')));t.pending.delete(path);t.held.delete(path);});
+  await expect(r.page.locator('#feed-action-dialog')).toContainText('Action outcome unknown');await expect(r.page.locator('#feed-action-confirm')).toBeDisabled();
+  expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/feeds/feed/completion').length)).toBe(1);
+  await r.page.locator('#feed-action-cancel').click();
+  await r.page.locator('#status-toggle').click();await expect(r.page.locator('#status-panel')).toContainText('Action outcome unknown');await r.page.keyboard.press('Escape');
+  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/feed/completion/preview',{body:{token:'fresh',cards_count:2,publications_count:2}}));
+  await r.page.locator('[data-feed="feed"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark All as Read',exact:true}).click();await expect(r.page.locator('#feed-completion-count')).toContainText('Items: 2');await expect(r.page.locator('#feed-action-confirm')).toBeEnabled();
+  expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/feeds/feed/completion/preview').length)).toBe(2);
+ }finally{await r.close();}
+});

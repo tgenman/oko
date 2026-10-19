@@ -89,6 +89,5 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged}:{
     get selection(){const session=store.get().session;return session?{id:session.id,folder_id:session.folder_id}:null;},open,clear,
     reconcile(cards:Card[]){const session=store.get().session;if(!session)return;const card=cards.find(card=>card.id===session.id);if(!card)clear();else if(JSON.stringify(card)!==session.cardKey)void open(card,true);},
     viewed(id:string){if(store.get().session?.id===id)clear();},
-    folderCompleted(folder:string){if(store.get().session?.folder_id===folder)clear();},
   };
 }
