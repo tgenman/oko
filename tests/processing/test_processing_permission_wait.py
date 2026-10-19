@@ -12,8 +12,15 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', api_only=True, clock=clock, codex_client=model), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         configure_codex(client)
-        blocked = wait_for(client, lambda: (m if 'Запрещена публичная' in ((m := client.get('/api/v3/materials/'+item).json())['theses']['diagnostic_message'] or '') else None))
-        assert blocked['theses']['attempt']['retry_at'] is None
+        items = [card['id'] for card in client.get('/api/v3/cards').json()]
+
+        def blocked_materials():
+            materials = [client.get('/api/v3/materials/'+identity).json() for identity in items]
+            return materials if all('Запрещена публичная' in (m['theses']['diagnostic_message'] or '') for m in materials) else None
+
+        # The counter below covers every Demo publication, not just the first.
+        blocked = wait_for(client, blocked_materials)
+        assert all(m['theses']['attempt']['retry_at'] is None for m in blocked)
         assert client.get('/api/v3/status').json()['diagnostic_count'] == 0
         assert all(w.get('retry_at') is None for w in client.get('/api/v3/status').json()['work'] if w.get('reason') == 'public_ai_not_allowed')
         assert not any(p['code'] == 'public_ai_not_allowed' for p in client.get('/api/v3/status').json()['problems']['current'])
