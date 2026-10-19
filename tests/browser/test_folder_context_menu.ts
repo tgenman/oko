@@ -16,7 +16,7 @@ test('folder menu A preserves selection and supports settings, rename, read all 
  await row(personal.id).click();await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await page.locator('[data-collapse="'+science.id+'"]').click();
  await row(science.id).click({button:'right'});await expect(row(personal.id)).toHaveAttribute('aria-pressed','true');
- expect(await page.locator('#folder-context-menu > button').allTextContents()).toEqual(['✓Mark All as Read','⚙Settings…','✎Rename…','⌫Delete…']);
+ expect(await page.locator('#folder-context-menu > button').allTextContents()).toEqual(['↻Refresh','✓Mark All as Read','⚙Settings…','✎Rename…','⌫Delete…']);
  await page.screenshot({path:artifactPath('folder-menu-a.png')});
  await page.keyboard.press('End');await expect(page.getByRole('menuitem',{name:'Delete…',exact:true})).toBeFocused();
  await page.keyboard.press('Escape');await expect(row(science.id)).toBeFocused();

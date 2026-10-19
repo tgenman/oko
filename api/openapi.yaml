@@ -5969,8 +5969,8 @@ paths:
     patch:
       summary: History pause
       operationId: history_pause
-      description: Pause or resume the existing archive run with a strict boolean.
-        Archive pause does not stop live collection or delete collected material.
+      description: Legacy resume of the existing archive run. Manual pause (paused=true) returns
+        409 history_conflict. Use collect to continue unfinished history.
         All operations require bearer authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
@@ -5998,8 +5998,7 @@ paths:
           mutations.
       responses:
         '200':
-          description: Pause or resume the existing archive run with a strict boolean.
-            Archive pause does not stop live collection or delete collected material.
+          description: Legacy resume of the existing archive run. Manual pause is rejected.
           content:
             application/json:
               schema:
@@ -16660,15 +16659,30 @@ components:
       examples:
       - scope: feed
         feed_id: example
+    FolderCollectionTarget:
+      type: object
+      properties:
+        scope:
+          type: string
+          const: folder
+        folder_id:
+          $ref: '#/components/schemas/FolderId'
+      required: [scope, folder_id]
+      additionalProperties: false
+      examples:
+      - scope: folder
+        folder_id: example
     CollectionTarget:
       oneOf:
       - $ref: '#/components/schemas/AllCollectionTarget'
       - $ref: '#/components/schemas/FeedCollectionTarget'
+      - $ref: '#/components/schemas/FolderCollectionTarget'
       discriminator:
         propertyName: scope
         mapping:
           all: '#/components/schemas/AllCollectionTarget'
           feed: '#/components/schemas/FeedCollectionTarget'
+          folder: '#/components/schemas/FolderCollectionTarget'
       examples:
       - scope: all
     RecoveryIntent:

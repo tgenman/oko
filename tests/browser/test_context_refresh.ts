@@ -1,0 +1,34 @@
+import {test} from 'node:test';
+import {expect} from 'playwright/test';
+import {productionReader} from './http-reader';
+import {addSources} from './connections';
+import {artifactPath} from './artifacts';
+
+test('feed and folder Refresh submit their scope and history has no manual pause',{timeout:30000},async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ const catalog=await addSources(api,[['https://a.test/feed','Alpha','Science'],['https://b.test/feed','Beta','Personal']]);
+ const alpha=catalog.feeds.find(f=>f.title==='Alpha')!,science=catalog.folders.find(f=>f.title==='Science')!;
+ const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin+'/#token='+token);await expect(page.locator('#cards button')).toHaveCount(2);
+ const folder=page.locator('[data-folder="'+science.id+'"]'),feed=page.locator('[data-feed="'+alpha.id+'"]');
+ await feed.click({button:'right'});
+ await page.screenshot({path:artifactPath('refresh-feed.png')});
+ const feedRequest=page.waitForRequest(r=>r.url().endsWith('/api/v3/collect')&&r.method()==='POST');
+ await page.getByRole('menuitem',{name:'Refresh',exact:true}).click();
+ expect((await feedRequest).postDataJSON()).toEqual({scope:'feed',feed_id:alpha.id});
+ await expect(page.locator('#feed-context-menu')).toHaveCount(0);
+ await folder.click({button:'right'});
+ await page.screenshot({path:artifactPath('refresh-folder.png')});
+ const folderRequest=page.waitForRequest(r=>r.url().endsWith('/api/v3/collect')&&r.method()==='POST');
+ await page.getByRole('menuitem',{name:'Refresh',exact:true}).click();
+ expect((await folderRequest).postDataJSON()).toEqual({scope:'folder',folder_id:science.id});
+ await expect(page.locator('#folder-context-menu')).toHaveCount(0);
+ await feed.click({button:'right'});await page.getByRole('menuitem',{name:'Settings…',exact:true}).click();
+ await page.getByRole('button',{name:'Connection and Options',exact:true}).click();
+ await expect(page.locator('#history-toggle')).toHaveCount(0);
+ await page.locator('#feeds-close').click();
+ await page.locator('#stop').click();await expect(page.locator('#stop')).toHaveText(/Start/);
+ await feed.click({button:'right'});await expect(page.getByRole('menuitem',{name:'Refresh',exact:true})).toBeDisabled();
+ expect(errors).toEqual([]);
+});

@@ -58,7 +58,7 @@ def test_real_settings_diagnostics_and_exact_history_obey_contract(tmp_path):
         assert response.status_code == 200
         validate_reply(spec,'/api/v3/feeds/{identity}/history','post',response)
         assert response.json()['history']['selection']['count'] == '9007199254740993'
-        response = client.patch(f'/api/v3/feeds/{feed}/history',json={'paused':True},headers=headers)
+        response = client.patch(f'/api/v3/feeds/{feed}/history',json={'paused':False},headers=headers)
         assert response.status_code == 200
         validate_reply(spec,'/api/v3/feeds/{identity}/history','patch',response)
         response = client.delete(f'/api/v3/feeds/{feed}/history',headers=headers)

@@ -35,11 +35,8 @@ test('YouTube settings start N history and waiting resumes manually without chan
     await r.page.locator('#feed-tree [data-owner="feed/yt"]').click();
     await feedOptions(r.page);
     await expect(r.page.locator('#history-progress')).toContainText('YouTube недоступен');
-    await expect(r.page.locator('#history-toggle')).toHaveText('Resume History');
+    await expect(r.page.locator('#history-toggle')).toHaveCount(0);
     await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
-    await r.page.locator('#history-toggle').click();
-    await r.page.waitForFunction(() => readerTransport.requests.some(request => request.method==='PATCH'&&request.url==='/api/v3/feeds/yt/history'));
-    expect(await r.page.evaluate(()=>readerTransport.requests.find(x=>x.method==='PATCH'&&x.url==='/api/v3/feeds/yt/history')!.body)).toEqual({paused:false});
     await r.page.locator('#youtube-history-stop').click();
     await r.page.waitForFunction(() => readerTransport.requests.some(request => request.method==='DELETE'&&request.url==='/api/v3/feeds/yt/history'));
     expect(await r.page.evaluate(()=>readerTransport.requests.some(x=>x.method==='DELETE'&&x.url==='/api/v3/feeds/yt/history'))).toBe(true);
@@ -117,7 +114,8 @@ test('reopened first history gets progress and resume after a late response', as
   t.release('/api/v3/feeds/A/history',history);
  });
  await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
- await expect(r.page.locator('#history-toggle')).toBeVisible({timeout:1500});
+ await expect(r.page.locator('#history-progress')).toBeVisible({timeout:1500});
+ await expect(r.page.locator('#history-toggle')).toHaveCount(0);
  }finally{await r.close();}
 });
 

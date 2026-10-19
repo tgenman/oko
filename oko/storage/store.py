@@ -80,6 +80,9 @@ class Store:
         CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY, signature TEXT);
         ''')
         columns = {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}
+        if 'manual_once' not in {row['name'] for row in self.db.execute('PRAGMA table_info(jobs)')}:
+            self.db.execute('ALTER TABLE jobs ADD COLUMN manual_once INTEGER DEFAULT 0')
+            self.db.commit()
         if 'problem_code' not in {row['name'] for row in self.db.execute('PRAGMA table_info(jobs)')}:
             self.db.execute('ALTER TABLE jobs ADD COLUMN problem_code TEXT')
             self.db.commit()
@@ -168,6 +171,37 @@ class Store:
         with self.db:
             self.db.execute("INSERT INTO jobs(kind,item,next) VALUES ('discover',?,?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=excluded.next,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed, next_at))
 
+    def refresh_feed(self, feed: str) -> None:
+        """Admit one manual refresh without restarting work already in progress."""
+        discovery = '' if feed == 'demo' else feed
+        active = self.db.execute("""SELECT 1 FROM jobs WHERE
+            (status='running' OR (status='pending' AND error IS NULL AND NOT
+              (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed
+               WHERE h.paused=1 OR h.scan_complete=0)))) AND
+            ((kind='discover' AND item=?) OR (kind IN ('fetch','filter','theses') AND
+              item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0))) LIMIT 1""", (discovery, feed)).fetchone()
+        if active:
+            return
+        with self.db:
+            history = self.subscriptions.history.status(feed)
+            if history and not history.get('cancelled'):
+                self.subscriptions.history.pause(feed, False)
+            self.enqueue_discovery(feed)
+            self.db.execute("""UPDATE jobs SET status='pending',next=CASE
+                WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' THEN next ELSE 0 END,
+                generation=generation+1 WHERE kind='discover' AND item=? AND status!='running'""", (discovery,))
+            for row in self.db.execute("""SELECT i.id,j.error,j.status FROM items i JOIN jobs j ON j.item=i.id AND j.kind='fetch'
+                    WHERE i.feed_id=? AND i.viewed=0 AND j.status!='running'""", (feed,)).fetchall():
+                material = self.material(row['id'])
+                unavailable = self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone()
+                if row['error'] or unavailable or not material or not material['full']:
+                    self.youtube.reset(row['id'])
+                    self.db.execute("""UPDATE jobs SET manual_once=CASE WHEN (status='done' AND error IS NOT NULL)
+                        OR item IN (SELECT item FROM source_deleted) THEN 1 ELSE manual_once END, status='pending',next=CASE
+                        WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' THEN next ELSE 0 END,
+                        generation=generation+1 WHERE kind='fetch' AND item=?""", (row['id'],))
+            self.processing.retry_failed(feed)
+
     def cursor_key(self, feed: str, namespace: str) -> str:
         return 'cursor:' + namespace + ':' + feed if namespace else 'cursor' if feed == 'demo' else 'cursor:' + feed
 
@@ -211,7 +245,7 @@ class Store:
                     history_items.append(row['id'])
                 if row and row['viewed'] and namespace=='telegram-web':
                     self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(sorted(set(json.loads(row['members'])) | set(p.members))),row['id']))
-                if row and not row['viewed'] and not self.db.execute("SELECT 1 FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE d.item=? AND h.outcome='unavailable'", (row['id'],)).fetchone():
+                if row and not row['viewed'] and not self.db.execute("SELECT 1 FROM source_deleted WHERE item=?", (row['id'],)).fetchone():
                     members = sorted(set(json.loads(row['members'])) | set(p.members))
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
@@ -247,7 +281,7 @@ class Store:
             if selection:
                 self.subscriptions.history.discovery_state(feed, selection)
             if envelope:
-                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND (error IS NULL OR problem_code IS NULL) AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT d.item FROM source_deleted d JOIN history_members h ON h.item=d.item WHERE h.outcome='unavailable'))", (feed,))
+                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND (error IS NULL OR problem_code IS NULL) AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT item FROM source_deleted))", (feed,))
                 if namespace == 'telegram':
                     self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
             self.fault('before_discovery_commit')
@@ -264,7 +298,7 @@ class Store:
             self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
             self.subscriptions.history.failed(job.item, True)
             self.finish(job)
-            self.db.execute('UPDATE jobs SET error=? WHERE id=?', ('Публикация удалена или недоступна в источнике', job.id))
+            self.db.execute("UPDATE jobs SET error=?,problem_code='source-deleted' WHERE id=?", ('Публикация удалена или недоступна в источнике', job.id))
         self.processing.sync()
 
     def retry_material(self, item: str) -> bool:
@@ -321,7 +355,7 @@ class Store:
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
     def finish(self, job: Job) -> None:
-        self.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
+        self.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL,manual_once=0 WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
 
     def valid(self, job: Job) -> bool:
         row = self.db.execute('SELECT status,generation,kind,item FROM jobs WHERE id=?', (job.id,)).fetchone()
@@ -355,6 +389,7 @@ class Store:
         item = job.item
         if not self.valid(job) or not self._has_unviewed(item):
             return
+        once = bool(self.db.execute('SELECT manual_once FROM jobs WHERE id=?',(job.id,)).fetchone()[0])
         prepared = self.versions.prepare(item, material, job, staging)
         self.fault('after_file_move')
         with self.db:
@@ -367,21 +402,21 @@ class Store:
             if not material.collection_error or not self.subscriptions.history.member(item):
                 self.subscriptions.history.saved(item, material.full)
             self.finish(job)
-            self.history_collection_error(job, material, self.clock() if now is None else now)
+            self.history_collection_error(job, material, self.clock() if now is None else now, once=once)
         self.processing.sync()
 
-    def history_collection_error(self, job: Job, material: Material, now: float) -> None:
+    def history_collection_error(self, job: Job, material: Material, now: float, *, once: bool = False) -> None:
         error = material.collection_error
         if not error:
             return
         if isinstance(error, SourceDeleted):
             self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
             self.subscriptions.history.failed(job.item, True)
-            self.db.execute('UPDATE jobs SET error=? WHERE id=?', (error.label, job.id))
+            self.db.execute("UPDATE jobs SET error=?,problem_code='source-deleted' WHERE id=?", (error.label, job.id))
         else:
             self.subscriptions.history.failed(job.item)
             self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=? WHERE id=?",
-                ('pending' if error.retryable else 'done',now+error.delay,error.label,error.code or job.kind+':'+(error.remote_type or type(error).__name__),job.id))
+                ('pending' if error.retryable and (not once or error.remote_type=='FloodWaitError') else 'done',now+error.delay,error.label,error.code or job.kind+':'+(error.remote_type or type(error).__name__),job.id))
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
@@ -459,12 +494,14 @@ class Store:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
 
-    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None) -> None:
+    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False) -> None:
         with self.db:
+            row = self.db.execute('SELECT manual_once FROM jobs WHERE id=?',(job.id,)).fetchone()
+            once = row and row[0] and not (code or '').endswith('FloodWaitError')
             if job.kind == 'fetch':
                 self.subscriptions.history.failed(job.item)
-            self.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
-                            (0 if code == 'ai-permission' else now + delay, error, code or job.kind, job.id, job.generation))
+            self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
+                            ('done' if once or terminal else 'pending', 0 if code == 'ai-permission' else now + delay, error, code or job.kind, job.id, job.generation))
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
         with self.db:

@@ -21,7 +21,7 @@ def wait_history(client, feed, predicate):
 
 
 @pytest.mark.parametrize('selection', [{'mode':'count','count':3}, {'mode':'date','date':'2025-10-01','timezone':'UTC'}])
-def test_pause_keeps_snapshot_across_restart_but_fetches_new_posts(tmp_path, selection):
+def test_removed_pause_preserves_history_snapshot_across_restart_and_fetches_new_posts(tmp_path, selection):
     blocked = True
     posts = [3, 2, 1]
     async def reply(request):
@@ -36,27 +36,24 @@ def test_pause_keeps_snapshot_across_restart_but_fetches_new_posts(tmp_path, sel
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history=selection).json()['id']
         wait_history(client, feed, lambda h: h['progress']['loaded'] == 1)
         result = client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':True})
-        assert result.status_code == 200, result.text
-        assert result.json()['history']['state'] == 'paused'
+        assert result.status_code == 409, result.text
     blocked = False
     posts.insert(0, 4)
     with reader() as client:
         presence(client, 'reader')
-        wait_history(client, feed, lambda h: (h['state']=='paused'))
         for _ in range(200):
             cards = client.get('/api/v3/cards').json()
             if any(c['source_url'].endswith('/4') and (c['availability'] == 'available') for c in cards): break
             time.sleep(.01)
         assert any(c['source_url'].endswith('/4') and (c['availability'] == 'available') for c in cards)
-        history = wait_history(client, feed, lambda h: h['progress']['loaded'] == 1)
-        assert history['state'] == 'paused'
+        history = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':False}).status_code == 200
         history = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert history['progress']['loaded'] == history['progress']['available'] == 3
         assert len(client.get('/api/v3/cards').json()) == 4
 
 
-def test_telegram_paused_history_keeps_live_lane_and_resumes_album_snapshot(tmp_path):
+def test_telegram_history_resumes_album_snapshot_after_restart_without_manual_pause(tmp_path):
     from tests.support.telegram_history import Archive
     class PausedArchive(Archive):
         blocked = True
@@ -71,7 +68,7 @@ def test_telegram_paused_history_keeps_live_lane_and_resumes_album_snapshot(tmp_
         presence(client, 'reader')
         feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=4))))['id']
         wait_history(client, feed, lambda h: h['progress']['available'] == 2)
-        assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':True}).status_code == 200
+        assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':True}).status_code == 409
     archive.blocked = False
     archive.rows.append(dict(id=7, date=1759350007, text='new', group=None, media=None))
     with reader() as client:
@@ -81,7 +78,7 @@ def test_telegram_paused_history_keeps_live_lane_and_resumes_album_snapshot(tmp_
             if any([int(identity) for identity in c['source']['message_ids']] == [7] and (c['availability'] == 'available') for c in cards): break
             time.sleep(.01)
         assert any([int(identity) for identity in c['source']['message_ids']] == [7] and (c['availability'] == 'available') for c in cards), cards
-        assert wait_history(client, feed, lambda h: (h['state']=='paused'))['progress']['available'] == 2
+        assert wait_history(client, feed, lambda h: h['state']=='complete')['progress']['available'] == 4
         assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':False}).status_code == 200
         history = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert history['progress']['available'] == history['progress']['loaded'] == 4
@@ -111,7 +108,7 @@ def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
     asyncio.run(scenario())
 
 
-def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp_path):
+def test_youtube_history_continues_after_restart_without_changing_selection(tmp_path):
     from tests.support.feed_url import YOUTUBE
     from tests.support.youtube import PNG, History, NoCaptions
     blocked = True
@@ -128,7 +125,7 @@ def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp
     with reader() as client:
         feed=add(client,verify(client,YOUTUBE),initial_history=dict(mode='count',count=2)).json()['id']
         wait_history(client,feed,lambda h:h['progress']['loaded']==1)
-        assert client.patch('/api/v3/feeds/'+feed+'/history',json={'paused':True}).status_code==200
+        assert client.patch('/api/v3/feeds/'+feed+'/history',json={'paused':True}).status_code==409
     blocked=False
     clock[0] += 10
     videos.append('wxyzabcdefg')
@@ -139,7 +136,6 @@ def test_youtube_paused_history_fetches_new_video_without_changing_selection(tmp
             if any(c['source_url'].endswith('wxyzabcdefg') and (c['availability'] == 'available') and not c.get('loading') for c in cards):break
             time.sleep(.01)
         assert any(c['source_url'].endswith('wxyzabcdefg') and (c['availability'] == 'available') and not c.get('loading') for c in cards)
-        assert wait_history(client,feed,lambda h:(h['state']=='paused'))['progress']['loaded']==1
         clock[0] += 10
         assert client.patch('/api/v3/feeds/'+feed+'/history',json={'paused':False}).status_code==200
         assert wait_history(client,feed,lambda h:h['state']=='complete')['progress']['loaded']==2

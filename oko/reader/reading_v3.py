@@ -317,9 +317,12 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     async def collect(request: Request, body: wire.CollectionTarget = Body(default=wire.CollectionTarget(wire.AllCollectionTarget(scope='all')))) -> wire.CommandAcknowledgement:
         async with track(runtime, request, wire.CommandContext(wire.CommandCollect(operation='collect',target=body))):
             feed = body.root.feed_id.root if isinstance(body.root,wire.FeedCollectionTarget) else None
+            folder = body.root.folder_id.root if isinstance(body.root,wire.FolderCollectionTarget) else None
             try:
-                await runtime.collect(feed)
+                await runtime.collect(feed, folder=folder)
             except ActionError as error:
+                if folder and error.kind=='missing':
+                    raise missing(wire.AffectedResource(wire.FolderResource(kind='folder',folder_id=wire.FolderId(folder)))) from None
                 if feed and error.kind=='missing':
                     raise missing(wire.AffectedResource(wire.FeedResource(kind='feed',feed_id=wire.FeedId(feed)))) from None
                 if feed and error.code=='deletion_in_progress':

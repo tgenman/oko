@@ -82,7 +82,7 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
         assert len(client.get('/api/v3/cards', params={'feed': feed}).json()) == 5
 
 
-def test_partial_error_requires_manual_resume_and_rss_remains_independent(tmp_path):
+def test_refresh_resumes_partial_history_error_and_collects_new_rss_publications(tmp_path):
     class Partial(HistoryFixture):
         async def fetch(self, channel, count, state):
             result = await super().fetch(channel, count, state)
@@ -115,12 +115,13 @@ def test_partial_error_requires_manual_resume_and_rss_remains_independent(tmp_pa
                 break
             time.sleep(.02)
         assert arrived and not arrived['loading']
-        assert len(history.calls) == 1
+        wait_history(client, feed, lambda h: h['state'] == 'complete')
+        assert len(history.calls) == 2
     with reader(tmp_path, history, requests, lambda: xml[0]) as client:
         presence(client, 'history')
         time.sleep(.15)
-        assert len(history.calls) == 1
-        assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused': False}).status_code == 200
+        assert len(history.calls) == 2
+        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':feed}).status_code == 200
         progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert progress['progress']['loaded'] == 8 and progress['progress']['available'] == 8
         assert len(history.calls) == 2

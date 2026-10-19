@@ -34,6 +34,15 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   let contentEpoch = 0;
   let refreshSequence = 0;
   let stopped = false;
+  let workAllowed = false;
+  const refreshing = new Set<string>();
+  async function refreshTarget(target:import('../api/generated/types.gen').CollectionTarget){
+    const key=JSON.stringify(target);if(!workAllowed||refreshing.has(key))return;
+    refreshing.add(key);
+    try{await readerApi.collect(target);await refresh();}
+    catch(error){reportError(error,'Refresh');progress(errorMessage(error));}
+    finally{refreshing.delete(key);}
+  }
   let readingCatalog: Navigation = {folders: [], feeds: [], count: 0};
   const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 
@@ -79,7 +88,8 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   });
   list.bindCommands(folderActions);
   const feedActions = createFeedActions({
-    readerApi, isStopped: () => stopped,
+    readerApi, isStopped: () => stopped,canRefresh:()=>workAllowed,
+    onRefresh:id=>refreshTarget({scope:'feed',feed_id:id}),
     onSettings: (id, trigger) => {void menus.openFeed(id, trigger);},
     onChanged: changed,
     onSettled: feed => {
@@ -93,7 +103,8 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     removeFeed: id => menus.removeFeed(id),
   });
   const folderMenu = createFolderMenu({
-    readerApi, isStopped: () => stopped,
+    readerApi, isStopped: () => stopped,canRefresh:()=>workAllowed,
+    onRefresh:id=>refreshTarget({scope:'folder',folder_id:id}),
     onSettings: (id, trigger) => {void menus.openFolder(id, trigger);},
     onRead: (id, title, trigger) => {void folderActions.openCompletion(id, title, trigger);},
     onChanged: async (id, removed) => {await menus.folderChanged(id, removed); await changed();},
@@ -159,6 +170,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       if (state.runtime_state==='stopped') { stopUi('Oko stopped'); return; }
       const enabled=state.runtime_state!=='disabled';
       onPowerState(enabled,state.runtime_state==='running'||state.runtime_state==='disabled');
+      workAllowed=state.work_allowed;
       menus.workAllowed(state.work_allowed);
       opened.workAllowed(state.work_allowed);
       statusPanel.update(state.problems, state);
@@ -190,7 +202,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     } catch (error) {
       reportError(error, 'Oko interface');
       if (!active()) return;
-      if (!statusAvailable) {onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);opened.clear(); statusPanel.unavailable();}
+      if (!statusAvailable) {workAllowed=false;onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);opened.clear(); statusPanel.unavailable();}
       list.error(errorMessage(error));
       progress(statusAvailable ? 'Reading temporarily unavailable' : 'No connection to Oko');
     }

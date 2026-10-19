@@ -196,7 +196,7 @@ export const historyCancel = <ThrowOnError extends boolean = true>(options: Opti
 /**
  * History pause
  *
- * Pause or resume the existing archive run with a strict boolean. Archive pause does not stop live collection or delete collected material. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ * Legacy resume of the existing archive run. Manual pause (paused=true) returns 409 history_conflict. Use collect to continue unfinished history. All operations require bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const historyPause = <ThrowOnError extends boolean = true>(options: Options<HistoryPauseData, ThrowOnError>) => (options.client ?? client).patch<HistoryPauseResponses, HistoryPauseErrors, ThrowOnError>({
     url: '/api/v3/feeds/{identity}/history',

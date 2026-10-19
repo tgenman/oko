@@ -1533,6 +1533,12 @@ class FeedPatchRequest(WireModel):
     transport: Literal["telegram", "rss", "youtube"] | None | MISSING = MISSING
 
 
+class FolderCollectionTarget(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    folder_id: FolderId
+    scope: Literal["folder"]
+
+
 class FolderNameConflictError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["folder_name_conflict"]
@@ -2237,9 +2243,11 @@ class CodexUnavailable(WireModel):
     version: StrictStr | None
 
 
-class CollectionTarget(RootModel[AllCollectionTarget | FeedCollectionTarget]):
+class CollectionTarget(
+    RootModel[AllCollectionTarget | FeedCollectionTarget | FolderCollectionTarget]
+):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: AllCollectionTarget | FeedCollectionTarget = Field(
+    root: AllCollectionTarget | FeedCollectionTarget | FolderCollectionTarget = Field(
         ..., discriminator="scope", examples=[{"scope": "all"}]
     )
 

@@ -11,8 +11,8 @@ import type {Navigation} from './tree';
 type Folder=Navigation['folders'][number];
 type Target={folder:Folder;x:number;y:number;trigger:HTMLElement};
 type State={target:Target|null;dialog:'rename'|'delete'|'blocked'|null;name:string;message:string;busy:boolean;generation:number};
-export function createFolderMenu({readerApi,isStopped,onSettings,onRead,onChanged}:{
-  readerApi:ReaderApi;isStopped:()=>boolean;
+export function createFolderMenu({readerApi,isStopped,canRefresh,onRefresh,onSettings,onRead,onChanged}:{
+  readerApi:ReaderApi;isStopped:()=>boolean;canRefresh:()=>boolean;onRefresh:(id:string)=>Promise<void>;
   onSettings:(id:string,trigger:HTMLElement)=>void;
   onRead:(id:string,title:string,trigger:HTMLElement)=>void;
   onChanged:(id:string,removed:boolean)=>Promise<unknown>;
@@ -68,7 +68,8 @@ export function createFolderMenu({readerApi,isStopped,onSettings,onRead,onChange
         options[event.key==='Home'?0:event.key==='End'?options.length-1:(index+(event.key==='ArrowDown'?1:options.length-1))%options.length]?.focus();
       }
     }
-    return createPortal(<>{!dialog?<div ref={ref} id="folder-context-menu" role="menu" aria-label={target.folder.title} className="feed-context-menu" style={{left:Math.max(8,Math.min(target.x,innerWidth-260)),top:Math.max(8,Math.min(target.y,innerHeight-190))}} onKeyDown={keys}>
+    return createPortal(<>{!dialog?<div ref={ref} id="folder-context-menu" role="menu" aria-label={target.folder.title} className="feed-context-menu" style={{left:Math.max(8,Math.min(target.x,innerWidth-260)),top:Math.max(8,Math.min(target.y,innerHeight-235))}} onKeyDown={keys}>
+      <button role="menuitem" disabled={disabled||!canRefresh()} onClick={()=>{const id=target.folder.id;close();void onRefresh(id);}}><span aria-hidden="true">↻</span>Refresh</button>
       <button role="menuitem" disabled={disabled} onClick={()=>{close(false);onRead(target.folder.id,target.folder.title,target.trigger);}}><span aria-hidden="true">✓</span>Mark All as Read</button>
       <button role="menuitem" disabled={disabled} onClick={()=>{close(false);onSettings(target.folder.id,target.trigger);}}><span aria-hidden="true">⚙</span>Settings…</button>
       <button role="menuitem" disabled={disabled} onClick={()=>prepare('rename')}><span aria-hidden="true">✎</span>Rename…</button><hr/>

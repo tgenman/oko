@@ -39,7 +39,7 @@ export function recoveryLabel(intent:RecoveryIntent):string {
  case 'retry_theses':return 'Retry Processing';
  case 'retry_filter':return 'Retry Filtering';
  case 'regenerate':return 'Regenerate Result';
- case 'retry_collection':return intent.target.scope==='feed'?'Refresh Source':'Refresh Sources';
+ case 'retry_collection':return intent.target.scope==='feed'?'Refresh Source':intent.target.scope==='folder'?'Refresh Folder':'Refresh Sources';
  }
 }
 export function workText(state:RuntimeStatus):string {

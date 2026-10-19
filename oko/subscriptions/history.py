@@ -61,6 +61,9 @@ class History:
         ''')
         if 'scan_complete' not in {r['name'] for r in db.execute('PRAGMA table_info(initial_history)')}:
             db.execute('ALTER TABLE initial_history ADD COLUMN scan_complete INTEGER DEFAULT 1')
+        # Legacy manual pauses are removed; an explicitly cancelled run stays stopped.
+        with db:
+            db.execute("UPDATE initial_history SET paused=0 WHERE paused=1 AND coalesce(json_extract(selection,'$.cancelled'),0)=0")
 
     def member(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM history_members WHERE item=?', (item,)).fetchone() is not None

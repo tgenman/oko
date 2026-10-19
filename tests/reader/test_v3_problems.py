@@ -92,7 +92,7 @@ def test_collection_recovery_target_is_admitted_and_only_schedules_that_feed(tmp
         assert set(calls)=={'one.test'}
         assert client.get('/api/v3/commands/one-feed').json()['context']=={'operation':'collect','target':{'scope':'feed','feed_id':target}}
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'missing'}).status_code==404
-        assert client.post('/api/v3/collect',json={'scope':'folder','folder_id':'all'}).status_code==422
+        assert client.post('/api/v3/collect',json={'scope':'folder','folder_id':'all'}).status_code==404
 
 
 def test_typed_conflict_recovery_never_proposes_reconnecting_an_existing_binding(tmp_path):

@@ -311,7 +311,7 @@ class Runtime:
                 self._feed_checks.clear()
                 await self._cancel()
 
-    async def collect(self, feed: str | None = None) -> None:
+    async def collect(self, feed: str | None = None, *, folder: str | None = None) -> None:
         async with self._actions:
             self.require_work()
             current = self.require_store()
@@ -322,9 +322,12 @@ class Runtime:
                     raise ActionError('missing','Фид недоступен')
                 if saved['connection']=='deleting':
                     raise ActionError('conflict','Фид удаляется',code='deletion_in_progress')
-            for source_feed in self._sources:
+            if folder is not None and not any(f['id']==folder for f in current.subscriptions.folders()):
+                raise ActionError('missing','Папка недоступна')
+            selected = {f['id'] for f in current.subscriptions.feeds() if f['connection']!='deleting' and (folder is None or f['folder_id']==folder)}
+            for source_feed in selected:
                 if feed is None or feed==source_feed:
-                    current.enqueue_discovery(source_feed)
+                    current.refresh_feed(source_feed)
 
     async def retry_material(self, item: str) -> None:
         async with self._actions:
@@ -418,17 +421,16 @@ class Runtime:
         async with self._actions:
             self.require_work()
             current = self.require_store()
+            if paused:
+                raise ActionError('conflict', 'Ручная пауза истории удалена; используйте обновление фида')
             try:
-                result = current.pause_history(identity, paused)
+                result = current.pause_history(identity, False)
             except LookupError as error:
                 raise ActionError('missing', str(error)) from None
             except ValueError as error:
                 raise ActionError('invalid', str(error)) from None
-            # Invalidate in-flight generations before cancellation. An adapter
-            # ignoring cancellation cannot publish an old history result.
-            await self._cancel()
             self._sync_sources()
-            current.enqueue_discovery(identity)
+            current.refresh_feed(identity)
             return result
 
     async def change_youtube_history(self, identity: str, selection: InitialHistory | None) -> dict[str, Any]:
@@ -1086,7 +1088,7 @@ class Runtime:
                         code = 'material-save-failed'
                     else:
                         code = job.kind + ':' + type(error).__name__
-                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code)
+                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,terminal=isinstance(error, SourceError) and not error.retryable)
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):

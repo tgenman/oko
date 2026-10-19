@@ -36,7 +36,7 @@ def test_rss_history_completion_pause_and_exact_selection(tmp_path):
         assert feed['history']['state']=='complete'
         assert feed['history']['selection']['count']=='9007199254740993'
         assert feed['history']['progress']['available']==0
-        assert client.patch('/api/v3/feeds/'+feed['id']+'/history', json={'paused':True}).json()['history']['state']=='complete'
+        assert client.patch('/api/v3/feeds/'+feed['id']+'/history', json={'paused':True}).status_code==409
 
 
 def test_youtube_credentials_and_errors_do_not_expose_secrets(tmp_path):
@@ -90,8 +90,7 @@ def test_youtube_archive_controls_survive_restart_and_do_not_replay_viewed(tmp_p
         response=client.post('/api/v3/feeds',json=dict(url=YOUTUBE,title='Videos',verification=checked['verification']))
         assert response.status_code==200,response.text
         feed=response.json()['id'];path='/api/v3/feeds/'+feed+'/history'
-        paused=client.patch(path,json={'paused':True}).json()['history']
-        assert paused['state']=='paused' and paused['paused_phase']=='not_started'
+        assert client.patch(path,json={'paused':True}).status_code==409
         assert client.patch(path,json={'paused':False}).json()['history']['state']=='not_started'
         assert client.delete(path).json()['history']['state']=='cancelled'
         assert client.patch(path,json={'paused':False}).status_code==409

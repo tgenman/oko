@@ -383,7 +383,9 @@ export type CollectionTarget = ({
     scope: 'all';
 } & AllCollectionTarget) | ({
     scope: 'feed';
-} & FeedCollectionTarget);
+} & FeedCollectionTarget) | ({
+    scope: 'folder';
+} & FolderCollectionTarget);
 
 export type CollectionTelegramProfileIdentityMismatch = {
     checked_at: Timestamp;
@@ -1168,6 +1170,11 @@ export type FinishedProblem = {
      * Human-readable subject explanation; clients branch on code, not this text.
      */
     title: string;
+};
+
+export type FolderCollectionTarget = {
+    folder_id: FolderId;
+    scope: 'folder';
 };
 
 export type FolderId = string;
@@ -3690,7 +3697,7 @@ export type HistoryPauseError = HistoryPauseErrors[keyof HistoryPauseErrors];
 
 export type HistoryPauseResponses = {
     /**
-     * Pause or resume the existing archive run with a strict boolean. Archive pause does not stop live collection or delete collected material.
+     * Legacy resume of the existing archive run. Manual pause is rejected.
      */
     200: FeedHistoryState;
 };

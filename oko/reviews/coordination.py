@@ -89,6 +89,18 @@ class ProcessingCoordination:
         self.store.filters.sync()
         self.theses.sync()
 
+    def retry_failed(self, feed: str) -> None:
+        """Retry failed processing only; accepted current results are untouched."""
+        self.sync()
+        rows = self.store.db.execute("""SELECT j.kind,j.item FROM jobs j JOIN items i ON i.id=j.item
+            WHERE i.feed_id=? AND i.viewed=0 AND j.kind IN ('filter','theses')
+            AND j.status IN ('pending','done') AND j.error IS NOT NULL""", (feed,)).fetchall()
+        for row in rows:
+            if row['kind'] == 'filter':
+                self.store.filters.retry(row['item'])
+            else:
+                self.theses.retry(row['item'])
+
     def prepare(self, job: 'Job') -> PreparedWork:
         operation = self._operations[job.kind]
         if job.kind in ('filter', 'theses'):

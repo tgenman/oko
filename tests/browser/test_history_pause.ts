@@ -2,7 +2,7 @@ import {feedOptions} from './settings-actions.ts';
 import {test} from 'node:test';
 import {reader, expect} from './support.ts';
 
-test('history can pause and resume in feed settings without offering restart after completion', async () => {
+test('unfinished history shows progress without offering a manual pause', async () => {
   const r = await reader();
   try {
     await r.start([]);
@@ -17,14 +17,8 @@ test('history can pause and resume in feed settings without offering restart aft
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
     await feedOptions(r.page);
-    await r.page.getByRole('button',{name:'Pause History',exact:true}).click();
-    await expect(r.page.locator('#history-progress')).toContainText('paused');
-    await expect(r.page.getByRole('button',{name:'Resume History',exact:true})).toBeVisible();
-    const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url==='/api/v3/feeds/rss/history'));
-    expect(request!.body).toEqual({paused:true});
-    await r.page.evaluate(() => readerTransport.replies.set('/api/v3/feeds/rss/history',{body:window.readerFixtures.history({mode:'count',count:20,count_text:'20',loaded:20,available:20,state:'done',frozen:true,paused:false})}));
-    await r.page.getByRole('button',{name:'Resume History',exact:true}).click();
-    await expect(r.page.locator('#history-progress')).toContainText('complete');
-    await expect(r.page.locator('#history-toggle')).toBeHidden();
+    await expect(r.page.locator('#history-progress')).toContainText('Loaded 7 of 20');
+    await expect(r.page.locator('#history-toggle')).toHaveCount(0);
+    expect(await r.page.evaluate(() => readerTransport.requests.some(r => r.url==='/api/v3/feeds/rss/history'))).toBe(false);
   } finally {await r.close();}
 });
