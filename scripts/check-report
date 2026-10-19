@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Read one saved check report as a compact text or JSON summary."""
+import argparse
+import json
+import math
+from pathlib import Path
+import sys
+
+
+def summary(path):
+    data = json.loads(path.read_text())
+    code = data['exit_code']
+    if type(code) is not int or not 0 <= code <= 255:
+        raise ValueError('Invalid exit_code')
+    duration = data['duration_seconds']
+    if type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0:
+        raise ValueError('Invalid duration_seconds')
+    if not isinstance(data['log'], str) or not data['log']:
+        raise ValueError('Invalid log')
+    suites = {}
+    for name, value in data['suites'].items():
+        status, failures = value['status'], value.get('failures', [])
+        if not isinstance(status, str) or not status or not text_list(failures):
+            raise ValueError('Invalid suite: ' + name)
+        suites[name] = dict(status=status, failures=failures)
+    guard = data.get('checkout', dict(status='NOT RECORDED', changed_files=[]))
+    if guard['status'] not in ('PASS', 'FAIL', 'NOT RECORDED') or not text_list(guard['changed_files']):
+        raise ValueError('Invalid checkout result')
+    result = dict(exit_code=code, duration_seconds=duration, suites=suites,
+                  checkout=guard, log=data['log'], report=str(path.resolve()))
+    if 'snapshot' in data:
+        snapshot = data['snapshot']
+        if not all(isinstance(snapshot[key], str) and snapshot[key] for key in ('source', 'checkout', 'head', 'tree')):
+            raise ValueError('Invalid snapshot')
+        result['snapshot'] = snapshot
+    return result
+
+
+def text_list(value):
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('report', type=Path)
+    parser.add_argument('--json', action='store_true', help='Print summary fields as JSON')
+    args = parser.parse_args()
+    try:
+        value = summary(args.report)
+        if args.json:
+            print(json.dumps(value, ensure_ascii=False, indent=2))
+        else:
+            for name, suite in value['suites'].items():
+                print(name + ': ' + suite['status'])
+                for failure in suite['failures']:
+                    print('  ' + failure)
+            guard = value['checkout']
+            print('checkout: ' + guard['status'])
+            for name in guard['changed_files']:
+                print('  ' + name)
+            print('Total:', value['duration_seconds'], 'seconds')
+            print('Log:', value['log'])
+        return value['exit_code']
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        print('Cannot read check report: ' + str(error), file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())
