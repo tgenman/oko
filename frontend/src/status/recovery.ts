@@ -43,6 +43,7 @@ export function recoveryLabel(intent:RecoveryIntent):string {
  }
 }
 export function workText(state:RuntimeStatus):string {
+ if(state.runtime_state==='disabled')return 'Oko is off';
  if(state.runtime_state==='stopped')return 'Oko stopped';
  if(state.runtime_state==='unavailable')return 'Storage unavailable';
  const labels=state.work.flatMap(work=>{switch(work.phase){case 'idle':return [];case 'collecting':return ['Collecting Sources'];case 'deleting':return ['Local Cleanup'];case 'processing':return [work.operation==='filter'?'Filtering':'Generating summary'];case 'waiting':return ['Waiting'];}});

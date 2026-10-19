@@ -46,6 +46,10 @@ def security_error(code: str) -> wire.ErrorEnvelope:
     return wire.ErrorEnvelope(wire.SessionRequiredError(code='session_required', message='Требуется локальная сессия', details=None, diagnostic_id=None, command_id=None))
 
 
+def disabled_error(command_id: str | None = None) -> ApiError:
+    return ApiError(409, wire.ErrorEnvelope(wire.RuntimeDisabledError(code='runtime_disabled', message='Око выключено; сначала включите Око', details=None, diagnostic_id=None, command_id=wire.CommandId(command_id) if command_id else None)))
+
+
 def error_response(status: int, value: wire.ErrorEnvelope) -> JSONResponse:
     return JSONResponse(value.model_dump(mode='json'), status_code=status, headers={'Cache-Control': 'no-store'})
 
@@ -98,8 +102,8 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
         else:
             policy = wire.ClientPresenceLifetimePolicy(kind='client_presence', lease_seconds=lifetime.lease_seconds,
                 grace_seconds=lifetime.grace_seconds, renew_after_seconds=lifetime.renew_after_seconds)
-        return wire.RuntimeStatus(api_version='3.0.0', runtime_state='stopped' if runtime.stopped else 'unavailable' if old.error else 'running',
-            lifetime=wire.LifetimePolicy(policy), work_allowed=not runtime.stopped and lifetime.admitted(), active_client_sessions=lifetime.active_clients,
+        return wire.RuntimeStatus(api_version='3.0.0', runtime_state='stopped' if runtime.stopped else 'unavailable' if old.error else 'disabled' if not runtime.enabled else 'running',
+            lifetime=wire.LifetimePolicy(policy), work_allowed=runtime._live(), active_client_sessions=lifetime.active_clients,
             work=[wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('storage_unavailable'),retry_at=None))] if old.error else [wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('client_presence_required'),retry_at=None))] if not lifetime.admitted() and not runtime.stopped else project.work(current.work_summary() if current else []),
             sources=[wire.SourceState(feed_id=wire.FeedId(value.feed_id), title=value.title,
                 state='unavailable' if isinstance(value.error, str) and value.error else 'ready',
@@ -145,6 +149,14 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
         lifetime.close(validated.root)
         await runtime.admission_changed()
         return wire.ClientSessionClosed(id=validated, closed=True)
+
+    @app.put('/api/v3/power', response_model=wire.CommandAcknowledgement)
+    async def power(request: Request, body: wire.PowerRequest) -> wire.CommandAcknowledgement:
+        from oko.reader.commands_v3 import track
+        no_query(request)
+        async with track(runtime, request, wire.CommandContext(wire.CommandPower(operation='power', enabled=body.enabled))):
+            await runtime.set_power(body.enabled)
+        return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     @app.post('/api/v3/stop', response_model=wire.CommandAcknowledgement)
     async def stop(request: Request) -> wire.CommandAcknowledgement:

@@ -500,6 +500,8 @@ export type CommandContext = ({
 } & CommandCompleteFolder) | ({
     operation: 'stop';
 } & CommandStop) | ({
+    operation: 'power';
+} & CommandPower) | ({
     operation: 'regenerate';
 } & CommandRegenerate) | ({
     operation: 'retry_theses';
@@ -560,6 +562,11 @@ export type CommandObservation = {
     context: CommandContext;
     id: CommandId;
     result: 'failed' | 'unknown';
+};
+
+export type CommandPower = {
+    enabled: boolean;
+    operation: 'power';
 };
 
 export type CommandPreviewCompletion = {
@@ -951,6 +958,8 @@ export type EffectiveTheses = {
 };
 
 export type ErrorEnvelope = ({
+    code: 'runtime_disabled';
+} & RuntimeDisabledError) | ({
     code: 'folder_not_empty';
 } & FolderNotEmptyError) | ({
     code: 'folder_name_conflict';
@@ -1709,6 +1718,10 @@ export type PersonalTelegramProfileUnconfigured = {
 
 export type PositiveDecimal = string;
 
+export type PowerRequest = {
+    enabled: boolean;
+};
+
 export type PreviousMedia404Errors = ({
     code: 'resource_not_found';
 } & ResourceNotFoundError) | ({
@@ -2083,6 +2096,14 @@ export type RssSubscriptionFeed = {
     transport: 'rss' | null;
 };
 
+export type RuntimeDisabledError = {
+    code: 'runtime_disabled';
+    command_id: CommandId | null;
+    details: null;
+    diagnostic_id: string | null;
+    message: string;
+};
+
 export type RuntimeResource = {
     kind: 'runtime';
 };
@@ -2096,7 +2117,7 @@ export type RuntimeStatus = {
     lifetime: LifetimePolicy;
     problems: ProblemSnapshot;
     ready_sources: number;
-    runtime_state: 'running' | 'stopping' | 'stopped' | 'unavailable';
+    runtime_state: 'running' | 'disabled' | 'stopping' | 'stopped' | 'unavailable';
     sources: Array<SourceState>;
     telegram_reads: Array<TelegramReadState>;
     total_sources: number;
@@ -2960,7 +2981,7 @@ export type CollectErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: Collect409Errors;
+    409: Collect409Errors | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -3223,7 +3244,7 @@ export type AddFeedErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: AddFeed409Errors;
+    409: AddFeed409Errors | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -3274,7 +3295,7 @@ export type VerifyFeedErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeStoppedError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -3650,7 +3671,7 @@ export type HistoryPauseErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: HistoryConflictError;
+    409: HistoryConflictError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -3706,7 +3727,7 @@ export type HistoryStartErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: HistoryStart409Errors;
+    409: HistoryStart409Errors | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4125,7 +4146,7 @@ export type RetryFilterErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeStoppedError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4285,7 +4306,7 @@ export type RegenerateErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeStoppedError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4345,7 +4366,7 @@ export type RetryMaterialErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeStoppedError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4405,7 +4426,7 @@ export type RetryThesesErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeStoppedError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4595,6 +4616,57 @@ export type ViewedResponses = {
 
 export type ViewedResponse = ViewedResponses[keyof ViewedResponses];
 
+export type SetPowerData = {
+    body: PowerRequest;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v3/power';
+};
+
+export type SetPowerErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: RuntimeStoppedError | CommandContextMismatchError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type SetPowerError = SetPowerErrors[keyof SetPowerErrors];
+
+export type SetPowerResponses = {
+    /**
+     * Desired work power persisted. Local reading remains available while disabled.
+     */
+    200: CommandAcknowledgement;
+};
+
+export type SetPowerResponse = SetPowerResponses[keyof SetPowerResponses];
+
 export type AbandonProblemData = {
     body?: never;
     headers?: {
@@ -4709,6 +4781,10 @@ export type CodexSaveErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
+    409: RuntimeDisabledError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
     422: RequestInvalidError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
@@ -4752,6 +4828,10 @@ export type CodexCheckErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
+    409: RuntimeDisabledError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
     422: RequestInvalidError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
@@ -4786,6 +4866,10 @@ export type CodexModelsErrors = {
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
     403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4913,6 +4997,10 @@ export type ProcessorCheckErrors = {
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
     403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -5268,7 +5356,7 @@ export type TelegramConnectErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: TelegramConnect409Errors;
+    409: TelegramConnect409Errors | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -5357,7 +5445,7 @@ export type TelegramProfileSaveErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: TelegramProfileSave409Errors;
+    409: TelegramProfileSave409Errors | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */

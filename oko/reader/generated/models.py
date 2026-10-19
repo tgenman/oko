@@ -153,6 +153,12 @@ class CommandId(RootModel[StrictStr]):
     )
 
 
+class CommandPower(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: StrictBool
+    operation: Literal["power"]
+
+
 class CommandProcessorCheck(WireModel):
     model_config = ConfigDict(extra="forbid")
     operation: Literal["processor_check"]
@@ -594,6 +600,11 @@ class PositiveDecimal(RootModel[StrictStr]):
     )
 
 
+class PowerRequest(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: StrictBool
+
+
 class ProblemCode(
     RootModel[
         Literal[
@@ -796,6 +807,15 @@ class RequestInvalidErrorDetails(WireModel):
 class RevisionId(RootModel[StrictStr]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictStr = Field(..., examples=["example"], min_length=1)
+
+
+class RuntimeDisabledError(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    code: Literal["runtime_disabled"]
+    command_id: CommandId | None
+    details: None
+    diagnostic_id: DiagnosticId | None
+    message: StrictStr
 
 
 class RuntimeResource(WireModel):
@@ -2271,6 +2291,7 @@ class CommandContext(
         | CommandCompleteFeed
         | CommandCompleteFolder
         | CommandStop
+        | CommandPower
         | CommandRegenerate
         | CommandRetryTheses
         | CommandRetryMaterial
@@ -2303,6 +2324,7 @@ class CommandContext(
         | CommandCompleteFeed
         | CommandCompleteFolder
         | CommandStop
+        | CommandPower
         | CommandRegenerate
         | CommandRetryTheses
         | CommandRetryMaterial
@@ -3741,7 +3763,7 @@ class RuntimeStatus(WireModel):
     lifetime: LifetimePolicy
     problems: ProblemSnapshot
     ready_sources: StrictInt = Field(..., ge=0, le=9007199254740991)
-    runtime_state: Literal["running", "stopping", "stopped", "unavailable"]
+    runtime_state: Literal["running", "disabled", "stopping", "stopped", "unavailable"]
     sources: list[SourceState]
     telegram_reads: list[TelegramReadState]
     total_sources: StrictInt = Field(..., ge=0, le=9007199254740991)
@@ -3798,7 +3820,8 @@ class EffectiveSettingsSnapshot(
 
 class ErrorEnvelope(
     RootModel[
-        FolderNotEmptyError
+        RuntimeDisabledError
+        | FolderNotEmptyError
         | FolderNameConflictError
         | ActionInvalidError
         | SettingScopeInvalidError
@@ -3837,7 +3860,8 @@ class ErrorEnvelope(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
-        FolderNotEmptyError
+        RuntimeDisabledError
+        | FolderNotEmptyError
         | FolderNameConflictError
         | ActionInvalidError
         | SettingScopeInvalidError

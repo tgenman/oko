@@ -94,6 +94,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         if request.url.path.startswith('/api/v3/'):
             from oko.reader.generated import models as v3
             command_id = v3.CommandId(request.state.command_id) if request.method != 'GET' else None
+            if error.code == 'runtime_disabled':
+                failure = api_v3.disabled_error(request.state.command_id if request.method != 'GET' else None)
+                return api_v3.error_response(failure.status, failure.value)
             if runtime.stopped:
                 return api_v3.error_response(409, v3.ErrorEnvelope(v3.RuntimeStoppedError(code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=command_id)))
             if error.kind == 'unavailable':

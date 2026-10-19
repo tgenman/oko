@@ -25,11 +25,12 @@ type Options = {
   actions: ReturnType<typeof createReaderActions>;
   progress: (text: string) => void;
   onStopped: () => void;
+  onPowerState: (enabled:boolean,available:boolean) => void;
 };
 
 // Coordinates accepted reading changes. Local owners retain DOM, scroll, drafts
 // and media; the session alone owns polling, presence and browser resources.
-export function createReadingCoordination({readerApi, fetchMedia, debug, menus, statusPanel, actions, progress, onStopped}: Options) {
+export function createReadingCoordination({readerApi, fetchMedia, debug, menus, statusPanel, actions, progress, onStopped, onPowerState}: Options) {
   let contentEpoch = 0;
   let refreshSequence = 0;
   let stopped = false;
@@ -156,6 +157,10 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
       menus.status(state,settingsRevision);
       if (state.runtime_state==='stopped') { stopUi('Oko stopped'); return; }
+      const enabled=state.runtime_state!=='disabled';
+      onPowerState(enabled,state.runtime_state==='running'||state.runtime_state==='disabled');
+      menus.workAllowed(state.work_allowed);
+      opened.workAllowed(state.work_allowed);
       statusPanel.update(state.problems, state);
       debug.forgetMaterials(state.viewed_ids || []);
       statusPanel.forgetMaterials(state.viewed_ids || []);
@@ -185,7 +190,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     } catch (error) {
       reportError(error, 'Oko interface');
       if (!active()) return;
-      if (!statusAvailable) {opened.clear(); statusPanel.unavailable();}
+      if (!statusAvailable) {onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);opened.clear(); statusPanel.unavailable();}
       list.error(errorMessage(error));
       progress(statusAvailable ? 'Reading temporarily unavailable' : 'No connection to Oko');
     }
@@ -198,6 +203,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onUnavailable: error => {
       reportError(error, 'Oko interface');
       if (!stopped) {
+        onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);
         opened.clear();
         statusPanel.unavailable();
         list.error(errorMessage(error));
@@ -218,10 +224,9 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     resourceName: (resource: AffectedResource) => resource.kind === 'material' ? list.title(resource.material_id)
       : resource.kind === 'feed' ? readingCatalog.feeds.find(feed => feed.id === resource.feed_id)?.title
       : resource.kind === 'folder' ? readingCatalog.folders.find(folder => folder.id === resource.folder_id)?.title : undefined,
-    async stop() {
-      await readerApi.stop();
-      session.post('stop');
-      stopUi('Oko stopped');
+    async setPower(enabled:boolean) {
+      try {await readerApi.setPower(enabled);}
+      finally {contentEpoch++;session.post({kind:'power'});await refresh();}
     },
   };
 }

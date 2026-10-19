@@ -21,6 +21,7 @@ const byId = (id:string):HTMLElement => {const node=document.getElementById(id);
 const button=(id:string)=>byId(id) as HTMLButtonElement;
 const progress=(text:string)=>{mountSurface(byId("progress"),<>{text}</>);};
 let commandsAvailable = false;
+let powerEnabled=true,powerAvailable=false;
 const commandHosts = new Map<string,HTMLElement>();
 let reading:ReturnType<typeof createReadingCoordination>;
 let statusPanel:ReturnType<typeof createStatusPanel>;
@@ -43,20 +44,21 @@ statusPanel = createStatusPanel({debug, actions,resourceName:resource=>reading.r
   }, onRefresh:()=>reading.refresh()});
 
 reading = createReadingCoordination({readerApi, fetchMedia:transport.media, debug, menus, statusPanel, actions, progress,
-  onStopped:()=>{button('stop').disabled=true;button('collect').disabled=true;button('folder-viewed').disabled=true;},
+  onPowerState:(enabled,available)=>{if(available)powerEnabled=enabled;powerAvailable=available;renderCommands();},
+  onStopped:()=>{powerAvailable=false;button('stop').disabled=true;button('collect').disabled=true;button('folder-viewed').disabled=true;},
 });
 
 function Command({id,label,run,disabled}:{id:string;label:string;run:()=>Promise<unknown>;disabled:boolean}) {
-  const [message,setMessage]=useState('');
-  return <><button id={id} type="button" disabled={disabled} onClick={async()=>{setMessage('');try{await run();}catch(error){reportError(error,'Oko interface');setMessage(errorMessage(error));}}}><span className="reader-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{id==='collect'?<path d="M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5L4 10m16 4-3 3a7 7 0 0 1-12-5"/>:<rect x="6" y="6" width="12" height="12" rx="2"/>}</svg></span>{label}</button><span className="header-command-error" role="status" hidden={!message}>{message}</span></>;
+  const [message,setMessage]=useState(''),[busy,setBusy]=useState('');
+  return <><button id={id} type="button" data-power={id==='stop'?(label==='Start'?'start':'stop'):undefined} disabled={disabled||Boolean(busy)} onClick={async()=>{setMessage('');setBusy(id==='stop'?(label==='Start'?'Starting…':'Stopping…'):'Refreshing…');try{await run();}catch(error){reportError(error,'Oko interface');setMessage(errorMessage(error));}finally{setBusy('');}}}><span className="reader-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{id==='collect'?<path d="M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5L4 10m16 4-3 3a7 7 0 0 1-12-5"/>:label==='Start'?<path d="m9 5 11 7-11 7Z"/>:<rect x="6" y="6" width="12" height="12" rx="2"/>}</svg></span>{busy&&id==='stop'?busy:label}</button><span className="header-command-error" role="status" hidden={!message}>{message}</span></>;
 }
 function renderCommands(){for(const [id,label,run] of [
   ['collect','Refresh Sources',async()=>{await readerApi.collect();await reading.refresh();}],
-  ['stop','Stop',()=>reading.stop()],
+  ['stop',powerEnabled?'Stop':'Start',()=>reading.setPower(!powerEnabled)],
 ] as const) {
   let host=commandHosts.get(id);
   if(!host){const control=byId(id);host=document.createElement('span');host.className='header-command';control.replaceWith(host);commandHosts.set(id,host);}
-  mountSurface(host,<Command id={id} label={label} run={run} disabled={!commandsAvailable}/>);
+  mountSurface(host,<Command id={id} label={label} run={run} disabled={id==='stop'?!powerAvailable:!commandsAvailable}/>);
 }}
 renderCommands();
 document.querySelector('.reader-toolbar-scroll')!.addEventListener('focusin',event=>{const control=event.target instanceof Element?event.target.closest('button'):null;control?.scrollIntoView({block:'nearest',inline:'nearest'});});

@@ -72,6 +72,8 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         try:
             result = facts.FeedVerification.model_validate(await runtime.verify_feed(FeedURL(url=body.url.root)))
         except ActionError as error:
+            if error.code == 'runtime_disabled':
+                raise
             if runtime.stopped:
                 raise ApiError(409, wire.ErrorEnvelope(wire.RuntimeStoppedError(code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=None))) from None
             if error.code != 'source_unavailable':
@@ -118,7 +120,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             try:
                 yield
             except ActionError as error:
-                if runtime.stopped or error.kind == 'unavailable':
+                if runtime.stopped or error.kind == 'unavailable' or error.code == 'runtime_disabled':
                     raise
                 command_id = wire.CommandId(request.state.command_id)
                 saved = runtime.require_store().subscriptions.feeds(identity)

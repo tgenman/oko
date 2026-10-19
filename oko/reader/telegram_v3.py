@@ -26,7 +26,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                 raise ApiError(error.status, wire.ErrorEnvelope.model_validate(dict(code=error.code, message=str(error), details=error.details,
                     diagnostic_id=None, command_id=request.state.command_id))) from None
             except ActionError as error:
-                if runtime.stopped or error.kind == 'unavailable':
+                if runtime.stopped or error.kind == 'unavailable' or error.code == 'runtime_disabled':
                     raise
                 code = 'profile_unavailable' if context['operation'] == 'telegram_profile_save' else 'source_unavailable'
                 raise ApiError(503, wire.ErrorEnvelope.model_validate(dict(code=code, message=str(error.detail), details=dict(retry_at=None),

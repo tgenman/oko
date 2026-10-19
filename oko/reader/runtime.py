@@ -78,6 +78,7 @@ class Runtime:
         self._feed_checks: dict[str, str] = {}
         self._stop_requested = asyncio.Event()
         self._closed = False
+        self.enabled = True
         self._actions = asyncio.Lock()
         self._epoch = 0
         self._requests: set[asyncio.Future[Any]] = set()
@@ -98,7 +99,7 @@ class Runtime:
             telegram_client.allowed = lambda: self._live() and not self._cancelling
 
     def _live(self) -> bool:
-        return not self.stopped and self._admitted()
+        return not self.stopped and self.enabled and self._admitted()
 
     async def admission_changed(self) -> None:
         async with self._actions:
@@ -296,8 +297,23 @@ class Runtime:
             if not self._closed:
                 await self._cancel()
 
+    def require_work(self) -> None:
+        self.require_store()
+        if not self.enabled:
+            raise ActionError('conflict', 'Око выключено; сначала включите Око', expected=True, code='runtime_disabled')
+
+    async def set_power(self, enabled: bool) -> None:
+        async with self._actions:
+            current = self.require_store()
+            current.set_work_enabled(enabled)
+            self.enabled = enabled
+            if not enabled:
+                self._feed_checks.clear()
+                await self._cancel()
+
     async def collect(self, feed: str | None = None) -> None:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             self._sync_sources()
             if feed is not None:
@@ -312,6 +328,7 @@ class Runtime:
 
     async def retry_material(self, item: str) -> None:
         async with self._actions:
+            self.require_work()
             if not self.require_store().retry_material(item):
                 raise ActionError('missing', 'Материал недоступен')
             await self._cancel({self.require_store().item_feed(item)})
@@ -399,6 +416,7 @@ class Runtime:
 
     async def pause_history(self, identity: str, paused: bool) -> dict[str, Any]:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             try:
                 result = current.pause_history(identity, paused)
@@ -415,6 +433,7 @@ class Runtime:
 
     async def change_youtube_history(self, identity: str, selection: InitialHistory | None) -> dict[str, Any]:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             try:
                 result = current.change_youtube_history(identity, selection)
@@ -464,6 +483,7 @@ class Runtime:
 
     async def add_feed(self, body: AddFeed) -> dict[str, Any]:
         async with self._actions:
+            self.require_work()
             try:
                 current = self.require_store()
                 if not self._live():
@@ -478,6 +498,7 @@ class Runtime:
 
     async def verify_feed(self, body: FeedURL) -> dict[str, Any]:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для проверки фида')
@@ -543,6 +564,7 @@ class Runtime:
 
     async def check_processor(self) -> dict[str, Any]:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения')
@@ -572,6 +594,7 @@ class Runtime:
 
     async def codex_models(self) -> list[dict[str, Any]]:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения')
@@ -606,6 +629,7 @@ class Runtime:
 
     async def check_codex(self) -> dict[str, Any]:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения')
@@ -631,6 +655,7 @@ class Runtime:
 
     async def retry_filter(self, item: str) -> None:
         async with self._actions:
+            self.require_work()
             if not self.require_store().filters.retry(item):
                 raise ActionError('missing', 'Фильтрация не включена')
             await self._cancel()
@@ -640,11 +665,13 @@ class Runtime:
 
     async def retry_theses(self, item: str) -> None:
         async with self._actions:
+            self.require_work()
             if not self.require_store().processing.retry_theses(item):
                 raise ActionError('missing', 'Тезисы для материала не включены')
 
     async def regenerate(self, item: str) -> None:
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             accepted = current.processing.retry_theses(item)
             if not accepted:
@@ -718,6 +745,7 @@ class Runtime:
     async def save_telegram_profile(self, role: str, account: str) -> dict[str, Any]:
         from oko.subscriptions.telegram import TelegramConflict
         async with self._actions:
+            self.require_work()
             current, _ = self._telegram_ready()
             old = current.subscriptions.telegram.profile(role)
             generation = old['generation'] if old else 0
@@ -762,6 +790,7 @@ class Runtime:
         from oko.subscriptions.telegram import locator, TelegramConflict
         kind, address = locator(source)
         async with self._actions:
+            self.require_work()
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения', expected=True)
@@ -813,6 +842,7 @@ class Runtime:
 
     async def _call_telegram(self, call: Callable[[TelegramClient], Awaitable[T]]) -> tuple[T, Store, int]:
         async with self._actions:
+            self.require_work()
             current, client = self._telegram_ready()
             epoch = self._epoch
             task = asyncio.ensure_future(call(client))
@@ -854,6 +884,7 @@ class Runtime:
                 raise ActionError('conflict', 'Профиль изменился; повторите подключение', expected=True)
             info, current, epoch = await self._call_telegram(lambda client: client.info(body.account, int(body.peer) if body.peer.startswith('-') else body.peer))
             async with self._actions:
+                self.require_work()
                 self._check_request(current, epoch)
                 latest = current.subscriptions.telegram.profile(profile['role'])
                 if not latest or latest['generation'] != profile['generation']:
@@ -1065,6 +1096,7 @@ class Runtime:
         journal_context = active_journal.set(self.diagnostics)
         try:
             self._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock)
+            self.enabled = self._store.work_enabled()
             viewed = {row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')}
             if viewed and self.diagnostics:
                 self.diagnostics.forget_materials(viewed)
@@ -1083,7 +1115,8 @@ class Runtime:
                 async with self._actions:
                     now = self._clock()
                     if not self._live():
-                        await self._cancel()
+                        if not self._admitted():
+                            await self._cancel()
                         if self._should_stop():
                             self._stop_requested.set()
                             break

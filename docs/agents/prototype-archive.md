@@ -44,3 +44,15 @@ Create & Move создаёт папку и переносит фид. Альте
 Исходники: `frontend/create-folder-prototype.html`,
 `frontend/src/reading/create-folder-prototype.{tsx,css,mjs}`.
 Контекст реализации: `.scratch/create-folder-menu/implementation.md`.
+
+## Включение и выключение Око — 19 октября 2026
+
+Выбрана одна кнопка Stop/Start на том же месте. При выключении чтение и локальные
+действия доступны, сбор/ИИ/подключения заблокированы; состояние сохраняется.
+Исходный прототип очищал чтение, это изменено после интервью с пользователем.
+
+Primary-source ветка: `codex/power-prototype-20261019` (локальная).
+Коммит: `c1faa9ee9695398834f822cf0091178766b4d798`.
+Исходник: `frontend/power-state-prototype.html`; интервью и проверка прототипа:
+`.scratch/power-state-prototype/`. Реализация: [#47](https://github.com/tgenman/oko/issues/47),
+[архитектура](../architecture/work-power.md).

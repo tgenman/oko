@@ -554,6 +554,14 @@ class Store:
             record_caught('store.derivative_provenance')
         return None
 
+    def work_enabled(self) -> bool:
+        row = self.db.execute("SELECT value FROM state WHERE key='work-enabled'").fetchone()
+        return row is None or row['value'] != 'false'
+
+    def set_work_enabled(self, enabled: bool) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO state VALUES ('work-enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('true' if enabled else 'false',))
+
     def codex_config(self) -> CodexSettings | None:
         row = self.db.execute("SELECT value FROM state WHERE key='processor:codex'").fetchone()
         return CodexSettings.model_validate_json(row[0]) if row else None

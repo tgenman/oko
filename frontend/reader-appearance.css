@@ -43,3 +43,7 @@
 #cards .date-group{background:#f2f2f7;border-color:#e5e5ea;color:#636366}
 #material-list :is(#list-menu-toggle,#folder-viewed){color:#636366}
 #material-list :is(#list-menu-toggle,#folder-viewed):focus-visible{outline-color:#007aff}
+
+/* Work power leaves the reader available while collection is disabled. */
+.reader-toolbar #stop[data-power=start]{color:#007aff}
+.reader-toolbar #stop[data-power=start] .reader-action-icon{background:#007aff}

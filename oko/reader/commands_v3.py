@@ -130,6 +130,9 @@ def register(app: FastAPI, runtime: Runtime) -> None:
 def action_error(error: ActionError, context: wire.CommandContext, identity: str, *, stopped: bool = False) -> 'ApiError':
     from oko.reader.api_v3 import ApiError
     command_id = wire.CommandId(identity)
+    if error.code == 'runtime_disabled':
+        from oko.reader.api_v3 import disabled_error
+        return disabled_error(identity)
     if stopped:
         return ApiError(409, wire.ErrorEnvelope(wire.RuntimeStoppedError(code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=command_id)))
     value = context.root

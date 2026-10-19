@@ -16,7 +16,7 @@ export class MenusOwner {
   snapshot=()=>this.version;
   changed=()=>{this.version++;flushSync(()=>{for(const listener of this.listeners)listener();});};
   active:DialogName|null=null; page='home'; stack:{page:string;trigger:HTMLElement|null;target?:string}[]=[];
-  opener:HTMLElement|null=null; stopped=false; selected:string|null=null; currentPath:string|null=null;
+  opener:HTMLElement|null=null; stopped=false; workAllowed=true; selected:string|null=null; currentPath:string|null=null;
   feedRefresh:EffectiveFeedRefreshMinutes|null=null;
   youtube:YouTubeState|null=null;
   subscriptions:SubscriptionCatalog={folders:[],feeds:[]}; sources:SourceState[]=[]; histories:FeedHistoryState[]=[];
@@ -38,7 +38,7 @@ export class MenusOwner {
   back(){const previous=this.stack.pop();if(!previous)return;this.navigationRevision++;this.operations.invalidate();this.settingsMessage='';this.page=previous.page;this.changed();for(const callback of this.onPageChange)callback(this.page);if(this.currentPath&&this.needsRefresh.has(this.currentPath))void this.loadSettings();queueMicrotask(()=>{const fallback=this.active&&document.getElementById(this.active+'-dialog')?.querySelector<HTMLElement>('[data-settings-target="'+previous.target+'"]');const target=previous.trigger?.isConnected?previous.trigger:fallback;if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});else this.focusHeading();});}
   leave(){this.navigationRevision++;this.menuOperations.invalidate();this.operations.invalidate();this.currentPath=null;for(const callback of this.onPageChange)callback('');}
   close(name:DialogName){if(this.active!==name)return;this.leave();this.active=null;this.changed();if(this.opener?.isConnected)this.opener.focus({preventScroll:true});this.opener=null;}
-  async open(name:DialogName,trigger:HTMLElement|null=null,preferred?:string|null){if(this.stopped)return;if(!this.active)this.opener=trigger||document.activeElement as HTMLElement;const previous=this.active;this.leave();this.active=name;this.page='home';this.stack=[];this.settingsMessage='';
+  async open(name:DialogName,trigger:HTMLElement|null=null,preferred?:string|null){if(this.stopped||name==='add'&&!this.workAllowed)return;if(!this.active)this.opener=trigger||document.activeElement as HTMLElement;const previous=this.active;this.leave();this.active=name;this.page='home';this.stack=[];this.settingsMessage='';
     if(preferred!==undefined)this.selected=preferred;this.currentPath=name==='settings'?'oko/global':name==='feeds'?this.selected:null;this.changed();
     if(previous&&previous!==name)(document.getElementById(previous+'-dialog')as HTMLDialogElement).close();const dialog=document.getElementById(name+'-dialog')as HTMLDialogElement;if(!dialog.open)dialog.showModal();
     const action=this.menuOperations.begin('open');const revision=this.navigationRevision;const owner=this;try{await this.refresh();if(name==='add'){action.commit(()=>{for(const callback of this.onAddOpen)callback();});}else await action.commit(()=>this.loadSettings());if(name==='settings')action.commit(()=>{for(const callback of this.onPageChange)callback('settings-open');});}catch(error){action.commit(()=>{if(name==='add')this.addMessage=message(error);else this.settingsMessage=message(error);this.changed();});}return {get current(){return action.current&&revision===owner.navigationRevision;}};}
@@ -87,6 +87,12 @@ export class MenusOwner {
   }
   setHistory(id:string,history:HistoryState){this.invalidateStatus();this.histories=[...(this.histories||[]).filter(h=>h.feed_id!==id),{history,feed_id:id}];}
   getHistory(feed:{id:string}){const current=this.histories.find(h=>h.feed_id===feed.id)?.history;const saved=this.values.get('feed/'+feed.id);return current||(saved?.scope==='feed'?saved.feed.history:undefined);}
+  setWorkAllowed(allowed:boolean){
+    if(this.workAllowed===allowed)return;
+    this.workAllowed=allowed;
+    (document.getElementById('add-open')as HTMLButtonElement).disabled=!allowed;
+    this.changed();
+  }
   status(state:RuntimeStatus,revision=this.statusGeneration){
     if(revision!==this.statusGeneration||this.stopped)return;
     this.histories=state.initial_histories;this.youtube=state.youtube;this.changed();

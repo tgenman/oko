@@ -25,7 +25,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         try:
             result = await runtime.codex_models()
         except ActionError as error:
-            if runtime.stopped:
+            if runtime.stopped or error.code == 'runtime_disabled':
                 raise
             raise ApiError(503, wire.ErrorEnvelope(wire.ProcessorUnavailableError(code='processor_unavailable', message=str(error.detail), details=wire.ProcessorUnavailableErrorDetails(retry_at=None), diagnostic_id=None, command_id=None))) from None
         return wire.CodexModelCatalog.model_validate({'models': result})

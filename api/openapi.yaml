@@ -1718,6 +1718,233 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+  /api/v3/power:
+    put:
+      summary: Set work power
+      operationId: set_power
+      description: Persist enabled work state without terminating the reader. Disabled Oko keeps
+        local reading and settings available. Absolute desired state shared by all clients.
+        A lost response must be reconciled through status or command receipt.
+      tags:
+      - power
+      parameters:
+      - name: X-Oko-Action
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/CommandId'
+        description: Command correlation only, never execution idempotency. Missing value generates
+          an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PowerRequest'
+            example:
+              enabled: false
+      responses:
+        '200':
+          description: Desired work power persisted. Local reading remains available while disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAcknowledgement'
+              example:
+                ok: true
+                command_id: example
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/CommandContextMismatchError'
+              examples:
+                RuntimeStoppedError:
+                  value:
+                    code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                CommandContextMismatchError:
+                  value:
+                    code: command_context_mismatch
+                    message: example
+                    details:
+                      command_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: example
+                    details:
+                      resource:
+                        kind: material
+                        material_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
   /api/v3/stop:
     post:
       summary: Stop
@@ -1886,20 +2113,19 @@ paths:
     get:
       summary: Codex state
       operationId: codex_state
-      description: Read saved configuration separately from processor availability
-        and observed quota; unknown quota is not zero. All operations require bearer
-        authorization, allowed Host and, when present, matching Origin. Structural
-        input errors are 422 before mutation. Client cancellation ends waiting, not
-        already committed effects. A lost response leaves outcome unknown; reconcile
-        tracked commands instead of replaying. Standard HTTP headers remain allowed.
-        Unknown query keys and duplicate scalar query parameters return 422.
+      description: Read saved configuration separately from processor availability and observed
+        quota; unknown quota is not zero. All operations require bearer authorization, allowed
+        Host and, when present, matching Origin. Structural input errors are 422 before mutation.
+        Client cancellation ends waiting, not already committed effects. A lost response leaves
+        outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
+        remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
       tags:
       - processors
       parameters: []
       responses:
         '200':
-          description: Read saved configuration separately from processor availability
-            and observed quota; unknown quota is not zero.
+          description: Read saved configuration separately from processor availability and observed
+            quota; unknown quota is not zero.
           content:
             application/json:
               schema:
@@ -1923,8 +2149,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
         '403':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -1962,8 +2188,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '422':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -1992,8 +2218,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '500':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -2017,8 +2243,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '503':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -2045,14 +2271,13 @@ paths:
     put:
       summary: Codex save
       operationId: codex_save
-      description: Replace the full filter/theses configuration after validating choices
-        against the current model catalogue. Persist locally; future processing uses
-        the accepted choice. All operations require bearer authorization, allowed
-        Host and, when present, matching Origin. Structural input errors are 422 before
-        mutation. Client cancellation ends waiting, not already committed effects.
-        A lost response leaves outcome unknown; reconcile tracked commands instead
-        of replaying. Standard HTTP headers remain allowed. Unknown query keys and
-        duplicate scalar query parameters return 422.
+      description: Replace the full filter/theses configuration after validating choices against
+        the current model catalogue. Persist locally; future processing uses the accepted choice.
+        All operations require bearer authorization, allowed Host and, when present, matching
+        Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting,
+        not already committed effects. A lost response leaves outcome unknown; reconcile tracked
+        commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys
+        and duplicate scalar query parameters return 422.
       tags:
       - processors
       parameters:
@@ -2061,14 +2286,13 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/CommandId'
-        description: Command correlation only, never execution idempotency. Missing
-          value generates an ID; supplied invalid value returns 422. Echoed for tracked
-          mutations.
+        description: Command correlation only, never execution idempotency. Missing value generates
+          an ID; supplied invalid value returns 422. Echoed for tracked mutations.
       responses:
         '200':
-          description: Replace the full filter/theses configuration after validating
-            choices against the current model catalogue. Persist locally; future processing
-            uses the accepted choice.
+          description: Replace the full filter/theses configuration after validating choices
+            against the current model catalogue. Persist locally; future processing uses the
+            accepted choice.
           content:
             application/json:
               schema:
@@ -2092,8 +2316,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
         '400':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -2118,8 +2342,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '403':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -2157,8 +2381,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '422':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -2187,8 +2411,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '500':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -2212,8 +2436,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '503':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
           content:
             application/json:
               schema:
@@ -2225,6 +2449,31 @@ paths:
                     message: example
                     details:
                       retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDisabledError'
+              examples:
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
+                    message: example
+                    details: null
                     diagnostic_id: null
                     command_id: null
           headers:
@@ -2411,6 +2660,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDisabledError'
+              examples:
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
   /api/v3/processors/codex/check:
     post:
       summary: Codex check
@@ -2565,6 +2839,31 @@ paths:
                     message: example
                     details:
                       retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDisabledError'
+              examples:
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
+                    message: example
+                    details: null
                     diagnostic_id: null
                     command_id: null
           headers:
@@ -3095,6 +3394,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDisabledError'
+              examples:
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
   /api/v3/materials/{item}/regenerate:
     post:
       summary: Regenerate
@@ -3234,16 +3558,25 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeStoppedError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -3491,16 +3824,25 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeStoppedError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -3820,12 +4162,14 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TelegramConnect409Errors'
+                oneOf:
+                - $ref: '#/components/schemas/TelegramConnect409Errors'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 DuplicateSourceError:
                   value:
@@ -3884,6 +4228,13 @@ paths:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -4281,12 +4632,14 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AddFeed409Errors'
+                oneOf:
+                - $ref: '#/components/schemas/AddFeed409Errors'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 VerificationExpiredError:
                   value:
@@ -4298,6 +4651,13 @@ paths:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -4584,16 +4944,25 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeStoppedError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -5678,12 +6047,14 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HistoryConflictError'
+                oneOf:
+                - $ref: '#/components/schemas/HistoryConflictError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 HistoryConflictError:
                   value:
@@ -5694,6 +6065,13 @@ paths:
                       history:
                         state: absent
                         legacy_since: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
+                    message: example
+                    details: null
                     diagnostic_id: null
                     command_id: null
           headers:
@@ -5916,12 +6294,14 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HistoryStart409Errors'
+                oneOf:
+                - $ref: '#/components/schemas/HistoryStart409Errors'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 HistoryConflictError:
                   value:
@@ -5937,6 +6317,13 @@ paths:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -8220,16 +8607,25 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Collect409Errors'
+                oneOf:
+                - $ref: '#/components/schemas/Collect409Errors'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -8541,16 +8937,25 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeStoppedError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -10109,16 +10514,25 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeStoppedError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
                     message: example
                     details: null
                     diagnostic_id: null
@@ -10679,12 +11093,14 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
         '409':
-          description: Operation-specific typed error. No raw submitted values, secret
-            context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TelegramProfileSave409Errors'
+                oneOf:
+                - $ref: '#/components/schemas/TelegramProfileSave409Errors'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 ProfileInUseError:
                   value:
@@ -10708,6 +11124,13 @@ paths:
                     message: example
                     details:
                       role: personal
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeDisabledError:
+                  value:
+                    code: runtime_disabled
+                    message: example
+                    details: null
                     diagnostic_id: null
                     command_id: null
           headers:
@@ -18505,6 +18928,7 @@ components:
         command_id: null
     ErrorEnvelope:
       oneOf:
+      - $ref: '#/components/schemas/RuntimeDisabledError'
       - $ref: '#/components/schemas/FolderNotEmptyError'
       - $ref: '#/components/schemas/FolderNameConflictError'
       - $ref: '#/components/schemas/ActionInvalidError'
@@ -18543,6 +18967,7 @@ components:
       discriminator:
         propertyName: code
         mapping:
+          runtime_disabled: '#/components/schemas/RuntimeDisabledError'
           folder_name_conflict: '#/components/schemas/FolderNameConflictError'
           folder_not_empty: '#/components/schemas/FolderNotEmptyError'
           action_invalid: '#/components/schemas/ActionInvalidError'
@@ -18805,6 +19230,63 @@ components:
       examples:
       - operation: complete_folder
         folder_id: example
+    PowerRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required:
+      - enabled
+      additionalProperties: false
+      examples:
+      - enabled: false
+    CommandPower:
+      type: object
+      properties:
+        operation:
+          type: string
+          const: power
+        enabled:
+          type: boolean
+      required:
+      - operation
+      - enabled
+      additionalProperties: false
+      examples:
+      - operation: power
+        enabled: false
+    RuntimeDisabledError:
+      type: object
+      properties:
+        code:
+          type: string
+          const: runtime_disabled
+        message:
+          type: string
+        details:
+          type: 'null'
+        diagnostic_id:
+          anyOf:
+          - type: string
+            minLength: 1
+          - type: 'null'
+        command_id:
+          anyOf:
+          - $ref: '#/components/schemas/CommandId'
+          - type: 'null'
+      required:
+      - code
+      - message
+      - details
+      - diagnostic_id
+      - command_id
+      additionalProperties: false
+      examples:
+      - code: runtime_disabled
+        message: example
+        details: null
+        diagnostic_id: null
+        command_id: null
     CommandStop:
       type: object
       properties:
@@ -18926,6 +19408,7 @@ components:
       - $ref: '#/components/schemas/CommandCompleteFeed'
       - $ref: '#/components/schemas/CommandCompleteFolder'
       - $ref: '#/components/schemas/CommandStop'
+      - $ref: '#/components/schemas/CommandPower'
       - $ref: '#/components/schemas/CommandRegenerate'
       - $ref: '#/components/schemas/CommandRetryTheses'
       - $ref: '#/components/schemas/CommandRetryMaterial'
@@ -18957,6 +19440,7 @@ components:
           complete_feed: '#/components/schemas/CommandCompleteFeed'
           complete_folder: '#/components/schemas/CommandCompleteFolder'
           stop: '#/components/schemas/CommandStop'
+          power: '#/components/schemas/CommandPower'
           regenerate: '#/components/schemas/CommandRegenerate'
           retry_theses: '#/components/schemas/CommandRetryTheses'
           retry_material: '#/components/schemas/CommandRetryMaterial'
@@ -19419,6 +19903,7 @@ components:
           type: string
           enum:
           - running
+          - disabled
           - stopping
           - stopped
           - unavailable
