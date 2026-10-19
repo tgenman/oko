@@ -1,0 +1,40 @@
+import {test} from 'node:test';
+import {expect} from 'playwright/test';
+import {productionReader} from './http-reader';
+import {artifactPath} from './artifacts';
+
+test('remembered browser reopens without token and survives a reader restart', {timeout:45000}, async t=>{
+  const {page,context,api,origin,token,restart}=await productionReader(t,{persistent:true,hostname:'oko'});
+  await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+  const checked=await api('feeds/verify','POST',{url:'https://a.test/feed'});
+  if(checked.state==='existing')throw new Error('Expected a new synthetic feed');
+  await api('feeds','POST',{url:checked.candidate.url,verification:checked.verification,title:'Alpha',folder:'Science',initial_history:{mode:'count',count:'1'}});
+  await page.goto(origin+'/#token='+token);
+  expect(await page.evaluate(()=>window.isSecureContext)).toBe(false);
+  await expect(page.locator('#stop')).toBeEnabled();
+  await expect(page).toHaveURL(origin+'/');
+  await expect(page.locator('#cards button')).toHaveCount(1);
+  await page.locator('#cards button').click();
+  await expect(page.locator('#copy')).toBeVisible();
+  await page.locator('#copy').click();
+  await expect(page.locator('#message')).toHaveText('Link copied');
+  await page.locator('#stop').click();
+  await expect(page.locator('#stop')).toHaveText('Start');
+  const reopened=await context.newPage();
+  await reopened.goto(origin+'/');
+  await expect(reopened.locator('#stop')).toHaveText('Start');
+  await page.close();
+  await restart();
+  await reopened.reload();
+  await expect(reopened.locator('#stop')).toBeEnabled();
+  await expect(reopened.locator('#stop')).toHaveText('Start');
+  await reopened.locator('#stop').click();
+  await expect(reopened.locator('#stop')).toHaveText('Stop');
+  await reopened.screenshot({path:artifactPath('persistent-reader.png'),fullPage:true});
+  const outcomes=await reopened.evaluate(async()=>{
+    const revoked=await fetch('/api/v3/browser-session',{method:'DELETE'});
+    const denied=await fetch('/api/v3/status');
+    return [revoked.status,denied.status];
+  });
+  expect(outcomes).toEqual([200,403]);
+});

@@ -1,6 +1,7 @@
 # Codex on Mac: authenticated helper and remote adapter
 
-Status: ready-for-agent
+GitHub: https://github.com/tgenman/oko/issues/49
+Status: claimed
 Blocked by: Нет
 
 Specification: [Docker runtime](../spec.md).

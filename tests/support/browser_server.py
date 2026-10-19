@@ -63,8 +63,8 @@ def response(request):
     return httpx.Response(200, text=f'<article><p>Открылась библиотека на 24 места.</p><img src="https://{request.url.host}/image.png"></article>')
 
 
-def build_app(root, token):
-    return create_app(root, token=token, rss_enabled=True,
+def build_app(root, token, *, persistent=False, public_url=None):
+    return create_app(root, token=token, rss_enabled=True, persistent=persistent, public_url=public_url,
                      rss_transport=httpx.MockTransport(response), telegram_client=BrowserTelegram(), ai_transport=model_transport([]), codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
                      lease=60, grace=60)

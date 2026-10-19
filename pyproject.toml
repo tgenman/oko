@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn==0.54.0",
     "httpx==0.28.1",
     "httpcore==1.0.9",
+    "jsonschema==4.26.0",
     "telethon==1.45.0",
     "python-dotenv==1.2.2",
     "python-socks[asyncio]==2.8.2",
@@ -23,7 +24,6 @@ dev = [
     "mypy==2.4.0",
     "datamodel-code-generator==0.83.0",
     "openapi-spec-validator==0.9.0",
-    "jsonschema==4.26.0",
     "pyyaml==6.0.3",
 ]
 

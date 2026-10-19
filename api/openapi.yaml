@@ -7,12 +7,100 @@ info:
     Client abort does not roll back committed writes. Closed response changes require
     semantic compatibility review.
 paths:
+  /api/v3/browser-session:
+    delete:
+      summary: Revoke the remembered session of this browser
+      operationId: revoke_browser_session
+      description: Revoke the presented browser cookie. Bearer authorization remains
+        available. Persistent web deployments issue an HttpOnly host-only SameSite=strict
+        cookie on a successful bearer-authenticated status request. Cookie-authenticated
+        mutations require an exact matching Origin; explicit invalid bearer never falls
+        back to cookies.
+      parameters: []
+      responses:
+        '200':
+          description: Browser credential revoked; process bearer unchanged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSessionRevoked'
+              example:
+                revoked: true
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
   /api/v3/diagnostics:
     get:
       summary: Diagnostic entries
       operationId: diagnostic_entries
       description: Read grouped masked diagnostics without starting work. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -344,7 +432,7 @@ paths:
       summary: Clear diagnostics
       operationId: clear_diagnostics
       description: Clear only the diagnostic journal; report a persistence failure
-        without claiming successful removal. All operations require bearer authorization,
+        without claiming successful removal. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -506,7 +594,7 @@ paths:
       operationId: status
       description: Read runtime, lifetime and typed concurrent work snapshots. A status
         read does not create client presence or start external work. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -687,7 +775,7 @@ paths:
       operationId: observe_command
       description: Record failed or unknown client observation against typed command
         context. Repeated observation delivery is safe; confirmed server outcomes
-        cannot be overwritten. All operations require bearer authorization, allowed
+        cannot be overwritten. All operations require bearer or persistent browser session authorization, allowed
         Host and, when present, matching Origin. Structural input errors are 422 before
         mutation. Client cancellation ends waiting, not already committed effects.
         A lost response leaves outcome unknown; reconcile tracked commands instead
@@ -898,7 +986,7 @@ paths:
       summary: Abandon problem
       operationId: abandon_problem
       description: Abandon an eligible unsuccessful editing problem. This does not
-        cancel or undo a committed command. All operations require bearer authorization,
+        cancel or undo a committed command. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -1102,7 +1190,7 @@ paths:
       operationId: create_client_session
       description: Create fresh presence under client_presence only. The new opaque
         ID has a lease and renew interval; it neither authenticates nor executes a
-        business command. All operations require bearer authorization, allowed Host
+        business command. All operations require bearer or persistent browser session authorization, allowed Host
         and, when present, matching Origin. Structural input errors are 422 before
         mutation. Client cancellation ends waiting, not already committed effects.
         A lost response leaves outcome unknown; reconcile tracked commands instead
@@ -1299,7 +1387,7 @@ paths:
       operationId: renew_client_session
       description: Renew a currently live presence ID using the monotonic host clock.
         Expired IDs return 410 and cannot be revived; explicitly create a new session.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -1528,7 +1616,7 @@ paths:
       summary: Close client session
       operationId: close_client_session
       description: Close presence idempotently. Repeating an absent ID succeeds without
-        extending the last-client departure time. All operations require bearer authorization,
+        extending the last-client departure time. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -1951,7 +2039,7 @@ paths:
       operationId: stop
       description: Accept the global prohibition of new work and begin shutdown. The
         response may precede process exit; losing it does not prove the instance remained
-        running. All operations require bearer authorization, allowed Host and, when
+        running. All operations require bearer or persistent browser session authorization, allowed Host and, when
         present, matching Origin. Structural input errors are 422 before mutation.
         Client cancellation ends waiting, not already committed effects. A lost response
         leaves outcome unknown; reconcile tracked commands instead of replaying. Standard
@@ -2114,7 +2202,7 @@ paths:
       summary: Codex state
       operationId: codex_state
       description: Read saved configuration separately from processor availability and observed
-        quota; unknown quota is not zero. All operations require bearer authorization, allowed
+        quota; unknown quota is not zero. All operations require bearer or persistent browser session authorization, allowed
         Host and, when present, matching Origin. Structural input errors are 422 before mutation.
         Client cancellation ends waiting, not already committed effects. A lost response leaves
         outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -2273,7 +2361,7 @@ paths:
       operationId: codex_save
       description: Replace the full filter/theses configuration after validating choices against
         the current model catalogue. Persist locally; future processing uses the accepted choice.
-        All operations require bearer authorization, allowed Host and, when present, matching
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present, matching
         Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting,
         not already committed effects. A lost response leaves outcome unknown; reconcile tracked
         commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys
@@ -2504,7 +2592,7 @@ paths:
       summary: Codex models
       operationId: codex_models
       description: Read dynamic supported models, effort choices and fast support;
-        clients do not hard-code the catalogue. All operations require bearer authorization,
+        clients do not hard-code the catalogue. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -2690,7 +2778,7 @@ paths:
       summary: Codex check
       operationId: codex_check
       description: Check processor admission and quota without changing settings or
-        starting material processing. All operations require bearer authorization,
+        starting material processing. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -2881,7 +2969,7 @@ paths:
       summary: Processor config
       operationId: processor_config
       description: Read an explicitly absent or present local processor configuration.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -3425,7 +3513,7 @@ paths:
       operationId: regenerate
       description: Schedule regeneration of applicable publication results. Keep previously
         accepted results during a new attempt and discard stale generations. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -3690,7 +3778,7 @@ paths:
       summary: Retry theses
       operationId: retry_theses
       description: Schedule an admissible theses retry for the identified publication;
-        it does not mark the publication viewed. All operations require bearer authorization,
+        it does not mark the publication viewed. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -3957,7 +4045,7 @@ paths:
       operationId: telegram_profiles
       description: Read the personal and collection roles and opaque references to
         existing configurations. This read does not verify an account and never discloses
-        session secrets or file paths. All operations require bearer authorization,
+        session secrets or file paths. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -4120,7 +4208,7 @@ paths:
         chosen web/client binding. Omitted access means web; omitted initial_history
         means count 20. No topics, joins, alternate-account fallback, account replacement
         or hidden upsert. Access and real source identity are immutable. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -4426,7 +4514,7 @@ paths:
       operationId: subscription_list
       description: Read saved folders and source subscriptions, including deleting
         entries and unconfirmed legacy client bindings without inventing identity.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -4842,7 +4930,7 @@ paths:
       operationId: verify_feed
       description: Verify one RSS/YouTube URL and return a new candidate token or
         the existing subscription. Verification itself does not create a subscription.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -5084,7 +5172,7 @@ paths:
       summary: Youtube settings
       operationId: youtube_settings
       description: Read public YouTube transport settings and admission state without
-        returning credentials. All operations require bearer authorization, allowed
+        returning credentials. All operations require bearer or persistent browser session authorization, allowed
         Host and, when present, matching Origin. Structural input errors are 422 before
         mutation. Client cancellation ends waiting, not already committed effects.
         A lost response leaves outcome unknown; reconcile tracked commands instead
@@ -5245,7 +5333,7 @@ paths:
       description: Patch YouTube transport settings. Omitted credentials remain unchanged;
         keep, clear and replace are explicit disjoint operations. Malformed structure
         is 422; a structurally valid impossible configuration is 400. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -5447,7 +5535,7 @@ paths:
       operationId: effective_settings
       description: Read effective settings and explicit overrides. Scope is oko/folder/feed;
         oko requires owner global, folder/feed require an existing resource. Feed
-        metadata exists only in the feed snapshot. All operations require bearer authorization,
+        metadata exists only in the feed snapshot. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -5697,7 +5785,7 @@ paths:
       operationId: settings_patch
       description: Patch the five publication settings. An omitted property keeps
         its override, null removes its override and a value sets it. No client presence
-        is needed for this local settings write. All operations require bearer authorization,
+        is needed for this local settings write. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -5971,7 +6059,7 @@ paths:
       operationId: history_pause
       description: Legacy resume of the existing archive run. Manual pause (paused=true) returns
         409 history_conflict. Use collect to continue unfinished history.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -6216,7 +6304,7 @@ paths:
       operationId: history_start
       description: Start an explicit count-only YouTube archive backfill. A selection
         is required; exact decimal count is preserved without rounding. No Telegram
-        backfill operation is introduced. All operations require bearer authorization,
+        backfill operation is introduced. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -6972,7 +7060,7 @@ paths:
         media, processing, settings and jobs through resumable cleanup. Deleting remains
         visible in the catalogue; repeats return current progress. No viewed, Telegram
         leave/delete/read ack. Claims remain reserved until completion; re-add gets
-        a new ID. All operations require bearer authorization, allowed Host and, when
+        a new ID. All operations require bearer or persistent browser session authorization, allowed Host and, when
         present, matching Origin. Structural input errors are 422 before mutation.
         Client cancellation ends waiting, not already committed effects. A lost response
         leaves outcome unknown; reconcile tracked commands instead of replaying. Standard
@@ -7173,7 +7261,7 @@ paths:
       summary: Folders
       operationId: folders
       description: Read ordered folders and counts of individual source publications.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -7327,7 +7415,7 @@ paths:
       operationId: reading_composition
       description: Read domain membership, counts and order for publication reading.
         This is a subject projection with no layout or navigation commands. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -7482,7 +7570,7 @@ paths:
       operationId: cards
       description: Read ordered publication cards for optional folder/feed filters.
         Preserve hidden-material and sort semantics; no grouped events or digests.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -8561,7 +8649,7 @@ paths:
       operationId: collect
       description: Schedule collection of admissible sources; acknowledgement does
         not promise completed downloads. Repeated commands are not execution-deduplicated.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -8802,7 +8890,7 @@ paths:
       operationId: retry_material
       description: Schedule another content fetch for the identified publication.
         Preserve any saved incomplete copy while retrying and do not mark viewed.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -9069,7 +9157,7 @@ paths:
       operationId: image
       description: Return saved image bytes for the current publication. Names are
         opaque single segments; do not construct local file paths. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -9479,7 +9567,7 @@ paths:
       operationId: previous_version
       description: Read a saved author version by positive decimal version number.
         The previous version is not substituted for current content. All operations
-        require bearer authorization, allowed Host and, when present, matching Origin.
+        require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin.
         Structural input errors are 422 before mutation. Client cancellation ends
         waiting, not already committed effects. A lost response leaves outcome unknown;
         reconcile tracked commands instead of replaying. Standard HTTP headers remain
@@ -9926,7 +10014,7 @@ paths:
       operationId: material
       description: Read one publication and its typed pending/available content. Fetch
         retries do not hide saved incomplete text; caption state belongs only to YouTube
-        and provenance belongs to results. All operations require bearer authorization,
+        and provenance belongs to results. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -10647,7 +10735,7 @@ paths:
       description: Explicitly complete the whole identified publication reading composition,
         deleting its local available content and permitting safe read acknowledgement.
         A repeat may return 404; never automatically replay after unknown outcome.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -10873,7 +10961,7 @@ paths:
       operationId: command_receipt
       description: Reconcile an outcome without executing a command. An unknown ID
         returns unknown, creates no command and never proves the request was absent.
-        All operations require bearer authorization, allowed Host and, when present,
+        All operations require bearer or persistent browser session authorization, allowed Host and, when present,
         matching Origin. Structural input errors are 422 before mutation. Client cancellation
         ends waiting, not already committed effects. A lost response leaves outcome
         unknown; reconcile tracked commands instead of replaying. Standard HTTP headers
@@ -11045,7 +11133,7 @@ paths:
       description: Verify a real account through an existing opaque configuration
         reference before binding the role. The same PUT rechecks the same account.
         Failed verification never persists a new unverified binding; dependent feeds
-        prohibit real-account replacement. All operations require bearer authorization,
+        prohibit real-account replacement. All operations require bearer or persistent browser session authorization,
         allowed Host and, when present, matching Origin. Structural input errors are
         422 before mutation. Client cancellation ends waiting, not already committed
         effects. A lost response leaves outcome unknown; reconcile tracked commands
@@ -11469,7 +11557,7 @@ paths:
       summary: Rename folder
       operationId: rename_folder
       description: Rename a folder without changing its stable ID, feeds, settings or reading
-        state. Titles are trimmed and case-sensitive unique. All operations require bearer authorization,
+        state. Titles are trimmed and case-sensitive unique. All operations require bearer or persistent browser session authorization,
         allowed Host and matching Origin when present. Unknown query keys return 422. A lost response
         must be reconciled through the tracked command receipt, never automatically replayed.
       tags:
@@ -11705,7 +11793,7 @@ paths:
       operationId: remove_folder
       description: Remove a folder and its settings only when it contains no feeds, including
         deleting and unavailable feeds. Emptiness is checked atomically with deletion. No feeds
-        are moved or removed. All operations require bearer authorization, allowed Host and matching
+        are moved or removed. All operations require bearer or persistent browser session authorization, allowed Host and matching
         Origin when present. Unknown query keys return 422. A lost response must be reconciled
         through the tracked command receipt, never automatically replayed.
       tags:
@@ -12080,6 +12168,17 @@ paths:
               description: Command correlation identity when known.
 components:
   schemas:
+    BrowserSessionRevoked:
+      type: object
+      properties:
+        revoked:
+          type: boolean
+          const: true
+      required:
+      - revoked
+      additionalProperties: false
+      examples:
+      - revoked: true
     MaterialId:
       type: string
       minLength: 1
@@ -21127,6 +21226,11 @@ components:
         origin:
           scope: default
   securitySchemes:
+    BrowserSession:
+      type: apiKey
+      in: cookie
+      name: oko_browser
+      description: Persistent web profile only. Host-only remembered credential bootstrapped using process bearer; cookie mutations require matching Origin.
     ReaderSession:
       type: http
       scheme: bearer
@@ -21135,3 +21239,4 @@ components:
         not authenticate.
 security:
 - ReaderSession: []
+- BrowserSession: []

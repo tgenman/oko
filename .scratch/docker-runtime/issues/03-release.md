@@ -1,6 +1,7 @@
 # Immutable Docker and native helper releases
 
-Status: ready-for-agent
+GitHub: https://github.com/tgenman/oko/issues/51
+Status: claimed
 Blocked by: 01, 02
 
 Specification: [Docker runtime](../spec.md).

@@ -18,16 +18,16 @@ from oko.collection.contracts import Source
 from oko.collection.telegram.source import LocalTelegram
 
 
-def existing(root: Path, browser: bool, *, api_only: bool = False) -> None:
+def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: bool = False) -> None:
     import time
     for _ in range(100):
         try:
             data = json.loads((root / 'runtime.json').read_text())
-            request = urllib.request.Request(data['url'] + '/api/v3/status',
+            request = urllib.request.Request(data.get('control_url', data['url']) + '/api/v3/status',
                                             headers={'Authorization': 'Bearer ' + data['token']})
             with urllib.request.urlopen(request, timeout=.2) as response:
                 if response.status == 200:
-                    expected = 'explicit' if api_only else 'client_presence'
+                    expected = 'explicit' if api_only or persistent else 'client_presence'
                     status = json.load(response)
                     actual = status['lifetime']['kind']
                     if actual != expected:
@@ -53,10 +53,20 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--api-only', action='store_true', help='API без веб-интерфейса, работа до явной остановки')
+    parser.add_argument('--persistent', action='store_true', help='Постоянный веб-экземпляр с запоминаемым входом')
+    parser.add_argument('--host', choices=('127.0.0.1', '0.0.0.0'), default='127.0.0.1')
+    parser.add_argument('--public-url', help='Внешний локальный origin читателя, например http://oko')
+    parser.add_argument('--codex-url', help='Адрес установленного процесса Codex на Mac')
+    parser.add_argument('--codex-token-file', type=Path)
+    parser.add_argument('--initially-disabled', action='store_true', help='Остановить работу при первом создании хранилища')
     parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--lease', type=float, default=6, help='Срок клиентской сессии, секунд')
     parser.add_argument('--grace', type=float, default=15, help='Ожидание переподключения, секунд')
     args = parser.parse_args()
+    if bool(args.codex_url) != bool(args.codex_token_file):
+        parser.error('--codex-url and --codex-token-file must be supplied together')
+    if args.persistent and args.api_only:
+        parser.error('--persistent and --api-only are separate profiles')
     if not all(math.isfinite(value) and value > 0 for value in (args.lease, args.grace)):
         parser.error('Таймауты должны быть положительными')
     telegram_env = args.telegram_env or (args.telegram_project / '.env' if args.telegram_project else None)
@@ -67,15 +77,27 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            existing(root, not (args.no_browser or args.api_only), api_only=args.api_only)
+            existing(root, not (args.no_browser or args.api_only), api_only=args.api_only, persistent=args.persistent)
             return
+        if args.initially_disabled and not (root / 'state.sqlite').exists():
+            from oko.storage.store import Store
+            store = Store(root, fault=fault)
+            try:
+                store.set_work_enabled(False)
+            finally:
+                store.db.close()
+        codex_client = None
+        if args.codex_url:
+            from oko.processing.codex_bridge import RemoteCodex
+            codex_client = RemoteCodex(args.codex_url, args.codex_token_file.read_text().strip())
         token = secrets.token_urlsafe(32)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            sock.bind(('127.0.0.1', args.port))
+            sock.bind((args.host, args.port))
             sock.listen(128)
             port = sock.getsockname()[1]
-            url = f'http://127.0.0.1:{port}'
+            control_url = f'http://127.0.0.1:{port}'
+            url = args.public_url.rstrip('/') if args.public_url else control_url
             server: uvicorn.Server | None = None
 
             def shutdown() -> None:
@@ -84,7 +106,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
 
             app = create_app(root, source=source or (DemoSource() if args.demo else None),
                              token=token, fault=fault, shutdown=shutdown,
-                             lease=args.lease, grace=args.grace, api_only=args.api_only, rss_enabled=not args.demo,
+                             lease=args.lease, grace=args.grace, api_only=args.api_only, persistent=args.persistent,
+                             public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo,
                              telegram_client=LocalTelegram(telegram_env, root) if telegram_env and not args.demo else None)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2)
             server = uvicorn.Server(config)
@@ -97,8 +120,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                 if server.started:
                     temporary = root / 'runtime.tmp'
                     version = json.loads((Path(__file__).parent / 'reader/generated/openapi.json').read_text())['info']['version']
-                    temporary.write_text(json.dumps(dict(url=url, token=token, pid=os.getpid(),
-                                                         lifetime='explicit' if args.api_only else 'client_presence', api_version=version)))
+                    temporary.write_text(json.dumps(dict(url=url, control_url=control_url, token=token, pid=os.getpid(),
+                                                         lifetime='explicit' if args.api_only or args.persistent else 'client_presence', api_version=version)))
                     os.replace(temporary, root / 'runtime.json')
                     print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram" if telegram_env else "RSS"}).', flush=True)
                     if not (args.no_browser or args.api_only):

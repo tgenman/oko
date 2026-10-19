@@ -1,3 +1,4 @@
+import {randomId} from '../browser-platform';
 import { useState } from 'react';
 import { mountSurface } from '../renderer';
 import type { ReaderApi } from '../api/reader';
@@ -34,7 +35,7 @@ export function createDebugPanel({ token, readerApi }: {
     const seen = new WeakSet<object>();
     const deleted = new Set<string>();
     const retained = (entry: DiagnosticEntry | Pending) => !(entry.material_ids || []).some(id => deleted.has(id));
-    const streamId = crypto.randomUUID();
+    const streamId = randomId();
     let sequence = 0;
     let remote: DiagnosticEntry[] = [], pending: Pending[] = [], sending = false, loading = false, revision = 0;
     let serverCount = 0, storageError = '', transportError = '';
@@ -121,7 +122,7 @@ export function createDebugPanel({ token, readerApi }: {
             return;
         }
         const now = new Date().toISOString();
-        const entry: Pending = { material_ids: [], event_id: crypto.randomUUID(), stream_id: streamId, sequence: ++sequence, source: clean(source).slice(0, 500),
+        const entry: Pending = { material_ids: [], event_id: randomId(), stream_id: streamId, sequence: ++sequence, source: clean(source).slice(0, 500),
             message: clean(error?.message ?? error).slice(0, 4000), traceback: clean(error?.stack || ''),
             error_type: clean(error?.name || 'Error').slice(0, 200),
             location: clean((error?.stack || '').split('\n').find(line => /^\s*at /.test(line))?.trim() || source).slice(0, 1000),

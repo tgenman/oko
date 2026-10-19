@@ -1,0 +1,27 @@
+name: oko-runtime
+services:
+  reader:
+    image: ${OKO_IMAGE:?use scripts/oko-release}
+    platform: linux/arm64
+    user: "${OKO_UID:?}:${OKO_GID:?}"
+    restart: unless-stopped
+    init: true
+    read_only: true
+    ports:
+      - "127.0.0.1:80:8765"
+    volumes:
+      - type: bind
+        source: ${OKO_HOME:?}/data
+        target: /data
+    secrets:
+      - codex
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+secrets:
+  codex:
+    file: ${OKO_HOME:?}/secrets/codex

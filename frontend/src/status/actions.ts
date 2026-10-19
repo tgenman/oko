@@ -1,3 +1,4 @@
+import {randomId} from '../browser-platform';
 import type {CommandContext,Problem,ProblemSnapshot} from '../api/generated/types.gen';
 import {observeCommand,commandReceipt,abandonProblem} from '../api/generated/sdk.gen';
 import type {ReaderApi} from '../api/reader';
@@ -8,7 +9,7 @@ export function createReaderActions({readerApi,onChanged}:{readerApi:ReaderApi;o
  const pending=new Map<string,{request:Request;problem:VisibleProblem}>(),latest=new Map<string,number>();
  let sequence=0,sending=false;
  function beginCommand(context:CommandContext):Request {
-  const key=JSON.stringify(context),request:Request={id:crypto.randomUUID(),context,result:'unknown',key,sequence:++sequence};
+  const key=JSON.stringify(context),request:Request={id:randomId(),context,result:'unknown',key,sequence:++sequence};
   latest.set(key,request.sequence);return request;
  }
  function describe(request:Request,unknown:boolean):VisibleProblem {

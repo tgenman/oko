@@ -1,3 +1,4 @@
+import {randomId} from '../browser-platform';
 import {createClient} from './generated/client';
 import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop, collect, setPower} from './generated/sdk.gen';
 import type {CommandContext,RuntimeStatus} from './generated/types.gen';
@@ -30,7 +31,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
       if (url.origin !== origin) throw new ReaderError('Unexpected API address');
       if (!['GET','HEAD'].includes(request.method)) await compatible();
       const headers = new Headers(request.headers);
-      headers.set('Authorization','Bearer '+token);
+      if(token)headers.set('Authorization','Bearer '+token);
       const body = request.body ? await request.text() : undefined;
       // The adapter keeps the same public fetch boundary as the previous
       // reader, including controlled delayed replies used by browser checks.
@@ -61,7 +62,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
   return {
     client,
     async command<T>(context:CommandContext, send:(headers:Record<string,string>)=>Promise<T>):Promise<T> {
-      const record=tracker?.beginCommand?.(context) ?? {id:crypto.randomUUID()};
+      const record=tracker?.beginCommand?.(context) ?? {id:randomId()};
       try {const result=await send({'X-Oko-Action':record.id});tracker?.succeeded(record);return result;}
       catch(error) {tracker?.failed(record,error);throw error;}
     },

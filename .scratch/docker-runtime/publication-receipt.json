@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "verified": true,
+  "repository": "tgenman/oko",
+  "plan_digest": "cdb5172506ec1d925399cfbef69f75edadea3ebf13da5dbdf33137ce0ef5b1dd",
+  "snapshot_digest": "d8f773572f1e104c32346f5b5e15ef78a60bfd54cb3f1430a648b476c106a7b1",
+  "criteria_count": 0,
+  "checklist_count": 16,
+  "issues": {
+    "01": {
+      "number": 49,
+      "url": "https://github.com/tgenman/oko/issues/49",
+      "state": "open",
+      "body_digest": "5b03272142e7945b8b2dc2fe4e0c2a108b0546ac5728967f9535c4e53fa2c960"
+    },
+    "02": {
+      "number": 50,
+      "url": "https://github.com/tgenman/oko/issues/50",
+      "state": "open",
+      "body_digest": "8ffdc8e2e776516377c3131f1b3af21642116dd575447eb03c41f86853f34d86"
+    },
+    "03": {
+      "number": 51,
+      "url": "https://github.com/tgenman/oko/issues/51",
+      "state": "open",
+      "body_digest": "55f0890fb699e2b5617e7364c38c159201be5ff2a840b5250fcd3400bb67e4e3"
+    },
+    "04": {
+      "number": 52,
+      "url": "https://github.com/tgenman/oko/issues/52",
+      "state": "open",
+      "body_digest": "daa10a6d4f80db632af74b0382d558319478a8b5c18e1f91ce5a11069e37acf6"
+    }
+  }
+}

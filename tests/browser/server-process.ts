@@ -53,6 +53,7 @@ function createHost() {
     },
   };
 }
-export const start = (data: string,token: string) => serverProcess().request('start',{data,token});
+export const start = (data: string,token: string,persistent=false,hostname='127.0.0.1') => serverProcess().request('start',{data,token,persistent:Number(persistent),hostname});
 export const stop = (scenario: number) => serverProcess().request('stop',{scenario});
+export const restart = (scenario: number) => serverProcess().request('restart',{scenario});
 after(async()=>{if(host) await host.close();});

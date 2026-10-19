@@ -1,3 +1,4 @@
+import {copyText} from '../browser-platform';
 import {serviceText} from '../service-text';
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {material as readMaterial,previousVersion,regenerate,retryMaterial,retryTheses,retryFilter,restoreFilter,viewed} from '../api/generated/sdk.gen';
@@ -73,7 +74,7 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged}:{
   const operations={regenerate,retryMaterial,retryTheses,retryFilter,restoreFilter};
   const intents={regenerate:'regenerate',retryMaterial:'retry_material',retryTheses:'retry_theses',retryFilter:'retry_filter',restoreFilter:'restore_filter'} as const;
   async function action(kind:keyof typeof operations,changed=false) {if(kind!=='restoreFilter'&&!store.get().workAllowed)return;const session=store.get().session;if(!session||!store.get().material)return;try{await readerApi.command({operation:intents[kind],material_id:session.id},headers=>operations[kind]({client:readerApi.client,headers,path:{item:session.id}}));if(active(session))onChanged(changed);}catch(error){reportError(error,'Opened item');if(active(session))store.set({...store.get(),message:errorMessage(error)});}}
-  async function copy(url:string) {const session=store.get().session;if(!session)return;try{await navigator.clipboard.writeText(url);if(active(session))store.set({...store.get(),message:'Link copied'});}catch(error){reportError(error,'Opened item');if(active(session))store.set({...store.get(),message:'Clipboard access denied by browser'});}}
+  async function copy(url:string) {const session=store.get().session;if(!session)return;try{await copyText(url);if(active(session))store.set({...store.get(),message:'Link copied'});}catch(error){reportError(error,'Opened item');if(active(session))store.set({...store.get(),message:'Clipboard access denied by browser'});}}
   async function markViewed() {const session=store.get().session;if(!session||!store.get().material)return;try{await readerApi.command({operation:'viewed',material_id:session.id},headers=>viewed({client:readerApi.client,headers,path:{item:session.id}}));if(active(session))clear();onViewed(session.id);}catch(error){reportError(error,'Opened item');if(active(session))store.set({...store.get(),message:errorMessage(error)});}}
   function Surface() {
     const state=useStore(store),material=state.material,session=state.session;

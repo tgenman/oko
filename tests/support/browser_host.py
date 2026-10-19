@@ -1,5 +1,6 @@
 """Reuse imports, never application state: one thread/event loop per HTTP fixture."""
 import json
+import secrets
 from pathlib import Path
 import signal
 import socket
@@ -13,15 +14,17 @@ from tests.support.browser_server import build_app
 
 
 class Scenario:
-    def __init__(self, data, token):
+    def __init__(self, data, token, persistent=False, port=0, hostname='127.0.0.1'):
+        self.data, self.persistent, self.hostname = data, persistent, hostname
         self.socket = socket.socket()
-        self.socket.bind(('127.0.0.1', 0))
-        self.origin = f'http://127.0.0.1:{self.socket.getsockname()[1]}'
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind(('127.0.0.1', port))
+        self.origin = f'http://{hostname}:{self.socket.getsockname()[1]}'
         self.error = None
         try:
             # Browser aborts can leave an unfinished HTTP request. Bound its
             # drain time before the normal application lifespan shutdown.
-            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token), log_level='error',
+            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token, persistent=persistent, public_url=self.origin), log_level='error',
                                                        timeout_graceful_shutdown=1))
         except BaseException:
             self.socket.close()
@@ -65,12 +68,19 @@ def main():
             key = command['id']
             try:
                 if command['op'] == 'start':
-                    scenario = Scenario(command['data'], command['token'])
+                    scenario = Scenario(command['data'], command['token'], bool(command.get('persistent')), hostname=command.get('hostname', '127.0.0.1'))
                     scenarios[key] = scenario
                     result = {'origin': scenario.origin}
                 elif command['op'] == 'stop':
                     scenarios.pop(command['scenario']).close()
                     result = {}
+                elif command['op'] == 'restart':
+                    old = scenarios.pop(command['scenario'])
+                    port = int(old.origin.rsplit(':', 1)[1])
+                    old.close()
+                    scenario = Scenario(old.data, secrets.token_urlsafe(24), old.persistent, port, old.hostname)
+                    scenarios[command['scenario']] = scenario
+                    result = {'origin': scenario.origin}
                 else:
                     raise ValueError('Unknown fixture command')
                 print(json.dumps({'id': key, **result}), flush=True)

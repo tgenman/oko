@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import secrets
 import time
+from urllib.parse import urlsplit
 
 import httpx
 from typing import Any
@@ -20,7 +21,9 @@ from oko.processing.codex import CodexClient
 from oko.collection.telegram.source import TelegramClient
 from oko.reader.runtime import Runtime, ActionError
 from oko.reader.lifetime import Lifetime
+from oko.reader.browser_auth import BrowserSessions, COOKIE, MAX_AGE
 from oko.reader import api_v3
+from oko.reader.generated.models import BrowserSessionRevoked
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.diagnostics import Journal, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught
@@ -30,14 +33,22 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                clock: Callable[[], float] = time.monotonic,
                fault: Callable[[str], None] = lambda _: None,
                shutdown: Callable[[], None] = lambda: None,
-               lease: float = 6, grace: float = 15, api_only: bool = False, source_feed: str = 'demo',
+               lease: float = 6, grace: float = 15, api_only: bool = False, persistent: bool = False,
+               public_url: str | None = None, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
                telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
                youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> FastAPI:
     if not api_only:
         from oko.reader.static import validate_frontend
         validate_frontend()
-    lifetime = Lifetime('explicit' if api_only else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
+    public_host: str | None = None
+    if public_url:
+        parsed = urlsplit(public_url)
+        if parsed.scheme != 'http' or parsed.hostname not in ('oko', 'localhost', '127.0.0.1') or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
+            raise ValueError('Public URL must be an allowed local HTTP origin')
+        public_host = parsed.netloc
+    lifetime = Lifetime('explicit' if api_only or persistent else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
+    browser_sessions = BrowserSessions(root, wall_clock) if persistent else None
     token = token or secrets.token_urlsafe(32)
     runtime = Runtime(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
     journal = Journal(root, token)
@@ -128,15 +139,21 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         api = request.url.path == '/api' or request.url.path.startswith('/api/')
         v3 = request.url.path.startswith('/api/v3/')
         host = request.headers.get('host', '')
-        if not re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host):
+        if host != public_host and not re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host):
             return api_v3.error_response(403, api_v3.security_error('host_not_allowed')) if api else JSONResponse({'detail': 'Недопустимый адрес'}, status_code=403)
         origin = request.headers.get('origin')
         if origin and origin != f'http://{host}':
             return api_v3.error_response(403, api_v3.security_error('origin_not_allowed')) if api else JSONResponse({'detail': 'Посторонняя страница'}, status_code=403)
         if api:
             supplied = request.headers.get('authorization', '')
-            if not secrets.compare_digest(supplied, f'Bearer {token}'):
+            bearer = secrets.compare_digest(supplied, f'Bearer {token}')
+            cookie = request.cookies.get(COOKIE, '')
+            remembered = browser_sessions is not None and browser_sessions.valid(cookie)
+            if not bearer and (supplied or not remembered):
                 return api_v3.error_response(403, api_v3.security_error('session_required')) if api else JSONResponse({'detail': 'Требуется локальная сессия'}, status_code=403)
+            if not bearer and (request.headers.get('sec-fetch-site') == 'cross-site' or
+                    request.method not in ('GET', 'HEAD') and origin != f'http://{host}'):
+                return api_v3.error_response(403, api_v3.security_error('origin_not_allowed'))
         if api and not v3:
             from oko.reader.generated.models import ApiVersionRemovedError, ApiVersionRemovedErrorDetails
             value = ApiVersionRemovedError(code='api_version_removed', message='Прежний API отключён; используйте /api/v3', details=ApiVersionRemovedErrorDetails(api_version='2.0.0'), diagnostic_id=None, command_id=None)
@@ -180,9 +197,22 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
+        if browser_sessions and request.url.path == '/api/v3/status' and response.status_code == 200 and bearer and not remembered:
+            response.set_cookie(COOKIE, browser_sessions.create(), max_age=MAX_AGE,
+                                httponly=True, samesite='strict', path='/')
+        if browser_sessions and request.url.path == '/api/v3/status' and response.status_code == 200:
+            response.headers['X-Oko-Browser-Session'] = 'remembered'
         return response
 
     api_v3.register(app, runtime, lifetime, wall_clock, journal)
+
+    @app.delete('/api/v3/browser-session', response_model=BrowserSessionRevoked)
+    async def revoke_browser_session(request: Request) -> BrowserSessionRevoked:
+        if request.query_params or await request.body():
+            raise api_v3.ApiError(422, api_v3.invalid('query' if request.query_params else 'body', ''))
+        if browser_sessions:
+            browser_sessions.revoke(request.cookies.get(COOKIE, ''))
+        return BrowserSessionRevoked(revoked=True)
 
     if not api_only:
         from oko.reader.docs import install_docs

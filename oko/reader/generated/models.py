@@ -46,6 +46,11 @@ class SourcePosition(RootModel[StrictInt]):
     root: StrictInt = Field(..., ge=0, le=9007199254740991)
 
 
+class BrowserSessionRevoked(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    revoked: Annotated[Literal[True], BeforeValidator(boolean_constant)]
+
+
 class ClientPresenceLifetimePolicy(WireModel):
     model_config = ConfigDict(extra="forbid")
     grace_seconds: StrictFloat = Field(..., description="Default: 15 seconds.", gt=0.0)

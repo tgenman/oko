@@ -1,6 +1,7 @@
 # Persistent reader and remembered login at http://oko
 
-Status: ready-for-agent
+GitHub: https://github.com/tgenman/oko/issues/50
+Status: claimed
 Blocked by: Нет
 
 Specification: [Docker runtime](../spec.md).

@@ -181,6 +181,10 @@ export type AvailableReadingCard = {
     version: number;
 };
 
+export type BrowserSessionRevoked = {
+    revoked: true;
+};
+
 /**
  * BrowserError
  */
@@ -2750,6 +2754,35 @@ export type YoutubeSubscriptionFeed = {
     title: string;
     transport: 'youtube' | null;
 };
+
+export type RevokeBrowserSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v3/browser-session';
+};
+
+export type RevokeBrowserSessionErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+};
+
+export type RevokeBrowserSessionError = RevokeBrowserSessionErrors[keyof RevokeBrowserSessionErrors];
+
+export type RevokeBrowserSessionResponses = {
+    /**
+     * Browser credential revoked; process bearer unchanged
+     */
+    200: BrowserSessionRevoked;
+};
+
+export type RevokeBrowserSessionResponse = RevokeBrowserSessionResponses[keyof RevokeBrowserSessionResponses];
 
 export type CardsData = {
     body?: never;

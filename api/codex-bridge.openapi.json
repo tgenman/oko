@@ -1,0 +1,487 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Oko private Codex bridge",
+    "version": "1",
+    "description": "Private loopback service. Reject every Origin header. X-Oko-Protocol: 1 and a bearer secret are mandatory on all operations. Request UTF-8 JSON <=1048576 bytes; result JSON <=1048576 bytes. One slot, no persistent queue. IDs and session IDs are 32 lowercase hex characters. Renew every 5s; ownership expires permanently after 20s or absolute deadline (maximum 180s). Retain content-free tombstones 600s, maximum 4096. Never recreate an unknown attempt after uncertain create; query the same boot/ID only. DELETE stops owned subprocesses and releases content; running means cleanup is still pending. JSON Schema is Draft 2020-12, self-contained fragment references only, nesting <=48 and structural nodes <=65536."
+  },
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health V1 Health Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid bearer token"
+          },
+          "403": {
+            "description": "Browser Origin or foreign session"
+          },
+          "409": {
+            "description": "Protocol, boot or identity conflict; busy or expired"
+          },
+          "413": {
+            "description": "Request exceeds byte limit"
+          },
+          "422": {
+            "description": "Invalid strict request"
+          },
+          "429": {
+            "description": "Tombstone capacity reached"
+          },
+          "503": {
+            "description": "Supervisor recovery required"
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Oko-Protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "put": {
+        "summary": "Create",
+        "operationId": "create_v1_jobs__job_id__put",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Oko-Protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "X-Oko-Boot",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-Oko-Session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create V1 Jobs  Job Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid strict request"
+          },
+          "401": {
+            "description": "Invalid bearer token"
+          },
+          "403": {
+            "description": "Browser Origin or foreign session"
+          },
+          "409": {
+            "description": "Protocol, boot or identity conflict; busy or expired"
+          },
+          "413": {
+            "description": "Request exceeds byte limit"
+          },
+          "429": {
+            "description": "Tombstone capacity reached"
+          },
+          "503": {
+            "description": "Supervisor recovery required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "State",
+        "operationId": "state_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Oko-Protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "X-Oko-Boot",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-Oko-Session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response State V1 Jobs  Job Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid strict request"
+          },
+          "401": {
+            "description": "Invalid bearer token"
+          },
+          "403": {
+            "description": "Browser Origin or foreign session"
+          },
+          "409": {
+            "description": "Protocol, boot or identity conflict; busy or expired"
+          },
+          "413": {
+            "description": "Request exceeds byte limit"
+          },
+          "429": {
+            "description": "Tombstone capacity reached"
+          },
+          "503": {
+            "description": "Supervisor recovery required"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Cancel",
+        "operationId": "cancel_v1_jobs__job_id__delete",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Oko-Protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "X-Oko-Boot",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-Oko-Session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Cancel V1 Jobs  Job Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid strict request"
+          },
+          "401": {
+            "description": "Invalid bearer token"
+          },
+          "403": {
+            "description": "Browser Origin or foreign session"
+          },
+          "409": {
+            "description": "Protocol, boot or identity conflict; busy or expired"
+          },
+          "413": {
+            "description": "Request exceeds byte limit"
+          },
+          "429": {
+            "description": "Tombstone capacity reached"
+          },
+          "503": {
+            "description": "Supervisor recovery required"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/lease": {
+      "post": {
+        "summary": "Renew",
+        "operationId": "renew_v1_jobs__job_id__lease_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Oko-Protocol",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          },
+          {
+            "name": "X-Oko-Boot",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-Oko-Session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Renew V1 Jobs  Job Id  Lease Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid strict request"
+          },
+          "401": {
+            "description": "Invalid bearer token"
+          },
+          "403": {
+            "description": "Browser Origin or foreign session"
+          },
+          "409": {
+            "description": "Protocol, boot or identity conflict; busy or expired"
+          },
+          "413": {
+            "description": "Request exceeds byte limit"
+          },
+          "429": {
+            "description": "Tombstone capacity reached"
+          },
+          "503": {
+            "description": "Supervisor recovery required"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CodexChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$",
+            "title": "Model",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "maxLength": 30,
+            "minLength": 1,
+            "pattern": "^[a-z_]+$",
+            "title": "Reasoning Effort",
+            "type": "string"
+          },
+          "fast": {
+            "default": false,
+            "title": "Fast",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "model",
+          "reasoning_effort"
+        ],
+        "title": "CodexChoice",
+        "type": "object"
+      },
+      "JobRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Boot Id",
+            "type": "string"
+          },
+          "session_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "check",
+              "catalog",
+              "complete"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "maxLength": 1048576,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "choice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodexChoice"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "deadline": {
+            "title": "Deadline",
+            "type": "number"
+          }
+        },
+        "required": [
+          "boot_id",
+          "session_id",
+          "operation",
+          "deadline"
+        ],
+        "title": "JobRequest",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bridgeToken": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "bridgeToken": []
+    }
+  ]
+}

@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""Install immutable, paired Oko releases. Never operates on development data."""
+import argparse
+import fcntl
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import platform
+import plistlib
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import tarfile
+import time
+import urllib.request
+from datetime import datetime, timezone
+
+DEFAULT_HOME = Path.home() / 'Library/Application Support/Oko'
+LABEL = 'local.oko.codex'
+
+
+def run(args, cwd=None, capture=False, env=None):
+    return subprocess.run([str(v) for v in args], cwd=cwd, check=True,
+                          stdout=subprocess.PIPE if capture else None,
+                          text=True, env=env).stdout
+
+
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(value, indent=2) + '\n')
+    tmp.chmod(0o600)
+    tmp.replace(path)
+
+
+def read(path):
+    return json.loads(path.read_text())
+
+
+def docker(*args, capture=False):
+    return run(['docker', '--context', 'desktop-linux', *args], capture=capture)
+
+
+def release(home, name=None):
+    name = name or read(home / 'current.json')['release']
+    if len(name) != 40 or any(c not in '0123456789abcdef' for c in name):
+        raise ValueError('Invalid release id')
+    folder = home / 'releases' / name
+    manifest = read(folder / 'manifest.json')
+    if manifest['release'] != name or manifest['protocol'] != 1:
+        raise ValueError('Incompatible release manifest')
+    return folder, manifest
+
+
+def prepare(args):
+    # An explicit ref plus a clean checkout prevents accidentally shipping WIP.
+    if run(['git', '-C', args.repo, 'status', '--porcelain', '--untracked-files=no'], capture=True).strip():
+        raise ValueError('prepare requires a clean checkout; preserve development work and use a clean snapshot')
+    commit = run(['git', '-C', args.repo, 'rev-parse', '--verify', args.ref + '^{commit}'], capture=True).strip()
+    destination = args.home / 'releases' / commit
+    if (destination / 'manifest.json').exists():
+        release(args.home, commit)
+        print(commit)
+        return
+    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
+        raise ValueError('Release helper requires this Apple Silicon Mac (Darwin arm64)')
+    if destination.exists():
+        raise ValueError('Incomplete release directory exists; inspect and remove it before retrying')
+    source = destination / 'source'
+    source.mkdir(parents=True, mode=0o700)
+    archive = subprocess.run(['git', '-C', str(args.repo), 'archive', '--format=tar', commit],
+                             check=True, stdout=subprocess.PIPE).stdout
+    # Git archive is local trusted source, but prevent archive symlinks escaping snapshot.
+    with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
+        for entry in bundle.getmembers():
+            if entry.issym() or entry.islnk() or Path(entry.name).is_absolute() or '..' in Path(entry.name).parts:
+                raise ValueError('Release snapshot may not contain links or escaping paths')
+        bundle.extractall(source)
+    run(['uv', 'sync', '--frozen', '--no-dev', '--python', '3.13'], cwd=source)
+    image = 'oko-release:' + commit
+    docker('build', '--platform', 'linux/arm64', '--tag', image, source)
+    image_id = docker('image', 'inspect', '--format', '{{.Id}}', image, capture=True).strip()
+    if not image_id.startswith('sha256:') or len(image_id) != 71:
+        raise ValueError('Docker did not return an immutable image digest')
+    manifest = dict(release=commit, image=image_id, protocol=1, helper=commit,
+                    platform='linux/arm64', python='3.13', uv='0.11.28',
+                    created_at=datetime.now(timezone.utc).isoformat())
+    save(destination / 'manifest.json', manifest)
+    print(commit)
+
+
+def compose(home, *args, name=None, capture=False):
+    folder, manifest = release(home, name)
+    env = os.environ.copy()
+    env.update(OKO_IMAGE=manifest['image'], OKO_HOME=str(home), OKO_UID=str(os.getuid()), OKO_GID=str(os.getgid()))
+    return run(['docker', '--context', 'desktop-linux', 'compose', '--project-name', 'oko-' + hashlib.sha256(str(home).encode()).hexdigest()[:12],
+                '--file', folder / 'source/compose.yaml', *args], capture=capture, env=env)
+
+
+def label(home):
+    return LABEL + '.' + hashlib.sha256(str(home).encode()).hexdigest()[:12]
+
+
+def launch_plist(home):
+    return home / 'launchd' / (label(home) + '.plist')
+
+
+def configure(home, name):
+    folder, manifest = release(home, name)
+    for sub in ('data', 'secrets', 'scratch', 'logs', 'launchd'):
+        (home / sub).mkdir(parents=True, exist_ok=True, mode=0o700)
+    token = home / 'secrets/codex'
+    if not token.exists():
+        token.write_text(secrets.token_urlsafe(48) + '\n')
+    token.chmod(0o600)
+    config = home / 'codex.json'
+    save(config, dict(host='127.0.0.1', port=8767, token_file=str(token),
+                      scratch_root=str(home / 'scratch'), release=name))
+    plist = dict(Label=label(home), ProgramArguments=[str(folder / 'source/.venv/bin/python'),
+                 '-m', 'oko.processing.codex_bridge', '--config', str(config)],
+                 WorkingDirectory=str(folder / 'source'), RunAtLoad=True, KeepAlive=True,
+                 ProcessType='Background', StandardOutPath=str(home / 'logs/codex.log'),
+                 StandardErrorPath=str(home / 'logs/codex-error.log'),
+                 EnvironmentVariables={'PATH': os.environ.get('PATH', '/usr/bin:/bin')})
+    launch_plist(home).write_bytes(plistlib.dumps(plist))
+    launch_plist(home).chmod(0o600)
+    save(home / 'current.json', dict(release=name))
+
+
+def domain():
+    return 'gui/' + str(os.getuid())
+
+
+def helper_loaded(home):
+    return subprocess.run(['launchctl', 'print', domain() + '/' + label(home)],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def stop(home):
+    compose(home, 'stop', '--timeout', '30')
+    # bootout, rather than kill, prevents KeepAlive from undoing explicit stop.
+    autostart = Path(read(home / 'installation.json')['launchagents']) / (label(home) + '.plist')
+    if autostart.is_symlink() and autostart.resolve() == launch_plist(home):
+        autostart.unlink()
+    if helper_loaded(home):
+        run(['launchctl', 'bootout', domain() + '/' + label(home)])
+
+
+def available(port):
+    with socket.socket() as listener:
+        try:
+            listener.bind(('127.0.0.1', port))
+        except OSError as exc:
+            raise ValueError('Port %s is occupied; no foreign process was stopped' % port) from exc
+
+
+def readiness(home, timeout=30):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            runtime = read(home / 'data/runtime.json')
+            request = urllib.request.Request('http://127.0.0.1/api/v3/status',
+                        headers={'Host': 'oko', 'Authorization': 'Bearer ' + runtime['token']})
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=2) as response:
+                result = json.load(response)
+                if result.get('runtime_state') in ('running', 'disabled'):
+                    return
+        except (OSError, ValueError, KeyError):
+            time.sleep(.25)
+    raise ValueError('Reader readiness failed; release remains selected for inspection, collection must stay disabled')
+
+
+def start(home):
+    running = bool(compose(home, 'ps', '--status', 'running', '--quiet', capture=True).strip())
+    if not running:
+        available(80)
+    autostart = Path(read(home / 'installation.json')['launchagents']) / (label(home) + '.plist')
+    autostart.parent.mkdir(parents=True, exist_ok=True)
+    if autostart.exists() or autostart.is_symlink():
+        if not autostart.is_symlink() or autostart.resolve() != launch_plist(home):
+            raise ValueError('Foreign LaunchAgent exists; preserved without changes')
+    else:
+        autostart.symlink_to(launch_plist(home))
+    if not helper_loaded(home):
+        available(8767)
+        run(['launchctl', 'bootstrap', domain(), launch_plist(home)])
+    try:
+        if not running:
+            compose(home, 'up', '--detach', '--wait', '--wait-timeout', '45')
+        readiness(home)
+        probe = ("import json,urllib.request; from pathlib import Path; "
+                 "r=urllib.request.Request('http://host.docker.internal:8767/v1/health',"
+                 "headers={'Authorization':'Bearer '+Path('/run/secrets/codex').read_text().strip(),'X-Oko-Protocol':'1'}); "
+                 "d=json.load(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(r,timeout=5)); "
+                 "assert d['protocol']==1 and d['release']==" + repr(read(home / 'current.json')['release']))
+        compose(home, 'exec', '--no-TTY', 'reader', 'python', '-c', probe)
+    except Exception:
+        if not running:
+            stop(home)
+        raise
+
+
+def tree_digest(root):
+    value = hashlib.sha256()
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():
+            raise ValueError('Data symlinks require an explicit migration plan')
+        if path.is_file() and path.name not in ('instance.lock', 'runtime.json', 'runtime.tmp'):
+            name = str(path.relative_to(root)).encode()
+            value.update(len(name).to_bytes(8, 'big'))
+            value.update(name)
+            value.update(path.stat().st_size.to_bytes(8, 'big'))
+            with path.open('rb') as source:
+                for block in iter(lambda: source.read(1024 * 1024), b''):
+                    value.update(block)
+    return value.hexdigest()
+
+
+def backup(home):
+    # Caller must stop container before copying. Refuse if any owned container runs.
+    active = compose(home, 'ps', '--status', 'running', '--quiet', capture=True)
+    if active.strip():
+        raise ValueError('Stop the working instance before a consistent backup')
+    root = home / 'data'
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (root / 'instance.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError('Data is still owned by a running instance') from exc
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        target = home / 'backups' / stamp
+        target.mkdir(parents=True, mode=0o700)
+        digest = tree_digest(root)
+        shutil.copytree(root, target / 'data')
+        save(target / 'backup.json', dict(release=read(home / 'current.json')['release'], digest=digest))
+        return target
+
+
+def migrate(args):
+    release(args.home)
+    source = args.source.resolve()
+    destination = args.home / 'data'
+    if destination.exists() and any(destination.iterdir()):
+        raise ValueError('Migration requires empty destination data; original data was preserved')
+    if not (source / 'state.sqlite').is_file():
+        raise ValueError('Source does not contain an Oko store')
+    with (source / 'instance.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError('Stop the old instance before migration') from exc
+        tree_digest(source)
+        if destination.exists():
+            destination.rmdir()
+        shutil.copytree(source, destination)
+    for name in ('runtime.json', 'runtime.tmp'):
+        (destination / name).unlink(missing_ok=True)
+    folder, _ = release(args.home)
+    run([folder / 'source/.venv/bin/python', '-c',
+         'from pathlib import Path; from oko.storage.store import Store; import sys; '
+         's=Store(Path(sys.argv[1]), lambda _: None); s.set_work_enabled(False); s.db.close()', destination],
+         cwd=folder / 'source')
+    print('Copied data with collection disabled. Original preserved. Validate Telegram paths before enabling.')
+
+
+def restore(args):
+    if args.backup != args.acknowledge_data_loss or Path(args.backup).name != args.backup:
+        raise ValueError('Repeat the backup id in --acknowledge-data-loss to approve discarding later changes')
+    checkpoint = args.home / 'backups' / args.backup
+    info = read(checkpoint / 'backup.json')
+    release(args.home, info['release'])
+    if tree_digest(checkpoint / 'data') != info['digest']:
+        raise ValueError('Backup integrity failed')
+    stop(args.home)
+    preserved = backup(args.home)
+    stage = args.home / 'restore-data'
+    if stage.exists():
+        raise ValueError('Previous restore staging exists; inspect before retry')
+    shutil.copytree(checkpoint / 'data', stage)
+    # Preserve the unsuccessful current state before switching the complete tree.
+    retired = args.home / ('retired-data-' + preserved.name)
+    (args.home / 'data').rename(retired)
+    stage.rename(args.home / 'data')
+    configure(args.home, info['release'])
+    start(args.home)
+    print('Restored backup; later data preserved at ' + str(retired))
+
+
+def main():
+    os.umask(0o077)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--repo', type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument('--home', type=Path, default=DEFAULT_HOME)
+    parser.add_argument('--launchagents', type=Path, default=Path.home() / 'Library/LaunchAgents')
+    commands = parser.add_subparsers(dest='command', required=True)
+    preparing = commands.add_parser('prepare')
+    preparing.add_argument('--ref', required=True)
+    for name in ('install', 'update', 'rollback'):
+        command = commands.add_parser(name)
+        command.add_argument('--release', required=True)
+    for name in ('start', 'stop', 'open', 'status', 'backup', 'hosts-plan'):
+        commands.add_parser(name)
+    restoring = commands.add_parser('restore')
+    restoring.add_argument('--backup', required=True)
+    restoring.add_argument('--acknowledge-data-loss', required=True)
+    migration = commands.add_parser('migrate')
+    migration.add_argument('--source', type=Path, required=True)
+    args = parser.parse_args()
+    args.home = args.home.expanduser().resolve()
+    args.repo = args.repo.resolve()
+    if args.home == args.repo or args.repo in args.home.parents:
+        raise ValueError('Release home and data must be outside the development checkout')
+    if args.command == 'prepare':
+        if run(['git', '-C', args.repo, 'status', '--porcelain', '--untracked-files=no'], capture=True).strip():
+            raise ValueError('prepare requires a clean tracked checkout; unrelated untracked files are not included')
+        args.home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    operation_lock = None
+    if args.home.exists() and args.command not in ('hosts-plan', 'status'):
+        operation_lock = (args.home / '.operation.lock').open('a')
+        try:
+            fcntl.flock(operation_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError('Another release operation is active') from exc
+    if args.command == 'prepare':
+        prepare(args)
+    elif args.command == 'hosts-plan':
+        print('Review /etc/hosts and add exactly: 127.0.0.1 oko\nAdministrative change is separate; this command changes nothing.')
+    elif args.command == 'install':
+        if (args.home / 'current.json').exists():
+            raise ValueError('Already installed; use update')
+        configure(args.home, args.release)
+        save(args.home / 'installation.json', dict(launchagents=str(args.launchagents.expanduser().resolve())))
+        print('Prepared installation. Review hosts-plan, migrate if needed, then start explicitly.')
+    elif args.command in ('update', 'rollback'):
+        release(args.home, args.release)
+        old = read(args.home / 'current.json')['release']
+        stop(args.home)
+        checkpoint = backup(args.home)
+        if args.command == 'rollback':
+            history = read(args.home / 'previous.json')
+            if history['release'] != args.release or tree_digest(args.home / 'data') != history['digest']:
+                raise ValueError('Rollback blocked: data changed or incompatible; preserve current data and plan restore explicitly')
+        save(args.home / 'previous.json', dict(release=old, digest=tree_digest(args.home / 'data'), backup=str(checkpoint)))
+        configure(args.home, args.release)
+        start(args.home)
+    elif args.command == 'start':
+        start(args.home)
+    elif args.command == 'stop':
+        stop(args.home)
+    elif args.command == 'backup':
+        print(backup(args.home))
+    elif args.command == 'migrate':
+        migrate(args)
+    elif args.command == 'restore':
+        restore(args)
+    elif args.command == 'open':
+        runtime = read(args.home / 'data/runtime.json')
+        # Token travels only in launcher argument, never printed to logs.
+        run(['open', 'http://oko/#token=' + runtime['token']])
+    elif args.command == 'status':
+        _, manifest = release(args.home)
+        output = compose(args.home, 'ps', '--format', 'json', capture=True).strip()
+        try:
+            containers = json.loads(output or '[]')
+        except json.JSONDecodeError:
+            containers = [json.loads(line) for line in output.splitlines()]
+        if isinstance(containers, dict):
+            containers = [containers]
+        print(json.dumps(dict(release=manifest, containers=containers, helper_loaded=helper_loaded(args.home)), indent=2))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, OSError, subprocess.CalledProcessError, KeyError) as error:
+        print('oko-release: ' + str(error), file=sys.stderr)
+        sys.exit(1)

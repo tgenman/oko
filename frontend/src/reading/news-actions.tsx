@@ -1,3 +1,4 @@
+import {copyText} from '../browser-platform';
 import {useEffect,useLayoutEffect,useRef} from 'react';
 import {createPortal} from 'react-dom';
 import {viewed} from '../api/generated/sdk.gen';
@@ -26,7 +27,7 @@ export function createNewsActions({readerApi,isStopped,onViewed,onRefresh,onPrev
   }catch(error){reportError(error,'Mark news as read');if(current(state))store.set({...store.get(),busy:false,message:`Completed ${done} of ${cards.length}. ${errorMessage(error)}. This action will not be retried. Its result will be checked in Status.`});}
   finally{if(run===operation)run=null;store.set({...store.get()});onRefresh();}
  }
- async function copy(){const state=store.get();if(!state.target)return;try{await navigator.clipboard.writeText(state.target.card.source_url);if(current(state)){close();store.set({...store.get(),notice:'Link copied'});}}catch(error){reportError(error,'Copy link');if(current(state))store.set({...store.get(),message:'Could not copy link: '+errorMessage(error)});}}
+ async function copy(){const state=store.get();if(!state.target)return;try{await copyText(state.target.card.source_url);if(current(state)){close();store.set({...store.get(),notice:'Link copied'});}}catch(error){reportError(error,'Copy link');if(current(state))store.set({...store.get(),message:'Could not copy link: '+errorMessage(error)});}}
  function Surface(){const state=useStore(store),{target,confirmation}=state;const ref=useRef<HTMLDivElement>(null),dialog=useRef<HTMLDialogElement>(null);
   useLayoutEffect(()=>{if(target&&!confirmation)ref.current?.querySelector<HTMLElement>('[role=menuitem]:not(:disabled)')?.focus({preventScroll:true});},[state.generation,!!confirmation]);
   useLayoutEffect(()=>{if(confirmation&&dialog.current&&!dialog.current.open)dialog.current.showModal();},[!!confirmation]);

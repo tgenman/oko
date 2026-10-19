@@ -6,7 +6,7 @@ export * as operations from './generated/sdk.gen';
 export function createTransport({fetch:adapter,token,origin}:{fetch:typeof fetch;token:string|null;origin:string}) {
   function headers(path:string,json=false):Record<string,string> {
     const result:Record<string,string>=json?{'Content-Type':'application/json'}:{};
-    if(new URL(path,origin).origin===origin)result.Authorization='Bearer '+token;
+    if(token&&new URL(path,origin).origin===origin)result.Authorization='Bearer '+token;
     return result;
   }
   async function request(path:string,options:RequestInit):Promise<Response> {

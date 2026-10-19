@@ -6,7 +6,7 @@ import {chromium} from 'playwright';
 // callers own a fresh context and close it, including all of its pages.
 let browser: Promise<Browser> | undefined;
 export async function newContext() {
-  browser ??= chromium.launch({headless: true,
+  browser ??= chromium.launch({headless: true,args:['--host-resolver-rules=MAP oko 127.0.0.1','--no-proxy-server'],
     executablePath: process.env.OKO_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
   const context = await (await browser).newContext();
   context.setDefaultTimeout(5000);

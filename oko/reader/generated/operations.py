@@ -3,6 +3,7 @@ from typing import Any
 from . import models
 
 RESPONSES: dict[tuple[str, str], Any] = {
+    ('DELETE', '/api/v3/browser-session'): models.BrowserSessionRevoked,
     ('GET', '/api/v3/cards'): list[models.ReadingCard],
     ('POST', '/api/v3/client-sessions'): models.ClientSession,
     ('DELETE', '/api/v3/client-sessions/{identity}'): models.ClientSessionClosed,
