@@ -57,7 +57,7 @@ class Report:
         if any(value['test'] == test for value in details):
             return
         source = Path(json.loads(os.environ.get('OKO_CHECK_SNAPSHOT', '{}')).get('source', str(ROOT)))
-        if self.current.startswith(('python-tests', 'tool-tests')):
+        if self.current == 'http' or self.current.startswith(('python-tests', 'tool-tests')):
             retry = [str(source/'scripts/check'), 'python', '--files', test]
         else:
             retry = [str(source/'scripts/check'), 'browser']
@@ -454,7 +454,12 @@ def parallel_tests(names, commands, environment, report, results, match=None):
             report.current = owner
             if result_file.exists():
                 child = json.loads(Path(json.loads(result_file.read_text())['report']).read_text())
-                report.output(Path(child['log']).read_text())
+                # These lines were already parsed by the worker. Replaying them
+                # must not announce failures again or replace the worker's log.
+                replay = Path(child['log']).read_text()
+                report.write(replay)
+                if not report.compact:
+                    print(replay, end='', flush=True)
                 data = child['suites'][name]
                 job_seconds[name] = child['duration_seconds']
                 if name == owner:
