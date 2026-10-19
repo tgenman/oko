@@ -1,8 +1,11 @@
 # Включение и выключение Око с доступным чтением
 
 GitHub: https://github.com/tgenman/oko/issues/47
-Status: implementing
+Status: done
 Blocked by: Нет
 
 Один связанный объём: runtime и контракт → UI → проверка и независимое ревью.
 Критерии: ../spec.md, разделы «Согласовано» и «Граница запрета действий».
+
+Результат: docs/verification/work-power.md (от корня checkout).
+Реализация: 7bc7304, 1bb4e69, fe818b4. Полный прогон и целевые проверки после ревью прошли.
