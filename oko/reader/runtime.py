@@ -771,12 +771,14 @@ class Runtime:
         profile = current.subscriptions.telegram.profile(role)
         if not profile:
             raise TelegramConflict('profile_not_configured', dict(role=role), 'Профиль Telegram не настроен')
+        verification_epoch = self._epoch
         try:
             user_id, owner, epoch = await self._call_telegram(lambda client: client.identity(profile['account']))
-        except ActionError:
+        except ActionError as error:
             async with self._actions:
-                if self._store is current and not self.stopped:
-                    current.subscriptions.telegram.checked(role, profile['generation'], None, self._wall_clock())
+                if error.diagnostic_skip or self._store is not current or not self._live() or verification_epoch != self._epoch:
+                    raise
+                current.subscriptions.telegram.checked(role, profile['generation'], None, self._wall_clock())
             raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Сессия Telegram недоступна', 503) from None
         async with self._actions:
             self._check_request(owner, epoch)
@@ -807,6 +809,8 @@ class Runtime:
                 raise ValueError('Веб-доступ требует публичный username')
             from oko.collection.telegram.web import preview
             async with self._actions:
+                self.require_work()
+                self._check_request(current, epoch)
                 task = asyncio.create_task(preview(str(address), self._rss_transport))
                 self._requests.add(task)
             try:
