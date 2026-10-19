@@ -3,6 +3,7 @@ import {createMaterialList} from './list';
 import {createReadingTree, type Navigation} from './tree';
 import {createOpenedMaterial} from './opened';
 import {createFeedActions} from './feed-actions';
+import {createFolderMenu} from './folder-menu';
 import {createFolderActions} from './folder-actions';
 import {createReaderSession, type ReaderMessage} from '../reader-session';
 import {reportError, type createDebugPanel} from '../status/debug';
@@ -55,7 +56,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   });
   const list = createMaterialList({
     readerApi, fetchMedia,
-    onContext: (card, context, x, y, trigger) => newsActions.open(card, context, x, y, trigger),
+    onContext: (card, context, x, y, trigger) => {folderMenu.close(false);feedActions.close(false);newsActions.open(card, context, x, y, trigger);},
     onOpen: card => opened.open(card),
     onRetry: refresh,
   });
@@ -70,6 +71,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     getFolder: () => tree.selection.kind === 'folder' ? tree.selection.id : null,
     onSettled: folder => {
       contentEpoch++;
+      // A captured token does not cover later arrivals; refresh reconciles exact cards.
       session.post({kind: 'folder-viewed', folder});
       void refresh();
     },
@@ -89,6 +91,12 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onMove: id => menus.feedMoved(id),
     removeFeed: id => menus.removeFeed(id),
   });
+  const folderMenu = createFolderMenu({
+    readerApi, isStopped: () => stopped,
+    onSettings: (id, trigger) => {void menus.openFolder(id, trigger);},
+    onRead: (id, title, trigger) => {void folderActions.openCompletion(id, title, trigger);},
+    onChanged: async (id, removed) => {await menus.folderChanged(id, removed); await changed();},
+  });
   const tree = createReadingTree({
     readerApi, fetchMedia,
     onSelect: selection => {
@@ -98,7 +106,8 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       list.setArea(selection, readingCatalog);
       void refresh();
     },
-    onFeedMenu: (feed, folders, x, y, trigger) => feedActions.open(feed, folders, x, y, trigger),
+    onFeedMenu: (feed, folders, x, y, trigger) => {folderMenu.close(false);newsActions.close(false);feedActions.open(feed, folders, x, y, trigger);},
+    onFolderMenu: (folder, catalog, x, y, trigger) => {feedActions.close(false);newsActions.close(false);folderMenu.open(folder, catalog, x, y, trigger);},
     onFeedSettings: (id, trigger) => menus.openFeed(id, trigger),
     onWarning: () => statusPanel.open(),
   });
@@ -114,6 +123,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     progress(message);
     onStopped();
     folderActions.stop();
+    folderMenu.stop();
     feedActions.stop();
     newsActions.stop();
 
@@ -123,6 +133,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     if (data === 'stop') stopUi('Oko stopped');
     else if (typeof data === 'object') {
       contentEpoch++;
+      // Completion broadcasts invalidate the snapshot, not newly arrived items.
       refresh();
     } else {
       viewed(data, false);
@@ -155,6 +166,8 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       if (!active()) return;
       readingCatalog = navigation;
       feedActions.update(navigation);
+      folderMenu.update(navigation);
+      folderActions.update(navigation.folders);
       if (tree.update(navigation, state.sources || [])) return;
       list.setArea(tree.selection, navigation);
       if (state.runtime_state==='unavailable') { opened.clear(); list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable'); return; }

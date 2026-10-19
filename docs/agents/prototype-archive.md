@@ -21,3 +21,26 @@
 Ранние primary-source ветки также сохранены: `codex/header-ios-prototype`, `codex/reader-surfaces-ios-prototype`, `codex/status-panel-prototype`. Новый архив фиксирует последние локальные версии; старые коммиты не переписаны.
 
 Завершённые планы, решения и исторические скриншоты удалены из рабочего дерева; их последняя версия доступна в [истории проекта](https://github.com/tgenman/oko/tree/365e2b38f86d6e2bedccbb40b14c615b6f069455/.scratch).
+
+## Меню папки — 2026-10-19
+
+Пользователь выбрал вариант A: список действий как у фида. Delete… блокирует
+удаление папки с фидами и показывает предупреждение; ID папки не зависит от названия.
+
+Primary-source ветка: `codex/folder-menu-prototype-20261019`.
+Коммит: `6906d5d767094a88e578226b2c3371152660ae82`.
+Прототип: `frontend/folder-menu-prototype.html`,
+`frontend/src/reading/folder-menu-prototype.{tsx,css,mjs}`.
+Обоснование и проверка: `.scratch/folder-context-menu/` в архивном коммите.
+Исходники прототипа удалены из рабочего frontend после выбора; для просмотра
+восстановите архив отдельно от рабочего читателя.
+
+## Создание папки из меню перемещения — 19 октября 2026
+
+Пользователь выбрал A: New Folder… под списком папок открывает отдельный диалог;
+Create & Move создаёт папку и переносит фид. Альтернативы B/C и прототип сохранены
+в локальной ветке `codex/create-folder-prototype-20261019`, коммит
+`39c98c2c523095f8ee7b4ad5b9c6c533cae92967`.
+Исходники: `frontend/create-folder-prototype.html`,
+`frontend/src/reading/create-folder-prototype.{tsx,css,mjs}`.
+Контекст реализации: `.scratch/create-folder-menu/implementation.md`.

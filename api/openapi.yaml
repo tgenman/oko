@@ -11042,6 +11042,466 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+  /api/v3/folders/{folder}:
+    patch:
+      summary: Rename folder
+      operationId: rename_folder
+      description: Rename a folder without changing its stable ID, feeds, settings or reading
+        state. Titles are trimmed and case-sensitive unique. All operations require bearer authorization,
+        allowed Host and matching Origin when present. Unknown query keys return 422. A lost response
+        must be reconciled through the tracked command receipt, never automatically replayed.
+      tags:
+      - folders
+      parameters:
+      - name: folder
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are
+          not parsed by clients.
+      - name: X-Oko-Action
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/CommandId'
+        description: Command correlation only, never execution idempotency. Missing value generates
+          an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+      responses:
+        '200':
+          description: Rename a folder without changing its stable ID, feeds, settings or reading
+            state. Titles are trimmed and case-sensitive unique.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionFolder'
+              example:
+                id: example
+                title: example
+                position: 0
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: example
+                    details:
+                      resource:
+                        kind: material
+                        material_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenameFolder409Errors'
+              examples:
+                FolderNameConflictError:
+                  value:
+                    code: folder_name_conflict
+                    message: example
+                    details:
+                      folder_id: example
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeStoppedError:
+                  value: &id001
+                    code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameFolderRequest'
+            example:
+              title: Design
+    delete:
+      summary: Remove empty folder
+      operationId: remove_folder
+      description: Remove a folder and its settings only when it contains no feeds, including
+        deleting and unavailable feeds. Emptiness is checked atomically with deletion. No feeds
+        are moved or removed. All operations require bearer authorization, allowed Host and matching
+        Origin when present. Unknown query keys return 422. A lost response must be reconciled
+        through the tracked command receipt, never automatically replayed.
+      tags:
+      - folders
+      parameters:
+      - name: folder
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are
+          not parsed by clients.
+      - name: X-Oko-Action
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/CommandId'
+        description: Command correlation only, never execution idempotency. Missing value generates
+          an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+      responses:
+        '200':
+          description: Remove a folder and its settings only when it contains no feeds, including
+            deleting and unavailable feeds. Emptiness is checked atomically with deletion. No
+            feeds are moved or removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAcknowledgement'
+              example:
+                ok: true
+                command_id: example
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: example
+                    details:
+                      resource:
+                        kind: material
+                        material_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoveFolder409Errors'
+              examples:
+                FolderNotEmptyError:
+                  value:
+                    code: folder_not_empty
+                    message: example
+                    details:
+                      folder_id: example
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeStoppedError:
+                  value: *id001
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context
+            or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+
 components:
   schemas:
     MaterialId:
@@ -11171,6 +11631,7 @@ components:
     FeedField:
       type: string
       enum:
+      - new_folder
       - folder_id
       - importance
       - initial_days
@@ -12966,7 +13427,14 @@ components:
         count: 0
     FeedPatchRequest:
       type: object
+      description: new_folder creates a uniquely named folder and moves this feed atomically. It cannot be combined with folder_id. Duplicate names or incompatible fields return action_invalid without any write.
       properties:
+        new_folder:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: Trimmed before saving; case-sensitive uniqueness.
         folder_id:
           $ref: '#/components/schemas/FolderId'
         importance:
@@ -17875,6 +18343,8 @@ components:
         command_id: null
     ErrorEnvelope:
       oneOf:
+      - $ref: '#/components/schemas/FolderNotEmptyError'
+      - $ref: '#/components/schemas/FolderNameConflictError'
       - $ref: '#/components/schemas/ActionInvalidError'
       - $ref: '#/components/schemas/SettingScopeInvalidError'
       - $ref: '#/components/schemas/SourceConnectionInvalidError'
@@ -17911,6 +18381,8 @@ components:
       discriminator:
         propertyName: code
         mapping:
+          folder_name_conflict: '#/components/schemas/FolderNameConflictError'
+          folder_not_empty: '#/components/schemas/FolderNotEmptyError'
           action_invalid: '#/components/schemas/ActionInvalidError'
           setting_scope_invalid: '#/components/schemas/SettingScopeInvalidError'
           source_connection_invalid: '#/components/schemas/SourceConnectionInvalidError'
@@ -18274,6 +18746,8 @@ components:
         material_id: example
     CommandContext:
       oneOf:
+      - $ref: '#/components/schemas/CommandRenameFolder'
+      - $ref: '#/components/schemas/CommandRemoveFolder'
       - $ref: '#/components/schemas/CommandSettingsPatch'
       - $ref: '#/components/schemas/CommandFeedPatch'
       - $ref: '#/components/schemas/CommandCodexSave'
@@ -18303,6 +18777,8 @@ components:
       discriminator:
         propertyName: operation
         mapping:
+          remove_folder: '#/components/schemas/CommandRemoveFolder'
+          rename_folder: '#/components/schemas/CommandRenameFolder'
           settings_patch: '#/components/schemas/CommandSettingsPatch'
           feed_patch: '#/components/schemas/CommandFeedPatch'
           codex_save: '#/components/schemas/CommandCodexSave'
@@ -19791,6 +20267,180 @@ components:
       examples:
       - state: unconfigured
         role: collection
+    RenameFolderRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: Trimmed before saving. Must be unique among current folder titles (case-sensitive).
+      required:
+      - title
+      additionalProperties: false
+      examples:
+      - title: Design
+    CommandRenameFolder:
+      type: object
+      properties:
+        operation:
+          type: string
+          const: rename_folder
+        folder_id:
+          $ref: '#/components/schemas/FolderId'
+      required:
+      - operation
+      - folder_id
+      additionalProperties: false
+      examples:
+      - operation: rename_folder
+        folder_id: example
+    CommandRemoveFolder:
+      type: object
+      properties:
+        operation:
+          type: string
+          const: remove_folder
+        folder_id:
+          $ref: '#/components/schemas/FolderId'
+      required:
+      - operation
+      - folder_id
+      additionalProperties: false
+      examples:
+      - operation: remove_folder
+        folder_id: example
+    FolderNotEmptyErrorDetails:
+      type: object
+      properties:
+        folder_id:
+          $ref: '#/components/schemas/FolderId'
+      required:
+      - folder_id
+      additionalProperties: false
+      examples:
+      - folder_id: example
+    FolderNotEmptyError:
+      type: object
+      properties:
+        code:
+          type: string
+          const: folder_not_empty
+        message:
+          type: string
+        details:
+          $ref: '#/components/schemas/FolderNotEmptyErrorDetails'
+        diagnostic_id:
+          anyOf:
+          - type: string
+            minLength: 1
+          - type: 'null'
+        command_id:
+          anyOf:
+          - $ref: '#/components/schemas/CommandId'
+          - type: 'null'
+      required:
+      - code
+      - message
+      - details
+      - diagnostic_id
+      - command_id
+      additionalProperties: false
+      examples:
+      - code: folder_not_empty
+        message: example
+        details:
+          folder_id: example
+        diagnostic_id: null
+        command_id: null
+    FolderNameConflictErrorDetails:
+      type: object
+      properties:
+        folder_id:
+          $ref: '#/components/schemas/FolderId'
+      required:
+      - folder_id
+      additionalProperties: false
+      examples:
+      - folder_id: example
+    FolderNameConflictError:
+      type: object
+      properties:
+        code:
+          type: string
+          const: folder_name_conflict
+        message:
+          type: string
+        details:
+          $ref: '#/components/schemas/FolderNameConflictErrorDetails'
+        diagnostic_id:
+          anyOf:
+          - type: string
+            minLength: 1
+          - type: 'null'
+        command_id:
+          anyOf:
+          - $ref: '#/components/schemas/CommandId'
+          - type: 'null'
+      required:
+      - code
+      - message
+      - details
+      - diagnostic_id
+      - command_id
+      additionalProperties: false
+      examples:
+      - code: folder_name_conflict
+        message: example
+        details:
+          folder_id: example
+        diagnostic_id: null
+        command_id: null
+    RenameFolder409Errors:
+      oneOf:
+      - $ref: '#/components/schemas/FolderNameConflictError'
+      - $ref: '#/components/schemas/RuntimeStoppedError'
+      discriminator:
+        propertyName: code
+        mapping:
+          folder_name_conflict: '#/components/schemas/FolderNameConflictError'
+          runtime_stopped: '#/components/schemas/RuntimeStoppedError'
+      examples:
+      - code: folder_name_conflict
+        message: example
+        details:
+          folder_id: example
+        diagnostic_id: null
+        command_id: null
+      - code: runtime_stopped
+        message: example
+        details: null
+        diagnostic_id: null
+        command_id: null
+
+    RemoveFolder409Errors:
+      oneOf:
+      - $ref: '#/components/schemas/FolderNotEmptyError'
+      - $ref: '#/components/schemas/RuntimeStoppedError'
+      discriminator:
+        propertyName: code
+        mapping:
+          folder_not_empty: '#/components/schemas/FolderNotEmptyError'
+          runtime_stopped: '#/components/schemas/RuntimeStoppedError'
+      examples:
+      - code: folder_not_empty
+        message: example
+        details:
+          folder_id: example
+        diagnostic_id: null
+        command_id: null
+      - code: runtime_stopped
+        message: example
+        details: null
+        diagnostic_id: null
+        command_id: null
+
   securitySchemes:
     ReaderSession:
       type: http

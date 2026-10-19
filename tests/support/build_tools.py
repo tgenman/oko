@@ -13,9 +13,9 @@ def api_document() -> dict:
     return {'openapi': '3.1.0', 'info': {'title': 'Око Reader API', 'version': '1.0.0'},
                 'paths': {'/api/probe': {'get': {'operationId': 'probe', 'responses': {
                     '200': {'description': 'ok', 'content': {'application/json': {
-                        'schema': {'$ref': '#/components/schemas/Probe'}}}}}}}},
+                        'schema': {'$ref': '#/components/schemas/Probe'}, 'example': {'value': 'fixture'}}}}}}}},
                 'components': {'schemas': {'Probe': {'type': 'object', 'required': ['value'],
-                    'properties': {'value': {'type': 'string'}}, 'additionalProperties': False}}}}
+                    'properties': {'value': {'type': 'string'}}, 'additionalProperties': False, 'examples': [{'value': 'fixture'}]}}}}
 
 
 def api_repository(root: Path) -> None:

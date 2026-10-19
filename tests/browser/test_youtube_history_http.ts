@@ -23,7 +23,8 @@ test('real HTTP settings load three YouTube materials and keep viewed IDs on a s
   await page.locator('#feeds-close').click();
   await page.locator(`button[data-feed="${feed.id}"]`).click();
   await expect(page.locator('#cards button')).toHaveCount(3);
-  await expect(page.locator('#cards .card-date').first()).toHaveText('Unknown date');
+  await expect(page.locator('#cards .date-group').first()).toHaveText('Unknown date');
+  await expect(page.locator('#cards .card-date')).toHaveCount(0);
   const latest=(await api('cards')).find(card=>card.source_url.endsWith('v0000000060'));
   expect(latest).toBeDefined();
   await page.locator(`button[data-card="${latest!.id}"]`).click();

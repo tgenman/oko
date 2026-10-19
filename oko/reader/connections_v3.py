@@ -43,6 +43,26 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message='Аватар недоступен', details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed',feed_id=wire.FeedId(feed)))), command_id=None, diagnostic_id=None)))
         return Response(bytes(row['image']), media_type=row['mime'])
 
+    def folder_id(folder: str) -> wire.FolderId:
+        from oko.reader.api_v3 import invalid
+        try:
+            return wire.FolderId(folder)
+        except ValueError:
+            raise ApiError(422, invalid('path', 'folder')) from None
+
+    @router.patch('/api/v3/folders/{folder}', response_model=wire.SubscriptionFolder)
+    async def rename_folder(request: Request, folder: str, body: wire.RenameFolderRequest) -> wire.SubscriptionFolder:
+        context = wire.CommandContext(wire.CommandRenameFolder(operation='rename_folder', folder_id=folder_id(folder)))
+        async with track(runtime, request, context):
+            return wire.SubscriptionFolder.model_validate(await runtime.rename_folder(folder, body.title))
+
+    @router.delete('/api/v3/folders/{folder}', response_model=wire.CommandAcknowledgement)
+    async def remove_folder(request: Request, folder: str) -> wire.CommandAcknowledgement:
+        context = wire.CommandContext(wire.CommandRemoveFolder(operation='remove_folder', folder_id=folder_id(folder)))
+        async with track(runtime, request, context):
+            await runtime.remove_folder(folder)
+            return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
+
     @router.post('/api/v3/feeds/verify', response_model=wire.FeedVerification)
     async def verify(request: Request, body: wire.FeedUrlRequest) -> wire.FeedVerification:
         async with track(runtime, request, wire.CommandContext(wire.CommandVerifyFeed(operation='verify_feed'))):

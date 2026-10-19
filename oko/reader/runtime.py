@@ -29,7 +29,7 @@ from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
-from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, identify
+from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, FolderConflict, identify
 from oko.collection.youtube.source import LocalCaptions
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -426,6 +426,24 @@ class Runtime:
             self._sync_sources()
             current.enqueue_discovery(identity)
             return result
+
+    async def rename_folder(self, identity: str, title: str) -> dict[str, Any]:
+        async with self._actions:
+            try:
+                return self.require_store().subscriptions.rename_folder(identity, title)
+            except LookupError as error:
+                raise ActionError('missing', str(error), expected=True) from None
+            except FolderConflict as error:
+                raise ActionError('conflict', str(error), code=error.code, expected=True) from None
+
+    async def remove_folder(self, identity: str) -> None:
+        async with self._actions:
+            try:
+                self.require_store().subscriptions.remove_folder(identity)
+            except LookupError as error:
+                raise ActionError('missing', str(error), expected=True) from None
+            except FolderConflict as error:
+                raise ActionError('conflict', str(error), code=error.code, expected=True) from None
 
     async def patch_feed(self, identity: str, body: FeedPatch) -> dict[str, Any]:
         async with self._actions:

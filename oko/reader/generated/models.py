@@ -301,6 +301,7 @@ class FeedConnectionUrl(RootModel[AnyUrl]):
 class FeedField(
     RootModel[
         Literal[
+            "new_folder",
             "folder_id",
             "importance",
             "initial_days",
@@ -313,6 +314,7 @@ class FeedField(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
+        "new_folder",
         "folder_id",
         "importance",
         "initial_days",
@@ -375,6 +377,16 @@ class FieldViolation(WireModel):
 class FolderId(RootModel[StrictStr]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictStr = Field(..., examples=["example"], min_length=1)
+
+
+class FolderNameConflictErrorDetails(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    folder_id: FolderId
+
+
+class FolderNotEmptyErrorDetails(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    folder_id: FolderId
 
 
 class FolderResource(WireModel):
@@ -763,6 +775,17 @@ class RemoveFeedResult(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_id: FeedId
     state: Literal["deleting", "deleted"]
+
+
+class RenameFolderRequest(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    title: StrictStr = Field(
+        ...,
+        description="Trimmed before saving. Must be unique among current folder titles (case-sensitive).",
+        max_length=200,
+        min_length=1,
+        pattern="\\S",
+    )
 
 
 class RequestInvalidErrorDetails(WireModel):
@@ -1270,6 +1293,18 @@ class CommandRemoveFeed(WireModel):
     operation: Literal["remove_feed"]
 
 
+class CommandRemoveFolder(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    folder_id: FolderId
+    operation: Literal["remove_folder"]
+
+
+class CommandRenameFolder(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    folder_id: FolderId
+    operation: Literal["rename_folder"]
+
+
 class CommandRestoreFilter(WireModel):
     model_config = ConfigDict(extra="forbid")
     material_id: MaterialId
@@ -1446,9 +1481,34 @@ class FeedPatchRequest(WireModel):
     folder_id: FolderId | MISSING = MISSING
     importance: Importance | MISSING = MISSING
     initial_days: StrictInt | MISSING = Field(default=MISSING, ge=1, le=3650)
+    new_folder: StrictStr | MISSING = Field(
+        default=MISSING,
+        description="Trimmed before saving; case-sensitive uniqueness.",
+        max_length=200,
+        min_length=1,
+        pattern="\\S",
+    )
     public_ai: StrictBool | MISSING = MISSING
     read_history: StrictBool | MISSING = MISSING
     transport: Literal["telegram", "rss", "youtube"] | None | MISSING = MISSING
+
+
+class FolderNameConflictError(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    code: Literal["folder_name_conflict"]
+    command_id: CommandId | None
+    details: FolderNameConflictErrorDetails
+    diagnostic_id: DiagnosticId | None
+    message: StrictStr
+
+
+class FolderNotEmptyError(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    code: Literal["folder_not_empty"]
+    command_id: CommandId | None
+    details: FolderNotEmptyErrorDetails
+    diagnostic_id: DiagnosticId | None
+    message: StrictStr
 
 
 class HistoryAbsent(WireModel):
@@ -1688,6 +1748,54 @@ class RecoveryConfigureTelegramProfile(WireModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["configure_telegram_profile"]
     role: TelegramRole
+
+
+class RemoveFolder409Errors(RootModel[FolderNotEmptyError | RuntimeStoppedError]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: FolderNotEmptyError | RuntimeStoppedError = Field(
+        ...,
+        discriminator="code",
+        examples=[
+            {
+                "code": "folder_not_empty",
+                "command_id": None,
+                "details": {"folder_id": "example"},
+                "diagnostic_id": None,
+                "message": "example",
+            },
+            {
+                "code": "runtime_stopped",
+                "command_id": None,
+                "details": None,
+                "diagnostic_id": None,
+                "message": "example",
+            },
+        ],
+    )
+
+
+class RenameFolder409Errors(RootModel[FolderNameConflictError | RuntimeStoppedError]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: FolderNameConflictError | RuntimeStoppedError = Field(
+        ...,
+        discriminator="code",
+        examples=[
+            {
+                "code": "folder_name_conflict",
+                "command_id": None,
+                "details": {"folder_id": "example"},
+                "diagnostic_id": None,
+                "message": "example",
+            },
+            {
+                "code": "runtime_stopped",
+                "command_id": None,
+                "details": None,
+                "diagnostic_id": None,
+                "message": "example",
+            },
+        ],
+    )
 
 
 class RequestInvalidError(WireModel):
@@ -2125,7 +2233,9 @@ class CommandCollect(WireModel):
 
 class CommandContext(
     RootModel[
-        CommandSettingsPatch
+        CommandRenameFolder
+        | CommandRemoveFolder
+        | CommandSettingsPatch
         | CommandFeedPatch
         | CommandCodexSave
         | CommandProcessorSave
@@ -2155,7 +2265,9 @@ class CommandContext(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
-        CommandSettingsPatch
+        CommandRenameFolder
+        | CommandRemoveFolder
+        | CommandSettingsPatch
         | CommandFeedPatch
         | CommandCodexSave
         | CommandProcessorSave
@@ -3666,7 +3778,9 @@ class EffectiveSettingsSnapshot(
 
 class ErrorEnvelope(
     RootModel[
-        ActionInvalidError
+        FolderNotEmptyError
+        | FolderNameConflictError
+        | ActionInvalidError
         | SettingScopeInvalidError
         | SourceConnectionInvalidError
         | ProcessorChoiceInvalidError
@@ -3703,7 +3817,9 @@ class ErrorEnvelope(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
-        ActionInvalidError
+        FolderNotEmptyError
+        | FolderNameConflictError
+        | ActionInvalidError
         | SettingScopeInvalidError
         | SourceConnectionInvalidError
         | ProcessorChoiceInvalidError

@@ -23,7 +23,8 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   for(const feed of [alpha,beta]){
    await page.locator(`[data-feed="${feed!.id}"]`).click();
    await expect(page.locator('#cards button')).toHaveCount(1);
-   await expect(page.locator('#cards .card-source')).toHaveText(feed!.title);
+   await expect(page.locator('#cards .card-source')).toHaveCount(0);
+   await expect(page.locator('#cards button')).toHaveAttribute('aria-label',new RegExp(feed!.title));
   }
   await api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
   await api('settings/oko/global','PATCH',{theses:true});

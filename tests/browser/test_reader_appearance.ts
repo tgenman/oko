@@ -51,7 +51,7 @@ test('reader card appearance preserves the compact layout, metadata and real pre
     const row = r.page.locator('[data-card="one"]');
     const preview = await row.locator('.card-preview').boundingBox();
     const text = await row.locator('.card-body').boundingBox();
-    expect(preview!.width).toBe(76); expect(preview!.height).toBe(76);
+    expect(preview!.width).toBe(64); expect(preview!.height).toBe(64);
     expect(text!.x-preview!.x-preview!.width).toBe(12);
     expect((await r.page.locator('#material-list').boundingBox())!.width).toBe(440);
     const geometry = await row.evaluate(n=>{
@@ -59,15 +59,17 @@ test('reader card appearance preserves the compact layout, metadata and real pre
       return {padding:style.padding,minHeight:style.minHeight,radius:style.borderRadius,margin:style.margin,
         titleSize:title.fontSize,titleLines:title.webkitLineClamp,snippetSize:snippet.fontSize,snippetLines:snippet.webkitLineClamp};
     });
-    expect(geometry).toEqual({padding:'16px',minHeight:'112px',radius:'0px',margin:'0px',titleSize:'15px',titleLines:'2',snippetSize:'14px',snippetLines:'2'});
+    expect(geometry).toEqual({padding:'6px 16px',minHeight:'76px',radius:'0px',margin:'0px',titleSize:'15px',titleLines:'2',snippetSize:'14px',snippetLines:'2'});
     await expect(row.locator('.card-kind')).toHaveText('Updated');
     await expect(r.page.locator('[data-card="three"] .card-kind')).toHaveText('Updated · Loading');
     await expect(row.locator('.card-source')).toHaveText('GetAClass — Физика в опытах и экспериментах');
-    await expect(row.locator('.card-date')).not.toHaveText('');
+    await expect(row.locator('.card-date')).toHaveCount(0);
     await expect(r.page.locator('.date-group')).toHaveCount(3);
     const shot=artifactPath('reader-cards.png');
     await r.page.screenshot({path:shot}); console.info('Cards screenshot:',shot);
     expect(await row.evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(231, 241, 255)');
+    await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('importance');
+    await expect(r.page.locator('.date-group')).toHaveCount(0);await expect(row.locator('.card-date')).not.toHaveText('');
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });

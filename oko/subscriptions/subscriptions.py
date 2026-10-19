@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+import secrets
 import sqlite3
 from collections.abc import Callable
 from typing import Any, Literal
@@ -39,6 +40,7 @@ class Overrides(BaseModel):
 class FeedPatch(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     folder_id: str | None = None
+    new_folder: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"\S")
     importance: Literal['normal', 'elevated', 'high'] | None = None
     initial_days: int | None = Field(default=None, ge=1, le=3650)
     public_ai: bool | None = None
@@ -79,6 +81,12 @@ def identify(url: str) -> tuple[str, str, str]:
         return 'youtube:' + channel[0], 'youtube', 'needs_connection'
     canonical = urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, parsed.query, ''))
     return 'rss:' + canonical, 'rss', 'needs_connection'
+
+
+class FolderConflict(ValueError):
+    def __init__(self, code: Literal['folder_not_empty', 'folder_name_conflict'], message: str) -> None:
+        self.code = code
+        super().__init__(message)
 
 
 class Subscriptions:
@@ -127,6 +135,34 @@ class Subscriptions:
             return (0, int(prefix[1])) if prefix else (1, folder['position'])
         return sorted(folders, key=order)
 
+    def ensure_folder(self, title: str) -> str:
+        """Resolve a creation label; all stored relationships use the opaque ID.
+
+        The caller owns the transaction enclosing folder and feed creation.
+        Never derive identity from a mutable title or reuse a deleted ID.
+        """
+        self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (secrets.token_hex(16), title, len(self.folders())))
+        return str(self.db.execute('SELECT id FROM folders WHERE title=?', (title,)).fetchone()[0])
+
+    def rename_folder(self, identity: str, title: str) -> dict[str, Any]:
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            self.check_owner('folder', identity)
+            try:
+                self.db.execute('UPDATE folders SET title=? WHERE id=?', (title.strip(), identity))
+            except sqlite3.IntegrityError:
+                raise FolderConflict('folder_name_conflict', 'A folder with this name already exists.') from None
+        return next(folder for folder in self.folders() if folder['id'] == identity)
+
+    def remove_folder(self, identity: str) -> None:
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            self.check_owner('folder', identity)
+            if self.db.execute('SELECT 1 FROM feeds WHERE folder_id=? LIMIT 1', (identity,)).fetchone():
+                raise FolderConflict('folder_not_empty', 'Move or delete all feeds before deleting this folder.')
+            self.db.execute("DELETE FROM settings WHERE scope='folder' AND owner=?", (identity,))
+            self.db.execute('DELETE FROM folders WHERE id=?', (identity,))
+
     def feeds(self, identity: str | None = None) -> list[dict[str, Any]]:
         result = []
         query = 'SELECT * FROM feeds' + (' WHERE id=?' if identity is not None else '') + ' ORDER BY rowid'
@@ -171,8 +207,8 @@ class Subscriptions:
             return old
         title = body.title or urlsplit(body.url).hostname or 'RSS'
         with self.db:
-            folder = key('folder:' + body.folder)
-            self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (folder, body.folder, len(self.folders())))
+            self.db.execute('BEGIN IMMEDIATE')
+            folder = self.ensure_folder(body.folder)
             self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,public_ai)
                             VALUES (?,?,?,?,?,?,?,?,?)''',
                             (key(identity), identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
@@ -238,6 +274,13 @@ class Subscriptions:
         values = patch.model_dump(exclude_unset=True)
         if any(value is None for field, value in values.items() if field not in ('auto_read', 'transport')):
             raise ValueError('Поле не может быть пустым')
+        title = values.pop('new_folder', None)
+        if title is not None:
+            title = title.strip()
+            if 'folder_id' in values:
+                raise ValueError('Choose an existing folder or create a new one, not both.')
+            if feed['connection'] == 'deleting':
+                raise ValueError('The feed is being deleted.')
         if 'folder_id' in values:
             self.check_owner('folder', values['folder_id'])
         if any(field in values for field in ('read_history', 'auto_read')) and feed['kind'] != 'telegram':
@@ -255,6 +298,11 @@ class Subscriptions:
         if transport == 'rss' and feed['kind'] in ('youtube', 'demo'):
             raise ValueError('Для этого источника нет RSS-подключения')
         with self.db:
+            if title is not None:
+                self.db.execute('BEGIN IMMEDIATE')
+                if self.db.execute('SELECT 1 FROM folders WHERE title=?', (title,)).fetchone():
+                    raise ValueError('A folder with this name already exists.')
+                values['folder_id'] = self.ensure_folder(title)
             for field, value in values.items():
                 self.db.execute(f'UPDATE feeds SET {field}=? WHERE id=?', (value, feed_id))
             if 'transport' in values:

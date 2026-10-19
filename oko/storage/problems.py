@@ -299,6 +299,8 @@ class Problems:
             return 'Настройки Око'
         if obj['kind'] == 'feed':
             return next((feed['title'] for feed in self.store.subscriptions.feeds() if feed['id'] == obj['id']), 'Источник недоступен')
+        if obj['kind'] == 'folder':
+            return next((folder['title'] for folder in self.store.subscriptions.folders() if folder['id'] == obj['id']), 'Папка недоступна')
         row = self.db.execute('SELECT viewed FROM items WHERE id=?', (obj['id'],)).fetchone()
         if row and row['viewed']:
             return 'Удалённый материал'

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "verified": true,
+  "repository": "tgenman/oko",
+  "plan_digest": "a3e9bf128b0c520371f413e360ab3155e39abc454ae6b029ad05bf38d87d66a0",
+  "snapshot_digest": "ad2835c1b785b79083432e253d61b133122526ccfd4128ccd7b0722991efed41",
+  "criteria_count": 0,
+  "checklist_count": 38,
+  "issues": {
+    "01": {
+      "number": 17,
+      "url": "https://github.com/tgenman/oko/issues/17",
+      "state": "open",
+      "body_digest": "229c77703a242a1658377913e818f65ba4509ae5f38274be433e4548cadca578"
+    },
+    "02": {
+      "number": 18,
+      "url": "https://github.com/tgenman/oko/issues/18",
+      "state": "open",
+      "body_digest": "61373238c1fd6ae2a1962e8f1b3f5b59a3c53cc1a0378b0d574466a5cfbed5ae"
+    },
+    "03": {
+      "number": 19,
+      "url": "https://github.com/tgenman/oko/issues/19",
+      "state": "open",
+      "body_digest": "d8d26bd29fee0a0d2ad1dfe52cc93dc1578a03cb1710da8fef3d11913f56a6c0"
+    },
+    "04": {
+      "number": 20,
+      "url": "https://github.com/tgenman/oko/issues/20",
+      "state": "open",
+      "body_digest": "e511ec4c98f255210f9e9398fca5135aca1004b53b791c1be291f41af05c0083"
+    },
+    "05": {
+      "number": 21,
+      "url": "https://github.com/tgenman/oko/issues/21",
+      "state": "open",
+      "body_digest": "eed3b186105a00788be8083530b4ac0879dcbb06ff316ea408e6b51a91c5d914"
+    }
+  }
+}

@@ -56,7 +56,7 @@ export function commandResources(context:CommandContext):{affected:AffectedResou
  if(context.operation==='add_feed'||context.operation==='verify_feed')return {affected:[],recovery:[{kind:'connect_source',source_kind:'rss'}]};
  if('material_id'in context)return {affected:[{kind:'material',material_id:context.material_id}],recovery:[{kind:'inspect_materials',material_ids:[context.material_id]}]};
  if('feed_id'in context)return {affected:[{kind:'feed',feed_id:context.feed_id}],recovery:[]};
- if(context.operation==='complete_folder')return {affected:[{kind:'folder',folder_id:context.folder_id}],recovery:[]};
+ if('folder_id'in context)return {affected:[{kind:'folder',folder_id:context.folder_id}],recovery:[]};
  if(context.operation==='collect')return {affected:[],recovery:[{kind:'retry_collection',target:context.target}]};
  return {affected:[{kind:'runtime'}],recovery:[]};
 }

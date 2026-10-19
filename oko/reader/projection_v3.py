@@ -19,6 +19,8 @@ def affected(value: facts.ProblemObject) -> wire.AffectedResource:
         return wire.AffectedResource(wire.MaterialResource(kind='material', material_id=wire.MaterialId(value.id)))
     if value.kind == 'feed':
         return wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(value.id)))
+    if value.kind == 'folder':
+        return wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=wire.FolderId(value.id)))
     return wire.AffectedResource(wire.RuntimeResource(kind='runtime'))
 
 
@@ -49,6 +51,8 @@ def command_recovery(context: wire.CommandContext) -> tuple[list[wire.AffectedRe
         recovery.append(wire.RecoveryIntent(wire.RecoveryConnectSource(kind='connect_source', source_kind='rss')))
     elif isinstance(value, (wire.CommandFeedPatch, wire.CommandRemoveFeed, wire.CommandHistoryStart, wire.CommandHistoryPause, wire.CommandHistoryCancel)):
         resources.append(wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=value.feed_id)))
+    elif isinstance(value, (wire.CommandCompleteFolder, wire.CommandRenameFolder, wire.CommandRemoveFolder)):
+        resources.append(wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=value.folder_id)))
     elif isinstance(value, (wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandRegenerate, wire.CommandViewed, wire.CommandRestoreFilter)):
         resources.append(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=value.material_id)))
         recovery.append(wire.RecoveryIntent(wire.RecoveryInspectMaterials(kind='inspect_materials', material_ids=[value.material_id])))

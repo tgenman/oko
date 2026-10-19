@@ -50,6 +50,15 @@ export class MenusOwner {
       this.changed();return true;
     }catch(error){if(!action.current)return false;throw error;}
   }
+  async folderChanged(id:string,removed:boolean){
+    const path='folder/'+id;
+    if(removed){
+      this.values.delete(path);this.drafts.delete(path);this.needsRefresh.delete(path);this.collapsed.delete(id);
+      if(this.selected===path)this.selected=null;
+      if(this.currentPath===path){this.operations.invalidate();this.currentPath=null;this.stack=[];this.page='home';}
+    }
+    await this.refresh();this.changed();
+  }
   async select(path:string){this.navigationRevision++;this.operations.invalidate();this.selected=path;this.currentPath=path;this.page='home';this.stack=[];for(const callback of this.onPageChange)callback('owner-change');this.changed();await this.loadSettings();}
   async loadSettings(){const path=this.currentPath;if(!path)return;const [level,owner]=path.split('/');if(!['oko','folder','feed'].includes(level||'')||!owner)return;const scope:SettingsScope=level==='folder'?'folder':level==='feed'?'feed':'oko';const action=this.operations.begin('load',{abortable:true});try{const{data}=await settings.effectiveSettings({client:this.api.client,path:{scope,owner},signal:action.signal});action.commit(()=>{this.values.set(path,data);this.needsRefresh.delete(path);this.changed();});}catch(error){action.commit(()=>{this.settingsMessage=message(error);this.changed();});}}
   async update(field:keyof SettingsPatch,body:SettingsPatch,submitted:string){const path=this.currentPath;if(!path)return;const key=path+'/'+field;if(this.saving.has(key))return;this.saving.add(key);this.settingsMessage='Saving…';this.changed();const action=this.operations.begin('field/'+field);const[level,owner]=path.split('/');const scope:SettingsScope=level==='folder'?'folder':level==='feed'?'feed':'oko';const target=scope==='oko'?{scope,owner:'global' as const}:{scope,owner:owner!};try{await this.api.command({operation:'settings_patch',target,keys:[field]},headers=>settings.settingsPatch({client:this.api.client,path:{scope,owner:owner!},body,headers}));const values=this.draft(path);if(values['setting-'+field]===submitted)delete values['setting-'+field];this.needsRefresh.add(path);if(this.currentPath===path)await this.loadSettings();action.commit(()=>{this.settingsMessage='Setting saved';this.changed();});}catch(error){action.commit(()=>{this.settingsMessage=message(error);this.changed();});}finally{this.saving.delete(key);this.changed();}}

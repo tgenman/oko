@@ -464,6 +464,10 @@ export type CommandCompleteFolder = {
 };
 
 export type CommandContext = ({
+    operation: 'rename_folder';
+} & CommandRenameFolder) | ({
+    operation: 'remove_folder';
+} & CommandRemoveFolder) | ({
     operation: 'settings_patch';
 } & CommandSettingsPatch) | ({
     operation: 'feed_patch';
@@ -625,6 +629,16 @@ export type CommandRegenerate = {
 export type CommandRemoveFeed = {
     feed_id: FeedId;
     operation: 'remove_feed';
+};
+
+export type CommandRemoveFolder = {
+    folder_id: FolderId;
+    operation: 'remove_folder';
+};
+
+export type CommandRenameFolder = {
+    folder_id: FolderId;
+    operation: 'rename_folder';
 };
 
 export type CommandResource = {
@@ -928,6 +942,10 @@ export type EffectiveTheses = {
 };
 
 export type ErrorEnvelope = ({
+    code: 'folder_not_empty';
+} & FolderNotEmptyError) | ({
+    code: 'folder_name_conflict';
+} & FolderNameConflictError) | ({
     code: 'action_invalid';
 } & ActionInvalidError) | ({
     code: 'setting_scope_invalid';
@@ -1025,7 +1043,7 @@ export type FeedCollectionTarget = {
 
 export type FeedConnectionUrl = string;
 
-export type FeedField = 'folder_id' | 'importance' | 'initial_days' | 'public_ai' | 'read_history' | 'auto_read' | 'transport';
+export type FeedField = 'new_folder' | 'folder_id' | 'importance' | 'initial_days' | 'public_ai' | 'read_history' | 'auto_read' | 'transport';
 
 export type FeedHistoryState = {
     feed_id: FeedId;
@@ -1034,11 +1052,18 @@ export type FeedHistoryState = {
 
 export type FeedId = string;
 
+/**
+ * new_folder creates a uniquely named folder and moves this feed atomically. It cannot be combined with folder_id. Duplicate names or incompatible fields return action_invalid without any write.
+ */
 export type FeedPatchRequest = {
     auto_read?: boolean | null;
     folder_id?: FolderId;
     importance?: Importance;
     initial_days?: number;
+    /**
+     * Trimmed before saving; case-sensitive uniqueness.
+     */
+    new_folder?: string;
     public_ai?: boolean;
     read_history?: boolean;
     transport?: 'telegram' | 'rss' | 'youtube' | null;
@@ -1128,6 +1153,30 @@ export type FinishedProblem = {
 };
 
 export type FolderId = string;
+
+export type FolderNameConflictError = {
+    code: 'folder_name_conflict';
+    command_id: CommandId | null;
+    details: FolderNameConflictErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type FolderNameConflictErrorDetails = {
+    folder_id: FolderId;
+};
+
+export type FolderNotEmptyError = {
+    code: 'folder_not_empty';
+    command_id: CommandId | null;
+    details: FolderNotEmptyErrorDetails;
+    diagnostic_id: string | null;
+    message: string;
+};
+
+export type FolderNotEmptyErrorDetails = {
+    folder_id: FolderId;
+};
 
 export type FolderResource = {
     folder_id: FolderId;
@@ -1934,6 +1983,25 @@ export type RecoveryRetryTheses = {
 export type RemoveFeedResult = {
     feed_id: FeedId;
     state: 'deleting' | 'deleted';
+};
+
+export type RemoveFolder409Errors = ({
+    code: 'folder_not_empty';
+} & FolderNotEmptyError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError);
+
+export type RenameFolder409Errors = ({
+    code: 'folder_name_conflict';
+} & FolderNameConflictError) | ({
+    code: 'runtime_stopped';
+} & RuntimeStoppedError);
+
+export type RenameFolderRequest = {
+    /**
+     * Trimmed before saving. Must be unique among current folder titles (case-sensitive).
+     */
+    title: string;
 };
 
 export type RequestInvalidError = {
@@ -3687,6 +3755,118 @@ export type FoldersResponses = {
 };
 
 export type FoldersResponse = FoldersResponses[keyof FoldersResponses];
+
+export type RemoveFolderData = {
+    body?: never;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        folder: string;
+    };
+    query?: never;
+    url: '/api/v3/folders/{folder}';
+};
+
+export type RemoveFolderErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: RemoveFolder409Errors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type RemoveFolderError = RemoveFolderErrors[keyof RemoveFolderErrors];
+
+export type RemoveFolderResponses = {
+    /**
+     * Remove a folder and its settings only when it contains no feeds, including deleting and unavailable feeds. Emptiness is checked atomically with deletion. No feeds are moved or removed.
+     */
+    200: CommandAcknowledgement;
+};
+
+export type RemoveFolderResponse = RemoveFolderResponses[keyof RemoveFolderResponses];
+
+export type RenameFolderData = {
+    body: RenameFolderRequest;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        folder: string;
+    };
+    query?: never;
+    url: '/api/v3/folders/{folder}';
+};
+
+export type RenameFolderErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: RenameFolder409Errors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type RenameFolderError = RenameFolderErrors[keyof RenameFolderErrors];
+
+export type RenameFolderResponses = {
+    /**
+     * Rename a folder without changing its stable ID, feeds, settings or reading state. Titles are trimmed and case-sensitive unique.
+     */
+    200: SubscriptionFolder;
+};
+
+export type RenameFolderResponse = RenameFolderResponses[keyof RenameFolderResponses];
 
 export type CompleteFolderData = {
     body: CompleteFolderRequest;
