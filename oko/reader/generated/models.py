@@ -823,24 +823,12 @@ class SessionRequiredError(WireModel):
 
 class SettingKey(
     RootModel[
-        Literal[
-            "originals",
-            "theses",
-            "prompt_theses",
-            "prompt_filters",
-            "processor",
-            "feed_refresh_minutes",
-        ]
+        Literal["originals", "theses", "prompt_theses", "prompt_filters", "processor"]
     ]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
-        "originals",
-        "theses",
-        "prompt_theses",
-        "prompt_filters",
-        "processor",
-        "feed_refresh_minutes",
+        "originals", "theses", "prompt_theses", "prompt_filters", "processor"
     ] = Field(..., examples=["originals"])
 
 

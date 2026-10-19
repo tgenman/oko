@@ -2122,7 +2122,7 @@ export type SessionRequiredError = {
     message: string;
 };
 
-export type SettingKey = 'originals' | 'theses' | 'prompt_theses' | 'prompt_filters' | 'processor' | 'feed_refresh_minutes';
+export type SettingKey = 'originals' | 'theses' | 'prompt_theses' | 'prompt_filters' | 'processor';
 
 export type SettingOrigin = ({
     scope: 'default';

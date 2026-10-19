@@ -65,3 +65,21 @@ test('delayed interval save keeps newer input after navigation', {timeout:20000}
   await page.getByRole('button',{name:'Discard Change',exact:true}).click();
   await expect(input).toHaveValue('30');
 });
+
+test('a failed interval draft can be discarded with compatible command context', {timeout:20000}, async t=>{
+  const {page,api,origin,token}=await productionReader(t);
+  await page.route('**/api/v3/settings/oko/global',async route=>{
+    if(route.request().method()!=='PATCH')return route.continue();
+    await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({code:'action_invalid',message:'Synthetic failure',details:{reason:'invalid_state'},diagnostic_id:null,command_id:route.request().headers()['x-oko-action']})});
+  });
+  await page.goto(origin+'/#token='+token);
+  await page.locator('#settings-open').click();
+  await page.getByRole('button',{name:'Feed Refresh Interval',exact:true}).click();
+  await page.getByRole('spinbutton',{name:'Interval (minutes)',exact:true}).fill('30');
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  await expect(page.locator('#settings-message')).toHaveText('Synthetic failure');
+  await expect.poll(async()=> (await api('status')).problems.current.filter(p=>p.code==='command_failed').length).toBe(1);
+  await page.getByRole('button',{name:'Discard Change',exact:true}).click();
+  await expect(page.getByRole('spinbutton',{name:'Interval (minutes)',exact:true})).toHaveValue('15');
+  await expect.poll(async()=> (await api('status')).problems.current.filter(p=>p.code==='command_failed').length).toBe(0);
+});

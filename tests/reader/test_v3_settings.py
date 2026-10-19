@@ -330,3 +330,29 @@ def test_existing_closed_settings_response_stays_compatible_after_interval_save(
             assert reply.status_code == 200, reply.text
             validator.validate(reply.json())
             validator.validate(client.get(path).json())
+
+
+def test_interval_command_outcomes_preserve_old_setting_keys(tmp_path):
+    import json
+    from pathlib import Path
+    from jsonschema import Draft202012Validator
+    pinned = json.loads((Path(__file__).parents[1] / 'fixtures/settings-v3-3.0.0.json').read_text())['schema']
+    context_validator = Draft202012Validator({'$ref': '#/components/schemas/CommandSettingsPatch', 'components': pinned['components']})
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+        path = '/api/v3/settings/oko/global'
+        assert client.patch(path, json={'feed_refresh_minutes': 25}, headers={'X-Oko-Action': 'interval-saved'}).status_code == 200
+        saved = client.get('/api/v3/commands/interval-saved').json()
+        assert saved['context']['keys'] == []
+        context_validator.validate(saved['context'])
+        context = saved['context']
+        for outcome in ('failed', 'unknown'):
+            response = client.post('/api/v3/command-observations', json={'id': 'interval-' + outcome, 'context': context, 'result': outcome})
+            assert response.status_code == 200, response.text
+            problems = client.get('/api/v3/status').json()['problems']['current']
+            problem = next(problem for problem in problems if problem['command_id'] == 'interval-' + outcome)
+            assert problem['affected'] == [{'kind': 'settings', 'target': {'scope': 'oko', 'owner': 'global'}}]
+            assert problem['recovery'] == []  # A compatible general settings problem, without a new output enum.
+        failed = client.get('/api/v3/commands/interval-failed').json()
+        assert failed['outcome'] == 'failed'
+        context_validator.validate(failed['context'])
+        assert client.get('/api/v3/commands/interval-unknown').json()['outcome'] == 'unknown'

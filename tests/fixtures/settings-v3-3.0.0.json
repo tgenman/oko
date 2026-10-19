@@ -306,6 +306,113 @@
           },
           "required": [],
           "additionalProperties": false
+        },
+        "CommandSettingsPatch": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "settings_patch"
+            },
+            "target": {
+              "$ref": "#/components/schemas/SettingsTarget"
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/SettingKey"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "target",
+            "keys"
+          ],
+          "additionalProperties": false
+        },
+        "SettingsTarget": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/OkoSettingsTarget"
+            },
+            {
+              "$ref": "#/components/schemas/FolderSettingsTarget"
+            },
+            {
+              "$ref": "#/components/schemas/FeedSettingsTarget"
+            }
+          ],
+          "discriminator": {
+            "propertyName": "scope",
+            "mapping": {
+              "oko": "#/components/schemas/OkoSettingsTarget",
+              "folder": "#/components/schemas/FolderSettingsTarget",
+              "feed": "#/components/schemas/FeedSettingsTarget"
+            }
+          }
+        },
+        "OkoSettingsTarget": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "oko"
+            },
+            "owner": {
+              "type": "string",
+              "const": "global"
+            }
+          },
+          "required": [
+            "scope",
+            "owner"
+          ],
+          "additionalProperties": false
+        },
+        "FolderSettingsTarget": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "folder"
+            },
+            "owner": {
+              "$ref": "#/components/schemas/FolderId"
+            }
+          },
+          "required": [
+            "scope",
+            "owner"
+          ],
+          "additionalProperties": false
+        },
+        "FeedSettingsTarget": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "feed"
+            },
+            "owner": {
+              "$ref": "#/components/schemas/FeedId"
+            }
+          },
+          "required": [
+            "scope",
+            "owner"
+          ],
+          "additionalProperties": false
+        },
+        "SettingKey": {
+          "type": "string",
+          "enum": [
+            "originals",
+            "theses",
+            "prompt_theses",
+            "prompt_filters",
+            "processor"
+          ]
         }
       }
     }
