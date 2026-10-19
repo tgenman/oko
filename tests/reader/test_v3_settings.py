@@ -277,3 +277,41 @@ def test_general_theses_off_youtube_defaults_on_with_public_ai_and_explicit_deni
     with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
         assert client.get(path).json()['effective']['theses']['value'] is False
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['public_ai'] is False
+
+
+def test_global_feed_refresh_interval_persists_and_resets(tmp_path):
+    path = '/api/v3/settings/oko/global'
+    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
+        assert client.get(path).json()['effective']['feed_refresh_minutes'] == {'value': 15, 'origin': {'scope': 'default'}}
+        saved = client.patch(path, json={'feed_refresh_minutes': 25})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()['effective']['feed_refresh_minutes'] == {'value': 25, 'origin': {'scope': 'oko', 'owner': 'global'}}
+        assert saved.json()['overrides']['feed_refresh_minutes'] == 25
+    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
+        assert client.get(path).json()['effective']['feed_refresh_minutes']['value'] == 25
+        reset = client.patch(path, json={'feed_refresh_minutes': None})
+        assert reset.status_code == 200, reset.text
+        assert reset.json()['effective']['feed_refresh_minutes'] == {'value': 15, 'origin': {'scope': 'default'}}
+        assert 'feed_refresh_minutes' not in reset.json()['overrides']
+
+
+def test_feed_refresh_interval_is_strict_and_global_only(tmp_path):
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+        path = '/api/v3/settings/oko/global'
+        for invalid in (0, 1441, 1.5, True, '15'):
+            response = client.patch(path, json={'feed_refresh_minutes': invalid})
+            assert response.status_code == 422, response.text
+        for valid in (1, 1440):
+            response = client.patch(path, json={'feed_refresh_minutes': valid})
+            assert response.status_code == 200, response.text
+        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]
+        for target in ('folder/' + feed['folder_id'], 'feed/' + feed['id']):
+            target_path = '/api/v3/settings/' + target
+            for value in (20, None):
+                response = client.patch(target_path, json={'feed_refresh_minutes': value, 'originals': False})
+                assert response.status_code == 400, response.text
+                assert response.json()['code'] == 'setting_scope_invalid'
+            result = client.get(target_path).json()
+            assert 'feed_refresh_minutes' not in result['effective']
+            assert result['overrides'] == {}
+        assert client.get(path).json()['effective']['feed_refresh_minutes']['value'] == 1440

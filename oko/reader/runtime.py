@@ -524,8 +524,10 @@ class Runtime:
             try:
                 current = self.require_store()
                 result = current.subscriptions.update_settings(scope, owner, body)
-                current.settings_changed()
-                await self._cancel()
+                self._collection_interval = current.subscriptions.feed_refresh_minutes() * 60
+                if body.model_fields_set - {'feed_refresh_minutes'}:
+                    current.settings_changed()
+                    await self._cancel()
                 return result
             except LookupError as error:
                 record_caught('runtime.update_settings')
@@ -1067,6 +1069,7 @@ class Runtime:
             if viewed and self.diagnostics:
                 self.diagnostics.forget_materials(viewed)
             config = self._store.subscriptions
+            self._collection_interval = config.feed_refresh_minutes() * 60
             if (self._source and self._source_feed == 'demo') or any(c['feed_id'] == 'demo' for c in self._store.cards()):
                 config.ensure_demo()
             if self._source:
@@ -1098,7 +1101,7 @@ class Runtime:
                                 self._ai_feed = self._store.item_feed(ai_job.item)
                                 self._ai = asyncio.create_task(self._execute_ai(ai_job))
                         self._sync_sources()
-                        if now-self._last_collection >= 300:
+                        if now-self._last_collection >= self._collection_interval:
                             for feed in self._sources:
                                 self._store.enqueue_discovery(feed)
                             self._last_collection = now

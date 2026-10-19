@@ -900,6 +900,15 @@ export type DuplicateSourceErrorDetails = {
     existing_feeds: Array<ExistingTelegramFeed>;
 };
 
+export type EffectiveFeedRefreshMinutes = {
+    origin: ({
+        scope: 'DefaultSettingOrigin';
+    } & DefaultSettingOrigin) | ({
+        scope: 'OkoSettingOrigin';
+    } & OkoSettingOrigin);
+    value: number;
+};
+
 export type EffectiveOriginals = {
     origin: SettingOrigin;
     value: boolean;
@@ -1587,14 +1596,23 @@ export type NewFeedVerification = {
     verification: string;
 };
 
+export type OkoEffectiveSettingsValues = {
+    feed_refresh_minutes: EffectiveFeedRefreshMinutes;
+    originals: EffectiveOriginals;
+    processor: EffectiveProcessor;
+    prompt_filters: EffectivePromptFilters;
+    prompt_theses: EffectivePromptTheses;
+    theses: EffectiveTheses;
+};
+
 export type OkoSettingOrigin = {
     owner: 'global';
     scope: 'oko';
 };
 
 export type OkoSettingsSnapshot = {
-    effective: EffectiveSettingsValues;
-    overrides: StoredOverrides;
+    effective: OkoEffectiveSettingsValues;
+    overrides: OkoStoredOverrides;
     owner: 'global';
     scope: 'oko';
 };
@@ -1602,6 +1620,15 @@ export type OkoSettingsSnapshot = {
 export type OkoSettingsTarget = {
     owner: 'global';
     scope: 'oko';
+};
+
+export type OkoStoredOverrides = {
+    feed_refresh_minutes?: number;
+    originals?: boolean;
+    processor?: StoredProcessorSelection;
+    prompt_filters?: string;
+    prompt_theses?: string;
+    theses?: boolean;
 };
 
 export type OriginNotAllowedError = {
@@ -2113,7 +2140,7 @@ export type SessionRequiredError = {
     message: string;
 };
 
-export type SettingKey = 'originals' | 'theses' | 'prompt_theses' | 'prompt_filters' | 'processor';
+export type SettingKey = 'originals' | 'theses' | 'prompt_theses' | 'prompt_filters' | 'processor' | 'feed_refresh_minutes';
 
 export type SettingOrigin = ({
     scope: 'default';
@@ -2138,6 +2165,10 @@ export type SettingScopeInvalidErrorDetails = {
 };
 
 export type SettingsPatch = {
+    /**
+     * Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.
+     */
+    feed_refresh_minutes?: number | null;
     originals?: boolean | null;
     processor?: ProcessorSelection | null;
     prompt_filters?: string | null;

@@ -30,9 +30,13 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.E
     saved = value.overrides.model_dump(exclude_unset=True)
     if isinstance(saved.get('processor'), str):
         saved['processor'] = processor(saved['processor']).model_dump(mode='json')
-    overrides = wire.StoredOverrides.model_validate(saved)
     if scope == 'oko':
-        return wire.EffectiveSettingsSnapshot(wire.OkoSettingsSnapshot(scope='oko', owner='global', effective=values, overrides=overrides))
+        interval = value.effective.feed_refresh_minutes
+        if not isinstance(interval, facts.FeedRefreshMinutes):
+            raise ValueError('Oko settings require a feed refresh interval')
+        global_values = wire.OkoEffectiveSettingsValues.model_validate({**values.model_dump(), 'feed_refresh_minutes': {'value': interval.value, 'origin': origin(interval.scope, interval.owner).model_dump()}})
+        return wire.EffectiveSettingsSnapshot(wire.OkoSettingsSnapshot(scope='oko', owner='global', effective=global_values, overrides=wire.OkoStoredOverrides.model_validate(saved)))
+    overrides = wire.StoredOverrides.model_validate(saved)
     if scope == 'folder':
         return wire.EffectiveSettingsSnapshot(wire.FolderSettingsSnapshot(scope='folder', owner=wire.FolderId(owner), effective=values, overrides=overrides))
     from oko.reader.projection_v3 import subscription
@@ -73,6 +77,11 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         from oko.reader.commands_v3 import track
         context = wire.CommandContext(wire.CommandSettingsPatch(operation='settings_patch', target=target(scope, owner), keys=[wire.SettingKey.model_validate(key) for key in sorted(body.model_fields_set)]))
         async with track(runtime, request, context):
+            if scope != 'oko' and 'feed_refresh_minutes' in body.model_fields_set:
+                raise ApiError(400, wire.ErrorEnvelope(wire.SettingScopeInvalidError(
+                    code='setting_scope_invalid', message='Интервал обновления задаётся только в Настройках Око',
+                    details=wire.SettingScopeInvalidErrorDetails(reason='feed_refresh_is_global_only'),
+                    diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
             result = await runtime.update_settings(scope, owner, Overrides.model_validate(body.model_dump(exclude_unset=True)))
             return snapshot(scope, owner, facts.EffectiveSettings.model_validate(result), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None)
 

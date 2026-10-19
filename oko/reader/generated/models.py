@@ -823,12 +823,24 @@ class SessionRequiredError(WireModel):
 
 class SettingKey(
     RootModel[
-        Literal["originals", "theses", "prompt_theses", "prompt_filters", "processor"]
+        Literal[
+            "originals",
+            "theses",
+            "prompt_theses",
+            "prompt_filters",
+            "processor",
+            "feed_refresh_minutes",
+        ]
     ]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
-        "originals", "theses", "prompt_theses", "prompt_filters", "processor"
+        "originals",
+        "theses",
+        "prompt_theses",
+        "prompt_filters",
+        "processor",
+        "feed_refresh_minutes",
     ] = Field(..., examples=["originals"])
 
 
@@ -854,6 +866,16 @@ class SettingScopeInvalidErrorDetails(WireModel):
     reason: StrictStr
 
 
+class FeedRefreshMinutes(RootModel[StrictInt]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictInt = Field(
+        ...,
+        description="Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.",
+        ge=1,
+        le=1440,
+    )
+
+
 class PromptFilters(RootModel[StrictStr]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictStr = Field(..., max_length=20000)
@@ -866,6 +888,10 @@ class PromptTheses(RootModel[StrictStr]):
 
 class SettingsPatch(WireModel):
     model_config = ConfigDict(extra="forbid")
+    feed_refresh_minutes: FeedRefreshMinutes | None | MISSING = Field(
+        default=MISSING,
+        description="Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.",
+    )
     originals: StrictBool | None | MISSING = MISSING
     processor: ProcessorSelection | None | MISSING = MISSING
     prompt_filters: PromptFilters | None | MISSING = MISSING
@@ -1432,6 +1458,12 @@ class DiagnosticJournal(WireModel):
     persistence_error: StrictStr | None
 
 
+class EffectiveFeedRefreshMinutes(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    origin: DefaultSettingOrigin | OkoSettingOrigin = Field(..., discriminator="scope")
+    value: StrictInt = Field(..., ge=1, le=1440)
+
+
 class EffectiveOriginals(WireModel):
     model_config = ConfigDict(extra="forbid")
     origin: SettingOrigin
@@ -1620,6 +1652,26 @@ class NewFeedVerification(WireModel):
     candidate: FeedCandidate
     state: Literal["new"]
     verification: StrictStr = Field(..., min_length=1)
+
+
+class OkoEffectiveSettingsValues(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    feed_refresh_minutes: EffectiveFeedRefreshMinutes
+    originals: EffectiveOriginals
+    processor: EffectiveProcessor
+    prompt_filters: EffectivePromptFilters
+    prompt_theses: EffectivePromptTheses
+    theses: EffectiveTheses
+
+
+class OkoStoredOverrides(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    feed_refresh_minutes: StrictInt | MISSING = Field(default=MISSING, ge=1, le=1440)
+    originals: StrictBool | MISSING = MISSING
+    processor: StoredProcessorSelection | MISSING = MISSING
+    prompt_filters: StrictStr | MISSING = Field(default=MISSING, max_length=20000)
+    prompt_theses: StrictStr | MISSING = Field(default=MISSING, max_length=20000)
+    theses: StrictBool | MISSING = MISSING
 
 
 class PersonalTelegramProfileIdentityMismatch(WireModel):
@@ -2492,8 +2544,8 @@ class HistoryState(
 
 class OkoSettingsSnapshot(WireModel):
     model_config = ConfigDict(extra="forbid")
-    effective: EffectiveSettingsValues
-    overrides: StoredOverrides
+    effective: OkoEffectiveSettingsValues
+    overrides: OkoStoredOverrides
     owner: Literal["global"]
     scope: Literal["oko"]
 
@@ -3756,6 +3808,10 @@ class EffectiveSettingsSnapshot(
         examples=[
             {
                 "effective": {
+                    "feed_refresh_minutes": {
+                        "origin": {"scope": "default"},
+                        "value": 15,
+                    },
                     "originals": {"origin": {"scope": "default"}, "value": False},
                     "processor": {"origin": {"scope": "default"}, "value": "codex"},
                     "prompt_filters": {

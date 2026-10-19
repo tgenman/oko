@@ -5119,6 +5119,10 @@ paths:
                 scope: oko
                 owner: global
                 effective:
+                  feed_refresh_minutes:
+                    value: 15
+                    origin:
+                      scope: default
                   originals:
                     value: false
                     origin:
@@ -5377,6 +5381,10 @@ paths:
                 scope: oko
                 owner: global
                 effective:
+                  feed_refresh_minutes:
+                    value: 15
+                    origin:
+                      scope: default
                   originals:
                     value: false
                     origin:
@@ -11626,6 +11634,7 @@ components:
       - prompt_theses
       - prompt_filters
       - processor
+      - feed_refresh_minutes
       examples:
       - originals
     FeedField:
@@ -13717,6 +13726,13 @@ components:
           anyOf:
           - $ref: '#/components/schemas/ProcessorSelection'
           - type: 'null'
+        feed_refresh_minutes:
+          description: Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.
+          anyOf:
+          - type: integer
+            minimum: 1
+            maximum: 1440
+          - type: 'null'
       required: []
       additionalProperties: false
       examples:
@@ -13884,9 +13900,9 @@ components:
           type: string
           const: global
         effective:
-          $ref: '#/components/schemas/EffectiveSettingsValues'
+          $ref: '#/components/schemas/OkoEffectiveSettingsValues'
         overrides:
-          $ref: '#/components/schemas/StoredOverrides'
+          $ref: '#/components/schemas/OkoStoredOverrides'
       required:
       - scope
       - owner
@@ -13915,6 +13931,10 @@ components:
               scope: default
           processor:
             value: codex
+            origin:
+              scope: default
+          feed_refresh_minutes:
+            value: 15
             origin:
               scope: default
         overrides: {}
@@ -14099,6 +14119,10 @@ components:
               scope: default
           processor:
             value: codex
+            origin:
+              scope: default
+          feed_refresh_minutes:
+            value: 15
             origin:
               scope: default
         overrides: {}
@@ -20441,6 +20465,98 @@ components:
         diagnostic_id: null
         command_id: null
 
+    EffectiveFeedRefreshMinutes:
+      type: object
+      properties:
+        value:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        origin:
+          oneOf:
+          - $ref: '#/components/schemas/DefaultSettingOrigin'
+          - $ref: '#/components/schemas/OkoSettingOrigin'
+          discriminator:
+            propertyName: scope
+      required:
+      - value
+      - origin
+      additionalProperties: false
+      examples:
+      - value: 15
+        origin:
+          scope: default
+    OkoEffectiveSettingsValues:
+      type: object
+      properties:
+        originals:
+          $ref: '#/components/schemas/EffectiveOriginals'
+        theses:
+          $ref: '#/components/schemas/EffectiveTheses'
+        prompt_theses:
+          $ref: '#/components/schemas/EffectivePromptTheses'
+        prompt_filters:
+          $ref: '#/components/schemas/EffectivePromptFilters'
+        processor:
+          $ref: '#/components/schemas/EffectiveProcessor'
+        feed_refresh_minutes:
+          $ref: '#/components/schemas/EffectiveFeedRefreshMinutes'
+      required:
+      - originals
+      - theses
+      - prompt_theses
+      - prompt_filters
+      - processor
+      - feed_refresh_minutes
+      additionalProperties: false
+      examples:
+      - originals:
+          value: false
+          origin:
+            scope: default
+        theses:
+          value: false
+          origin:
+            scope: default
+        prompt_theses:
+          value: example
+          origin:
+            scope: default
+        prompt_filters:
+          value: example
+          origin:
+            scope: default
+        processor:
+          value: codex
+          origin:
+            scope: default
+        feed_refresh_minutes:
+          value: 15
+          origin:
+            scope: default
+    OkoStoredOverrides:
+      type: object
+      properties:
+        originals:
+          type: boolean
+        theses:
+          type: boolean
+        prompt_theses:
+          type: string
+          maxLength: 20000
+        prompt_filters:
+          type: string
+          maxLength: 20000
+        processor:
+          $ref: '#/components/schemas/StoredProcessorSelection'
+        feed_refresh_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+      required: []
+      additionalProperties: false
+      examples:
+      - {}
   securitySchemes:
     ReaderSession:
       type: http

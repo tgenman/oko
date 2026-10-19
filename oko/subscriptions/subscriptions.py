@@ -30,6 +30,7 @@ class AddFeed(FeedURL):
 
 class Overrides(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
+    feed_refresh_minutes: int | None = Field(default=None, ge=1, le=1440)
     originals: bool | None = None
     theses: bool | None = None
     prompt_theses: str | None = Field(default=None, max_length=20000)
@@ -47,6 +48,9 @@ class FeedPatch(BaseModel):
     read_history: bool | None = None
     auto_read: bool | None = None
     transport: Literal['telegram', 'rss', 'youtube'] | None = None
+
+
+DEFAULT_FEED_REFRESH_MINUTES = 15
 
 
 DEFAULTS: dict[str, Any] = dict(
@@ -226,6 +230,10 @@ class Subscriptions:
         if not table or not self.db.execute(f'SELECT id FROM {table} WHERE id=?', (owner,)).fetchone():
             raise LookupError('Настройка не найдена')
 
+    def feed_refresh_minutes(self) -> int:
+        row = self.db.execute("SELECT value FROM settings WHERE scope='oko' AND owner='global' AND field='feed_refresh_minutes'").fetchone()
+        return int(json.loads(row['value'])) if row else DEFAULT_FEED_REFRESH_MINUTES
+
     def effective(self, scope: str, owner: str) -> dict[str, Any]:
         self.check_owner(scope, owner)
         feed = self.feeds(owner)[0] if scope == 'feed' else None
@@ -235,13 +243,14 @@ class Subscriptions:
             chain.append(('folder', folder))
         if scope != 'oko':
             chain.append((scope, owner))
-        values = {field: dict(value=value, scope='default', owner=None) for field, value in DEFAULTS.items()}
+        defaults = {**DEFAULTS, 'feed_refresh_minutes': DEFAULT_FEED_REFRESH_MINUTES} if scope == 'oko' else DEFAULTS
+        values = {field: dict(value=value, scope='default', owner=None) for field, value in defaults.items()}
         if feed is not None and feed['kind'] == 'youtube':
             values['theses']['value'] = True
         overrides = {}
         for level, identity in chain:
             for row in self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (level, identity)):
-                if row['field'] not in DEFAULTS:
+                if row['field'] not in defaults:
                     continue
                 value = json.loads(row['value'])
                 values[row['field']] = dict(value=value, scope=level, owner=identity)

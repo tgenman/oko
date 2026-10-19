@@ -89,9 +89,16 @@ class Theses(WireModel):
     scope: Literal['default', 'oko', 'folder', 'feed']
     value: StrictBool
 
+class FeedRefreshMinutes(WireModel):
+    owner: StrictStr | None
+    scope: Literal['default', 'oko']
+    value: StrictInt
+
+
 class EffectiveValues(WireModel):
     model_config = ConfigDict(extra='forbid')
     originals: Originals
+    feed_refresh_minutes: FeedRefreshMinutes | MISSING = MISSING
     processor: Processor
     prompt_filters: PromptFilters
     prompt_theses: PromptTheses
@@ -189,6 +196,7 @@ class Reference(WireModel):
     url: StrictStr = Field(..., title='Url')
 
 class SettingOverrides(WireModel):
+    feed_refresh_minutes: StrictInt | MISSING = MISSING
     model_config = ConfigDict(extra='forbid')
     originals: StrictBool | MISSING = MISSING
     processor: StrictStr | MISSING = MISSING
