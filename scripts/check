@@ -28,7 +28,8 @@ class Report:
         self.directory = base / (stamp + '-' + uuid4().hex[:8])
         self.directory.mkdir(parents=True)
         self.log = (self.directory / 'output.log').open('w', encoding='utf-8')
-        self.data = dict(started_at=stamp, selected_files=selected_files,
+        self.compact = False
+        self.data = dict(started_at=stamp, selected_files=selected_files, checkout=dict(status='PASS', changed_files=[]),
                          suites={name: dict(status='NOT RUN', commands=[], failures=[]) for name in names})
         self.current = None
         self.pending_line = ''
@@ -39,7 +40,8 @@ class Report:
 
     def output(self, value, stream=None):
         self.write(value)
-        print(value, end='', file=stream or sys.stdout, flush=True)
+        if not self.compact:
+            print(value, end='', file=stream or sys.stdout, flush=True)
         lines = (self.pending_line + value).split('\n')
         self.pending_line = lines.pop()
         for line in lines:
@@ -50,12 +52,19 @@ class Report:
             passed = re.match(r'^# pass (\d+)$', line)
             if self.current == 'browser' and passed:
                 self.data['suites']['browser']['passed_scenarios'] = int(passed.group(1))
-            match = re.match(r'^(?:FAILED|ERROR) (\S+)', line)
+            match = re.match(r'^(?:FAILED|ERROR) (.+?)(?: - |$)', line)
             tap = re.match(r'^\s*not ok \d+ - (.+)', line)
             failure = match.group(1) if match else tap.group(1).strip() if tap else None
             failures = self.data['suites'][self.current]['failures']
             if failure and failure not in failures:
                 failures.append(failure)
+
+    def checkout_changed(self, changed):
+        if changed:
+            guard = self.data['checkout']
+            guard['status'] = 'FAIL'
+            guard['changed_files'] = sorted(set(guard['changed_files']) | set(changed))
+            self.output('Checkout changed during checks:\n' + ''.join('  ' + name + '\n' for name in changed))
 
     def flush_line(self):
         self.failure(self.pending_line)
@@ -197,7 +206,7 @@ def checkout_state(excluded):
     return result
 
 
-TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_TESTS = ('tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
                'tests/support/', 'frontend/src/api/generated/',
                'oko/reader/generated/',
@@ -384,10 +393,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
         changed = sorted(name for name in baseline.keys() | after.keys() if baseline.get(name) != after.get(name))
         for name in original_names:
             report.data['suites'][name]['checkout_changes'] = changed
-            if changed:
-                results[name] = 'FAIL (tests changed checkout files)'
-        if changed:
-            report.output('Tests changed checkout files:\n' + ''.join('  ' + name + '\n' for name in changed))
+        report.checkout_changed(changed)
 
 
 
@@ -407,6 +413,8 @@ def main():
     parser.add_argument('--tools-needed', action='store_true', help='Print tool-change selection and exit before setting up runtimes')
     parser.add_argument('--base', help='Git revision for tool-change selection; default: merge-base with origin/main')
     parser.add_argument('--if-changed', action='store_true', help='Run the explicit tools suite only when its inputs changed')
+    parser.add_argument('--in-place', action='store_true', help='Check this checkout directly; local all otherwise uses a captured tree')
+    parser.add_argument('--compact', action='store_true', help='Print the summary only; preserve full output in the report log')
     args = parser.parse_args()
     if args.if_changed and args.sets != ['tools']:
         parser.error('--if-changed requires the tools group alone')
@@ -450,7 +458,33 @@ def main():
             parser.error(f'File does not match selected checks: {value}')
     if 'lifecycle' in args.sets and not {'ui','all','browser'} & set(args.sets) and not selected_files['browser']:
         selected_files['browser'] = [str(ROOT / 'tests/browser/test_ui_lifecycle.ts')]
+    if 'all' in args.sets and not args.in_place and not os.environ.get('CI'):
+        from check_snapshot import run
+        from task_changes import TaskError
+        # Rebuild paths relative to the source; absolute --files must refer to
+        # their captured counterparts rather than the editable checkout.
+        arguments = [*args.sets]
+        for option, value in (('--match', args.match),):
+            if value is not None:
+                arguments.extend([option, value])
+        if args.files:
+            arguments.append('--files')
+            for value in args.files:
+                filename, *node_id = value.split('::', 1)
+                relative = (ROOT / filename).resolve().relative_to(ROOT)
+                arguments.append(str(relative) + ('::' + node_id[0] if node_id else ''))
+        arguments.extend(['--browser-workers', str(args.browser_workers)])
+        if args.compact:
+            arguments.append('--compact')
+        try:
+            return run(ROOT, arguments, args.report_dir.resolve(), args.base)
+        except (TaskError, OSError, ValueError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
     report = Report(args.report_dir.resolve(), names, selected_files)
+    report.compact = args.compact
+    if os.environ.get('OKO_CHECK_SNAPSHOT'):
+        report.data['snapshot'] = json.loads(os.environ['OKO_CHECK_SNAPSHOT'])
     report.data['browser_name_pattern'] = args.match
     report.data['tool_selection'] = dict(required=tools_required, inputs=tool_inputs, base=args.base)
     if ('all' in args.sets and not args.files) or args.if_changed:
@@ -560,10 +594,8 @@ def main():
                 after = checkout_state(report.directory)
                 changed = sorted(name for name in baseline.keys() | after.keys() if baseline.get(name) != after.get(name))
                 report.data['suites'][current]['checkout_changes'] = changed
-                if changed:
-                    report.output('Tests changed checkout files:\n' + ''.join('  ' + name + '\n' for name in changed))
-                    results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
-        exit_code = int(any(not value.startswith('PASS') for value in results.values()))
+                report.checkout_changed(changed)
+        exit_code = int(report.data['checkout']['status'] != 'PASS' or any(not value.startswith('PASS') for value in results.values()))
     except KeyboardInterrupt:
         if current and results[current] == 'NOT RUN':
             results[current] = 'INTERRUPTED'
@@ -575,6 +607,7 @@ def main():
         report.output(str(error) + '\n', stream=sys.stderr)
     finally:
         report.current = None
+        report.compact = False
         report.output('\nCheck summary\n')
         for name, status in results.items():
             state, *detail = status.split(' ', 1)
@@ -582,6 +615,11 @@ def main():
                 report.output(f'NOT RUN {name}\n')
             else:
                 report.output(f'{state} {name} {" ".join(detail)}'.rstrip() + '\n')
+        if report.data['checkout']['status'] != 'PASS':
+            report.output('FAIL checkout_changed: ' + ', '.join(report.data['checkout']['changed_files']) + '\n')
+        for name, suite in report.data['suites'].items():
+            for failure in suite['failures']:
+                report.output(f'  {name}: {failure}\n')
         report.output(f'Total {time.monotonic() - started:.2f}s\n')
         report.output(f'Report: {report.directory / "report.json"}\n')
         report.finish(results, exit_code, started)

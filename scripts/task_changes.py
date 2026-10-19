@@ -302,16 +302,20 @@ def checkout(root, prepared, output):
     """Materialize the immutable task tree with its real base and an independent index."""
     plan = load_snapshot(root, prepared)
     prepared_entries(root, prepared, plan)
+    checkout_tree(root, plan['head'], plan['task_tree'], output)
+
+def checkout_tree(root, head, tree, output):
+    """Materialize a captured tree without sharing an index or remotes."""
     directory = external_directory(root, output)
     env = dict(os.environ)
     env.pop('GIT_INDEX_FILE', None)
     git(root, 'clone', '--local', '--no-hardlinks', '--no-checkout', '--', str(root), str(directory), env=env)
-    git(directory, 'update-ref', '--no-deref', 'HEAD', plan['head'], env=env)
-    git(directory, 'read-tree', '--reset', '-u', plan['task_tree'], env=env)
+    git(directory, 'update-ref', '--no-deref', 'HEAD', head, env=env)
+    git(directory, 'read-tree', '--reset', '-u', tree, env=env)
     git(directory, 'remote', 'remove', 'origin', env=env)
     print('Checkout:', directory)
-    print('Base:', plan['head'])
-    print('Task tree:', plan['task_tree'])
+    print('Base:', head)
+    print('Task tree:', tree)
 
 
 def commit(root, directory, message):
