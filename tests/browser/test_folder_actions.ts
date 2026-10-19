@@ -60,3 +60,24 @@ test('late folder completion preserves another folder material and confirmation 
     expect(r.errors).toEqual([]);
   }finally{await r.close();}
 });
+
+test('reopening a folder confirmation cannot duplicate its pending completion',async()=>{
+  const r=await reader();try {
+    await r.start([material('a')]);await chooseFolder(r);
+    await r.page.evaluate(()=>{
+      readerTransport.replies.set('/api/v3/folders/f/completion/preview',{body:{token:'captured',cards_count:1,publications_count:1}});
+      readerTransport.held.set('/api/v3/folders/f/completion',true);
+    });
+    await r.page.locator('#folder-viewed').click();await expect(r.page.locator('#completion-confirm')).toBeEnabled();
+    await r.page.locator('#completion-confirm').click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/folders/f/completion'));
+    await r.page.locator('#completion-close').click();await r.page.locator('#folder-viewed').click();
+    await expect(r.page.locator('#completion-count')).toContainText('Cards: 1');
+    await expect(r.page.locator('#completion-confirm')).toBeDisabled();
+    expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/folders/f/completion').length)).toBe(1);
+    await r.page.evaluate(()=>readerTransport.release('/api/v3/folders/f/completion',{ok:true}));
+    await expect(r.page.locator('#completion-confirm')).toBeEnabled();
+    await expect(r.page.locator('#completion-dialog')).toBeVisible();
+    expect(r.errors).toEqual([]);
+  }finally{await r.close();}
+});

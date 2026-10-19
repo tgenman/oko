@@ -68,12 +68,10 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   const folderActions = createFolderActions({
     readerApi, isStopped: () => stopped,
     getFolder: () => tree.selection.kind === 'folder' ? tree.selection.id : null,
-    onRefresh: refresh,
-    onCompleted: folder => {
+    onSettled: folder => {
       contentEpoch++;
-      opened.folderCompleted(folder);
-      if (tree.selection.kind === 'folder' && tree.selection.id === folder) list.clear();
       session.post({kind: 'folder-viewed', folder});
+      void refresh();
     },
   });
   list.bindCommands(folderActions);
@@ -81,11 +79,12 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     readerApi, isStopped: () => stopped,
     onSettings: (id, trigger) => {void menus.openFeed(id, trigger);},
     onChanged: changed,
-    onCompleted: feed => {
+    onSettled: feed => {
       // A completion token cannot cover later arrivals. Reconcile the accepted
       // cards on refresh instead of clearing everything belonging to this feed.
       contentEpoch++;
       session.post({kind: 'feed-viewed', feed});
+      void refresh();
     },
     onMove: id => menus.feedMoved(id),
     removeFeed: id => menus.removeFeed(id),
@@ -124,7 +123,6 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     if (data === 'stop') stopUi('Oko stopped');
     else if (typeof data === 'object') {
       contentEpoch++;
-      if (data.kind === 'folder-viewed') opened.folderCompleted(data.folder);
       refresh();
     } else {
       viewed(data, false);
