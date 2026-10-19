@@ -6,6 +6,7 @@ import {feedOptions} from './settings-actions';
 
 test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-add', {timeout:25000},async t=>{
  const {page,api,origin,token}=await productionReader(t);
+ const chooseFolder=async()=>{const picker=page.locator('#telegram-folder');if(await picker.locator('option').filter({hasText:/^News$/}).count())await picker.selectOption({label:'News'});else await page.locator('#telegram-folder-new').fill('News');};
  await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
  await page.goto(origin+'/#token='+token);
  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
@@ -17,7 +18,7 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await page.screenshot({path:artifactPath('telegram-connect-mobile.png')});
  await page.setViewportSize({width:1280,height:900});
  const created=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');
- await page.locator('#telegram-add').click();
+ await chooseFolder();await page.locator('#telegram-add').click();
  const old=(await (await created).json()).feed_id;
  await expect(page.locator('#feeds-dialog')).toBeVisible();await feedOptions(page);
  await expect(page.locator('#feed-options')).toContainText('Web Access');
@@ -45,7 +46,7 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await page.locator('#settings-close').click();
  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
  await page.locator('#telegram-peer').fill('https://t.me/s/fixture/11');
- await page.locator('#telegram-add').click();
+ await chooseFolder();await page.locator('#telegram-add').click();
  await expect(page.getByRole('dialog',{name:'Source already added'})).toBeVisible();
  await expect(page.locator('#telegram-duplicate')).toContainText('Web Access');
  await page.screenshot({path:artifactPath('telegram-duplicate-mobile.png')});
@@ -57,14 +58,14 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await expect(page.locator('#feed-tree [data-owner="feed/'+old+'"]')).toHaveCount(0);
  await page.locator('#feeds-close').click();await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
  await page.locator('#telegram-peer').fill('@fixture');
- const again=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');await page.locator('#telegram-add').click();
+ const again=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');await chooseFolder();await page.locator('#telegram-add').click();
  expect((await (await again).json()).feed_id).not.toBe(old);
  await expect(page.locator('#feeds-dialog')).toBeVisible();await page.locator('#feeds-close').click();
  for(const role of ['personal','collection']){
   await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
   await page.locator('#telegram-access').selectOption(role);await page.locator('#telegram-peer').fill('@'+role);
   const connected=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');
-  await page.locator('#telegram-add').click();const response=await connected;
+  await chooseFolder();await page.locator('#telegram-add').click();const response=await connected;
   expect(response.status()).toBe(200);expect((await response.json()).access.role).toBe(role);
   expect(response.request().postDataJSON().auto_read).toBe(false);
   await expect(page.locator('#feeds-dialog')).toBeVisible();await feedOptions(page);

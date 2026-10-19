@@ -30,7 +30,7 @@ let statusPanel:ReturnType<typeof createStatusPanel>;
 const actions = createReaderActions({readerApi,onChanged:()=>statusPanel?.redraw()});
 readerApi.setActionTracker(actions);
 const api={discardDraft:async(path:string,field:string,method?:string)=>{await statusPanel.discardDraft(path,field,method);void reading.refresh();}};
-const menus = createMenus({api, readerApi, onChanged: () => {void reading.changed();}});
+const menus = createMenus({api, readerApi, fetchMedia:transport.media, onChanged: () => {void reading.changed();}});
 statusPanel = createStatusPanel({debug, actions,resourceName:resource=>reading.resourceName(resource),onAvailability:available=>{commandsAvailable=available;renderCommands();}, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
   onMaterial:id=>reading.openMaterial(id), onRetry:async(target)=>{
     if(target.kind==='retry_collection')await readerApi.collect(target.target);

@@ -177,7 +177,7 @@ def parse_page(data: bytes, username: str) -> WebPage:
             name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
             mime=m.mime or 'application/octet-stream',status='missing' if m.url else 'unsupported',reason=m.reason or '') for i,m in enumerate(media))
         manifest = SourceManifest(source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.kind) for m in media]),resources=resources)
-        teaser = Material(body.split('\n')[0][:160] or 'Telegram · медиа',body,False,
+        teaser = Material(body.split('\n')[0] or 'Telegram · медиа',body,False,
                           'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest)
         posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published,teaser,members),body,media))
     more = history.select_one('a.js-messages_more[href*="before="]')
@@ -245,7 +245,7 @@ async def avatar_metadata(page: WebPage, transport: httpx.AsyncBaseTransport | N
 
 async def preview(username: str, transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
     page,url = await load(username,0,transport)
-    return dict(username=username,title=page.title,preview_url=url,**await avatar_metadata(page,transport))
+    return dict(username=username,title=page.title,description=page.description,preview_url=url,**await avatar_metadata(page,transport))
 
 
 class WebTelegram:
@@ -257,7 +257,7 @@ class WebTelegram:
 
     async def metadata(self, page: WebPage) -> None:
         avatar = await avatar_metadata(page,self.transport) if self.identity_info is None or page.avatar_url != self._avatar_url else {key:value for key,value in self.identity_info.items() if key == 'avatar'}
-        self.identity_info = dict(username=self.username,title=page.title,**avatar)
+        self.identity_info = dict(username=self.username,title=page.title,description=page.description,**avatar)
         self._avatar_url = page.avatar_url
 
     @staticmethod

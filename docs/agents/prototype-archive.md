@@ -56,3 +56,16 @@ Primary-source ветка: `codex/power-prototype-20261019` (локальная)
 Исходник: `frontend/power-state-prototype.html`; интервью и проверка прототипа:
 `.scratch/power-state-prototype/`. Реализация: [#47](https://github.com/tgenman/oko/issues/47),
 [архитектура](../architecture/work-power.md).
+
+## Настройки фида — 19 октября 2026
+
+Выбран вариант B: поля Title/Link/Folder и описание слева, Activity справа.
+Уточнение пользователя: Link неизменяемый, только выделение/копирование; рядом
+маленькая кнопка Copy link. Макет первоначально позволял редактировать Link.
+
+Primary-source ветка: `codex/feed-settings-prototype-20261019` (локальная).
+Коммит: `1b1516cf09621304bdc9e9cde06908f85539bb6f`.
+Исходники: `frontend/feed-settings-prototype.html`,
+`frontend/src/settings/feed-settings-prototype.{tsx,css,md}`.
+Спецификация: `.scratch/feed-settings/spec.md`.
+Архив сохраняет все три варианта; рабочий редактор использует только B.

@@ -56,9 +56,9 @@ test('folder field resets preserve other overrides and new drafts', async () => 
     await r.page.locator('#setting-prompt_theses').fill('Unsaved prompt');
     await r.page.locator('#feed-tree').getByRole('button',{name:'Источник',exact:true}).click();
     await expect(r.page.getByRole('button',{name:'Объединение событий',exact:true})).toHaveCount(0);
-    await expect(r.page.locator('#feed-folder')).toBeHidden();
-    await r.page.getByRole('button',{name:'Connection and Options',exact:true}).click();
     await expect(r.page.locator('#feed-folder')).toBeVisible();
+    await r.page.getByRole('button',{name:'Connection and Options',exact:true}).click();
+    await expect(r.page.locator('#feed-folder')).toBeHidden();
     await r.page.locator('#feed-tree').getByRole('button',{name:'Наука',exact:true}).click();
     await editSetting(r.page,'prompt_theses');
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Unsaved prompt');

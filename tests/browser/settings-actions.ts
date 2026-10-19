@@ -17,7 +17,7 @@ async function modelPage(page: Page, title = 'llama.cpp') {
   await page.locator('[data-settings-target="' + (title === 'Codex' ? 'codex' : 'llamacpp') + '"]').click();
 }
 async function feedOptions(page: Page) {
-  if (await page.locator('#feed-folder').isVisible()) return;
+  if (await page.locator('[data-settings-page=feed-connection]').isVisible()) return;
   await settingsHome(page);
   await page.getByRole('button',{name:'Connection and Options',exact:true}).click();
 }

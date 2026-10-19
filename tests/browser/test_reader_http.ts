@@ -13,7 +13,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   await page.goto(origin+'/#token='+token);
   await expect.poll(async()=>{const cards=await api('cards'); return cards.length===2&&cards.every(c=>c.availability==='available'&&!c.loading);},{timeout:15000}).toBe(true);
   await expect(page.locator('#cards button')).toHaveCount(2);
-  await expect(page.locator('#cards .card-snippet').first()).toHaveText('Открылась библиотека на 24 места.');
+  await expect(page.locator('#cards .card-snippet')).toHaveCount(0);
   await expect(page.locator('#cards img')).toHaveCount(2);
   await expect.poll(()=>page.locator('#cards img').evaluateAll(images=>images.every(img=>(img as HTMLImageElement).complete&&(img as HTMLImageElement).naturalWidth>0))).toBe(true);
   const alpha=plan.feeds.find(feed=>feed.title==='Альфа'), beta=plan.feeds.find(feed=>feed.title==='Бета'), empty=plan.feeds.find(feed=>feed.title==='Пустой');

@@ -39,7 +39,7 @@
 #cards .material-row.active{background:#e7f1ff}
 #cards .material-row:focus-visible{outline-color:#007aff}
 #cards .card-preview{background:#f2f2f7;color:#636366}
-#cards :is(.card-kind,.card-snippet,.card-source,.card-date){color:#636366}
+#cards :is(.card-kind,.card-source,.card-date){color:#636366}
 #cards .date-group{background:#f2f2f7;border-color:#e5e5ea;color:#636366}
 #material-list :is(#list-menu-toggle,#folder-viewed){color:#636366}
 #material-list :is(#list-menu-toggle,#folder-viewed):focus-visible{outline-color:#007aff}

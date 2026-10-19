@@ -49,6 +49,14 @@ def snippet(text: str) -> str:
     return ' '.join(''.join(parser.parts).split())[:500]
 
 
+def _reading_heading(material: dict[str, Any] | None, feed: dict[str, Any]) -> dict[str, Any] | None:
+    # Older Telegram copies retain the full first line in their saved text.
+    # Project it for reading without rewriting source versions or processing state.
+    if material and feed['kind'] == 'telegram' and feed.get('transport') != 'rss' and material['text']:
+        material['title'] = material['text'].split('\n')[0] or material['title']
+    return material
+
+
 class ReadingComposition:
     def __init__(self, store: 'Store') -> None:
         self._store = store
@@ -60,7 +68,7 @@ class ReadingComposition:
             owner = feeds.get(row['feed_id'])
             if owner is None or (folder is not None and owner['folder_id'] != folder) or (feed is not None and row['feed_id'] != feed):
                 continue
-            material = self._store.material(row['id'])
+            material = _reading_heading(self._store.material(row['id']), owner)
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):
                 card = dict(material)
                 preview_text = material.get('description') or material.get('display_text', material['text'])
@@ -117,7 +125,12 @@ class ReadingComposition:
                               tuple(sorted(card['id'] for card in self.cards(True, feed=feed))))
 
     def material(self, identity: str) -> dict[str, Any] | None:
-        return self._store.material(identity)
+        material = self._store.material(identity)
+        if material:
+            owners = self._store.subscriptions.feeds(material['feed_id'])
+            if owners:
+                return _reading_heading(material, owners[0])
+        return material
 
     def members(self, identity: str) -> list[str]:
         return [identity]

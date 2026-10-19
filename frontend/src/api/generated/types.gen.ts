@@ -1052,6 +1052,33 @@ export type ExplicitLifetimePolicy = {
     kind: 'explicit';
 };
 
+export type FeedActivity = {
+    /**
+     * Time this subscription was created in Oko. Null for unknown legacy dates.
+     */
+    created: Timestamp | null;
+    /**
+     * Description of the external source, not an individual publication. Null means no metadata has been received.
+     */
+    description: string | null;
+    /**
+     * Last committed transition of at least one publication of this feed to viewed in Oko; Telegram read acknowledgements and deletion do not advance it.
+     */
+    marked_read: Timestamp | null;
+    /**
+     * Last actual change to this feed own settings, excluding inherited changes and collection.
+     */
+    modified: Timestamp | null;
+    /**
+     * Known original publications not viewed in Oko, including hidden, pending and unavailable publications. Independent of visible cards and Telegram read status.
+     */
+    unread: number;
+    /**
+     * Last successfully admitted discovery result, including an empty result; failures do not advance this timestamp.
+     */
+    updated: Timestamp | null;
+};
+
 export type FeedAvatarUrl = string;
 
 export type FeedCandidate = {
@@ -1067,7 +1094,7 @@ export type FeedCollectionTarget = {
 
 export type FeedConnectionUrl = string;
 
-export type FeedField = 'new_folder' | 'folder_id' | 'importance' | 'initial_days' | 'public_ai' | 'read_history' | 'auto_read' | 'transport';
+export type FeedField = 'title' | 'new_folder' | 'folder_id' | 'importance' | 'initial_days' | 'public_ai' | 'read_history' | 'auto_read' | 'transport';
 
 export type FeedHistoryState = {
     feed_id: FeedId;
@@ -1090,6 +1117,10 @@ export type FeedPatchRequest = {
     new_folder?: string;
     public_ai?: boolean;
     read_history?: boolean;
+    /**
+     * Local feed title. Trimmed before saving; must contain 1 to 200 characters after trimming. Does not change source identity.
+     */
+    title?: string;
     transport?: 'telegram' | 'rss' | 'youtube' | null;
 };
 
@@ -1104,6 +1135,7 @@ export type FeedSettingOrigin = {
 };
 
 export type FeedSettingsSnapshot = {
+    activity?: FeedActivity | null;
     effective: EffectiveSettingsValues;
     feed: SubscriptionFeed;
     overrides: StoredOverrides;

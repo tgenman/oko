@@ -55,11 +55,12 @@ test('reader card appearance preserves the compact layout, metadata and real pre
     expect(text!.x-preview!.x-preview!.width).toBe(12);
     expect((await r.page.locator('#material-list').boundingBox())!.width).toBe(440);
     const geometry = await row.evaluate(n=>{
-      const style=getComputedStyle(n),title=getComputedStyle(n.querySelector('.card-title')!),snippet=getComputedStyle(n.querySelector('.card-snippet')!);
+      const style=getComputedStyle(n),title=getComputedStyle(n.querySelector('.card-title')!);
       return {padding:style.padding,minHeight:style.minHeight,radius:style.borderRadius,margin:style.margin,
-        titleSize:title.fontSize,titleLines:title.webkitLineClamp,snippetSize:snippet.fontSize,snippetLines:snippet.webkitLineClamp};
+        titleSize:title.fontSize,titleLines:title.webkitLineClamp};
     });
-    expect(geometry).toEqual({padding:'6px 16px',minHeight:'76px',radius:'0px',margin:'0px',titleSize:'15px',titleLines:'2',snippetSize:'14px',snippetLines:'2'});
+    expect(geometry).toEqual({padding:'6px 16px',minHeight:'76px',radius:'0px',margin:'0px',titleSize:'15px',titleLines:'2'});
+    await expect(row.locator('.card-snippet')).toHaveCount(0);
     await expect(row.locator('.card-kind')).toHaveText('Updated');
     await expect(r.page.locator('[data-card="three"] .card-kind')).toHaveText('Updated · Loading');
     await expect(row.locator('.card-source')).toHaveText('GetAClass — Физика в опытах и экспериментах');

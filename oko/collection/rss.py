@@ -93,6 +93,18 @@ def feed_title(raw: bytes) -> str:
     return ''.join(title.itertext()).strip()[:200] if title is not None else ''
 
 
+def feed_description(raw: bytes) -> str | None:
+    # entries() has already validated the same bytes (including entity rejection).
+    root = ET.fromstring(raw)
+    def local(tag: str) -> str:
+        return tag.rsplit('}', 1)[-1]
+    parent = root if local(root.tag) == 'feed' else next((node for node in root if local(node.tag) == 'channel'), None)
+    if parent is None:
+        return None
+    node = next((node for node in parent if local(node.tag) in ('description', 'subtitle')), None)
+    return RSSSource.excerpt(''.join(node.itertext())) if node is not None else None
+
+
 def entries(raw: bytes, base: str) -> list[Entry]:
     if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():
         raise SourceError('Неподдерживаемый XML источника')
@@ -161,6 +173,7 @@ class RSSSource:
         self.url, self.initial_days, self.transport = normalized(url), initial_days, transport
         self.gap: str | None = None
         self.initial_history: dict[str, Any] | None = None
+        self.description: str | None = None
 
     async def download(self, url: str, limit: int = 4_000_000) -> tuple[bytes, str, str]:
         try:
@@ -191,7 +204,9 @@ class RSSSource:
 
     async def read_entries(self) -> list[Entry]:
         raw, url, _ = await self.download(self.url)
-        return entries(raw, url)
+        result = entries(raw, url)
+        self.description = feed_description(raw)
+        return result
 
     async def discover(self, cursor: str | None) -> DiscoveryResult:
         batch = await self.read_entries()
@@ -218,14 +233,14 @@ class RSSSource:
                 selected = {e.publication.id for e in chosen}
                 next_cursor = {'history_ids': list(selected), 'excluded': [e.publication.id for e in batch if e.publication.id not in selected], 'since': time.time(), 'warnings': warnings}
             self.gap = ' · '.join(next_cursor.get('warnings', [])) or None
-            return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in chosen]), json.dumps(next_cursor), SourceObservation(self.gap, self.changes))
+            return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in chosen]), json.dumps(next_cursor), SourceObservation(self.gap, self.changes, description=self.description))
         cutoff = previous['since'] if previous else time.time() - self.initial_days * 86400
         self.gap = None
         if not batch or min(e.publication.published for e in batch) > cutoff:
             self.gap = 'RSS отдаёт ограниченное окно: полнота истории за период не подтверждена'
         # Keep the original import boundary. RSS order/dates are not a cursor:
         # replaying the finite window also captures delayed and out-of-order items.
-        return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in batch if not e.publication.published_known or e.publication.published >= cutoff]), json.dumps({'since': cutoff}), SourceObservation(self.gap, self.changes))
+        return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in batch if not e.publication.published_known or e.publication.published >= cutoff]), json.dumps({'since': cutoff}), SourceObservation(self.gap, self.changes, description=self.description))
 
     @staticmethod
     def excerpt(html: str) -> str:
@@ -284,4 +299,4 @@ class RSSSource:
                 full, reason = False, 'Не все изображения сохранены'
                 if publication.teaser:
                     images.extend(image for image in publication.teaser.images if image.name.startswith(f'image-{position}.'))
-        return FetchResult(Material(title, text, full, reason, tuple(images), collection_error=collection_error), SourceObservation(self.gap, self.changes))
+        return FetchResult(Material(title, text, full, reason, tuple(images), collection_error=collection_error), SourceObservation(self.gap, self.changes, description=self.description))

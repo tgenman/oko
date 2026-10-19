@@ -87,7 +87,7 @@ test('legacy Telegram feed shows the saved alias and profile mapping without a r
   await r.start([]);
   await r.page.evaluate(snapshot=>{
    const common={id:'legacy',identity:'telegram-peer:old-account:-10042',title:'Старый канал',kind:'telegram',folder_id:'f',importance:'normal',initial_days:1,public_ai:false,original_urls:['@channel']};
-   readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Прежние'}],feeds:[{...common,transport:'telegram',telegram_account:'old-account',telegram_peer:-10042,auto_read:false,read_history:false,connection:'connected'}]}});
+   readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Прежние'}],feeds:[{...common,connection:'needs_profile_confirmation',access:{kind:'legacy_client',alias:'old-account',source_locator:'@channel',peer_id:'-10042'},history:{state:'absent',legacy_since:null}}]}});
    readerTransport.replies.set('/api/v3/settings/feed/legacy',{body:{...snapshot,scope:'feed',owner:'legacy',feed:{...common,connection:'needs_profile_confirmation',access:{kind:'legacy_client',alias:'old-account',source_locator:'@channel',peer_id:'-10042'},history:{state:'absent',legacy_since:null}}}});
   },base);
   await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/legacy"]').click();

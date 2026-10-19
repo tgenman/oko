@@ -260,6 +260,7 @@ test('RSS addition reconciles after closing and reopening but cannot navigate th
     await r.page.locator('#rss-url').fill('https://source.test/new');
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-title')).toHaveValue('Новый фид');
+    await r.page.locator('#rss-folder').selectOption({label:'Учёба'});
     await r.page.locator('#rss-add').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/feeds'));
     await r.page.keyboard.press('Escape');
@@ -344,6 +345,7 @@ test('a completed RSS addition preserves changes typed after submission', async 
     await r.page.locator('#rss-url').fill('https://source.test/new');
     await r.page.locator('#rss-check').click();
     await expect(r.page.locator('#rss-title')).toHaveValue('Sent A');
+    await r.page.locator('#rss-folder').selectOption({label:'Учёба'});
     await r.page.locator('#rss-add').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/feeds'));
     await r.page.locator('#rss-title').fill('Draft B');

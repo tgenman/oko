@@ -1,0 +1,97 @@
+{
+  "started_at": "20261019T150616Z",
+  "selected_files": {
+    "browser": [
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_feed_details.ts",
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_connections_v3_http.ts",
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_feed_debug.ts",
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_settings_navigation.ts",
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_existing_history.ts",
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_separate_menus.ts",
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_telegram_connection.ts",
+      "/private/tmp/oko-feed-settings-check-08/tests/browser/test_telegram_v3_http.ts"
+    ],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (1.18s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-feed-settings-check-08/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (1.98s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-feed-settings-check-08/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (30.22s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/private/tmp/oko-feed-settings-check-08/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-concurrency=2",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_feed_details.ts",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_connections_v3_http.ts",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_feed_debug.ts",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_settings_navigation.ts",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_existing_history.ts",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_separate_menus.ts",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_telegram_connection.ts",
+            "/private/tmp/oko-feed-settings-check-08/tests/browser/test_telegram_v3_http.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 38,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 33.73,
+  "log": "/private/tmp/oko-feed-settings-check-08/.scratch/check-runs/20261019T150616Z-69e2ffeb/output.log"
+}

@@ -11,6 +11,7 @@ import re
 import secrets
 import sqlite3
 from typing import Any
+from collections.abc import Callable
 from urllib.parse import urlsplit
 
 
@@ -46,8 +47,9 @@ def locator(value: str) -> tuple[str, str | int]:
 
 
 class TelegramAccess:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: sqlite3.Connection, modified: Callable[[str], None] = lambda _: None) -> None:
         self.db = db
+        self.modified = modified
         # No executescript here: migrations and their ownership rows are atomic.
         with db:
             db.execute('BEGIN IMMEDIATE')
@@ -119,6 +121,7 @@ class TelegramAccess:
                 binding = self.binding(row['id'])
                 if binding and binding['kind'] == 'legacy_client' and binding['alias'] in aliases and row['telegram_peer']:
                     self.put_binding(row['id'], dict(kind='client', role=role, account_user_id=str(user_id), peer_id=str(row['telegram_peer'])))
+                    self.modified(row['id'])
         return self.profile(role) or {}
 
     def checked(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
@@ -170,6 +173,8 @@ class TelegramAccess:
                 (identity, 'telegram-instance:' + identity, info['title'], folder_id, json.dumps([source]),
                  'telegram' if profile else None, info.get('peer'), profile['account'] if profile else None,
                  info.get('username'), auto_read if profile else None))
+            subscriptions.details.created(identity)
+            subscriptions.details.description(identity, info.get('description'))
             self.put_binding(identity, binding)
             self.save_avatar(identity, info)
             for claim in claims:
@@ -196,7 +201,10 @@ class TelegramAccess:
             owners = [owner for owner in self.conflicts(claims, info.get('peer')) if owner != feed]
             if owners:
                 raise TelegramConflict('duplicate_source', self.duplicates(owners), 'Источник уже подключён')
-            self.put_binding(feed, dict(kind='client', role=profile['role'], account_user_id=str(profile['user_id']), peer_id=str(info['peer'])))
+            next_binding = dict(kind='client', role=profile['role'], account_user_id=str(profile['user_id']), peer_id=str(info['peer']))
+            if binding != next_binding or row['auto_read'] != auto_read or row['transport'] != 'telegram' or row['telegram_peer'] != info['peer'] or row['telegram_username'] != info.get('username') or row['connection'] != 'connected':
+                self.modified(feed)
+            self.put_binding(feed, next_binding)
             self.db.execute("UPDATE feeds SET telegram_peer=?,telegram_account=COALESCE(telegram_account,?),telegram_username=?,transport='telegram',connection='connected',auto_read=? WHERE id=?", (info['peer'], profile['account'], info.get('username'), auto_read, feed))
             for claim in claims:
                 self.claim(feed, claim, 'explicit legacy confirmation')

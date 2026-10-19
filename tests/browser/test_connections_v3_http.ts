@@ -14,6 +14,7 @@ test('single RSS connection sends an exact history count and displays the persis
  await page.locator('#rss-check').click();
  await expect(page.locator('#rss-add')).toBeEnabled();
  await page.locator('#rss-history-count').fill('9007199254740993');
+ await page.locator('#rss-folder-new').fill('News');
  const request=page.waitForRequest(r=>r.url().endsWith('/api/v3/feeds')&&r.method()==='POST');
  await page.locator('#rss-add').click();
  expect((await request).postDataJSON().initial_history).toEqual({mode:'count',count:'9007199254740993'});

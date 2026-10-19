@@ -12314,6 +12314,7 @@ components:
     FeedField:
       type: string
       enum:
+      - title
       - new_folder
       - folder_id
       - importance
@@ -14112,6 +14113,9 @@ components:
       type: object
       description: new_folder creates a uniquely named folder and moves this feed atomically. It cannot be combined with folder_id. Duplicate names or incompatible fields return action_invalid without any write.
       properties:
+        title:
+          type: string
+          description: Local feed title. Trimmed before saving; must contain 1 to 200 characters after trimming. Does not change source identity.
         new_folder:
           type: string
           minLength: 1
@@ -14682,9 +14686,56 @@ components:
       examples:
       - scope: feed
         owner: example
+    FeedActivity:
+      type: object
+      additionalProperties: false
+      properties:
+        created:
+          description: Time this subscription was created in Oko. Null for unknown legacy dates.
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        modified:
+          description: Last actual change to this feed own settings, excluding inherited changes and collection.
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        updated:
+          description: Last successfully admitted discovery result, including an empty result; failures do not advance this timestamp.
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        marked_read:
+          description: Last committed transition of at least one publication of this feed to viewed in Oko; Telegram read acknowledgements and deletion do not advance it.
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        unread:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Known original publications not viewed in Oko, including hidden, pending and unavailable publications. Independent of visible cards and Telegram read status.
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Description of the external source, not an individual publication. Null means no metadata has been received.
+      required: [created, modified, updated, marked_read, unread, description]
+      examples:
+      - created: null
+        modified: null
+        updated: null
+        marked_read: null
+        unread: 0
+        description: null
     FeedSettingsSnapshot:
       type: object
       properties:
+        activity:
+          anyOf:
+          - $ref: '#/components/schemas/FeedActivity'
+          - type: 'null'
+          default: null
         scope:
           type: string
           const: feed

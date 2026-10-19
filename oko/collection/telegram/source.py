@@ -304,7 +304,7 @@ class TelegramSource:
             self.observation(), (.1 if self.initial_history else 0) if self.more else None, self.retry_error)
 
     def observation(self) -> SourceObservation:
-        return SourceObservation(self.gap, self.changes, SourceIdentity.from_info(self.identity_info))
+        return SourceObservation(self.gap, self.changes, SourceIdentity.from_info(self.identity_info), (self.identity_info or {}).get('description'))
 
     async def _page(self, state: dict[str, Any]) -> dict[str, Any]:
         if isinstance(self.client, WebTelegram):
@@ -348,7 +348,7 @@ class TelegramSource:
             members.sort(key=lambda m: m['id'])
             text = '\n\n'.join(m['text'] for m in members if m['text'])
             result.append(Publication(identity, self.url(members[0]['id']), members[0]['date'],
-                          Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, False),
+                          Material(text.split('\n')[0] or 'Telegram · медиа', text, False),
                           tuple(m['id'] for m in members)))
         return sorted(result, key=lambda p: max(p.members), reverse=True)
 
@@ -502,5 +502,5 @@ class TelegramSource:
         same_source = teaser.source_manifest.post==manifest.post if teaser.source_manifest else teaser.text==text
         if teaser.full and same_source and all(resource.status=='loaded' for resource in resources) and not any(msg['group'] and time.time()-msg['date']<5 for msg in rows):
             complete = True
-        return Material(text.split('\n')[0][:160] or 'Telegram · медиа', text, complete,
+        return Material(text.split('\n')[0] or 'Telegram · медиа', text, complete,
                         '; '.join(dict.fromkeys(reasons)), attachments=tuple(attachments), members=tuple(sorted({m['id'] for m in rows} | set(publication.members))), collection_error=collection_error, source_manifest=manifest)

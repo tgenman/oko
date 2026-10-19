@@ -148,7 +148,8 @@ def test_legacy_aliases_all_claim_owners_and_saved_material_survive_until_explic
     ids = legacy_feeds(tmp_path)
     tg = Accounts()
     tg.users['three'] = 333
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg), headers=HEADERS) as client:
+    clock = [1800000000.]
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg, wall_clock=lambda: clock[0]), headers=HEADERS) as client:
         feeds = client.get('/api/v3/subscriptions').json()['feeds']
         assert [feed['id'] for feed in feeds] == ids
         assert [feed['access']['alias'] for feed in feeds] == ['one', 'two', 'three']
@@ -157,11 +158,21 @@ def test_legacy_aliases_all_claim_owners_and_saved_material_survive_until_explic
         duplicate = client.post('/api/v3/telegram/connect', json={'source_locator':'https://telegram.me/s/SHARED/11', 'folder':'New'})
         assert duplicate.status_code == 409
         assert {f['feed_id'] for f in duplicate.json()['details']['existing_feeds']} == set(ids)
+        assert client.get('/api/v3/settings/feed/'+ids[0]).json()['activity']['modified'] is None
+        clock[0] += 10
         client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
         feeds = client.get('/api/v3/subscriptions').json()['feeds']
         assert feeds[0]['id'] == ids[0] and feeds[0]['access']['kind'] == 'client'
         assert {f['access']['alias'] for f in feeds[1:]} == {'two','three'}
         assert len(client.get('/api/v3/telegram/profiles').json()['configurations']) == 3
+
+        from datetime import datetime, timezone
+        modified = datetime.fromtimestamp(clock[0], timezone.utc).isoformat().replace('+00:00', 'Z')
+        assert client.get('/api/v3/settings/feed/'+ids[0]).json()['activity']['modified'] == modified
+        assert client.get('/api/v3/settings/feed/'+ids[1]).json()['activity']['modified'] is None
+        clock[0] += 10
+        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
+        assert client.get('/api/v3/settings/feed/'+ids[0]).json()['activity']['modified'] == modified
 
 
 def test_unexpected_topic_migration_refuses_before_database_changes(tmp_path):

@@ -114,7 +114,7 @@ class Store:
         if 'source_order' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
             self.db.execute('ALTER TABLE items ADD COLUMN source_order INTEGER')
             self.db.commit()
-        self.subscriptions = Subscriptions(self.db, self.fault)
+        self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.filters = Filters(self)
         self.processing = ProcessingCoordination(self)
         self.reading = ReadingComposition(self)
@@ -205,7 +205,9 @@ class Store:
         row = self.db.execute("SELECT value FROM state WHERE key=?", (self.cursor_key(feed, namespace),)).fetchone()
         return row[0] if row else None
 
-    def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo', namespace: str = '') -> None:
+    def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo', namespace: str = '', *, description: str | None = None, successful: bool = True) -> None:
+        if not self.valid(job):
+            return
         with self.db:
             history_items = []
             envelope = HistoryEnvelope.decode(cursor, adapter='client' if namespace == 'telegram' else 'web') if namespace in ('telegram', 'telegram-web') else None
@@ -280,6 +282,9 @@ class Store:
                 self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND (error IS NULL OR problem_code IS NULL) AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT item FROM source_deleted))", (feed,))
                 if namespace == 'telegram':
                     self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
+            if successful:
+                self.subscriptions.details.record(feed, 'updated')
+            self.subscriptions.details.description(feed, description)
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
@@ -426,6 +431,9 @@ class Store:
         with self.db:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
                 return False
+            changed_feeds = {row['feed_id'] for member in members for row in self.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0', (member,))}
+            for feed in changed_feeds:
+                self.subscriptions.details.record(feed, 'marked_read')
             self.problems.forget_materials(affected, self.wall_clock())
             for member in members:
                 row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
@@ -478,6 +486,7 @@ class Store:
             self.db.execute("DELETE FROM settings WHERE scope='feed' AND owner=?", (feed,))
             self.db.execute('DELETE FROM state WHERE key IN (?,?,?)', ('cursor:'+feed, 'cursor:telegram:'+feed, 'feed-status:'+feed))
             self.subscriptions.telegram.release(feed)
+            self.db.execute('DELETE FROM feed_details WHERE feed=?', (feed,))
             self.db.execute('DELETE FROM feeds WHERE id=?', (feed,))
 
     def delete(self, job: Job) -> None:

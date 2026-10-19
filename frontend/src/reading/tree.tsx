@@ -13,7 +13,7 @@ export function SourceIcon({kind}:{kind:string}) {
   return <span className={'source-icon '+kind} aria-hidden="true">{kind==='folder'?<svg viewBox="0 0 512 512" fill="currentColor"><path d="M496 152a56 56 0 0 0-56-56H220.11a23.9 23.9 0 0 1-13.31-4L179 73.41A55.77 55.77 0 0 0 147.89 64H72a56 56 0 0 0-56 56v48a8 8 0 0 0 8 8h464a8 8 0 0 0 8-8ZM16 392a56 56 0 0 0 56 56h368a56 56 0 0 0 56-56V216a8 8 0 0 0-8-8H24a8 8 0 0 0-8 8Z"/></svg>:kind==='rss'?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><circle cx="5" cy="19" r="1.5" fill="currentColor"/><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/></svg>:kind==='youtube'?'▶':kind==='telegram'?'➤':'◷'}</span>;
 }
 type MediaFetch=(path:string,signal?:AbortSignal)=>Promise<Response>;
-function FeedAvatar({url,fetchMedia,kind}:{url:string;fetchMedia:MediaFetch;kind:string}) {
+export function FeedAvatar({url,fetchMedia,kind}:{url:string;fetchMedia:MediaFetch;kind:string}) {
   const [image,setImage]=useState<string|null>(null);
   useEffect(()=>{const controller=new AbortController();let active=true,objectUrl:string|null=null;setImage(null);
     void(async()=>{try{const response=await fetchMedia(url,controller.signal);if(!active||!response.ok)return;const blob=await response.blob();if(!active)return;objectUrl=URL.createObjectURL(blob);setImage(objectUrl);}catch{/* Optional source artwork falls back to the source icon. */}})();

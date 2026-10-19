@@ -1,12 +1,12 @@
 import {test} from 'node:test';
 import {reader, material, expect} from './support.ts';
 
-test('compact rows show excerpts and current area with actions in menu', async () => {
+test('compact rows show titles without post excerpts and current area with actions in menu', async () => {
  const r=await reader(); try {
   await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('article',{title:'Статья',snippet:'Текст статьи'})]);
   await expect(r.page.locator('#list-title')).toHaveText('All Items');
   await expect(r.page.locator('#count-label')).toHaveText('2');
-  await expect(r.page.locator('#cards .card-snippet').first()).toHaveText('Описание сохранённого видео');
+  await expect(r.page.locator('#cards .card-snippet')).toHaveCount(0);
   await expect(r.page.locator('#cards .card-kind')).toHaveCount(0);
   await expect(r.page.locator('#cards .card-preview')).toHaveCount(2);
   await r.page.locator('[data-folder="f"]').click();
@@ -212,6 +212,33 @@ test('incomplete materials and unavailable previews keep usable rows and diagnos
   await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
   await expect(r.page.locator('#debug-errors')).toContainText('Could not load preview');
+  expect(r.errors).toEqual([]);
+ } finally {await r.close();}
+});
+
+test('news titles show link labels without Markdown destinations', async () => {
+ const r=await reader(); try {
+  const cases=[
+   ['У [Kai-Fu Lee](https://en.wikipedia.org/wiki/Kai-Fu_Lee) вышла книга (+ [интервью](https://t.me/example/123))','У Kai-Fu Lee вышла книга (+ интервью)'],
+   ['[Статья](https://example.test/wiki/Topic_(detail)) и [обзор](https://example.test/review "Подсказка")','Статья и обзор'],
+   ['Начало [интервью](https://t.me/pr','Начало интервью'],
+   ['Обычный заголовок [часть 1]','Обычный заголовок [часть 1]'],
+  ];
+  await r.start(cases.map(([title],i)=>material('link-'+i,{title,text:'Текст [ссылка](https://example.test/body)'})));
+  for(const [i,[,title]] of cases.entries()) {
+   const row=r.page.locator(`[data-card="link-${i}"]`);
+   await expect(row.locator('.card-title')).toHaveText(title!);
+   await expect(row.locator('.card-title')).toHaveAttribute('title',title!);
+   await expect(row).toHaveAttribute('aria-label',new RegExp(title!.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+   await row.click();
+   await expect(r.page.locator('#title')).toHaveText(title!);
+   await expect(r.page.locator('#title a')).toHaveAttribute('href',new RegExp('^https?://'));
+   await expect(r.page.locator('#text')).toHaveText('Текст [ссылка](https://example.test/body)');
+  }
+  await r.page.locator('[data-card="link-0"]').click();
+  await expect(r.page.locator('#title')).toHaveText(cases[0]![1]!);
+  await expect(r.page.locator('#completeness')).toHaveText('Fully saved');
+  await r.page.screenshot({path:'/tmp/oko-title-links.png',fullPage:true});
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });

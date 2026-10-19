@@ -312,6 +312,7 @@ class FeedConnectionUrl(RootModel[AnyUrl]):
 class FeedField(
     RootModel[
         Literal[
+            "title",
             "new_folder",
             "folder_id",
             "importance",
@@ -325,6 +326,7 @@ class FeedField(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
+        "title",
         "new_folder",
         "folder_id",
         "importance",
@@ -1507,6 +1509,36 @@ class EffectiveTheses(WireModel):
     value: StrictBool
 
 
+class FeedActivity(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    created: Timestamp | None = Field(
+        ...,
+        description="Time this subscription was created in Oko. Null for unknown legacy dates.",
+    )
+    description: StrictStr | None = Field(
+        ...,
+        description="Description of the external source, not an individual publication. Null means no metadata has been received.",
+    )
+    marked_read: Timestamp | None = Field(
+        ...,
+        description="Last committed transition of at least one publication of this feed to viewed in Oko; Telegram read acknowledgements and deletion do not advance it.",
+    )
+    modified: Timestamp | None = Field(
+        ...,
+        description="Last actual change to this feed own settings, excluding inherited changes and collection.",
+    )
+    unread: StrictInt = Field(
+        ...,
+        description="Known original publications not viewed in Oko, including hidden, pending and unavailable publications. Independent of visible cards and Telegram read status.",
+        ge=0,
+        le=9007199254740991,
+    )
+    updated: Timestamp | None = Field(
+        ...,
+        description="Last successfully admitted discovery result, including an empty result; failures do not advance this timestamp.",
+    )
+
+
 class FeedCandidate(WireModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["rss", "youtube"]
@@ -1535,6 +1567,10 @@ class FeedPatchRequest(WireModel):
     )
     public_ai: StrictBool | MISSING = MISSING
     read_history: StrictBool | MISSING = MISSING
+    title: StrictStr | MISSING = Field(
+        default=MISSING,
+        description="Local feed title. Trimmed before saving; must contain 1 to 200 characters after trimming. Does not change source identity.",
+    )
     transport: Literal["telegram", "rss", "youtube"] | None | MISSING = MISSING
 
 
@@ -3362,6 +3398,7 @@ class ExistingFeedVerification(WireModel):
 
 class FeedSettingsSnapshot(WireModel):
     model_config = ConfigDict(extra="forbid")
+    activity: FeedActivity | None = None
     effective: EffectiveSettingsValues
     feed: SubscriptionFeed
     overrides: StoredOverrides

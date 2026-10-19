@@ -1041,7 +1041,7 @@ class Runtime:
                         if outcome.observation.identity:
                             current.subscriptions.telegram.refresh(feed, outcome.observation.identity.as_info())
                         self._account_wait(feed, outcome.retry_error)
-                        current.discovered(list(outcome.publications), outcome.cursor, job, feed, namespace)
+                        current.discovered(list(outcome.publications), outcome.cursor, job, feed, namespace, description=outcome.observation.description, successful=outcome.retry_error is None)
                         if outcome.continuation is not None:
                             delay = outcome.continuation
                             current.enqueue_discovery(feed, self._clock() + delay if delay else 0)

@@ -4,6 +4,7 @@ import json
 import re
 import secrets
 import sqlite3
+import time
 from collections.abc import Callable
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit, parse_qs
@@ -13,7 +14,8 @@ from oko.subscriptions.telegram import TelegramAccess
 from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.collection.contracts import SourceError
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from oko.subscriptions.details import FeedDetails
 
 
 class FeedURL(BaseModel):
@@ -39,6 +41,13 @@ class Overrides(BaseModel):
 
 
 class FeedPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator('title', mode='before')
+    @classmethod
+    def trim_title(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
     model_config = ConfigDict(extra='forbid', strict=True)
     folder_id: str | None = None
     new_folder: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"\S")
@@ -94,7 +103,7 @@ class FolderConflict(ValueError):
 
 
 class Subscriptions:
-    def __init__(self, db: sqlite3.Connection, fault: Callable[[str], None] = lambda _: None) -> None:
+    def __init__(self, db: sqlite3.Connection, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
         self.db = db
         self.history = History(db)
         db.executescript('''
@@ -125,12 +134,15 @@ class Subscriptions:
                     db.execute('UPDATE feeds SET telegram_username=? WHERE id=?', (username, row['id']))
                 fault('before_telegram_username_commit')
 
-        self.telegram = TelegramAccess(db)
+        self.details = FeedDetails(db, wall_clock)
+        self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
 
     def ensure_demo(self) -> None:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO folders VALUES ('demo','Тестовый источник',-1)")
-            self.db.execute("INSERT OR IGNORE INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport) VALUES ('demo','demo','Тестовый источник','demo','demo','[]','connected','demo')")
+            inserted = self.db.execute("INSERT OR IGNORE INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport) VALUES ('demo','demo','Тестовый источник','demo','demo','[]','connected','demo')")
+            if inserted.rowcount:
+                self.details.created('demo')
 
     def folders(self) -> list[dict[str, Any]]:
         folders = [dict(row) for row in self.db.execute('SELECT * FROM folders ORDER BY position,id')]
@@ -216,6 +228,7 @@ class Subscriptions:
             self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,public_ai)
                             VALUES (?,?,?,?,?,?,?,?,?)''',
                             (key(identity), identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
+            self.details.created(key(identity))
             self.history.configure(key(identity), body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
 
@@ -265,12 +278,16 @@ class Subscriptions:
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> dict[str, Any]:
         self.check_owner(scope, owner)
         with self.db:
+            before = list(self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=? ORDER BY field', (scope, owner)))
             for field, value in patch.model_dump(exclude_unset=True).items():
                 if value is None:
                     self.db.execute('DELETE FROM settings WHERE scope=? AND owner=? AND field=?', (scope, owner, field))
                 else:
                     self.db.execute('INSERT INTO settings VALUES (?,?,?,?) ON CONFLICT(scope,owner,field) DO UPDATE SET value=excluded.value',
                                     (scope, owner, field, json.dumps(value)))
+            after = list(self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=? ORDER BY field', (scope, owner)))
+            if scope == 'feed' and before != after:
+                self.details.record(owner, 'modified')
         return self.effective(scope, owner)
 
     def youtube_theses(self, feed_id: str) -> bool:
@@ -283,9 +300,9 @@ class Subscriptions:
         values = patch.model_dump(exclude_unset=True)
         if any(value is None for field, value in values.items() if field not in ('auto_read', 'transport')):
             raise ValueError('Поле не может быть пустым')
-        title = values.pop('new_folder', None)
-        if title is not None:
-            title = title.strip()
+        folder_title = values.pop('new_folder', None)
+        if folder_title is not None:
+            folder_title = folder_title.strip()
             if 'folder_id' in values:
                 raise ValueError('Choose an existing folder or create a new one, not both.')
             if feed['connection'] == 'deleting':
@@ -307,14 +324,17 @@ class Subscriptions:
         if transport == 'rss' and feed['kind'] in ('youtube', 'demo'):
             raise ValueError('Для этого источника нет RSS-подключения')
         with self.db:
-            if title is not None:
+            if folder_title is not None:
                 self.db.execute('BEGIN IMMEDIATE')
-                if self.db.execute('SELECT 1 FROM folders WHERE title=?', (title,)).fetchone():
+                if self.db.execute('SELECT 1 FROM folders WHERE title=?', (folder_title,)).fetchone():
                     raise ValueError('A folder with this name already exists.')
-                values['folder_id'] = self.ensure_folder(title)
+                values['folder_id'] = self.ensure_folder(folder_title)
+            changed = any(feed.get(field) != value for field, value in values.items())
             for field, value in values.items():
                 self.db.execute(f'UPDATE feeds SET {field}=? WHERE id=?', (value, feed_id))
-            if 'transport' in values:
+            if 'transport' in values and values['transport'] != feed['transport']:
                 connection = 'ambiguous' if feed['kind'] == 'unresolved' and transport is None else 'needs_connection'
                 self.db.execute('UPDATE feeds SET connection=? WHERE id=?', (connection, feed_id))
+            if changed:
+                self.details.record(feed_id, 'modified')
         return next(f for f in self.feeds() if f['id'] == feed_id)

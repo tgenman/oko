@@ -116,9 +116,11 @@ class SourceIdentity:
 
 @dataclass(frozen=True)
 class SourceObservation:
+    # None means metadata was not provided; empty string explicitly clears it.
     gap: str | None = None
     changes: str | None = None
     identity: SourceIdentity | None = None
+    description: str | None = None
 
 
 @dataclass(frozen=True)
