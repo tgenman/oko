@@ -1,0 +1,48 @@
+{
+  "started_at": "20261019T124727Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "staged": {
+      "status": "PASS (11.52s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "/Users/dabondarev/repo_personal/oko/scripts/check-staged"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "api/openapi.yaml",
+      "frontend/src/api/generated/index.ts",
+      "frontend/src/api/generated/revision.ts",
+      "frontend/src/api/generated/sdk.gen.ts",
+      "frontend/src/api/generated/types.gen.ts",
+      "oko/reader/generated/models.py",
+      "oko/reader/generated/openapi.json",
+      "oko/reader/generated/operations.py",
+      "oko/reader/generated/revision.py"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 11.66,
+  "log": "/Users/dabondarev/repo_personal/oko/.scratch/check-runs/20261019T124727Z-e065597f/output.log"
+}

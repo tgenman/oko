@@ -20616,6 +20616,9 @@ components:
           - $ref: '#/components/schemas/OkoSettingOrigin'
           discriminator:
             propertyName: scope
+            mapping:
+              default: '#/components/schemas/DefaultSettingOrigin'
+              oko: '#/components/schemas/OkoSettingOrigin'
       required:
       - value
       - origin

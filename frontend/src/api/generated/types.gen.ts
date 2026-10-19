@@ -902,9 +902,9 @@ export type DuplicateSourceErrorDetails = {
 
 export type EffectiveFeedRefreshMinutes = {
     origin: ({
-        scope: 'DefaultSettingOrigin';
+        scope: 'default';
     } & DefaultSettingOrigin) | ({
-        scope: 'OkoSettingOrigin';
+        scope: 'oko';
     } & OkoSettingOrigin);
     value: number;
 };

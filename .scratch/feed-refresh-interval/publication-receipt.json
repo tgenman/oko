@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "verified": true,
+  "repository": "tgenman/oko",
+  "plan_digest": "3484e1405fa91b70829a5f5b02f48b8c434281f393e48052ab0cc8a2f1d9f2b7",
+  "snapshot_digest": "356c50f16b1ade4c8e15c8232f038f3e7f2b29d39198f08de5976dce43cb91a8",
+  "criteria_count": 0,
+  "checklist_count": 5,
+  "issues": {
+    "01": {
+      "number": 46,
+      "url": "https://github.com/tgenman/oko/issues/46",
+      "state": "open",
+      "body_digest": "4bab54dccb056fb7e9c2b99fb2cbd624b62cbef3fc3dff9e2d88e95ab75979fd"
+    }
+  }
+}

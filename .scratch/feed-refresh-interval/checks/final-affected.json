@@ -1,0 +1,227 @@
+{
+  "started_at": "20261019T124539Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [
+      "/private/tmp/oko-feed-interval-check/tests/reader/test_v3_settings.py",
+      "/private/tmp/oko-feed-interval-check/tests/reader/test_feed_refresh_interval.py",
+      "/private/tmp/oko-feed-interval-check/tests/reader/test_remove_aggregates.py",
+      "/private/tmp/oko-feed-interval-check/tests/api/test_contract.py"
+    ],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.42s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "/private/tmp/oko-feed-interval-check/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "tooling-types": {
+      "status": "PASS (1.25s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-feed-interval-check/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (2.36s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-feed-interval-check/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "build": {
+      "status": "PASS (10.98s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-feed-interval-check/scripts/build-frontend.mts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-feed-interval-check/scripts/build-frontend.mts",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (95.23s)",
+      "commands": [
+        {
+          "command": [
+            "/usr/local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/private/tmp/oko-feed-interval-check/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-concurrency=4",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_browser_context.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_codex_settings.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_codex_settings_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_completion.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_connections_v3_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_contracts.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_create_folder_move.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_existing_history.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_feed_context_menu.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_feed_debug.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_feed_refresh_interval.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_feed_tree.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_folder_actions.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_folder_context_menu.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_history_outcomes.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_history_pause.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_http_isolation.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_independent_sessions.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_initial_history.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_material_list.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_news_context_menu.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_opened_material.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_reader_appearance.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_reader_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_reader_refresh.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_reading_tree.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_reading_v3_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_separate_menus.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_settings_navigation.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_settings_v3_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_status_panel.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_status_v3_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_telegram_connection.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_telegram_v3_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_transport.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_ui_lifecycle.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_youtube_history.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_youtube_history_http.ts",
+            "/private/tmp/oko-feed-interval-check/tests/browser/test_youtube_settings.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 159,
+      "checkout_changes": []
+    },
+    "python-tests": {
+      "status": "PASS (8.76s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-feed-interval-check/tests/reader/test_v3_settings.py"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-feed-interval-check/tests/reader/test_feed_refresh_interval.py",
+            "/private/tmp/oko-feed-interval-check/tests/api/test_contract.py",
+            "/private/tmp/oko-feed-interval-check/tests/reader/test_remove_aggregates.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "workers": {
+        "python-tests-1": {
+          "status": "PASS (8.76s)",
+          "commands": [
+            {
+              "command": [
+                "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-feed-interval-check/tests/reader/test_v3_settings.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        },
+        "python-tests-2": {
+          "status": "PASS (7.80s)",
+          "commands": [
+            {
+              "command": [
+                "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-feed-interval-check/tests/reader/test_feed_refresh_interval.py",
+                "/private/tmp/oko-feed-interval-check/tests/api/test_contract.py",
+                "/private/tmp/oko-feed-interval-check/tests/reader/test_remove_aggregates.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        }
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 110.79,
+  "log": "/private/tmp/oko-feed-interval-check/.scratch/check-runs/20261019T124539Z-2b8628cb/output.log"
+}
