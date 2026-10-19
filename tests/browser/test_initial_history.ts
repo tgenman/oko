@@ -22,6 +22,7 @@ test('RSS connection selects count or inclusive date and displays saved history 
     await r.page.locator('#rss-history-mode').selectOption('date');
     await expect(r.page.locator('#rss-history-count')).toBeHidden();
     await r.page.locator('#rss-history-date').fill('2025-10-01');
+    await r.page.locator('#rss-folder').selectOption('Учёба');
     await r.page.locator('#rss-add').click();
     await r.page.waitForFunction(() => readerTransport.requests.some(request => request.url === '/api/v3/feeds' && request.method === 'POST'));
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/feeds' && r.method === 'POST'));
@@ -48,6 +49,7 @@ test('Telegram connection sends default count and can switch to date with user t
     await r.page.locator('#telegram-history-mode').selectOption('date');
     await expect(r.page.locator('#telegram-history-count')).toBeHidden();
     await r.page.locator('#telegram-history-date').fill('2025-10-01');
+    await r.page.locator('#telegram-folder-new').fill('Telegram');
     await r.page.locator('#telegram-add').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/telegram/connect'));
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/telegram/connect'));

@@ -37,7 +37,7 @@ function duplicateOwners(error:unknown):ExistingTelegramFeed[] {
  return result;
 }
 class TelegramOwner {
- access:'web'|TelegramRole='web';peer='';folder='Telegram';newFolder='';auto=false;history=initial();status='';busy=false;profiles:Profiles|null=null;duplicates:ExistingTelegramFeed[]=[];
+ access:'web'|TelegramRole='web';peer='';folder='';newFolder='';auto=false;history=initial();status='';busy=false;profiles:Profiles|null=null;duplicates:ExistingTelegramFeed[]=[];
  constructor(readonly owner:MenusOwner){owner.onAddOpen.push(()=>{if(owner.tab==='telegram')void this.load();});owner.onTabChange.push(tab=>{if(tab==='telegram')void this.load();});}
  change(){this.owner.changed();}
  async load(){const context=this.owner.menuOperations.capture();try{const {data}=await sdk.telegramProfiles({client:this.owner.api.client});context.commit(()=>{this.profiles=data;this.change();});}catch(error){context.commit(()=>{if(this.access!=='web')this.status=message(error);this.change();});}}
@@ -45,7 +45,7 @@ class TelegramOwner {
   const context=this.owner.menuOperations.capture(),sent={access:this.access,peer:this.peer,folder:this.folder,newFolder:this.newFolder,auto:this.auto,history:JSON.stringify(this.history)};
   this.busy=true;this.status='Connecting…';this.change();
   try{const body={source_locator:this.peer.trim(),folder:(this.folder||this.newFolder).trim(),initial_history:history};const {data}=await this.owner.api.command({operation:'telegram_connect'},headers=>sdk.telegramConnect({headers,client:this.owner.api.client,body:this.access==='web'?{...body,access:{kind:'web'}}:{...body,access:{kind:'client',profile:this.access},auto_read:this.auto}}));
-   if(this.peer===sent.peer)this.peer='';if(this.newFolder===sent.newFolder)this.newFolder='';if(this.folder===sent.folder)this.folder='Telegram';if(JSON.stringify(this.history)===sent.history)this.history=initial();if(this.auto===sent.auto)this.auto=false;
+   if(this.peer===sent.peer)this.peer='';if(this.newFolder===sent.newFolder)this.newFolder='';if(this.folder===sent.folder)this.folder='';if(JSON.stringify(this.history)===sent.history)this.history=initial();if(this.auto===sent.auto)this.auto=false;
    if(!this.owner.workAllowed||this.owner.stopped)return;this.owner.onChanged();await this.owner.refresh();
    if(context.current){this.status='Source connected';await context.commit(()=>this.owner.open('feeds',null,'feed/'+data.feed_id));}
   }catch(error){context.commit(()=>{this.status=message(error);this.duplicates=duplicateOwners(error);});}finally{this.busy=false;if(!context.current&&this.status==='Connecting…')this.status='';this.change();}

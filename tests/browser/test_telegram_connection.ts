@@ -12,6 +12,7 @@ async function setup() {
  await r.start([]);
  await r.page.locator('#add-open').click();
  await r.page.locator('#add-telegram-tab').click();
+ await r.page.locator('#telegram-folder-new').fill('Telegram');
  return r;
 }
 
