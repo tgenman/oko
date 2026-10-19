@@ -1,15 +1,8 @@
 on run
-    set appPath to POSIX path of (path to me)
-    set projectPath to do shell script "/usr/bin/dirname " & quoted form of appPath
-    set pythonPath to projectPath & "/.venv/bin/python"
-    set telegramEnv to "/Users/dabondarev/repo_personal/telegram-mcp/.env"
-    set logPath to projectPath & "/data/launcher.log"
+    set pythonCode to "import json, re, subprocess, sys; from pathlib import Path; home = Path.home() / 'Library/Application Support/Oko'; release = json.loads((home / 'current.json').read_text())['release']; assert re.fullmatch('[0-9a-f]{40}', release), 'Invalid installed release'; controller = home / 'releases' / release / 'source/scripts/oko-release'; [subprocess.run([sys.executable, str(controller), '--home', str(home), operation], check=True) for operation in ('start', 'open')]"
     try
-        do shell script "/bin/test -x " & quoted form of pythonPath
-        do shell script "/bin/test -r " & quoted form of telegramEnv
-        set launchCommand to "cd " & quoted form of projectPath & " && umask 077 && /bin/mkdir -p data && PATH=/Users/dabondarev/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/nohup " & quoted form of pythonPath & " -m oko --telegram-env " & quoted form of telegramEnv & " > " & quoted form of logPath & " 2>&1 < /dev/null & launch_pid=$!; /bin/sleep 1; if ! /bin/kill -0 \"$launch_pid\" 2>/dev/null; then wait \"$launch_pid\"; fi"
-        do shell script launchCommand
+        do shell script "/usr/bin/env PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/python3 -c " & quoted form of pythonCode
     on error
-        display dialog "Не удалось запустить Око. Проверьте, что приложение лежит в папке проекта, окружение .venv установлено и файл авторизации Telegram доступен. Журнал запуска: " & logPath buttons {"OK"} default button "OK" with icon caution
+        display dialog "Не удалось открыть рабочее Око. Проверьте установку выпуска и запуск Docker Desktop. Адрес читателя: http://localhost:8765. Журналы находятся в ~/Library/Application Support/Oko/logs/." buttons {"OK"} default button "OK" with icon caution
     end try
 end run
