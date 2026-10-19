@@ -1,7 +1,6 @@
 """Telegram adapter contracts; no SDK, HTML, storage or process ownership here.
 
-This foundation is adopted by bindings/history in #18–20. Source.discover/fetch
-stays unchanged. Store may decode selection, but must not interpret position.
+This foundation is adopted by bindings/history in #18–20. Source keeps discover/fetch with complete per-call results. Store may decode selection, but must not interpret position.
 """
 from dataclasses import dataclass
 import json

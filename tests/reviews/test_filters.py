@@ -1,3 +1,4 @@
+from oko.collection.contracts import FetchResult, FetchResources
 from tests.support.presence import presence, close_presence
 from tests.support.filters import FilterSource, transport, setup_filters
 import json
@@ -128,9 +129,9 @@ def test_restore_applies_only_to_original_version_and_media_survive_filter(tmp_p
     from oko.collection.contracts import Attachment
     class ChangingSource(FilterSource):
         revision = False
-        async def fetch(self, publication):
-            result = await super().fetch(publication)
-            return Material(result.title, result.text + (' Новая версия.' if self.revision else ''), attachments=(Attachment('media-0.txt', b'attachment', 'file', 'text/plain'),))
+        async def fetch(self, publication, resources=FetchResources()):
+            result = (await super().fetch(publication, resources)).material
+            return FetchResult(Material(result.title, result.text + (' Новая версия.' if self.revision else ''), attachments=(Attachment('media-0.txt', b'attachment', 'file', 'text/plain'),)))
     source = ChangingSource()
     with TestClient(create_app(tmp_path, source=source, token='test', ai_transport=transport([])), headers=HEADERS) as client:
         setup_filters(client)

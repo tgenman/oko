@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 import httpx
-from oko.collection.contracts import Material, Publication, Image, SourceError, SourceDeleted
+from oko.collection.contracts import Material, Publication, Image, SourceError, SourceDeleted, DiscoveryResult, FetchResult, FetchResources, FetchRequirements, SourceObservation
 
 
 def normalized(url: str) -> str:
@@ -155,6 +155,7 @@ def entries(raw: bytes, base: str) -> list[Entry]:
 
 
 class RSSSource:
+    fetch_requirements = FetchRequirements()
     changes = 'RSS: повторно проверяются статьи в доступном окне фида; 404/410 сохраняют локальную копию. Исчезновение из окна не означает удаление.'
     def __init__(self, url: str, initial_days: int, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.url, self.initial_days, self.transport = normalized(url), initial_days, transport
@@ -192,7 +193,7 @@ class RSSSource:
         raw, url, _ = await self.download(self.url)
         return entries(raw, url)
 
-    async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+    async def discover(self, cursor: str | None) -> DiscoveryResult:
         batch = await self.read_entries()
         previous = json.loads(cursor) if cursor else None
         if self.initial_history:
@@ -217,14 +218,14 @@ class RSSSource:
                 selected = {e.publication.id for e in chosen}
                 next_cursor = {'history_ids': list(selected), 'excluded': [e.publication.id for e in batch if e.publication.id not in selected], 'since': time.time(), 'warnings': warnings}
             self.gap = ' · '.join(next_cursor.get('warnings', [])) or None
-            return [Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in chosen], json.dumps(next_cursor)
+            return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in chosen]), json.dumps(next_cursor), SourceObservation(self.gap, self.changes))
         cutoff = previous['since'] if previous else time.time() - self.initial_days * 86400
         self.gap = None
         if not batch or min(e.publication.published for e in batch) > cutoff:
             self.gap = 'RSS отдаёт ограниченное окно: полнота истории за период не подтверждена'
         # Keep the original import boundary. RSS order/dates are not a cursor:
         # replaying the finite window also captures delayed and out-of-order items.
-        return [Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in batch if not e.publication.published_known or e.publication.published >= cutoff], json.dumps({'since': cutoff})
+        return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in batch if not e.publication.published_known or e.publication.published >= cutoff]), json.dumps({'since': cutoff}), SourceObservation(self.gap, self.changes))
 
     @staticmethod
     def excerpt(html: str) -> str:
@@ -232,7 +233,7 @@ class RSSSource:
         parser.feed('<article>' + html + '</article>')
         return parser.text
 
-    async def fetch(self, publication: Publication) -> Material:
+    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult:
         try:
             batch = await self.read_entries()
         except SourceError:
@@ -283,4 +284,4 @@ class RSSSource:
                 full, reason = False, 'Не все изображения сохранены'
                 if publication.teaser:
                     images.extend(image for image in publication.teaser.images if image.name.startswith(f'image-{position}.'))
-        return Material(title, text, full, reason, tuple(images), collection_error=collection_error)
+        return FetchResult(Material(title, text, full, reason, tuple(images), collection_error=collection_error), SourceObservation(self.gap, self.changes))

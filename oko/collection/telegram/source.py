@@ -15,7 +15,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from oko.collection.contracts import SourceError, SourceDeleted
+from oko.collection.contracts import SourceError, SourceDeleted, DiscoveryResult, FetchResources, FetchResult, FetchRequirements, SourceObservation, SourceIdentity
 from oko.collection.contracts import Attachment, Material, Publication, DownloadStage, StagedPayload, SourceManifest, ResourceManifest
 from oko.collection.telegram.contracts import HistoryEnvelope, Adapter
 from oko.collection.telegram.web import WebTelegram
@@ -260,6 +260,7 @@ class LocalTelegram(_TelegramOperations):
 
 
 class TelegramSource:
+    fetch_requirements = FetchRequirements(staging=True)
     changes = 'Telegram: при сборе перечитываются известные непросмотренные сообщения и вложения. Отсутствующие сообщения сохраняются локально; исчезновение может означать удаление или потерю доступа.'
     def __init__(self, client: TelegramClient | WebTelegram, account: str, peer: int, initial_days: int, username: str | None = None, *, http_transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.http_transport = client.transport if isinstance(client,WebTelegram) else http_transport
@@ -287,7 +288,7 @@ class TelegramSource:
     def url(self, id: int) -> str:
         return f'https://t.me/c/{-self.peer-1000000000000}/{id}' if self.peer < -1000000000000 else f'tg://openmessage?chat_id={-self.peer}&message_id={id}'
 
-    async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+    async def discover(self, cursor: str | None) -> DiscoveryResult:
         previous = HistoryEnvelope.decode(cursor, adapter='web' if isinstance(self.client, WebTelegram) else 'client') if cursor else None
         if previous:
             after = previous.position.get('after')
@@ -299,7 +300,11 @@ class TelegramSource:
             self.identity_info = self.client.identity_info
         envelope = HistoryEnvelope.from_progress(json.loads(raw), adapter=self.adapter)
         selection = envelope.selection.model_copy(update={'paused': bool((self.initial_history or {}).get('paused'))})
-        return publications, envelope.model_copy(update={'selection': selection}).encode()
+        return DiscoveryResult(tuple(publications), envelope.model_copy(update={'selection': selection}).encode(),
+            self.observation(), (.1 if self.initial_history else 0) if self.more else None, self.retry_error)
+
+    def observation(self) -> SourceObservation:
+        return SourceObservation(self.gap, self.changes, SourceIdentity.from_info(self.identity_info))
 
     async def _page(self, state: dict[str, Any]) -> dict[str, Any]:
         if isinstance(self.client, WebTelegram):
@@ -417,14 +422,15 @@ class TelegramSource:
         self.gap = batch.get('gap')
         return publications, json.dumps(state)
 
-    async def fetch(self, publication: Publication, *, staging: DownloadStage | None = None) -> Material:
+    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult:
+        staging = resources.staging
         if staging and not staging.admitted():
             raise asyncio.CancelledError
         material = (await self.client.fetch(publication,staging) if isinstance(self.client,WebTelegram)
                     else await self._fetch_client(publication,staging))
         if staging and not staging.admitted():
             raise asyncio.CancelledError
-        return await enrich(material,publication.teaser,staging,self.http_transport)
+        return FetchResult(await enrich(material,publication.teaser,staging,self.http_transport), self.observation())
 
     async def _fetch_client(self, publication: Publication, staging: DownloadStage | None) -> Material:
         if isinstance(self.client,WebTelegram):

@@ -1,3 +1,4 @@
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import saved_sources
 from pathlib import Path
@@ -47,14 +48,16 @@ def test_folders_and_sorting_use_feed_importance_not_folder_prefix(tmp_path: Pat
     from oko.collection.contracts import Publication, Material
 
     class Sample:
+        fetch_requirements = FetchRequirements()
+        changes = None
         def __init__(self, item, published):
             self.item, self.published = item, published
 
         async def discover(self, cursor):
-            return [Publication(self.item, 'https://example.org/' + self.item, self.published)], 'done'
+            return DiscoveryResult(tuple([Publication(self.item, 'https://example.org/' + self.item, self.published)]), 'done')
 
-        async def fetch(self, publication):
-            return Material(self.item, 'Текст')
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material(self.item, 'Текст'))
 
     saved_sources(tmp_path, [('https://example.org/a.xml', 'A', '9 Второй'), ('https://example.org/b.xml', 'B', '1 Первый')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
@@ -93,11 +96,13 @@ def test_same_url_in_two_feeds_remains_in_each_folder_after_viewing_one(tmp_path
     from oko.collection.contracts import Publication, Material
 
     class SharedArticle:
+        fetch_requirements = FetchRequirements()
+        changes = None
         async def discover(self, cursor):
-            return [Publication('same', 'https://example.org/shared', 100)], 'done'
+            return DiscoveryResult(tuple([Publication('same', 'https://example.org/shared', 100)]), 'done')
 
-        async def fetch(self, publication):
-            return Material('Общая статья', 'Текст статьи')
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material('Общая статья', 'Текст статьи'))
 
     saved_sources(tmp_path, [('https://example.org/a', 'Источник', 'A'), ('https://example.org/b', 'Источник', 'B')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:

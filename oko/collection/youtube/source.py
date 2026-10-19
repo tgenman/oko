@@ -6,20 +6,16 @@ import re
 import sys
 import time
 from dataclasses import replace
-from typing import Any, Protocol
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
 from oko.collection.rss import RSSSource, Entry, entries
 from oko.collection.contracts import SourceError, SourceSkipped
-from oko.collection.contracts import Image, Material, Publication
+from oko.collection.contracts import Image, Material, Publication, DiscoveryResult, FetchResult, FetchResources, FetchRequirements, SourceObservation, CaptionsClient
 from oko.collection.youtube.history import HistoryClient, LocalHistory
 from oko.collection.youtube.access import CaptionsBlocked
-
-
-class CaptionsClient(Protocol):
-    async def fetch(self, video: str) -> str | None: ...
 
 
 class LocalCaptions:
@@ -69,6 +65,7 @@ class LocalCaptions:
 
 
 class YouTubeSource(RSSSource):
+    fetch_requirements = FetchRequirements(captions=True)
     changes = 'YouTube: повторно проверяются название и превью видео в окне Atom. Полученные субтитры сохраняются без повторных запросов. Удаление видео и правки вне этого окна не определяются.'
     def __init__(self, url: str, initial_days: int, captions: CaptionsClient,
                  transport: httpx.AsyncBaseTransport | None = None,
@@ -106,14 +103,15 @@ class YouTubeSource(RSSSource):
         self.latest = {entry.publication.id: entry for entry in result}
         return list(self.latest.values())
 
-    async def discover(self, cursor: str | None) -> tuple[list[Publication], str]:
+    async def discover(self, cursor: str | None) -> DiscoveryResult:
         selection = self.initial_history
         previous: dict[str, Any] = json.loads(cursor) if cursor else {}
         # An existing frozen RSS window must not start backfill on upgrade.
         if selection and selection['mode'] == 'count' and (
                 not selection.get('frozen') or selection.get('run') or 'youtube_history' in previous):
             return await self.discover_history(previous, selection)
-        publications, next_cursor = await super().discover(cursor)
+        outcome = await super().discover(cursor)
+        publications, next_cursor = list(outcome.publications), outcome.cursor
         if not self.rss_windows and self.rss_errors:
             raise SourceError(' · '.join(self.rss_errors))
         if selection and selection['mode'] == 'date':
@@ -121,10 +119,10 @@ class YouTubeSource(RSSSource):
             publications = [p for p in publications if not p.published_known or p.published >= selection['since']]
         if self.rss_errors:
             self.gap = ' · '.join(self.rss_errors)
-        return [replace(p, teaser=replace(p.teaser, text='', description=p.teaser.text))
-                if p.teaser else p for p in publications], next_cursor
+        return DiscoveryResult(tuple([replace(p, teaser=replace(p.teaser, text='', description=p.teaser.text))
+                if p.teaser else p for p in publications]), next_cursor, SourceObservation(self.gap, self.changes))
 
-    async def discover_history(self, previous: dict[str, Any], selection: dict[str, Any]) -> tuple[list[Publication], str]:
+    async def discover_history(self, previous: dict[str, Any], selection: dict[str, Any]) -> DiscoveryResult:
         batch = await self.read_entries()
         run = selection.get('run', 'initial')
         saved = previous.get('youtube_history', {})
@@ -188,9 +186,10 @@ class YouTubeSource(RSSSource):
         next_cursor = dict(youtube_history=saved, history_enroll=list(chosen),
                            scan_complete=saved['complete'], history_waiting=saved['waiting'],
                            history_error=saved.get('error'), history_requests=saved.get('requests', 0))
-        return result_publications, json.dumps(next_cursor)
+        return DiscoveryResult(tuple(result_publications), json.dumps(next_cursor), SourceObservation(self.gap, self.changes))
 
-    async def fetch(self, publication: Publication, *, captions: CaptionsClient | None = None, request_captions: bool = True) -> Material:
+    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult:
+        captions, request_captions = resources.captions, resources.request_captions
         if not re.fullmatch(r'[A-Za-z0-9_-]{11}', publication.id):
             raise SourceError('Неверный ID YouTube')
         entry = self.latest.get(publication.id)
@@ -228,4 +227,4 @@ class YouTubeSource(RSSSource):
             if publication.teaser:
                 images.extend(publication.teaser.images)
             reason = (reason + '; ' if reason else '') + 'Превью недоступно'
-        return Material(title, text, state == 'available' and bool(images) and preview_complete, reason, tuple(images), captions=state, description=description)
+        return FetchResult(Material(title, text, state == 'available' and bool(images) and preview_complete, reason, tuple(images), captions=state, description=description), SourceObservation(self.gap, self.changes))

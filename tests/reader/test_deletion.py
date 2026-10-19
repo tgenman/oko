@@ -1,3 +1,4 @@
+from oko.collection.contracts import FetchResources
 from tests.support.presence import presence, close_presence
 from tests.support.sources import LateSource
 from tests.support.reader import Clock, wait_for
@@ -71,7 +72,7 @@ def test_repeated_discovery_does_not_download_viewed_identity(tmp_path: Path):
             self.downloaded = []
         async def discover(self, cursor):
             return await super().discover(None)
-        async def fetch(self, publication):
+        async def fetch(self, publication, resources=FetchResources()):
             self.downloaded.append(publication.id)
             return await super().fetch(publication)
     source = RepeatingSource()

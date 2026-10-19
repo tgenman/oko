@@ -1,4 +1,5 @@
 """Revision lifecycle through the agreed reader API and external HTTP seam."""
+from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 from tests.support.presence import presence, close_presence
 import time
 import httpx
@@ -76,11 +77,13 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
     from oko.collection.contracts import Material, Publication
     class Editable:
+        fetch_requirements = FetchRequirements()
+        changes = None
         text = 'Первая версия'
         async def discover(self, cursor):
-            return [Publication('one', 'https://source.test/one', time.time())], 'one'
-        async def fetch(self, publication):
-            return Material('Новость', self.text)
+            return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material('Новость', self.text))
     source = Editable()
     interrupted = [False]
     def fault(point):
@@ -155,11 +158,13 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
     from oko.collection.contracts import Material, Publication
     from tests.support.models import model_transport
     class Editable:
+        fetch_requirements = FetchRequirements()
+        changes = None
         text = 'Старое утверждение'
         async def discover(self, cursor):
-            return [Publication('one', 'https://source.test/one', time.time())], 'one'
-        async def fetch(self, publication):
-            return Material('Новость', self.text)
+            return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material('Новость', self.text))
     class Held(httpx.AsyncBaseTransport):
         started = threading.Event()
         release = threading.Event()
@@ -229,11 +234,13 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
     from oko.collection.contracts import Material, Publication
     from tests.support.models import model_transport
     class Editable:
+        fetch_requirements = FetchRequirements()
+        changes = None
         text = 'Первая версия'
         async def discover(self, cursor):
-            return [Publication('one', 'https://source.test/one', time.time())], 'one'
-        async def fetch(self, publication):
-            return Material('Новость', self.text)
+            return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material('Новость', self.text))
     source, calls = Editable(), []
     with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://remote.test', 'model': 'local:latest', 'local_execution': False})
