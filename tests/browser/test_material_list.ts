@@ -5,7 +5,7 @@ test('compact rows show excerpts and current area with actions in menu', async (
  const r=await reader(); try {
   await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('article',{title:'Статья',snippet:'Текст статьи'})]);
   await expect(r.page.locator('#list-title')).toHaveText('All Items');
-  await expect(r.page.locator('#count-label')).toHaveText('2 items');
+  await expect(r.page.locator('#count-label')).toHaveText('2');
   await expect(r.page.locator('#cards .card-snippet').first()).toHaveText('Описание сохранённого видео');
   await expect(r.page.locator('#cards .card-kind')).toHaveCount(0);
   await expect(r.page.locator('#cards .card-preview')).toHaveCount(2);
@@ -56,11 +56,11 @@ test('date groups, saved sorting and displayed hidden card count use current row
   const now=Date.now()/1000;
   await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false})]);
   await expect(r.page.locator('.date-group')).toHaveText(['Today','Yesterday','Unknown date']);
-  await expect(r.page.locator('#count-label')).toHaveText('3 items');
+  await expect(r.page.locator('#count-label')).toHaveText('3');
   await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/v3/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/v3/cards')!.body![0],{...t.replies.get('/api/v3/cards')!.body![0],id:'hidden',filter:{status:'done',hidden:true,restored:false,reason:'Синтетический фильтр',removed:[]}},...t.replies.get('/api/v3/cards')!.body!.slice(1)]});});
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
-  await expect(r.page.locator('#count-label')).toHaveText('4 items');
+  await expect(r.page.locator('#count-label')).toHaveText('4');
   await r.page.locator('#sort').selectOption('importance');
   await expect(r.page.locator('.date-group')).toHaveCount(0);
   await r.page.reload();
