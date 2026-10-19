@@ -33,6 +33,8 @@ class Report:
                          suites={name: dict(status='NOT RUN', commands=[], failures=[]) for name in names})
         self.current = None
         self.pending_line = ''
+        self.events_file = None
+        self.tap_failure = None
 
     def write(self, value):
         self.log.write(value)
@@ -47,17 +49,78 @@ class Report:
         for line in lines:
             self.failure(line)
 
+    def failure_event(self, test, reason, file=None):
+        suite = self.data['suites'][self.current]
+        if test not in suite['failures']:
+            suite['failures'].append(test)
+        details = suite.setdefault('failure_details', [])
+        if any(value['test'] == test for value in details):
+            return
+        source = Path(json.loads(os.environ.get('OKO_CHECK_SNAPSHOT', '{}')).get('source', str(ROOT)))
+        if self.current.startswith(('python-tests', 'tool-tests')):
+            retry = [str(source/'scripts/check'), 'python', '--files', test]
+        else:
+            retry = [str(source/'scripts/check'), 'browser']
+            if file:
+                path = Path(file)
+                if path.is_absolute() and path.is_relative_to(ROOT):
+                    file = str(path.relative_to(ROOT))
+                retry.extend(['--files', file])
+            retry.extend(['--match', '^'+re.escape(test)+'$'])
+        event = dict(test=test, reason=reason[:600], log=str(self.directory/'output.log'), retry=shlex.join(retry))
+        details.append(event)
+        if self.events_file:
+            with self.events_file.open('a', encoding='utf-8') as output:
+                output.write(json.dumps(event, ensure_ascii=False)+'\n')
+        else:
+            self.announce_failure(event)
+
+    def announce_failure(self, event):
+        message = 'FAIL NOW '+event['test']+': '+event['reason']+'\nLog: '+event['log']+'\nRetry: '+event['retry']+'\n'
+        self.write(message)
+        print(message, end='', flush=True)
+
     def failure(self, line):
-        if self.current:
-            passed = re.match(r'^# pass (\d+)$', line)
-            if self.current == 'browser' and passed:
-                self.data['suites']['browser']['passed_scenarios'] = int(passed.group(1))
-            match = re.match(r'^(?:FAILED|ERROR) (.+?)(?: - |$)', line)
-            tap = re.match(r'^\s*not ok \d+ - (.+)', line)
-            failure = match.group(1) if match else tap.group(1).strip() if tap else None
-            failures = self.data['suites'][self.current]['failures']
-            if failure and failure not in failures:
-                failures.append(failure)
+        if not self.current:
+            return
+        if line.startswith('OKO_TEST_FAILURE '):
+            try:
+                event = json.loads(line.removeprefix('OKO_TEST_FAILURE '))
+                if isinstance(event['test'], str) and isinstance(event['reason'], str):
+                    self.failure_event(event['test'], event['reason'])
+                    return
+            except (ValueError, KeyError, TypeError):
+                pass  # The original output stays in the log even for malformed records.
+        passed = re.match(r'^# pass (\d+)$', line)
+        if self.current == 'browser' and passed:
+            self.data['suites']['browser']['passed_scenarios'] = int(passed.group(1))
+        match = re.match(r'^(?:FAILED|ERROR) (.+?)(?: - (.*)|$)', line)
+        if match:
+            self.failure_event(match.group(1), match.group(2) or 'pytest failed; see full log')
+        tap = re.match(r'^\s*not ok \d+ - (.+)', line)
+        if tap:
+            self.tap_failure = dict(test=tap.group(1).strip(), file=None, multiline=False)
+            failure = self.tap_failure['test']
+            if failure not in self.data['suites'][self.current]['failures']:
+                self.data['suites'][self.current]['failures'].append(failure)
+        elif self.tap_failure:
+            location = re.match(r"^\s*location: ['\"]?(.+\.[cm]?[jt]sx?):\d+(?::\d+)?", line)
+            if location:
+                self.tap_failure['file'] = location.group(1)
+            reason = re.match(r'^\s*error: (.+)', line)
+            if reason:
+                value = reason.group(1)
+                if value.startswith('|'):
+                    self.tap_failure['multiline'] = True
+                else:
+                    self.failure_event(self.tap_failure['test'], value.strip("'\""), self.tap_failure['file'])
+                    self.tap_failure = None
+            elif self.tap_failure['multiline'] and line.strip():
+                self.failure_event(self.tap_failure['test'], line.strip(), self.tap_failure['file'])
+                self.tap_failure = None
+            elif line.strip() == '...':
+                self.failure_event(self.tap_failure['test'], 'Browser test failed; see full log', self.tap_failure['file'])
+                self.tap_failure = None
 
     def checkout_changed(self, changed):
         if changed:
@@ -94,6 +157,9 @@ def descendants(pid):
 
 def execute(command, env, report=None, **output):
     record = None
+    if report and '-m' in command and 'pytest' in command:
+        position = command.index('pytest') + 1
+        command = [*command[:position], '-p', 'scripts.pytest_events', *command[position:]]
     if report and report.current:
         record = dict(command=[str(part) for part in command], exit_code=None)
         report.data['suites'][report.current]['commands'].append(record)
@@ -206,7 +272,7 @@ def checkout_state(excluded):
     return result
 
 
-TOOL_TESTS = ('tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_TESTS = ('tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_prepare_worktree.py', 'tests/development/test_check_feedback.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
                'tests/support/', 'frontend/src/api/generated/',
                'oko/reader/generated/',
@@ -281,6 +347,23 @@ def parallel_tests(names, commands, environment, report, results, match=None):
     children = {}
     completed = {}
     interrupted = False
+    event_offsets = {}
+    event_pending = {}
+    def relay_failures():
+        for name in names:
+            path = report.directory/(name+'-events.jsonl')
+            if not path.exists():
+                continue
+            offset = event_offsets.get(name, 0)
+            if path.stat().st_size == offset:
+                continue
+            with path.open('rb') as events:
+                events.seek(offset)
+                lines = (event_pending.get(name, b'')+events.read()).split(b'\n')
+                event_offsets[name] = events.tell()
+            event_pending[name] = lines.pop()
+            for line in lines:
+                report.announce_failure(json.loads(line))
     try:
         for name in names:
             report.output(f'\nRUN {name} (parallel)\n')
@@ -290,6 +373,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                 os.setsid()
                 child_report = Report(report.directory / 'parallel' / name, [name], {})
                 child_report.current = name
+                child_report.events_file = report.directory/(name+'-events.jsonl')
                 child_env = dict(environment, OKO_TEST_ARTIFACT_DIR=str(report.directory / 'artifacts' / name))
                 Path(child_env['OKO_TEST_ARTIFACT_DIR']).mkdir(parents=True, exist_ok=True)
                 tick = time.monotonic()
@@ -318,6 +402,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                 os._exit(code if 0 <= code <= 255 else 1)
             children[pid] = (name, result_file)
         while len(completed) < len(children):
+            relay_failures()
             for pid in children.keys() - completed.keys():
                 ended, status = os.waitpid(pid, os.WNOHANG)
                 if ended:
@@ -328,6 +413,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
         interrupted = True
         raise
     finally:
+        relay_failures()
         # Signal workers first: execute() in each worker owns and reaps its children.
         pending = children.keys() - completed.keys()
         owned = set()
@@ -377,6 +463,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                     aggregate = report.data['suites'][owner]
                     aggregate['commands'].extend(data['commands'])
                     aggregate['failures'] = list(dict.fromkeys([*aggregate['failures'], *data['failures']]))
+                    aggregate.setdefault('failure_details', []).extend(data.get('failure_details', []))
                     aggregate.setdefault('workers', {})[name] = data
                 job_results[name] = data['status']
                 if completed.get(pid) != 0 and job_results[name].startswith('PASS'):

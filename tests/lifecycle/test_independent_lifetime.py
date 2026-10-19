@@ -179,3 +179,19 @@ def test_standalone_client_reads_configures_reconciles_lost_reply_and_stops(tmp_
         assert process.wait(timeout=3)==0
     finally:
         cleanup(process)
+
+
+def test_reader_clock_options_keep_both_clocks_controlled(tmp_path, monkeypatch):
+    import time
+    from tests.support.reader import Clock
+    clock = Clock()
+    with TestClient(create_app(tmp_path, token='test', lease=1, grace=1, **clock.options()),
+                    headers={'Authorization':'Bearer test'}) as client:
+        identity = client.post('/api/v3/client-sessions').json()['id']
+        wall = time.time()
+        monkeypatch.setattr(time, 'time', lambda: wall + 86400)
+        assert client.put('/api/v3/client-sessions/'+identity).status_code == 200
+        clock.now += 2
+        reply = client.put('/api/v3/client-sessions/'+identity)
+        assert reply.status_code == 410
+        assert reply.json()['code'] == 'client_session_expired'

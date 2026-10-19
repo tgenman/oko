@@ -218,7 +218,7 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
     from tests.support.reader import Clock
     clock = Clock()
     captions = Late()
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, lease=.1, grace=.5, clock=clock, wall_clock=clock), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, lease=.1, grace=.5, **clock.options()), headers=HEADERS) as client:
         feed = subscribe(client)
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')

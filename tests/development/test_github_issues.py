@@ -265,3 +265,59 @@ def test_reference_images_use_raw_context_and_indented_code_stays_literal(tmp_pa
     assert '```md\n![literal][other]\n```' in body
     assert f'[other]: https://github.com/example/reader/blob/{ref}/.scratch/migrate/spec.md' in body
     assert (feature / 'issues/01-first.md').read_text() == original
+
+
+def execute_search_call(tmp_path, source, response):
+    """Execute emitted orchestration code with only a synthetic connector."""
+    import os
+    harness = tmp_path/'search.cjs'
+    harness.write_text("const calls=[], output=[], saved=new Map();\n"+
+        "const tools={mcp__codex_apps__github_search_issues:async args=>{calls.push(args);return "+json.dumps(response)+";}};\n"+
+        "const store=(key,value)=>saved.set(key,value);const text=value=>output.push(value);\n"+
+        "(async()=>{\n"+source+"\nprocess.stdout.write(JSON.stringify({calls,output,saved:[...saved.values()]}));\n"+
+        "})().catch(error=>{console.error(error);process.exitCode=1;});\n")
+    result=subprocess.run([os.environ.get('OKO_NODE','node'),str(harness)],text=True,capture_output=True)
+    assert result.returncode==0,result.stderr
+    return json.loads(result.stdout)
+
+
+def test_search_call_prints_only_issue_summary_and_retains_full_response(tmp_path):
+    query='Source in:title "quoted"; text("not executed")'
+    result=run(tmp_path,'search-call','--repo','tgenman/oko','--query',query,'--limit','5')
+    assert result.returncode==0,result.stderr
+    response={'structuredContent':{'issues':[{'issue_number':41,'title':'Source outcomes','state':'closed','url':'https://github.com/tgenman/oko/issues/41','body':'large private body '*1000,'labels':['extra']}]}}
+    value=execute_search_call(tmp_path,result.stdout,response)
+    assert value['calls']==[dict(repository_full_name='tgenman/oko',query=query,topn=5)]
+    assert len(value['output'])==1
+    summary=value['output'][0]
+    assert summary['issues']==[dict(number=41,title='Source outcomes',state='closed',url='https://github.com/tgenman/oko/issues/41')]
+    assert 'large private body' not in json.dumps(summary)
+    assert value['saved']==[response]
+
+
+def test_search_call_reports_connector_failure_without_dumping_response(tmp_path):
+    result=run(tmp_path,'search-call','--repo','tgenman/oko','--query','Source')
+    assert result.returncode==0,result.stderr
+    response={'isError':True,'content':[{'type':'text','text':'raw connector diagnostic'}]}
+    value=execute_search_call(tmp_path,result.stdout,response)
+    assert value['output'][0]['ok'] is False
+    assert 'raw connector diagnostic' not in json.dumps(value['output'])
+    assert value['saved']==[response]
+
+
+def test_search_call_rejects_invalid_repo_limit_and_empty_query(tmp_path):
+    for args in [('--repo','not-a-repo','--query','Source'),('--repo','tgenman/oko','--query','Source','--limit','0'),('--repo','tgenman/oko','--query',' ')]:
+        result=run(tmp_path,'search-call',*args)
+        assert result.returncode!=0
+        assert result.stdout==''
+
+
+def test_search_call_distinguishes_empty_unknown_state_and_malformed_rows(tmp_path):
+    result=run(tmp_path,'search-call','--repo','tgenman/oko','--query','Source')
+    empty=execute_search_call(tmp_path,result.stdout,{'structuredContent':{'issues':[]}})['output'][0]
+    assert empty['ok'] is True and empty['returned']==0
+    response={'structuredContent':{'issues':[{'number':41,'title':'SOURCE','html_url':'https://github.com/tgenman/oko/issues/41','body':'SOURCE'}]}}
+    summary=execute_search_call(tmp_path,result.stdout,response)['output'][0]
+    assert summary['ok'] is True and summary['issues'][0]['state'] is None
+    for response in [{'structuredContent':{'issues':[None]}},{'structuredContent':{'items':[]}}]:
+        assert execute_search_call(tmp_path,result.stdout,response)['output'][0]['ok'] is False
