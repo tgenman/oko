@@ -9,13 +9,13 @@ import * as path from 'node:path';
 import * as servers from './server-process.ts';
 import assert from 'node:assert/strict';
 
-export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>, options: {persistent?:boolean;hostname?:'oko'}={}) {
+export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>, options: {persistent?:boolean;hostname?:'oko';prepare?:(data:string)=>Promise<void>;collection?:boolean;processingDelay?:number}={}) {
   const data=await fs.mkdtemp(path.join(os.tmpdir(),'oko-history-http-'));
   const token=randomBytes(24).toString('base64url');
   let context: BrowserContext | undefined, scenario: Awaited<ReturnType<typeof servers.start>> | undefined, cleanup: Promise<void> | undefined;
   // Independent startup runs in parallel; cleanup waits for both owners,
   // including resources created after an abort or the other startup failing.
-  const started=servers.start(data,token,options.persistent,options.hostname).then(value=>{scenario=value;return value;});
+  const started=Promise.resolve().then(()=>options.prepare?.(data)).then(()=>servers.start(data,token,options.persistent,options.hostname,{collection:options.collection,processingDelay:options.processingDelay})).then(value=>{scenario=value;return value;});
   const contextStarted=newContext().then(value=>{context=value;return value;});
   const close=()=>cleanup ??= (async()=>{
     t?.signal.removeEventListener('abort',abort);

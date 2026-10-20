@@ -520,13 +520,18 @@ def main():
             if probe_code:
                 raise RuntimeError('Browser dependencies unavailable. See tests/browser/README.md.\n' + probe_text)
             env['OKO_BROWSER_EXECUTABLE'] = probe_text.strip()
+        browser_files=list(dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts')))))
+        # Latency acceptance needs a free browser worker, after functional cases.
+        # It remains mandatory in browser/ui/all and retains its 200ms budget.
+        performance_files=[p for p in browser_files if Path(p).name=='test_reading_performance_http.ts']
+        browser_batches=[batch for batch in [[p for p in browser_files if p not in performance_files],performance_files] if batch]
         commands = {
             'build': [[node, '--import', 'tsx', str(ROOT / 'scripts/build-frontend.mts')], [node, '--import', 'tsx', str(ROOT / 'scripts/build-frontend.mts'), '--check']],
             'syntax': syntax_commands(node, selected_files['syntax'] or sorted(path for path in (ROOT / 'frontend').rglob('*') if path.suffix in ('.js', '.mjs', '.ts', '.tsx'))),
             'lint': [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/lint-js.cts'), *dict.fromkeys(selected_files['lint'])]],
             'tooling-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.tooling.json']],
             'browser-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.browser-tests.json']],
-            'browser': [[node, '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-reporter=tap', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts'))))]],
+            'browser': [[node, '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-reporter=tap', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *batch] for batch in browser_batches],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
         if {'contracts', 'http', 'python-tests', 'tool-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):

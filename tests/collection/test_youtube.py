@@ -58,8 +58,10 @@ def transport(calls):
     return httpx.MockTransport(reply)
 
 
-def wait(client, predicate):
+def wait(client, predicate, *, keep_alive=False):
     for _ in range(200):
+        if keep_alive:
+            assert presence(client, 'reader').status_code==200
         cards = client.get('/api/v3/cards').json()
         if len(cards) == 1:
             material = client.get('/api/v3/materials/' + cards[0]['id']).json()
@@ -313,10 +315,12 @@ class YouTubeTranscriptApi:
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
         if not skipped:
-            wait(client, lambda m: m['source'].get('captions') == 'error')
+            wait(client, lambda m: m['source'].get('captions') == 'error',keep_alive=True)
             assert any(g['error_type'] == 'VideoUnplayable' for g in client.get('/api/v3/diagnostics').json()['groups'])
             return
         for _ in range(200):
+            # A live browser renews its lease while an SDK worker is pending.
+            assert presence(client, 'reader').status_code==200
             if calls.exists() and client.get('/api/v3/cards').json() == []:
                 break
             time.sleep(.02)

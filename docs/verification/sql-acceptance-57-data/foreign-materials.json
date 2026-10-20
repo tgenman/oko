@@ -1,0 +1,30 @@
+[
+  {
+    "name": "selected",
+    "sql": 272,
+    "vm": 5100,
+    "content_opens": 26,
+    "content_stats": 78,
+    "read_bytes": 3838,
+    "json_loads": 54,
+    "json_input_bytes": 3976,
+    "json_dumps": 0,
+    "json_output_bytes": 0,
+    "response_bytes": 22929,
+    "ms": 26.698
+  },
+  {
+    "name": "selected",
+    "sql": 272,
+    "vm": 5100,
+    "content_opens": 26,
+    "content_stats": 78,
+    "read_bytes": 3838,
+    "json_loads": 54,
+    "json_input_bytes": 3976,
+    "json_dumps": 0,
+    "json_output_bytes": 0,
+    "response_bytes": 22929,
+    "ms": 17.572
+  }
+]

@@ -48,7 +48,7 @@ export function createReadingResources(api:ReaderApi) {
       values.delete(identity);const id=(value.data as SubscriptionFeed).id;
       for(const [cardKey,card] of values)if(cardKey.startsWith('card/')&&(card.data as CompactReadingCard).feed_id===id)values.delete(cardKey);
     }
-    const status=data<RuntimeStatus>('status','runtime');if(status)forget(status.viewed_ids);
+    const status=data<RuntimeStatus>('status','runtime');if(status&&changed.has('status'))forget(status.viewed_ids);
     return {reset,changed};
   }
   function navigation():Navigation|undefined {
