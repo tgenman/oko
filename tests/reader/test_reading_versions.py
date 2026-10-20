@@ -227,3 +227,84 @@ def test_linked_feed_move_updates_lists_without_retransmitting_cards(tmp_path):
         assert next(r for r in current['resources'] if r['kind']=='list')['data']['ids']==[]
         assert next(r for r in current['resources'] if r['kind']=='feed')['data']['title']=='Moved'
         assert not any(r['kind']=='card' and r['state']=='changed' for r in current['resources'])
+
+
+def test_registered_list_batches_work_and_versions_in_the_write_transaction(tmp_path):
+    from oko.storage.store import Store
+    import pytest
+    for count in [100,200,400]:
+        root=tmp_path/str(count)
+        store=Store(root,lambda _:None)
+        store.subscriptions.ensure_demo()
+        options={'target':{'scope':'all'},'sort':'newest','show_hidden':False}
+        before=store.read_versions.list_version(options)['version']
+        steps=[]
+        store.db.set_progress_handler(lambda:steps.append(1) or 0,100)
+        with store.db:
+            store.db.executemany('INSERT INTO items(id,feed_id,published) VALUES (?,?,?)',[(f'item-{n}','demo',n) for n in range(count)])
+        store.db.set_progress_handler(None,0)
+        assert len(steps)*100<count*1000,(count,len(steps)*100)
+        assert store.read_versions.list_version(options)['version']==before+1
+        assert len(store.read_versions.ids(options))==count
+        # Net-zero changes do not advance a list, and failed writes roll back
+        # both membership and the transaction's pending list maintenance.
+        with store.db:
+            store.db.execute("UPDATE items SET viewed=1 WHERE id='item-0'")
+            store.db.execute("UPDATE items SET viewed=0 WHERE id='item-0'")
+        assert store.read_versions.list_version(options)['version']==before+1
+        with pytest.raises(ValueError):
+            with store.db:
+                store.db.execute("UPDATE items SET viewed=1 WHERE id='item-0'")
+                raise ValueError('rollback')
+        store.db.close()
+        reopened=Store(root,lambda _:None)
+        assert reopened.read_versions.list_version(options)['version']==before+1
+        assert len(reopened.read_versions.ids(options))==count
+        reopened.db.close()
+
+
+def test_filter_resource_keeps_saved_provenance_across_restart(tmp_path):
+    from tests.support.app import create_app
+    from tests.support.filters import FilterSource,transport,setup_filters
+    from tests.support.reader import wait_for
+    options=dict(source=FilterSource(),token='test',api_only=True,ai_transport=transport([]))
+    identity=None
+    for _ in range(2):
+        with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
+            if identity is None:
+                setup_filters(client)
+                cards=wait_for(client,lambda:(v if len(v:=client.get('/api/v3/cards').json())==2 and all(c['filter']['attempt']['state']=='ready' for c in v) else None))
+                identity=cards[0]['id']
+            expected=client.get('/api/v3/materials/'+identity).json()['filter']['result']['provenance']
+            frame=client.get('/api/v3/reading/materials/'+identity).json()
+            actual=next(r['data']['filter']['result']['provenance'] for r in frame['resources'] if r['kind']=='filter')
+            assert actual==expected=={'kind':'local','processor_id':'llamacpp','model':{'name':'local:latest','state':'known'}}
+
+
+def test_list_maintenance_failure_rolls_back_data_and_versions(tmp_path,monkeypatch):
+    from oko.storage.store import Store
+    import pytest
+    store=Store(tmp_path,lambda _:None)
+    store.subscriptions.ensure_demo()
+    options={'target':{'scope':'all'},'sort':'newest','show_hidden':False}
+    before=store.read_versions.list_version(options)['version']
+    def fail():
+        raise OSError('Synthetic commit failure')
+    for explicit in [False,True]:
+        with monkeypatch.context() as patch:
+            patch.setattr(store.db,'flush_reading_lists',fail)
+            with pytest.raises(OSError,match='Synthetic commit failure'):
+                if explicit:
+                    store.db.execute("INSERT INTO items(id,feed_id,published) VALUES ('rejected','demo',1)")
+                    store.db.commit()
+                else:
+                    with store.db:
+                        store.db.execute("INSERT INTO items(id,feed_id,published) VALUES ('rejected','demo',1)")
+        assert store.read_versions.ids(options)==[]
+        assert store.read_versions.list_version(options)['version']==before
+    store.db.execute("INSERT INTO items(id,feed_id,published) VALUES ('uncommitted','demo',1)")
+    store.db.close()
+    reopened=Store(tmp_path,lambda _:None)
+    assert reopened.read_versions.ids(options)==[]
+    assert reopened.read_versions.list_version(options)['version']==before
+    reopened.db.close()

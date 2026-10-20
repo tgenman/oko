@@ -7,11 +7,56 @@ import hashlib
 import json
 import sqlite3
 import uuid
-from typing import Any, TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING, cast, Literal
 from collections.abc import Callable
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
+
+
+class ReadingConnection(sqlite3.Connection):
+    """Flush derived list versions before the transaction becomes visible.
+
+    Store uses implicit transactions, commit and connection contexts. SQL COMMIT
+    and autocommitting DML scripts are not write interfaces of this connection.
+    close retains SQLite's rollback semantics.
+    """
+    reading_lists: bool | None = None
+
+    def flush_reading_lists(self) -> None:
+        if not self.in_transaction:
+            return
+        if self.reading_lists is None:
+            self.reading_lists=any(row[1]=='pending' for row in self.execute('PRAGMA table_info(reader_lists)'))
+        if not self.reading_lists:
+            return
+        rows=self.execute('SELECT identity,scope,owner,sort,hidden,digest FROM reader_lists WHERE pending=1').fetchall()
+        for identity,scope,owner,sort,hidden,previous in rows:
+            ids=[row[0] for row in self.execute(ReaderVersions._ids(':scope',':owner',':sort',':hidden'),dict(scope=scope,owner=owner,sort=sort,hidden=hidden))]
+            digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+            self.execute('UPDATE reader_lists SET version=version+?,changed=CASE WHEN ? THEN oko_reader_time() ELSE changed END,digest=?,pending=0 WHERE identity=?',
+                         (int(digest!=previous),int(digest!=previous),digest,identity))
+
+    def commit(self) -> None:
+        try:
+            self.flush_reading_lists()
+            super().commit()
+        except BaseException:
+            self.rollback()
+            raise
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Literal[False]:
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+        return False
+
+    def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
+        # CPython's executescript commits through C, bypassing commit overrides.
+        # Production scripts are schema/trigger setup, not data-write batches.
+        self.commit()
+        return super().executescript(sql_script)
 
 
 class ReaderVersions:
@@ -29,7 +74,7 @@ class ReaderVersions:
         CREATE TABLE IF NOT EXISTS reader_folder_counts (folder TEXT PRIMARY KEY, visible INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS reader_lists (
           identity TEXT PRIMARY KEY, scope TEXT, owner TEXT, sort TEXT, hidden INTEGER,
-          version INTEGER NOT NULL, changed REAL NOT NULL, digest TEXT NOT NULL);
+          version INTEGER NOT NULL, changed REAL NOT NULL, digest TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS reader_job_time (job INTEGER PRIMARY KEY, deadline REAL, ready INTEGER);
         CREATE INDEX IF NOT EXISTS reader_job_due ON reader_job_time(deadline) WHERE ready=0;
         CREATE TABLE IF NOT EXISTS reader_runtime (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
@@ -37,6 +82,13 @@ class ReaderVersions:
         CREATE INDEX IF NOT EXISTS reader_problem_expiry ON reader_problems(finished) WHERE finished IS NOT NULL;
         CREATE INDEX IF NOT EXISTS reader_action_expiry ON reader_action_results(completed) WHERE completed IS NOT NULL;
         ''')
+        if not any(row['name']=='pending' for row in self.db.execute('PRAGMA table_info(reader_lists)')):
+            with self.db:
+                for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reader_v_%'").fetchall():
+                    self.db.execute('DROP TRIGGER "'+row['name'].replace('"','""')+'"')
+                self.db.execute('ALTER TABLE reader_lists ADD COLUMN pending INTEGER NOT NULL DEFAULT 0')
+        self.db.reading_lists=True
+        self.db.execute('CREATE INDEX IF NOT EXISTS reader_lists_pending ON reader_lists(identity) WHERE pending=1')
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO reader_identity VALUES (1,?)', (str(uuid.uuid4()),))
             for kind, identity in [('status', 'runtime'), ('navigation', 'navigation')]:
@@ -100,13 +152,7 @@ class ReaderVersions:
 
     @classmethod
     def _lists(cls, where: str) -> str:
-        ids = cls._ids('l.scope','l.owner','l.sort','l.hidden')
-        return f"""INSERT INTO reader_lists
-            SELECT l.identity,l.scope,l.owner,l.sort,l.hidden,1,oko_reader_time(),
-              (SELECT oko_reader_hash(coalesce(json_group_array(id),'[]')) FROM ({ids}))
-            FROM reader_lists l WHERE {where}
-            ON CONFLICT(identity) DO UPDATE SET digest=excluded.digest,version=reader_lists.version+1,changed=excluded.changed
-              WHERE reader_lists.digest IS NOT excluded.digest;"""
+        return f"UPDATE reader_lists SET pending=1 WHERE pending=0 AND identity IN (SELECT l.identity FROM reader_lists l WHERE {where});"
 
     @classmethod
     def _feed_lists(cls, feed: str) -> str:
@@ -296,6 +342,7 @@ class ReaderVersions:
 
     def list_version(self, options: dict[str, Any]) -> sqlite3.Row:
         identity=self.list_identity(options)
+        self.db.flush_reading_lists()
         row=self.db.execute('SELECT version,changed FROM reader_lists WHERE identity=?',(identity,)).fetchone()
         if row:return cast(sqlite3.Row,row)
         ids=self.ids(options)
@@ -303,7 +350,7 @@ class ReaderVersions:
         digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
         target=options['target']
         with self.db:
-            self.db.execute('INSERT INTO reader_lists VALUES (?,?,?,?,?,1,?,?)',(identity,target['scope'],target.get('feed_id',target.get('folder_id','')),options['sort'],int(options['show_hidden']),self.store.wall_clock(),digest))
+            self.db.execute('INSERT INTO reader_lists(identity,scope,owner,sort,hidden,version,changed,digest) VALUES (?,?,?,?,?,1,?,?)',(identity,target['scope'],target.get('feed_id',target.get('folder_id','')),options['sort'],int(options['show_hidden']),self.store.wall_clock(),digest))
         row=self.db.execute('SELECT version,changed FROM reader_lists WHERE identity=?',(identity,)).fetchone()
         assert row is not None
         return cast(sqlite3.Row,row)

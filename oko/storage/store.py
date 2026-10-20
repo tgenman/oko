@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from oko.storage.aggregate_upgrade import remove_aggregates
 from oko.storage.versions import Versions
-from oko.storage.reader_versions import ReaderVersions
+from oko.storage.reader_versions import ReaderVersions, ReadingConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.reader.composition import FolderContents, ReadingComposition
@@ -54,7 +54,7 @@ class Store:
         self.wall_clock = wall_clock
         self.clock = clock
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.db = sqlite3.connect(root / 'state.sqlite')
+        self.db = ReadingConnection(root / 'state.sqlite')
         self.db.row_factory = sqlite3.Row
         ReaderVersions.functions(self.db,self.clock,self.wall_clock)
         # Reject unsupported topic migration before any PRAGMA/schema/data write.

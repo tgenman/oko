@@ -1,13 +1,14 @@
 """Offline fixture connections retain Store's transactional reader functions."""
 from contextlib import contextmanager
-import sqlite3
+from pathlib import Path
+from collections.abc import Iterator
 import time
-from oko.storage.reader_versions import ReaderVersions
+from oko.storage.reader_versions import ReaderVersions,ReadingConnection
 
 
 @contextmanager
-def database(root):
-    db=sqlite3.connect(root/'state.sqlite')
+def database(root:Path) -> Iterator[ReadingConnection]:
+    db=ReadingConnection(root/'state.sqlite')
     ReaderVersions.functions(db,time.monotonic,time.time)
     try:
         with db:

@@ -88,6 +88,18 @@ class Common(TypedDict):
     theses: wire.ThesesState
 
 
+def saved_filter(runtime: Runtime, item: str, value: facts.Filter | None) -> wire.FilterState:
+    current=runtime.require_store()
+    filtered = filter_state(value, runtime.processing_wait(item, 'filter'))
+    if filtered.root.result is not None:
+        saved = current.derivative_provenance(current.path(item).parent / 'filter.md', current.filters.signature(item))
+        if saved:
+            from pydantic import TypeAdapter
+            origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
+            filtered.root.result.provenance = provenance(origin)
+    return filtered
+
+
 def common(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed) -> Common:
     current = runtime.require_store()
     source: wire.DemoSourceReference | wire.RssSourceReference | wire.YoutubeSourceReference | wire.TelegramSourceReference
@@ -101,13 +113,7 @@ def common(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed) -> 
         source = wire.DemoSourceReference(kind='demo', feed_id=fid, source_url=url)
     else:
         source = wire.RssSourceReference(kind='rss', feed_id=fid, source_url=url)
-    filtered = filter_state(value.filter if isinstance(value.filter, facts.Filter) else None, runtime.processing_wait(value.id, 'filter'))
-    if filtered.root.result is not None:
-        saved = current.derivative_provenance(current.path(value.id).parent / 'filter.md', current.filters.signature(value.id))
-        if saved:
-            from pydantic import TypeAdapter
-            origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
-            filtered.root.result.provenance = provenance(origin)
+    filtered = saved_filter(runtime,value.id,value.filter if isinstance(value.filter,facts.Filter) else None)
     return Common(id=wire.MaterialId(value.id), title=value.title, feed_id=fid, feed_title=value.feed_title,
         folder_id=wire.FolderId(value.folder_id), importance=wire.Importance(value.importance),
         published_at=project.timestamp(value.published) if value.published_known else None,

@@ -186,12 +186,12 @@ class VersionedReading:
                             elif kind=='card':data=self.compact(identity)
                             elif kind=='media':data=self.media(identity)
                             elif kind in ('filter','theses'):
-                                from oko.reader.reading_v3 import filter_state, theses_parts
+                                from oko.reader.reading_v3 import saved_filter, theses_parts
                                 complete=store.db.execute('SELECT complete FROM items WHERE id=?',(identity,)).fetchone()
                                 revision=store.content_version(identity) if complete and complete['complete'] else None
                                 if kind=='filter':
                                     filtered=facts.Filter.model_validate(store.filters.read(identity))
-                                    data=dict(revision_id=revision,filter=filter_state(filtered,self.runtime.processing_wait(identity,'filter')).model_dump(mode='json'))
+                                    data=dict(revision_id=revision,filter=saved_filter(self.runtime,identity,filtered).model_dump(mode='json'))
                                 else:
                                     theses=store.processing.theses
                                     summary,origin,ai=theses.read(identity),theses.provenance(identity),theses.status(identity)
