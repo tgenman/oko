@@ -85,7 +85,7 @@ def test_telegram_reconciliation_scales_linearly(tmp_path, count):
 def test_pending_dispatch_ignores_completed_archive_and_keeps_priorities(tmp_path):
     store = Store(tmp_path, lambda _: None)
     with store.db:
-        store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')", [(f'old-{i}',) for i in range(20000)])
+        store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('filter',?,'done')", [(f'old-{i}',) for i in range(20000)])
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('discover','')")
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','processing')")
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete','removed')")
