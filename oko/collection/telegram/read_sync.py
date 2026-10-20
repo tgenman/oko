@@ -22,6 +22,7 @@ class ReadPlan:
 class ReadSync:
     def __init__(self, store: 'Store') -> None:
         self.store = store
+        self._configuration: int | None = None
         store.db.executescript('''
         CREATE TABLE IF NOT EXISTS telegram_read_topics (
           feed TEXT, topic INTEGER, confirmed INTEGER, PRIMARY KEY(feed,topic));
@@ -36,6 +37,37 @@ class ReadSync:
         if 'missing' not in columns:
             with store.db:
                 store.db.execute('ALTER TABLE telegram_read_members ADD COLUMN missing INTEGER DEFAULT 0')
+
+    def recover(self) -> None:
+        """Import legacy tombstones once on startup, never in ordinary polling."""
+        db = self.store.db
+        with db:
+            db.execute('CREATE TABLE IF NOT EXISTS telegram_read_dirty (feed TEXT PRIMARY KEY)')
+            for event in ('INSERT', 'UPDATE'):
+                db.execute(f"""CREATE TRIGGER IF NOT EXISTS telegram_read_member_{event}
+                    AFTER {event} ON telegram_read_members BEGIN
+                    INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END""")
+            db.executescript("""
+            CREATE TRIGGER IF NOT EXISTS telegram_read_item_added AFTER INSERT ON items
+              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed_id) ON CONFLICT(feed) DO NOTHING; END;
+            CREATE TRIGGER IF NOT EXISTS telegram_read_item_changed AFTER UPDATE OF complete,members,viewed ON items
+              WHEN NEW.complete IS NOT OLD.complete OR NEW.members IS NOT OLD.members OR NEW.viewed IS NOT OLD.viewed
+              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed_id) ON CONFLICT(feed) DO NOTHING; END;
+            CREATE TRIGGER IF NOT EXISTS telegram_read_version_added AFTER INSERT ON content_current
+              BEGIN INSERT INTO telegram_read_dirty SELECT feed_id FROM items WHERE id=NEW.item
+                ON CONFLICT(feed) DO NOTHING; END;
+            CREATE TRIGGER IF NOT EXISTS telegram_read_version_changed AFTER UPDATE ON content_current
+              BEGIN INSERT INTO telegram_read_dirty SELECT feed_id FROM items WHERE id=NEW.item
+                ON CONFLICT(feed) DO NOTHING; END;
+            CREATE TRIGGER IF NOT EXISTS telegram_read_initial_added AFTER INSERT ON telegram_read_state
+              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
+            CREATE TRIGGER IF NOT EXISTS telegram_read_initial_changed AFTER UPDATE OF initial,since ON telegram_read_state
+              WHEN NEW.initial IS NOT OLD.initial OR NEW.since IS NOT OLD.since
+              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
+            """)
+            for row in db.execute("SELECT feed_id,members FROM items WHERE viewed=1 AND members!='[]'").fetchall():
+                self.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
+        self.sync()
 
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:
         db = self.store.db
@@ -55,17 +87,23 @@ class ReadSync:
                                   [(feed, member, reason) for member in members])
 
     def request(self, feed: str) -> dict[str, Any] | None:
-        config = next((f for f in self.store.subscriptions.feeds() if f['id'] == feed), None)
-        history = config.get('initial_history') if config else None
+        configs = self.store.subscriptions.feeds(feed)
+        if not configs:
+            return None
+        binding = self.store.subscriptions.telegram.binding(feed)
+        profile = self.store.subscriptions.telegram.profile(binding['role']) if binding and binding['kind'] == 'client' else None
+        return self._request(configs[0], binding, profile)
+
+    def _request(self, config: dict[str, Any], binding: dict[str, Any] | None, profile: dict[str, Any] | None) -> dict[str, Any] | None:
+        feed = config['id']
+        history = config.get('initial_history')
         if history and history['mode'] == 'count' and (not history['frozen'] or not history.get('scan_complete', True)):
             return None
         state = self.store.db.execute('SELECT * FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
-        if not config or not state or config['transport'] != 'telegram' or config['auto_read'] is None:
+        if not state or config['transport'] != 'telegram' or config['auto_read'] is None:
             return None
-        binding = self.store.subscriptions.telegram.binding(feed)
         if not binding or binding['kind'] != 'client' or config['connection'] == 'deleting':
             return None
-        profile = self.store.subscriptions.telegram.profile(binding['role'])
         return dict(account=profile['account'] if profile else config['telegram_account'], peer=config['telegram_peer'],
                     username=config.get('telegram_username'), since=state['since'],
                     initial=state['initial'], read_history=config['read_history'], auto_read=config['auto_read'],
@@ -77,37 +115,46 @@ class ReadSync:
 
     def sync(self) -> None:
         db = self.store.db
-        for config in self.store.subscriptions.feeds():
+        revision = self.store.subscriptions.source_revision()
+        if revision != self._configuration:
+            configs = self.store.subscriptions.feeds()
+        else:
+            pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_dirty')]
+            if not pending:
+                return
+            configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed)]
+        bindings = self.store.subscriptions.telegram.bindings()
+        profiles = self.store.subscriptions.telegram.profiles()
+        for config in configs:
             feed = config['id']
-            binding = self.store.subscriptions.telegram.binding(feed)
-            if config['transport'] != 'telegram' or config['connection'] == 'deleting' or not binding or binding['kind'] != 'client':
-                continue
+            binding = bindings.get(feed)
+            if config['transport'] == 'telegram' and config['connection'] != 'deleting' and binding and binding['kind'] == 'client':
+                with db:
+                    if config['auto_read']:
+                        eligible = {r[0] for r in db.execute('SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1', (feed,))}
+                        for row in db.execute('SELECT * FROM items WHERE feed_id=? AND complete=1 AND viewed=0', (feed,)).fetchall():
+                            members = json.loads(row['members'])
+                            if members and not set(members) <= eligible:
+                                try:
+                                    header, _ = self.store.original(row['id'])
+                                except (OSError, ValueError, KeyError):
+                                    continue
+                                if isinstance(header.get('title'), str) and header.get('full', True) and (not header.get('members') or set(header['members']) == set(members)):
+                                    self.eligible(feed, members, 'saved')
+                    request = self._request(config, binding, profiles.get(binding['role']))
+                    if request is not None:
+                        state = db.execute('SELECT signature,waiting FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
+                        if request['eligible'] or request['read_history'] or state['waiting']:
+                            signature = self.signature(request)
+                            if state['signature'] != signature:
+                                db.execute('UPDATE telegram_read_state SET signature=? WHERE feed=?', (signature, feed))
+                                db.execute("INSERT INTO jobs(kind,item) VALUES ('read',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1", (feed,))
             with db:
-                eligible = {r[0] for r in db.execute('SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1', (feed,))}
-                # Viewed tombstones predate this queue in existing installations.
-                # Their service IDs are sufficient; deleted text is never needed.
-                for row in db.execute('SELECT members FROM items WHERE feed_id=? AND viewed=1', (feed,)).fetchall():
-                    missing = set(json.loads(row['members'])) - eligible
-                    if missing:
-                        self.eligible(feed, sorted(missing), 'viewed')
-                        eligible.update(missing)
-                if config['auto_read']:
-                    for row in db.execute('SELECT * FROM items WHERE feed_id=? AND complete=1 AND viewed=0', (feed,)).fetchall():
-                        members = json.loads(row['members'])
-                        if members and not set(members) <= eligible:
-                            material = self.store.material(row['id'])
-                            if material and material['full']:
-                                self.eligible(feed, members, 'saved')
-                request = self.request(feed)
-                if request is None:
-                    continue
-                state = db.execute('SELECT signature,waiting FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
-                if not request['eligible'] and not request['read_history'] and not state['waiting']:
-                    continue
-                signature = self.signature(request)
-                if state['signature'] != signature:
-                    db.execute('UPDATE telegram_read_state SET signature=? WHERE feed=?', (signature, feed))
-                    db.execute("INSERT INTO jobs(kind,item) VALUES ('read',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1", (feed,))
+                db.execute('DELETE FROM telegram_read_dirty WHERE feed=?', (feed,))
+        # Deleted feeds have no configuration and need no work.
+        with db:
+            db.execute('DELETE FROM telegram_read_dirty WHERE feed NOT IN (SELECT id FROM feeds)')
+        self._configuration = revision
 
     def plan(self, request: dict[str, Any], state: dict[str, Any], window: dict[str, Any] | None = None) -> ReadPlan:
         confirmed = int(state['read_max'])

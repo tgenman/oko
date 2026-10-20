@@ -87,6 +87,12 @@ class TelegramAccess:
             # A saved verified identity is not evidence for the next process.
             db.execute("UPDATE telegram_profiles SET state='unavailable',message='Требуется проверка сессии после запуска'")
 
+    def bindings(self) -> dict[str, dict[str, Any]]:
+        return {row['feed']: json.loads(row['binding']) for row in self.db.execute('SELECT feed,binding FROM telegram_bindings')}
+
+    def profiles(self) -> dict[str, dict[str, Any]]:
+        return {row['role']: dict(row) for row in self.db.execute('SELECT * FROM telegram_profiles')}
+
     def binding(self, feed: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT binding FROM telegram_bindings WHERE feed=?', (feed,)).fetchone()
         return json.loads(row[0]) if row else None

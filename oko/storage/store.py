@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from oko.storage.aggregate_upgrade import remove_aggregates
 from oko.storage.versions import Versions
@@ -116,6 +116,7 @@ class Store:
             self.db.execute('ALTER TABLE items ADD COLUMN source_order INTEGER')
             self.db.commit()
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.filters = Filters(self)
         self.processing = ProcessingCoordination(self)
@@ -133,6 +134,9 @@ class Store:
         self.versions.recover()
         remove_aggregates(self)
         self.recover_files()
+        self.subscriptions.watch_configuration()
+        self.processing.recover()
+        self.read_sync.recover()
 
     def recover_files(self) -> None:
         # Never promote orphaned output: the pending fetch must produce a fresh result.
@@ -669,13 +673,22 @@ class Store:
         self.settings_changed()
 
     @reading_value
-    def settings_version(self) -> int:
-        row = self.db.execute("SELECT value FROM state WHERE key='settings-version'").fetchone()
-        return int(row[0]) if row else 0
+    def settings_version(self, feed: str | None = None) -> int:
+        keys = ['settings-version'] + (['settings-version:' + feed] if feed else [])
+        return max((int(row[0]) for key in keys for row in self.db.execute('SELECT value FROM state WHERE key=?', (key,))), default=0)
 
-    def settings_changed(self) -> None:
+    def settings_changed(self, scope: str = 'oko', owner: str = 'global') -> None:
         with self.db:
-            self.db.execute("INSERT INTO state VALUES ('settings-version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(self.settings_version() + 1),))
+            row = self.db.execute("SELECT value FROM state WHERE key='settings-sequence'").fetchone()
+            sequence = max(int(row[0]) if row else 0, self.settings_version()) + 1
+            self.db.execute("INSERT INTO state VALUES ('settings-sequence',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(sequence),))
+            if scope == 'oko':
+                keys = ['settings-version']
+            else:
+                query = 'SELECT id FROM feeds WHERE ' + ('id=?' if scope == 'feed' else 'folder_id=?')
+                keys = ['settings-version:' + row[0] for row in self.db.execute(query, (owner,))]
+            self.db.executemany('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [(key, str(sequence)) for key in keys])
+            self.processing.invalidate(scope, owner)
         self.processing.sync()
 
     def content_version(self, item: str) -> str:
@@ -698,7 +711,7 @@ class Store:
             if header.get('captions') == 'not_requested':
                 self.retry_material(row['id'])
 
-    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True) -> None:
+    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True, *, provenance: dict[str, Any] | None | Literal['execution'] = 'execution') -> None:
         """Commit a validated AI result; callers own admission and input signature."""
         stage = None
         if job.kind in ('filter', 'theses'):
@@ -709,7 +722,7 @@ class Store:
             pending = stage / filename
         else:
             raise ValueError('Unknown derivative')
-        provenance = self.execution_provenance(job)
+        provenance = self.execution_provenance(job) if provenance == 'execution' else provenance
         with pending.open('w', encoding='utf-8') as output:
             output.write(json.dumps(dict(signature=signature, result=result, provenance=provenance), ensure_ascii=False) + '\n\n' + text)
             output.flush()

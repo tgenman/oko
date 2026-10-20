@@ -153,12 +153,12 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
         assert len(rows) == 100
         assert rows[0]['id'] == 'archive-00099'
         assert len(steps) < 2000, len(steps)
-        # Measure index maintenance independently of SQLite wall-clock speed.
+        # Include bounded transactional dirty markers as well as index maintenance.
         writes = []
         store.db.set_progress_handler(lambda: writes.append(1) or 0, 1)
         with store.db:
             store.db.execute('UPDATE items SET viewed=1 WHERE id=?', ('archive-00000',))
             store.db.execute('UPDATE items SET viewed=0 WHERE id=?', ('archive-00000',))
         store.db.set_progress_handler(None, 0)
-        assert len(writes) < 200, len(writes)
+        assert len(writes) < 300, len(writes)
         store.db.close()

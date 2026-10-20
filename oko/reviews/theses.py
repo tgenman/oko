@@ -42,12 +42,11 @@ class PublicationTheses:
         elif not values['theses']:
             return None
         config = self.store.processor_config()
-        payload = [version, filter_input, row['members'], self.store.settings_version(), values, settings['feed']['public_ai'], config.model_dump() if config else None]
+        payload = [version, filter_input, row['members'], self.store.settings_version(row['feed_id']), values, settings['feed']['public_ai'], config.model_dump() if config else None]
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
-    def sync(self) -> None:
-        for row in self.store.db.execute('SELECT id FROM items WHERE viewed=0').fetchall():
-            item = row['id']
+    def sync(self, items: list[str]) -> None:
+        for item in items:
             signature = self.signature(item)
             old = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
             state = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
@@ -111,7 +110,7 @@ class PublicationTheses:
         if settings['feed']['kind'] == 'youtube':
             text = material['text']
             version = hashlib.sha256(text.encode()).hexdigest()
-        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text),), settings_version=self.store.settings_version(), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text),), settings_version=self.store.settings_version(material['feed_id']), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, settings['feed']['public_ai']
 
     def retry(self, item: str) -> bool:
@@ -176,6 +175,8 @@ class PublicationTheses:
                     return result, path
             except (OSError, ValueError, KeyError):
                 record_caught('theses.read')
+        if row[0] == 'done' and signature is not None:
+            self.store.processing.repair(item)
         return None
 
     def provenance(self, item: str) -> dict[str, Any] | None:

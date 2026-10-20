@@ -167,7 +167,7 @@ def test_previous_caption_signature_is_upgraded_without_model_call(tmp_path, int
                     raise OSError('Interrupted signature upgrade')
             store.fault = fault
             with pytest.raises(OSError, match='Interrupted signature upgrade'):
-                store.processing.theses.sync()
+                store.processing.recover()
     finally:
         store.db.close()
 

@@ -138,6 +138,26 @@ class Subscriptions:
         self.details = FeedDetails(db, wall_clock)
         self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
 
+    def watch_configuration(self) -> None:
+        """A durable revision of source settings, independent of job progress."""
+        for table in ('feeds', 'settings', 'initial_history', 'telegram_bindings', 'telegram_profiles'):
+            for event in ('INSERT', 'UPDATE', 'DELETE'):
+                self.db.execute(f"""CREATE TRIGGER IF NOT EXISTS source_configuration_{table}_{event}
+                    AFTER {event} ON {table} BEGIN
+                    INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
+                    DO UPDATE SET value=CAST(state.value AS INTEGER)+1;
+                    END""")
+        self.db.executescript("""
+        CREATE TRIGGER IF NOT EXISTS source_read_initial AFTER UPDATE OF initial ON telegram_read_state
+          WHEN NEW.initial IS NOT OLD.initial BEGIN
+          INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
+          DO UPDATE SET value=CAST(state.value AS INTEGER)+1; END;
+        """)
+
+    def source_revision(self) -> int:
+        row = self.db.execute("SELECT value FROM state WHERE key='sources-version'").fetchone()
+        return int(row[0]) if row else 0
+
     def ensure_demo(self) -> None:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO folders VALUES ('demo','Тестовый источник',-1)")
