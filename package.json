@@ -2,7 +2,7 @@
   "name": "oko-browser-checks",
   "private": true,
   "engines": {
-    "node": "^20.19.0 || ^22.13.0 || >=24"
+    "node": "^26.12.0"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "0.97.3",

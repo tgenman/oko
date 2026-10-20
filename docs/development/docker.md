@@ -4,7 +4,7 @@
 
 ## Подготовка
 
-Нужны работающий Docker Desktop со свободным портом 8765, Git и `uv 0.11.28`. `prepare` создаёт отдельное Python 3.13 окружение Mac и строит `linux/arm64` образ с Python 3.13.9 и Node 24.10.0 на этапе сборки. Python/npm зависимости берутся из lock-файлов. Builder проверяет generated API, типы и целостность frontend assets. Runtime содержит только Python-окружение и готовые assets; Node остаётся в builder.
+Нужны работающий Docker Desktop со свободным портом 8765, Git и `uv 0.11.28`. `prepare` создаёт отдельное Python 3.13 окружение Mac и строит `linux/arm64` образ с Python 3.13.9 и Node 26.12.0 на этапе сборки. Python/npm зависимости берутся из lock-файлов. Builder устанавливает `libatomic1`, необходимую Node 26, и проверяет generated API, типы и целостность frontend assets. Runtime содержит только Python-окружение и готовые assets; Node остаётся в builder.
 
 Отслеживаемые файлы checkout должны быть чистыми; посторонние untracked файлы не входят в Git snapshot. Изменения текущей разработки сначала сохранить в отдельной ветке/checkout; `prepare` не сбрасывает и не коммитит их. Выпуск строится из явного Git ref через `git archive`, а не из изменяемого рабочего дерева:
 

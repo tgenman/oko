@@ -45,7 +45,7 @@ def main():
         else:
             node = shutil.which(os.environ.get('OKO_NODE', 'node'))
             if not node:
-                print('Node missing; set OKO_NODE or install Node >=20.', file=sys.stderr)
+                print('Node missing; set OKO_NODE or install Node 26.12.0+.', file=sys.stderr)
                 return 1
             print(f'CHECK staged {name}', flush=True)
             if typescript:

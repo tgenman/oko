@@ -16,7 +16,7 @@
 
 ## Запуск
 
-Браузерный интерфейс написан на React и strict TypeScript в `frontend/src/`, сборка — Vite. Python выдаёт готовые HTML, JS/CSS и API на одном origin. Око запускается из репозитория; Node нужен для подготовки frontend. Для разработки установите Python-зависимости через `uv sync --locked` (включая группу `dev`), выполните `npm ci`, `npm run api:generate` и `npm run build`; `npm run dev` пересобирает assets при правках для того же Python-сервера. Source checkout отклоняет отсутствующую или устаревшую сборку до запуска Runtime.
+Браузерный интерфейс написан на React и strict TypeScript в `frontend/src/`, сборка — Vite. Python выдаёт готовые HTML, JS/CSS и API на одном origin. Око запускается из репозитория; Для подготовки frontend нужен Node.js 26.12.0 (версия закреплена в `.node-version`). Для разработки установите Python-зависимости через `uv sync --locked` (включая группу `dev`), выполните `npm ci`, `npm run api:generate` и `npm run build`; `npm run dev` пересобирает assets при правках для того же Python-сервера. Source checkout отклоняет отсутствующую или устаревшую сборку до запуска Runtime.
 
 Контракт — [api/openapi.yaml](api/openapi.yaml). Обе библиотеки DTO/SDK генерируются из него; `npm run api:check` выявляет drift без записи в checkout. У работающего Око документация находится на `/docs`; `npm run api:docs` показывает её отдельно без Runtime. [Команды контракта](api/README.md), [запуск из checkout](docs/development/package.md).
 

@@ -502,7 +502,8 @@ def main():
         if 'browser' in names:
             with tempfile.TemporaryFile(mode='w+') as output:
                 probe_code = execute([node, '-e', '''
-    if (Number(process.versions.node.split('.')[0]) < 20) throw new Error('Node >=20 required');
+    const [major, minor] = process.versions.node.split('.').map(Number);
+    if (major !== 26 || minor < 12) throw new Error('Node 26.12.0+ (26.x) required');
     const fs = require('node:fs');
     const {chromium} = require('playwright');
     require('playwright/test');
@@ -525,7 +526,7 @@ def main():
             'lint': [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/lint-js.cts'), *dict.fromkeys(selected_files['lint'])]],
             'tooling-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.tooling.json']],
             'browser-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.browser-tests.json']],
-            'browser': [[node, '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts'))))]],
+            'browser': [[node, '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-reporter=tap', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts'))))]],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
         if {'contracts', 'http', 'python-tests', 'tool-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):

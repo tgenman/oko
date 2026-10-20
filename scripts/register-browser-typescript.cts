@@ -1,4 +1,4 @@
-// Node 20+ test runner preload. Project types are checked before execution.
+// Node 26 test runner preload. Project types are checked before execution.
 // NodeNext preserves dynamic import() inside functions serialized by Playwright.
 import fs = require('node:fs');
 import ts = require('typescript');

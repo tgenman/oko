@@ -76,7 +76,7 @@ Runner перед каждым браузерным и Python-тестовым �
 Автоматические pre-commit и pre-push hooks удалены. Commit и push не запускают локальные проверки. Оставшийся `core.hooksPath=.githooks` не запускает удалённый hook.
 
 - Ручной `./scripts/check staged` проверяет whitespace, синтаксис Python/JavaScript и `no-undef` именно из индекса, включая частичный staging; проверки типов и generated-контракта сохраняют прежнюю строгость.
-- GitHub Actions на pull request и push в `main` выполняет общую сборку, затем Python- и браузерную группы параллельно, с Python 3.11, Node 22 и Chromium. Push в рабочую ветку без PR не запускает CI; обновление открытого PR запускает один полный набор. Установку зависимостей выполняют отдельные шаги CI; runner их не устанавливает. После подключения remote настройте `Full checks` как required check в правилах защищённой ветки, если нужна серверная блокировка merge.
+- GitHub Actions на pull request и push в `main` выполняет общую сборку, затем Python- и браузерную группы параллельно, с Python 3.11, Node 26.12.0 (из `.node-version`) и Chromium. Push в рабочую ветку без PR не запускает CI; обновление открытого PR запускает один полный набор. Установку зависимостей выполняют отдельные шаги CI; runner их не устанавливает. После подключения remote настройте `Full checks` как required check в правилах защищённой ветки, если нужна серверная блокировка merge.
 
 ## Подготовка окружения
 
@@ -84,7 +84,7 @@ Runner перед каждым браузерным и Python-тестовым �
 
 Проверки маршрута субтитров используют настоящий SDK и локальный HTTP/CONNECT-прокси. Для временного тестового TLS-сертификата нужен `openssl` в PATH. Сертификаты и ключи создаются во временном каталоге; внешние сетевые соединения запрещены тестовым окружением worker. Настоящий YouTube и платный прокси не вызываются.
 
-Один раз установите Python-зависимости по [README](../../README.md), через `uv sync --locked` (группа разработки устанавливается по умолчанию). Поддерживаемые версии Node заданы в `engines` корневого package.json. Браузерные зависимости и ESLint закреплены в package.json и lock-файле:
+Один раз установите Python-зависимости по [README](../../README.md), через `uv sync --locked` (группа разработки устанавливается по умолчанию). Для разработки используется Node.js 26.12.0 из `.node-version`; совместимые обновления ветки 26 заданы в `engines` корневого package.json. Браузерные зависимости и ESLint закреплены в package.json и lock-файле:
 
 ```sh
 npm ci
@@ -157,7 +157,7 @@ node --require tsx/cjs --require ./scripts/register-browser-typescript.cts --tes
 
 Все сценарии и общая поддержка находятся в `tests/browser/*.ts`. Runner автоматически выполняет `browser-types` перед запуском выбранных сценариев; ошибка типов оставляет браузерный набор `NOT RUN`. `npm run typecheck` проверяет фронтенд, тесты и инструменты; `npm run typecheck:browser` — только тесты. CI получает эти проверки через `check all`. Pre-commit проверяет синтаксис и типы точного индекса, включая импортируемые помощники, независимо от незакоммиченных исправлений.
 
-Прямой запуск: `node --require tsx/cjs --require ./scripts/register-browser-typescript.cts --enable-source-maps --test tests/browser/test_opened_material.ts`. Preload использует закреплённый TypeScript и сохраняет динамические `import()` внутри функций, которые Playwright отправляет браузеру. Перед прямым запуском выполните `npm run typecheck:browser`; runner делает это автоматически. Поддерживаются версии Node из `package.json`, включая Node 20.
+Прямой запуск: `node --require tsx/cjs --require ./scripts/register-browser-typescript.cts --enable-source-maps --test --test-reporter=tap tests/browser/test_opened_material.ts`. Preload использует закреплённый TypeScript и сохраняет динамические `import()` внутри функций, которые Playwright отправляет браузеру. Перед прямым запуском выполните `npm run typecheck:browser`; runner делает это автоматически. Runner явно выбирает TAP, чтобы разбор падений и числа прошедших сценариев не зависел от формата отчёта Node по умолчанию.
 
 Фикстуры используют DTO сгенерированного OpenAPI. Подмена транспорта принимает `unknown`, чтобы отрицательные тесты могли отправлять неверные данные; успешные снимки дополнительно проверяются JSON Schema при доставке. Non-null assertions в сценариях сохраняют прежнее требование наличия элемента/запроса после ожидания Playwright и не отключают проверку типов полей.
 

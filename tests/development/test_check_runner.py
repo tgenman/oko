@@ -416,12 +416,13 @@ def test_browser_name_filter_is_passed_and_reported(tmp_path):
     record = tmp_path / 'commands'
     env['RECORD'] = str(record)
     runtime = Path(env['OKO_NODE'])
-    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nif '--test' in sys.argv: print('# pass 1')\nsys.exit(0)"))
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nif '--test' in sys.argv: print('# pass 1' if '--test-reporter=tap' in sys.argv else 'ℹ pass 1')\nsys.exit(0)"))
     result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser', '--match', 'late.*draft', '--files', 'tests/browser/test_settings_navigation.ts', '--report-dir', str(tmp_path / 'reports')], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert '--test-name-pattern=late.*draft' in record.read_text()
     report = json.loads((next((tmp_path / 'reports').iterdir()) / 'report.json').read_text())
     assert report['browser_name_pattern'] == 'late.*draft'
+    assert report['suites']['browser']['passed_scenarios'] == 1
 
 
 def test_failed_lint_skips_browser_but_keeps_other_results(tmp_path):

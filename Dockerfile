@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM ghcr.io/astral-sh/uv:0.11.28 AS uv
-FROM node:24.10.0-bookworm-slim AS node
+FROM node:26.12.0-bookworm-slim AS node
 FROM python:3.13.9-slim-bookworm AS build
+RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
