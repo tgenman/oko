@@ -59,6 +59,7 @@ class History:
         CREATE TABLE IF NOT EXISTS initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));
         ''')
+        db.execute('CREATE INDEX IF NOT EXISTS history_members_item ON history_members(item)')
         if 'scan_complete' not in {r['name'] for r in db.execute('PRAGMA table_info(initial_history)')}:
             db.execute('ALTER TABLE initial_history ADD COLUMN scan_complete INTEGER DEFAULT 1')
         # Legacy manual pauses are removed; an explicitly cancelled run stays stopped.
@@ -176,7 +177,7 @@ class History:
         result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen'] and row['scan_complete']))
         result['retrying'] = counts.get('retrying', 0)
         result['unavailable'] = counts.get('unavailable', 0)
-        result['errors'] = [dict(item=r['item'], message=r['error']) for r in self.db.execute("SELECT h.item,j.error FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch' WHERE h.feed=? AND h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL", (feed,))]
+        result['errors'] = [dict(item=r['item'], message=r['error']) for r in self.db.execute("SELECT h.item,(SELECT j.error FROM jobs j WHERE j.item=h.item AND j.kind='fetch') AS error FROM history_members h WHERE h.feed=? AND h.outcome IN ('retrying','unavailable')", (feed,)) if r['error'] is not None]
         result['scan_complete'] = bool(row['scan_complete'])
         result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or counts.get('retrying', 0) or not row['scan_complete'] else 'done'
         if row['frozen'] and not result['scan_complete'] and result['mode'] == 'count':

@@ -118,16 +118,17 @@ class ReadingComposition:
                     feeds=[dict(feed, count=len(feed_members[feed['id']]), has_unviewed=feed['id'] in unviewed_feeds) for feed in feeds],
                     count=len(visible))
 
+    @reading_snapshot()
     def folder_contents(self, folder: str) -> FolderContents:
         self._store.subscriptions.check_owner('folder', folder)
-        feeds = {feed['id']: feed['folder_id'] for feed in self._store.subscriptions.feeds()}
-        cards = self.cards(True)
-        owned = [card for card in cards if card['folder_id'] == folder]
-        rows = self._store.db.execute('SELECT id,feed_id,members FROM items WHERE viewed=0 ORDER BY id').fetchall()
-        # Folder completion also includes hidden, unreadable and loading items.
-        members = tuple((row['id'], row['members']) for row in rows if feeds.get(row['feed_id']) == folder)
-        return FolderContents(members, tuple(sorted(card['id'] for card in owned)))
+        cards = self.cards(True, folder=folder)
+        rows = self._store.db.execute("""SELECT i.id,i.members FROM items i JOIN feeds f ON f.id=i.feed_id
+            WHERE i.viewed=0 AND f.folder_id=? ORDER BY i.id""", (folder,))
+        # Completion includes hidden, unreadable and loading publications.
+        return FolderContents(tuple((row['id'], row['members']) for row in rows),
+                              tuple(sorted(card['id'] for card in cards)))
 
+    @reading_snapshot()
     def feed_contents(self, feed: str) -> FolderContents:
         self._store.subscriptions.check_owner('feed', feed)
         rows = self._store.db.execute('SELECT id,members FROM items WHERE viewed=0 AND feed_id=? ORDER BY id', (feed,)).fetchall()

@@ -1,5 +1,6 @@
 """Durable, content-free eligibility and cumulative Telegram confirmation."""
 import json
+from oko.storage.reading import reading_value
 from dataclasses import dataclass
 from oko.collection.contracts import SourceError
 from oko.collection.telegram.contracts import HistoryEnvelope
@@ -87,7 +88,7 @@ class ReadSync:
                                   [(feed, member, reason) for member in members])
 
     def request(self, feed: str) -> dict[str, Any] | None:
-        configs = self.store.subscriptions.feeds(feed)
+        configs = self.store.subscriptions.feeds(feed, transport='telegram')
         if not configs:
             return None
         binding = self.store.subscriptions.telegram.binding(feed)
@@ -117,12 +118,12 @@ class ReadSync:
         db = self.store.db
         revision = self.store.subscriptions.source_revision()
         if revision != self._configuration:
-            configs = self.store.subscriptions.feeds()
+            configs = self.store.subscriptions.feeds(transport='telegram')
         else:
             pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_dirty')]
             if not pending:
                 return
-            configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed)]
+            configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed, transport='telegram')]
         bindings = self.store.subscriptions.telegram.bindings()
         profiles = self.store.subscriptions.telegram.profiles()
         for config in configs:
@@ -151,9 +152,9 @@ class ReadSync:
                                 db.execute("INSERT INTO jobs(kind,item) VALUES ('read',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1", (feed,))
             with db:
                 db.execute('DELETE FROM telegram_read_dirty WHERE feed=?', (feed,))
-        # Deleted feeds have no configuration and need no work.
+        # Deleted and non-Telegram feeds need no read-frontier work.
         with db:
-            db.execute('DELETE FROM telegram_read_dirty WHERE feed NOT IN (SELECT id FROM feeds)')
+            db.execute("DELETE FROM telegram_read_dirty WHERE NOT EXISTS (SELECT 1 FROM feeds WHERE id=telegram_read_dirty.feed AND transport='telegram' AND connection!='deleting')")
         self._configuration = revision
 
     def plan(self, request: dict[str, Any], state: dict[str, Any], window: dict[str, Any] | None = None) -> ReadPlan:
@@ -214,6 +215,7 @@ class ReadSync:
         with self.store.db:
             self.store.db.execute('UPDATE telegram_read_state SET error=? WHERE feed=?', (label, feed))
 
+    @reading_value
     def statuses(self) -> list[dict[str, Any]]:
         result = []
         for row in self.store.db.execute('SELECT * FROM telegram_read_state').fetchall():

@@ -3,6 +3,7 @@
 All mutations run on the existing Subscriptions SQLite connection under Runtime
 admission. No network, credentials, SDK or file deletion belongs here.
 """
+from oko.storage.reading import reading_value
 import json
 import base64
 import hashlib
@@ -93,6 +94,7 @@ class TelegramAccess:
     def profiles(self) -> dict[str, dict[str, Any]]:
         return {row['role']: dict(row) for row in self.db.execute('SELECT * FROM telegram_profiles')}
 
+    @reading_value
     def binding(self, feed: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT binding FROM telegram_bindings WHERE feed=?', (feed,)).fetchone()
         return json.loads(row[0]) if row else None
@@ -100,6 +102,7 @@ class TelegramAccess:
     def put_binding(self, feed: str, binding: dict[str, Any]) -> None:
         self.db.execute('INSERT INTO telegram_bindings VALUES (?,?) ON CONFLICT(feed) DO UPDATE SET binding=excluded.binding', (feed, json.dumps(binding)))
 
+    @reading_value
     def profile(self, role: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM telegram_profiles WHERE role=?', (role,)).fetchone()
         return dict(row) if row else None
