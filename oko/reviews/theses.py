@@ -1,4 +1,5 @@
 """Publication theses: current inputs, durable results and their reader state."""
+from oko.storage import material_read
 from oko.storage.reading import reading_value, saved_bytes, saved_document
 from oko.diagnostics import record_caught
 import hashlib
@@ -22,13 +23,13 @@ class PublicationTheses:
         return self._signature(item)
 
     def _signature(self, item: str, legacy: bool = False) -> str | None:
-        row = self.store.db.execute('SELECT * FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
-        if not row or not self.store.path(item).is_file():
+        row = material_read.item(self.store.db, item)
+        if not row or row['viewed'] or not row['complete'] or not self.store.path(item).is_file():
             return None
         filtered = self.store.filters.read(item)
         if filtered['status'] not in ('off', 'done') or filtered['hidden']:
             return None
-        settings = self.store.subscriptions.effective('feed', row['feed_id'])
+        settings = self.store.subscriptions.effective('feed', row['feed_id'], details=False)
         values = {k: v['value'] for k, v in settings['effective'].items()}
         version = self.store.content_version(item)
         filter_input = filtered
@@ -126,8 +127,8 @@ class PublicationTheses:
     def status(self, item: str) -> dict[str, Any] | None:
         if not self.signature(item):
             return None
-        row = self.store.db.execute("SELECT status,error FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
-        return dict(row) if row else dict(status='pending', error=None)
+        row = material_read.jobs(self.store.db, item).get('theses')
+        return dict(status=row['status'],error=row['error']) if row else dict(status='pending', error=None)
 
     def read(self, item: str) -> dict[str, Any] | None:
         accepted = self._accepted(item)
@@ -135,23 +136,24 @@ class PublicationTheses:
 
     @reading_value
     def _accepted(self, item: str, *, retain: bool = False) -> tuple[dict[str, Any], Path] | None:
-        row = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
-        if not row or row[0] not in ('done', 'pending', 'running'):
+        row = material_read.jobs(self.store.db, item).get('theses')
+        if not row or row['status'] not in ('done', 'pending', 'running'):
             return None
         # Accepted bytes remain readable during an explicit regeneration, but
         # only while their signature still matches the current inputs.
         signature = self.signature(item)
         paths = [self.store.path(item).parent / 'theses.md']
-        saved = self.store.db.execute('SELECT path,digest FROM retained_theses WHERE item=?', (item,)).fetchone()
+        record = material_read.item(self.store.db, item)
+        saved = material_read.retained(self.store.db,item)
         if saved:
             accepted_path = self.store.root / saved['path']
             if accepted_path not in paths:
                 paths.append(accepted_path)
-        feed = self.store.item_feed(item)
-        if feed and self.store.subscriptions.effective('feed', feed)['feed']['kind'] == 'youtube':
+        feed = record['feed_id'] if record else None
+        if feed and material_read.feed(self.store.db, feed)['kind'] == 'youtube':
             # Metadata revisions share the caption result in its published version.
-            versions = self.store.db.execute('SELECT number FROM content_versions WHERE item=? AND number!=? ORDER BY number DESC',
-                                             (item, self.store.versions.number(item))).fetchall()
+            current_number=self.store.versions.number(item)
+            versions = [v for v in material_read.versions(self.store.db,item) if v['number'] != current_number]
             paths.extend(self.store.versions.path(item, v['number']).parent / 'theses.md' for v in versions)
         for path in paths:
             if not path.is_file():
@@ -165,7 +167,7 @@ class PublicationTheses:
                     digest = hashlib.sha256(raw).hexdigest()
                     if path != paths[0] and saved and relative == saved['path'] and digest != saved['digest']:
                         continue
-                    if row[0] != 'done':
+                    if row['status'] != 'done':
                         # A moved file alone is not a committed result. Retain
                         # only bytes observed as accepted before explicit retry.
                         if not saved or (saved['path'], saved['digest']) != (relative, digest):
@@ -175,7 +177,7 @@ class PublicationTheses:
                     return result, path
             except (OSError, ValueError, KeyError):
                 record_caught('theses.read')
-        if row[0] == 'done' and signature is not None:
+        if row['status'] == 'done' and signature is not None:
             self.store.processing.repair(item)
         return None
 

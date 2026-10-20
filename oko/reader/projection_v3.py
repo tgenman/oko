@@ -250,6 +250,20 @@ def history(value: facts.InitialHistoryStatus) -> wire.FeedHistoryState:
     return wire.FeedHistoryState(feed_id=wire.FeedId(value.feed_id), history=wire.HistoryState(state))
 
 
+def telegram_access(value: facts.SubscriptionFeed, binding: dict[str, object] | None) -> wire.TelegramAccess:
+    """Publication source identity without subscription/history presentation."""
+    if binding and binding['kind'] in ('web', 'client'):
+        return wire.TelegramAccess.model_validate(binding)
+    if value.transport == 'telegram' and isinstance(value.telegram_account, str):
+        return wire.TelegramAccess(wire.TelegramLegacyClientAccess(kind='legacy_client', alias=value.telegram_account,
+            peer_id=wire.TelegramPeerId(str(value.telegram_peer)) if isinstance(value.telegram_peer,int) else None,
+            source_locator=value.identity if isinstance(value.identity,str) else value.id))
+    if binding and binding['kind']=='unconfigured':
+        return wire.TelegramAccess.model_validate(binding)
+    return wire.TelegramAccess(wire.TelegramUnconfiguredAccess(kind='unconfigured',
+        source_locator=value.identity if isinstance(value.identity,str) else value.id))
+
+
 def subscription(value: facts.SubscriptionFeed, binding: dict[str, object] | None = None) -> wire.SubscriptionFeed:
     data = value.model_dump(exclude_unset=True)
     data['history'] = history(facts.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, facts.History) else wire.HistoryState(wire.HistoryAbsent(state='absent', legacy_since=timestamp(value.legacy_since) if isinstance(value.legacy_since, float) else None)).model_dump(mode='json')
@@ -258,16 +272,15 @@ def subscription(value: facts.SubscriptionFeed, binding: dict[str, object] | Non
     data['connection'] = 'ready' if data.get('connection') == 'connected' else data.get('connection', 'unavailable')
     if value.kind == 'telegram':
         if binding and binding['kind'] in ('web', 'client'):
-            data['access'] = binding
+            data['access'] = telegram_access(value,binding).model_dump(mode='json')
             if binding['kind'] == 'client':
                 data['auto_read'], data['read_history'] = bool(value.auto_read), bool(value.read_history)
         elif value.transport == 'telegram' and isinstance(value.telegram_account, str):
             data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_profile_confirmation'
-            data['access'] = wire.TelegramLegacyClientAccess(kind='legacy_client', alias=value.telegram_account, peer_id=wire.TelegramPeerId(str(value.telegram_peer)) if isinstance(value.telegram_peer, int) else None, source_locator=value.identity if isinstance(value.identity, str) else value.id).model_dump(mode='json')
+            data['access'] = telegram_access(value,binding).model_dump(mode='json')
         else:
             data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_connection'
-            access = wire.TelegramUnconfiguredAccess.model_validate(binding) if binding and binding['kind']=='unconfigured' else wire.TelegramUnconfiguredAccess(kind='unconfigured', source_locator=value.identity if isinstance(value.identity,str) else value.id)
-            data['access'] = access.model_dump(mode='json')
+            data['access'] = telegram_access(value,binding).model_dump(mode='json')
         data.pop('transport', None)
     for key in ('telegram_account', 'telegram_peer', 'telegram_topic', 'telegram_username', 'read_history', 'auto_read'):
         if key not in ('auto_read', 'read_history') or not binding or binding['kind'] != 'client':

@@ -1,4 +1,5 @@
 """Durable filtered views; originals and media remain owned by Store."""
+from oko.storage import material_read
 from oko.storage.reading import reading_value, saved_document
 from oko.diagnostics import record_caught
 import hashlib
@@ -25,10 +26,10 @@ class Filters:
 
     def _signature(self, item: str, *, legacy: bool = False) -> str | None:
         store = self.store
-        row = store.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
-        if not row or not store.path(item).is_file():
+        row = material_read.item(store.db, item)
+        if not row or row['viewed'] or not row['complete'] or not store.path(item).is_file():
             return None
-        settings = store.subscriptions.effective('feed', row['feed_id'])
+        settings = store.subscriptions.effective('feed', row['feed_id'], details=legacy)
         # Retired public metadata must not invalidate already accepted results.
         # This null field was part of the persisted processing signature.
         settings = dict(settings, feed=dict(settings['feed'], telegram_topic=None))
@@ -96,9 +97,9 @@ class Filters:
         if not signature:
             return dict(status='off', hidden=False, restored=False, reason='', removed=[])
         store = self.store
-        override = store.db.execute('SELECT version FROM filter_restores WHERE item=?', (item,)).fetchone()
-        restored = bool(override and override[0] == store.content_version(item))
-        row = store.db.execute("SELECT status,error FROM jobs WHERE kind='filter' AND item=?", (item,)).fetchone()
+        override = material_read.restored_version(store.db,item)
+        restored = bool(override and override == store.content_version(item))
+        row = material_read.jobs(store.db, item).get('filter')
         if row and row['status'] == 'done':
             try:
                 data, _ = saved_document(store.path(item).parent / 'filter.md')

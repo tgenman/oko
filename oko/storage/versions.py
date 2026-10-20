@@ -1,4 +1,5 @@
 """Immutable content versions; SQLite selects only a durably published directory."""
+from oko.storage import material_read
 from oko.storage.reading import reading_value
 import hashlib
 import json
@@ -33,7 +34,10 @@ class Versions:
 
     @reading_value
     def number(self, item: str) -> int:
-        row = self.store.db.execute('SELECT number FROM content_current WHERE item=?', (item,)).fetchone()
+        snapshot=material_read.current(self.store.db)
+        if snapshot and item in snapshot.items:
+            return int(snapshot.items[item]['current_number'] or 0)
+        row=self.store.db.execute('SELECT number FROM content_current WHERE item=?',(item,)).fetchone()
         return int(row[0]) if row else 0
 
     def path(self, item: str, number: int | None = None) -> Path:
@@ -224,12 +228,20 @@ class Versions:
 
     @reading_value
     def version(self, item: str) -> str:
-        row = self.store.db.execute('SELECT fingerprint FROM content_versions WHERE item=? AND number=?', (item, self.number(item))).fetchone()
+        snapshot=material_read.current(self.store.db)
+        if snapshot and item in snapshot.items and snapshot.items[item]['current_fingerprint']:
+            return str(snapshot.items[item]['current_fingerprint'])
+        row=self.store.db.execute('SELECT fingerprint FROM content_versions WHERE item=? AND number=?',(item,self.number(item))).fetchone()
         return str(row[0]) if row else self.fingerprint(self.path(item).parent)
 
     @reading_value
     def previous(self, item: str) -> list[dict[str, Any]]:
-        rows = self.store.db.execute('SELECT number,fingerprint FROM content_versions WHERE item=? AND visible=1 AND number!=? ORDER BY number DESC', (item, self.number(item))).fetchall()
+        current_number=self.number(item)
+        snapshot=material_read.current(self.store.db)
+        rows = ([r for r in snapshot.versions.get(item,[]) if r['visible'] and r['number'] != current_number]
+                if snapshot and item in snapshot.items else self.store.db.execute(
+                    'SELECT number,fingerprint FROM content_versions WHERE item=? AND visible=1 AND number!=? ORDER BY number DESC',
+                    (item,current_number)).fetchall())
         return [dict(number=r['number'], version=r['fingerprint'], url=f"/api/v3/materials/{item}/versions/{r['number']}") for r in rows]
 
     def read(self, item: str, number: int) -> dict[str, Any] | None:
@@ -250,7 +262,10 @@ class Versions:
 
     @reading_value
     def deleted(self, item: str) -> bool:
-        return bool(self.store.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (item,)).fetchone())
+        snapshot=material_read.current(self.store.db)
+        if snapshot and item in snapshot.items:
+            return bool(snapshot.items[item]['source_deleted'])
+        return bool(self.store.db.execute('SELECT 1 FROM source_deleted WHERE item=?',(item,)).fetchone())
 
     def forget(self, item: str) -> None:
         for table in ('content_versions', 'content_current', 'source_deleted'):

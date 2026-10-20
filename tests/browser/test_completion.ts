@@ -63,7 +63,7 @@ for(const scope of ['folder','feed'] as const){
       await r.page.evaluate(({fresh,scope})=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});const channel=new BroadcastChannel('oko-reader');channel.postMessage(scope==='feed'?{kind:'feed-viewed',feed:'feed'}:{kind:'folder-viewed',folder:'f'});channel.close();},{fresh,scope});
       await expect(r.page.locator('[data-card="old"]')).toHaveCount(0);await expect(r.page.locator('#text')).toContainText('Текст fresh');
       await r.page.evaluate(scope=>{readerTransport.replies.set('/api/v3/cards',{body:[]});const channel=new BroadcastChannel('oko-reader');channel.postMessage(scope==='feed'?{kind:'feed-viewed',feed:'feed'}:{kind:'folder-viewed',folder:'f'});channel.close();},scope);
-      await expect(r.page.locator('#material')).toBeHidden();expect(r.errors).toEqual([]);
+      await expect(r.page.locator('#cards button')).toHaveCount(0);await expect(r.page.locator('#text')).toContainText('Текст fresh');expect(r.errors).toEqual([]);
     }finally{await r.close();}
   });
 }

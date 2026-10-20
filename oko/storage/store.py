@@ -1,3 +1,4 @@
+from oko.storage import material_read
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
@@ -672,8 +673,8 @@ class Store:
 
     @reading_value
     def processor_config(self) -> ProcessorConfig | None:
-        row = self.db.execute("SELECT value FROM state WHERE key='processor:llamacpp'").fetchone()
-        return ProcessorConfig.model_validate_json(row[0]) if row else None
+        value = material_read.state(self.db,'processor:llamacpp')
+        return ProcessorConfig.model_validate_json(value) if value else None
 
     def configure_processor(self, config: ProcessorConfig) -> bool:
         if self.processor_config() == config:
@@ -686,7 +687,7 @@ class Store:
     @reading_value
     def settings_version(self, feed: str | None = None) -> int:
         keys = ['settings-version'] + (['settings-version:' + feed] if feed else [])
-        return max((int(row[0]) for key in keys for row in self.db.execute('SELECT value FROM state WHERE key=?', (key,))), default=0)
+        return max((int(value) for key in keys if (value := material_read.state(self.db,key)) is not None), default=0)
 
     def settings_changed(self, scope: str = 'oko', owner: str = 'global') -> None:
         with self.db:

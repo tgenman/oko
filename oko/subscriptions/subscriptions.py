@@ -1,5 +1,6 @@
-from oko.storage.reading import reading_value
 """Persistent subscription identity and field-by-field effective settings."""
+from oko.storage import material_read
+from oko.storage.reading import reading_value
 import hashlib
 import json
 import re
@@ -301,12 +302,13 @@ class Subscriptions:
 
     @reading_value
     def _settings(self, scope: str, owner: str) -> list[sqlite3.Row]:
-        return self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (scope, owner)).fetchall()
+        return material_read.settings(self.db,scope,owner)
 
     @reading_value
-    def effective(self, scope: str, owner: str) -> dict[str, Any]:
-        self.check_owner(scope, owner)
-        feed = self._feed(owner) if scope == 'feed' else None
+    def effective(self, scope: str, owner: str, *, details: bool = True) -> dict[str, Any]:
+        if details or scope != 'feed':
+            self.check_owner(scope, owner)
+        feed = (self._feed(owner) if details else material_read.feed(self.db,owner)) if scope == 'feed' else None
         chain = [('oko', 'global')]
         if scope == 'feed':
             assert feed is not None
@@ -349,7 +351,7 @@ class Subscriptions:
         return self.effective(scope, owner)
 
     def youtube_theses(self, feed_id: str) -> bool:
-        settings = self.effective('feed', feed_id)
+        settings = self.effective('feed', feed_id, details=False)
         return bool(settings['feed']['kind'] == 'youtube' and (settings['feed']['importance'] == 'high' or settings['effective']['theses']['value']))
 
     def update_feed(self, feed_id: str, patch: FeedPatch) -> dict[str, Any]:

@@ -17,7 +17,12 @@ test('unchanged reading checks transmit versions and opening bypasses the poll',
   await expect.poll(async()=>{const cards=await api('cards');return cards.length===1&&cards[0].availability==='available'&&!cards[0].loading;}).toBe(true);
   await expect(page.locator('#cards .card-kind')).toHaveCount(0);
   const before=frames.length;
-  await expect.poll(()=>frames.length).toBeGreaterThan(before+1);
+  // A complete card can precede the final Runtime startup/status transition.
+  // Require two actually unchanged polls within the existing wait budget.
+  await expect.poll(()=>{
+    if(frames.length<before+2)return false;
+    return frames.slice(-2).every(frame=>frame.state==='current'&&frame.resources.every(resource=>resource.state==='unchanged'));
+  }).toBe(true);
   const quiet=frames.slice(-2);
   for(const frame of quiet){assert.equal(frame.state,'current');if(frame.state==='current')assert.ok(frame.resources.every(resource=>resource.state==='unchanged'));}
   assert.ok(!paths.includes('/api/v3/cards'));
@@ -60,4 +65,18 @@ test('tabs recover missed reading changes and reconcile a local viewed action', 
   await other.locator('#viewed').click();
   await expect(page.locator('#cards button')).toHaveCount(0);
   await expect(other.locator('#cards button')).toHaveCount(0);
+});
+
+test('viewed in another tab deletes server content while the loaded tab retains its text and media until reload',{timeout:25000},async t=>{
+  const {page,context,api,origin,token}=await productionReader(t);
+  await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+  await addSources(api,[['https://a.test/feed','Alpha','Folder']]);
+  await page.goto(origin+'/#token='+token);await expect(page.locator('#cards button')).toHaveCount(1);
+  const id=await page.locator('#cards button').getAttribute('data-card');
+  await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');await expect(page.locator('#images img')).toHaveAttribute('src',/^blob:/);
+  const text=await page.locator('#text').textContent(),image=await page.locator('#images img').getAttribute('src');
+  const other=await context.newPage();await other.goto(origin+'/#token='+token);await expect(other.locator('#cards button')).toHaveCount(1);await other.locator('#cards button').click();await expect(other.locator('#text')).toHaveText(text!);await other.locator('#viewed').click();
+  await expect(page.locator('#cards button')).toHaveCount(0);await expect(page.locator('#material-retained')).toBeVisible();await expect(page.locator('#text')).toHaveText(text!);await expect(page.locator('#images img')).toHaveAttribute('src',image!);await expect(page.locator('#viewed')).toBeDisabled();
+  const response=await page.request.get(origin+'/api/v3/materials/'+id,{headers:{Authorization:'Bearer '+token}});assert.equal(response.status(),404);
+  await page.reload();await expect(page.locator('#cards button')).toHaveCount(0);await expect(page.locator('#material')).toBeHidden();
 });

@@ -23,12 +23,12 @@ export function FeedAvatar({url,fetchMedia,kind}:{url:string;fetchMedia:MediaFet
 }
 function Title({title,kind,count,avatar,fetchMedia,completed=false}:{title:string;kind:string;count?:number;avatar?:string;fetchMedia?:MediaFetch;completed?:boolean}) {return <>{avatar&&fetchMedia?<FeedAvatar url={avatar} fetchMedia={fetchMedia} kind={kind}/>:<SourceIcon kind={kind}/> }<span className="tree-title">{title}{completed&&<small className="feed-completed-label">All Read</small>}</span>{count!==undefined&&<span className="tree-count">{count||''}</span>}</>;}
 const feedIcon=(feed:SubscriptionFeed)=>['youtube','telegram'].includes(feed.kind)?feed.kind:'rss';
-export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,onFolderMenu,onWarning,fetchMedia}:{readerApi:ReaderApi;fetchMedia:MediaFetch;onSelect:(selection:Selection)=>void;onFolderMenu:(folder:Navigation['folders'][number],catalog:Navigation,x:number,y:number,trigger:HTMLElement)=>void;onFeedMenu:(feed:Navigation['feeds'][number],folders:Navigation['folders'],x:number,y:number,trigger:HTMLElement)=>void;onFeedSettings:(id:string,trigger:HTMLElement)=>void;onWarning:()=>void}) {
+export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,onFolderMenu,onWarning,fetchMedia}:{readerApi:ReaderApi;fetchMedia:MediaFetch;onSelect:(selection:Selection,reason:'user'|'reconcile')=>void;onFolderMenu:(folder:Navigation['folders'][number],catalog:Navigation,x:number,y:number,trigger:HTMLElement)=>void;onFeedMenu:(feed:Navigation['feeds'][number],folders:Navigation['folders'],x:number,y:number,trigger:HTMLElement)=>void;onFeedSettings:(id:string,trigger:HTMLElement)=>void;onWarning:()=>void}) {
   let collapsed:Record<string,boolean>={};
   try {const value:unknown=JSON.parse(saved('oko-reading-collapsed','{}'));if(value&&typeof value==='object'&&!Array.isArray(value))collapsed=value as Record<string,boolean>;}catch{}
   const store=createStore({catalog:{folders:[],feeds:[],count:0} as Navigation,sources:[] as SourceState[],selection:{kind:'all',id:null} as Selection,collapsed,showRead:saved('oko-reading-show-read','false')==='true',width:Number(saved('oko-reading-width','280'))||280});
   function resize(value:number) {const state=store.get(),width=Math.max(220,Math.min(480,Math.max(220,window.innerWidth-700),value));save('oko-reading-width',width);store.set({...state,width});}
-  function select(selection:Selection) {store.set({...store.get(),selection});onSelect(selection);}
+  function select(selection:Selection) {store.set({...store.get(),selection});onSelect(selection,'user');}
   function toggle(id:string) {const state=store.get(),collapsed={...state.collapsed,[id]:!state.collapsed[id]};save('oko-reading-collapsed',JSON.stringify(collapsed));store.set({...state,collapsed});}
   function Tree() {
     const {catalog,sources,selection,collapsed,width,showRead}=useStore(store);
@@ -62,7 +62,7 @@ export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,
       store.set({...state,catalog,sources,selection,collapsed});host('reading-nav').scrollTop=scroll;
       if(focus) [...host('reading-nav').querySelectorAll<HTMLElement>('[data-tree-key]')].find(node=>node.dataset.treeKey===focus)?.focus({preventScroll:true});
       if(moved)[...host('folders').querySelectorAll<HTMLElement>('[data-feed]')].find(node=>node.dataset.feed===selection.id)?.scrollIntoView({block:'nearest'});
-      if(changed)onSelect(selection);return changed;
+      if(changed)onSelect(selection,'reconcile');return changed;
     },
     clear(){store.set({...store.get(),catalog:{folders:[],feeds:[],count:0},sources:[]});},
   };

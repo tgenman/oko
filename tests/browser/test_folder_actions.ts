@@ -27,7 +27,7 @@ test('folder completion conflict keeps material and requires the refreshed token
     await r.page.locator('#completion-confirm').click();
     await expect(r.page.locator('#completion-dialog')).not.toBeVisible();
     await expect(r.page.locator('#cards button')).toHaveCount(0);
-    await expect(r.page.locator('#text')).not.toContainText('Текст a');
+    await expect(r.page.locator('#text')).toContainText('Текст a');
     expect(await r.page.evaluate(()=>readerTransport.requests.filter(request=>request.url==='/api/v3/folders/f/completion').map(request=>request.body!.token))).toEqual(['first','changed']);
     expect(r.errors).toEqual([]);
   }finally{await r.close();}

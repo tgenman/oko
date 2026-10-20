@@ -121,10 +121,10 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   });
   const tree = createReadingTree({
     readerApi, fetchMedia,
-    onSelect: selection => {
+    onSelect: (selection,reason) => {
       newsActions.close(false);
       contentEpoch++;
-      opened.clear();
+      if(reason==='user')opened.clear();
       list.setArea(selection, readingCatalog);
       listOnly=true;
       void refresh();
@@ -183,8 +183,9 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       const frame=await resources.check(resources.plan(options,openedCheck.resources,selectedOnly),controller.signal);
       if(!active())return;
       const accepted=resources.accept(frame);
-      if(accepted.reset){opened.clear();void refresh();return;}
+      if(accepted.reset){opened.reset();void refresh();return;}
       if(frame.state!=='current')return;
+      opened.connected();
       if(openedCheck.session)opened.apply(frame.resources,openedCheck.session);
       const state=resources.status;
       if(!state)throw new Error('Reading status temporarily unavailable');
@@ -223,7 +224,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
         if(tree.update(navigation,state.sources||[]))return;
         list.setArea(tree.selection,navigation);
       } else if(accepted.changed.has('status'))tree.update(navigation,state.sources||[]);
-      if(state.runtime_state==='unavailable'){opened.clear();list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable');return;}
+      if(state.runtime_state==='unavailable'){opened.disconnected();list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable');return;}
       const cards=resources.cards(options);
       if(!cards)throw new Error('Reading list temporarily unavailable');
       if(recovered||displayedList!==listIdentity(options)||navigationChanged||accepted.changed.has('list')||accepted.changed.has('card')){
@@ -238,7 +239,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       unavailable=true;
       reportError(error, 'Oko interface');
       if (!active()) return;
-      if (!statusAvailable) {workAllowed=false;onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);opened.clear(); statusPanel.unavailable();}
+      if (!statusAvailable) {workAllowed=false;onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);opened.disconnected(); statusPanel.unavailable();}
       list.error(errorMessage(error));
       progress(statusAvailable ? 'Reading temporarily unavailable' : 'No connection to Oko');
     }
@@ -252,7 +253,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       reportError(error, 'Oko interface');
       if (!stopped) {
         onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);
-        opened.clear();
+        opened.disconnected();
         statusPanel.unavailable();
         list.error(errorMessage(error));
         progress('No connection to Oko');
@@ -262,7 +263,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onCloseError: error => reportError(error, 'Closing tab'),
   });
   input('sort').onchange = () => {newsActions.close(false); void changed();};
-  input('show-hidden').onchange = () => {newsActions.close(false); opened.clear(); void changed();};
+  input('show-hidden').onchange = () => {newsActions.close(false); void changed();};
 
   return {
     start: () => session.start(),

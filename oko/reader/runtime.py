@@ -155,6 +155,8 @@ class Runtime:
         self._detached_ai: set[asyncio.Task[None]] = set()
         self.diagnostics: Journal | None = None
         self.reader_finish: Callable[[], Awaitable[None]] | None = None
+        self.reader_advance: Callable[[], None] | None = None
+        self._reader_advanced = float('-inf')
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
 
@@ -1170,6 +1172,9 @@ class Runtime:
             while not self.stopped:
                 async with self._actions:
                     now = self._clock()
+                    if self._store and self.reader_advance and now-self._reader_advanced >= .25:
+                        self.reader_advance()
+                        self._reader_advanced = now
                     if not self._live():
                         if not self._admitted():
                             await self._cancel()

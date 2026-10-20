@@ -1,0 +1,30 @@
+[
+  {
+    "name": "idle",
+    "sql": 2,
+    "vm": 5200,
+    "content_opens": 0,
+    "content_stats": 0,
+    "read_bytes": 0,
+    "json_loads": 1,
+    "json_input_bytes": 4949,
+    "json_dumps": 2,
+    "json_output_bytes": 50,
+    "response_bytes": 10408,
+    "ms": 4.268
+  },
+  {
+    "name": "idle",
+    "sql": 2,
+    "vm": 18800,
+    "content_opens": 0,
+    "content_stats": 0,
+    "read_bytes": 0,
+    "json_loads": 1,
+    "json_input_bytes": 16494,
+    "json_dumps": 2,
+    "json_output_bytes": 50,
+    "response_bytes": 37049,
+    "ms": 9.672
+  }
+]

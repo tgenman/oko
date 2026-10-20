@@ -1,0 +1,30 @@
+✖ concurrent reading 20 tabs (33167.840167ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35443.677667
+
+✖ failing tests:
+
+test at ../oko-read-short-concurrency.cjs:8:28
+✖ concurrent reading 20 tabs (33167.840167ms)
+  locator.click: Timeout 5000ms exceeded.
+  Call log:
+    - waiting for locator('[data-card="9e1cc1aa5d915e2b763dcd3a6130ab48"]')
+      - locator resolved to <button type="button" aria-pressed="false" class="material-row " data-card="9e1cc1aa5d915e2b763dcd3a6130ab48" aria-label="Publication 9e1cc1aa5d915e2b763dcd3a6130ab48 · Synthetic 2 · 01/01/1970, 03:00 AM">…</button>
+    - attempting click action
+      - waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - performing click action
+
+      at /private/tmp/oko-read-short-concurrency.cjs:26:46
+      at async TestContext.<anonymous> (/private/tmp/oko-read-short-concurrency.cjs:23:2) {
+    name: 'TimeoutError',
+    log: [ `  - waiting for locator('[data-card="9e1cc1aa5d915e2b763dcd3a6130ab48"]')`, '    - locator resolved to <button type="button" aria-pressed="false" class="material-row " data-card="9e1cc1aa5d915e2b763dcd3a6130ab48" aria-label="Publication 9e1cc1aa5d915e2b763dcd3a6130ab48 · Synthetic 2 · 01/01/1970, 03:00 AM">…</button>', '  - attempting click action', '    - waiting for element to be visible, enabled and stable', '    - element is visible, enabled and stable', '    - scrolling into view if needed', '    - done scrolling', '    - performing click action' ]
+  }

@@ -1,4 +1,5 @@
 """Current processing work and reconciliation of dependent reader results."""
+from oko.storage import material_read
 from oko.diagnostics import record_caught
 from oko.storage.reading import retry_time
 from collections.abc import Callable
@@ -90,8 +91,8 @@ class ProcessingCoordination:
         }
 
     def waiting(self, item: str, kind: Literal['filter', 'theses'], now: float, wall_now: float) -> ProcessingWait | None:
-        row = self.store.db.execute("SELECT problem_code,error,next FROM jobs WHERE item=? AND kind=? AND status='pending'", (item, kind)).fetchone()
-        if not row or not row['error']:
+        row = material_read.jobs(self.store.db,item).get(kind)
+        if not row or row['status'] != 'pending' or not row['error']:
             return None
         reason: Literal['processor_not_configured', 'public_ai_not_allowed', 'processor_unavailable', 'retry_scheduled']
         if row['problem_code'] == 'processor-config':

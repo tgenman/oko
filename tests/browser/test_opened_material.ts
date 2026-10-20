@@ -1,5 +1,6 @@
 import type {Page} from 'playwright';
 import {test} from 'node:test';
+import {artifactPath} from './artifacts';
 import {reader, material, expect} from './support.ts';
 import assert from 'node:assert/strict';
 
@@ -93,13 +94,13 @@ async function videoFixture(page: Page) {
 }
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1sAAAAASUVORK5CYII=';
 
-test('viewing during media loading stops playback, releases URLs and rejects late media', async () => {
+test('viewing retains loaded media and playback, rejects late media and switching releases URLs', async () => {
   const r = await reader();
   try {
     await r.start([material('A', {images: ['/api/v3/materials/A/images/image-2.png'], attachments: [
       {url: '/api/v3/materials/A/media/media-1.webm', kind: 'video', mime: 'video/webm'},
       {url: '/api/v3/materials/A/media/media-2.webm', kind: 'circle', mime: 'video/webm'},
-    ]})]);
+    ]}),material('B')]);
     const base64 = await videoFixture(r.page);
     await r.page.evaluate(({base64, png}) => {
       readerTransport.replies.set('/api/v3/materials/A/images/image-2.png', {base64: png, mime: 'image/png'});
@@ -119,16 +120,20 @@ test('viewing during media loading stops playback, releases URLs and rejects lat
       window.testVideo = document.querySelector<HTMLVideoElement>('#images video')!;
       testVideo.muted = true; testVideo.loop = true; await testVideo.play();
     });
-    await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
+    await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[{...readerTransport.replies.get('/api/v3/materials/B')!.body!}]}]]}));
     await r.page.getByRole('button', {name: 'Mark as Read', exact: true}).click();
-    await expect(r.page.locator('#material')).toBeHidden();
-    assert.equal(await r.page.evaluate(() => testVideo.paused && !testVideo.hasAttribute('src')), true);
+    await expect(r.page.locator('#material-retained')).toBeVisible();
+    assert.equal(await r.page.evaluate(() => !testVideo.paused && testVideo.hasAttribute('src')), true);
     assert.equal(await r.page.evaluate(() => browserResources.created.length), 2);
-    assert.deepEqual(await r.page.evaluate(() => browserResources.revoked), await r.page.evaluate(() => browserResources.created));
+    assert.deepEqual(await r.page.evaluate(() => browserResources.revoked), []);
     await r.page.evaluate(() => readerTransport.release('/api/v3/materials/A/media/media-2.webm', 'late circle'));
     await settle(r.page);
-    await expect(r.page.locator('#images')).toBeEmpty();
+    await expect(r.page.locator('#images video')).toHaveCount(1);
     assert.equal(await r.page.evaluate(() => browserResources.created.length), 2);
+    await r.page.locator('[data-card="B"]').click();
+    await expect(r.page.locator('#text')).toHaveText('Текст B');
+    assert.equal(await r.page.evaluate(() => testVideo.paused && !testVideo.hasAttribute('src')), true);
+    assert.deepEqual(await r.page.evaluate(() => browserResources.revoked), await r.page.evaluate(() => browserResources.created));
     assert.deepEqual(r.errors, []);
   } finally {await r.close();}
 });
@@ -222,4 +227,138 @@ test('background processing updates keep long material visible and preserve scro
   await expect(r.page.locator('#text')).toContainText('Длинный текст');
   expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(before);
  }finally{await r.close();}
+});
+
+test('new text waits for a button, keeps its paragraph and never mixes summaries across revisions',async()=>{
+  const r=await reader();try{
+    const text=Array.from({length:90},(_,i)=>'Абзац '+i+' '+('сохранённый текст '.repeat(10))).join('\n\n');
+    const old=material('A',{text,version:'old',theses:{points:[{text:'Старые тезисы',sources:[]}]}});
+    await r.start([old]);await r.page.locator('[data-card="A"]').click();
+    await expect(r.page.locator('#theses')).toHaveText('Старые тезисы');
+    await r.page.locator('#text [data-reading-paragraph]').nth(25).evaluate(node=>node.scrollIntoView({block:'start'}));
+    const before=await r.page.locator('#text [data-reading-paragraph]').nth(25).boundingBox();
+    const fresh={...old,text:'Новый первый абзац\n\n'.repeat(8)+text,version:'new',theses:{points:[{text:'Новые тезисы',sources:[]}]}};
+    await r.page.evaluate(fresh=>readerTransport.replies.set('/api/v3/materials/A',{body:fresh}),fresh);
+    await expect(r.page.locator('#material-update-button')).toBeVisible();
+    await expect(r.page.locator('#text')).toHaveText(text);
+    await expect(r.page.locator('#theses')).toHaveText('Старые тезисы');
+    expect(Math.abs((await r.page.locator('#text [data-reading-paragraph]').nth(25).boundingBox())!.y-before!.y)).toBeLessThan(2);
+    // Click without scrolling the article to the update banner.
+    await r.page.screenshot({path:artifactPath('version-available.png')});
+    await r.page.locator('#material-update-button').click();
+    await expect(r.page.locator('#text')).toHaveText(fresh.text);
+    await expect(r.page.locator('#theses')).toHaveText('Новые тезисы');
+    expect(Math.abs((await r.page.locator('#text [data-reading-paragraph]').nth(33).boundingBox())!.y-before!.y)).toBeLessThan(2);
+    await r.page.screenshot({path:artifactPath('version-switched.png')});
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
+});
+
+test('summary and media append independently without replacing a playing video',async()=>{
+  const r=await reader();try{
+    const old=material('A',{text:'Текст A\n'.repeat(100),attachments:[{url:'/api/v3/materials/A/media/one.webm',kind:'video',mime:'video/webm'}]});
+    await r.start([old]);const base64=await videoFixture(r.page);
+    await r.page.evaluate(base64=>readerTransport.replies.set('/api/v3/materials/A/media/one.webm',{base64,mime:'video/webm'}),base64);
+    await r.page.locator('[data-card="A"]').click();
+    await r.page.locator('#images video').evaluate(async node=>{const video=node as HTMLVideoElement;window.testVideo=video;video.muted=true;video.loop=true;await video.play();});
+    await r.page.locator('article').evaluate(node=>node.scrollTop=500);
+    const top=await r.page.locator('article').evaluate(node=>node.scrollTop);
+    const next={...old,theses:{points:[{text:'Готовые тезисы',sources:[]}]},images:['/api/v3/materials/A/images/new.png']};
+    await r.page.evaluate(({next,png})=>{readerTransport.replies.set('/api/v3/materials/A/images/new.png',{base64:png,mime:'image/png'});readerTransport.replies.set('/api/v3/materials/A',{body:next});},{next,png});
+    await expect(r.page.locator('#theses')).toHaveText('Готовые тезисы');
+    await expect(r.page.locator('#images img')).toHaveCount(1);
+    assert.equal(await r.page.evaluate(()=>document.querySelector('#images video')===testVideo&&!testVideo.paused),true);
+    // The new summary above the reading position must not move its paragraph.
+    expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBeGreaterThan(top);
+    assert.equal(await r.page.evaluate(()=>browserResources.created.length),2);
+    assert.deepEqual(await r.page.evaluate(()=>browserResources.revoked),[]);
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
+});
+
+test('removed cards and connection loss keep loaded text, reload drops it',async()=>{
+  const r=await reader();try{
+    await r.start([material('A')]);await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards',{body:[]}));
+    await expect(r.page.locator('#cards button')).toHaveCount(0);await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));
+    await expect(r.page.locator('#progress')).toContainText('No connection');await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await r.page.reload();await expect(r.page.locator('#material')).toBeHidden();
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
+});
+
+for(const fallback of ['neighbour','relative','filtered'])test('version replacement preserves '+fallback+' reading position',async()=>{
+  const r=await reader();try{
+    const lines=Array.from({length:90},(_,i)=>'Абзац '+i+' '+('длинный текст '.repeat(15)));
+    const filter=fallback==='filtered'?{status:'done' as const,hidden:false,restored:false,reason:'Фильтр',removed:['Реклама']}:undefined;
+    const old=material('A',{text:lines.join('\n\n')+'\nРеклама',version:'old',...(filter?{filter}:{})});
+    await r.start([old]);await r.page.locator('[data-card="A"]').click();
+    const selector=fallback==='filtered'?'#filtered-text':'#text';
+    await expect(r.page.locator(selector)).toContainText('Абзац 25');
+    await r.page.locator(selector+' [data-reading-paragraph]').nth(25).evaluate(node=>node.scrollIntoView({block:'start'}));
+    const anchor=await r.page.locator(selector+' [data-reading-paragraph]').nth(fallback==='neighbour'?24:25).boundingBox();
+    const ratio=await r.page.locator('article').evaluate(node=>node.scrollTop/(node.scrollHeight-node.clientHeight));
+    const nextLines=fallback==='relative'?lines.map(line=>line.replace('Абзац','Заменён')):lines.filter((_,i)=>fallback!=='neighbour'||i!==25);
+    const fresh={...old,text:'Вставка\n\n'.repeat(8)+nextLines.join('\n\n')+(fallback==='relative'?'\nНовый конец':'\nРеклама'),version:'new'};
+    await r.page.evaluate(fresh=>readerTransport.replies.set('/api/v3/materials/A',{body:fresh}),fresh);
+    await expect(r.page.locator('#material-update-button')).toBeVisible();await r.page.locator('#material-update-button').click();
+    await expect(r.page.locator(selector)).toContainText(fallback==='relative'?'Заменён':'Вставка');
+    if(fallback==='relative')expect(Math.abs(await r.page.locator('article').evaluate(node=>node.scrollTop/(node.scrollHeight-node.clientHeight))-ratio)).toBeLessThan(.01);
+    else expect(Math.abs((await r.page.locator(selector+' [data-reading-paragraph]').nth(fallback==='neighbour'?32:33).boundingBox())!.y-anchor!.y)).toBeLessThan(2);
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
+});
+
+test('automatic fallback after removing the selected feed keeps the loaded material',async()=>{
+  const r=await reader();try{
+    await r.start([material('A')]);await r.page.locator('[data-feed="feed"]').click();await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/cards',{body:[]});readerTransport.replies.set('/api/v3/reading-composition',{body:{count:0,folders:[],feeds:[]}});});
+    await expect(r.page.locator('[data-feed="feed"]')).toHaveCount(0);await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await r.page.locator('#all-folders').click();await expect(r.page.locator('#material')).toBeHidden();
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
+});
+
+test('storage replacement rejects old media replies and stages the replacement before loading its assets',async()=>{
+  const r=await reader();try{
+    const url='/api/v3/materials/A/images/one.png';
+    await r.page.addInitScript(()=>{
+      const fetch=window.fetch.bind(window);let reset=true;
+      window.fetch=async(url,options)=>{
+        if(String(url)!=='/api/v3/reading/check'||!readerTransport.held.has('test-storage-reset'))return fetch(url,options);
+        const storage_id='2d879353-68a3-4919-831c-32cb82c3d55f';
+        if(reset){reset=false;return new Response(JSON.stringify({state:'reset',storage_id}),{headers:{'Content-Type':'application/json'}});}
+        const request=JSON.parse(String(options!.body));request.storage_id=null;
+        const reply=await fetch(url,{...options,body:JSON.stringify(request)}),frame=await reply.json();
+        return new Response(JSON.stringify({...frame,storage_id}),{headers:{'Content-Type':'application/json'}});
+      };
+    });
+    await r.start([material('A',{version:'old',images:[url]})]);
+    await r.page.evaluate(url=>readerTransport.held.set(url,true),url);
+    await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
+    await r.page.evaluate(()=>{
+      readerTransport.held.set('test-storage-reset',true);
+      readerTransport.replies.set('/api/v3/materials/A',{body:{...readerTransport.replies.get('/api/v3/materials/A')!.body!,text:'Другой экземпляр',version:'old'}});
+    });
+    // Wait for the request after reset: the already in-flight pre-reset poll
+    // can discover the new text before the injected reset is accepted.
+    await r.page.waitForFunction(()=>readerTransport.requests.some(request=>request.url==='/api/v3/reading/check'&&Array.isArray(request.body?.resources)&&request.body.resources.some(resource=>resource.kind==='material'&&resource.known_version===null)));
+    await expect(r.page.locator('#material-update-button')).toBeVisible();
+    await r.page.evaluate(({url,png})=>{readerTransport.release(url,'late old asset');readerTransport.replies.set(url,{base64:png,mime:'image/png'});},{url,png});
+    await settle(r.page);await expect(r.page.locator('#text')).toHaveText('Текст A');await expect(r.page.locator('#images img')).toHaveCount(0);assert.deepEqual(await r.page.evaluate(()=>browserResources.created),[]);
+    await r.page.locator('#material-update-button').click();await expect(r.page.locator('#text')).toHaveText('Другой экземпляр');await expect(r.page.locator('#images img')).toHaveCount(1);assert.equal(await r.page.evaluate(()=>browserResources.created.length),1);
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
+});
+
+test('reconnect resumes missing media for unchanged text without replacing loaded content',async()=>{
+  const r=await reader();try{
+    const url='/api/v3/materials/A/images/one.png';await r.start([material('A',{images:[url]})]);
+    await r.page.evaluate(url=>readerTransport.held.set(url,true),url);await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));await expect(r.page.locator('#progress')).toContainText('No connection');
+    await r.page.evaluate(({url,png})=>{readerTransport.release(url,'stale bytes');readerTransport.replies.set(url,{base64:png,mime:'image/png'});readerTransport.replies.set('/api/v3/status',{body:{stopped:false,ready_sources:1,total_sources:1}});},{url,png});
+    await expect(r.page.locator('#progress')).not.toContainText('No connection');await expect(r.page.locator('#text')).toHaveText('Текст A');await expect(r.page.locator('#images img')).toHaveCount(1);assert.equal(await r.page.evaluate(()=>browserResources.created.length),1);
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
 });

@@ -63,6 +63,7 @@ class ReaderVersions:
     def __init__(self, store: 'Store') -> None:
         self.store, self.db = store, store.db
         self.offset = store.wall_clock() - store.clock()
+        self._next_action_cleanup = float('-inf')
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS reader_identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS reader_entities (
@@ -321,13 +322,16 @@ class ReaderVersions:
 
     def batch(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], sqlite3.Row]:
         result = {}
-        for kind in sorted({key[0] for key in keys}):
-            identities = sorted(identity for k,identity in keys if k==kind)
-            for start in range(0,len(identities),500):
-                batch=identities[start:start+500]
-                rows=self.db.execute("""SELECT e.*,i.id AS item_exists,i.viewed,f.id AS feed_exists FROM reader_entities e LEFT JOIN items i
-                    ON e.kind IN ('card','material','filter','theses','media') AND i.id=e.identity LEFT JOIN feeds f ON e.kind='feed' AND f.id=e.identity WHERE e.kind=? AND e.identity IN ("""+','.join('?' for _ in batch)+')',(kind,*batch))
-                result.update({(kind,r['identity']):r for r in rows})
+        ordered=sorted(keys)
+        for start in range(0,len(ordered),499):
+            batch=ordered[start:start+499]
+            marks=','.join('(?,?)' for _ in batch)
+            rows=self.db.execute("""WITH wanted(kind,identity) AS (VALUES """+marks+""")
+                SELECT e.*,i.id AS item_exists,i.viewed,f.id AS feed_exists
+                FROM wanted w JOIN reader_entities e ON e.kind=w.kind AND e.identity=w.identity
+                LEFT JOIN items i ON e.kind IN ('card','material','filter','theses','media') AND i.id=e.identity
+                LEFT JOIN feeds f ON e.kind='feed' AND f.id=e.identity""", [v for pair in batch for v in pair])
+            result.update({(r['kind'],r['identity']):r for r in rows})
         return result
 
     @staticmethod
@@ -361,7 +365,9 @@ class ReaderVersions:
         with self.db:
             self.db.execute('UPDATE reader_job_time SET ready=1 WHERE ready=0 AND deadline<=?',(now,))
             self.db.execute('INSERT INTO reader_youtube_time SELECT 1,blocked_until>? FROM youtube_access WHERE id=1 ON CONFLICT(id) DO UPDATE SET paused=excluded.paused WHERE paused IS NOT excluded.paused',(wall,))
-            self.db.execute('DELETE FROM reader_problems WHERE finished<=?',(wall-86400,))
-            self.db.execute('DELETE FROM reader_action_results WHERE completed<=? AND sequence NOT IN (SELECT max(sequence) FROM reader_action_results GROUP BY identity)',(wall-86400,))
+            self.db.execute('DELETE FROM reader_problems WHERE rowid IN (SELECT rowid FROM reader_problems WHERE finished<=? ORDER BY finished LIMIT 200)',(wall-86400,))
+            if now >= self._next_action_cleanup:
+                self.db.execute('DELETE FROM reader_action_results WHERE rowid IN (SELECT rowid FROM reader_action_results WHERE completed<=? AND sequence NOT IN (SELECT max(sequence) FROM reader_action_results GROUP BY identity) ORDER BY completed LIMIT 200)',(wall-86400,))
+                self._next_action_cleanup=now+60
             body=json.dumps(metadata,sort_keys=True,separators=(',',':'))
             self.db.execute('INSERT INTO reader_runtime VALUES (1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE body IS NOT excluded.body',(body,))

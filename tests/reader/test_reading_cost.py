@@ -1,4 +1,5 @@
 """Bound HTTP reading work independently of machine speed and background work."""
+import re
 import pytest
 from fastapi.testclient import TestClient
 
@@ -30,8 +31,10 @@ def test_reading_http_budgets(tmp_path, count):
         assert response.status_code == 200
         assert response.json()['content']['description'] == 'Synthetic video'
         assert int(response.headers['X-Test-SQL']) < 35
-        waits = [q for q in app.state.last_sql if q.startswith('SELECT problem_code,error,next FROM jobs')]
-        assert len(waits) == 2 and len(set(waits)) == 2, waits
+        jobs = [q for q in app.state.last_sql if re.search(r'\bFROM jobs\b', q, re.IGNORECASE)]
+        # The compatible legacy response also reads history and fetch state.
+        # The shared job snapshot must not be queried twice.
+        assert len(jobs) <= 3 and len(jobs) == len(set(jobs)), jobs
 
 
 def test_opening_one_material_does_not_read_unrelated_feeds(tmp_path):

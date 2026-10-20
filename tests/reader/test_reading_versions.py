@@ -1,4 +1,5 @@
 """Persisted resource versions and selective delivery at the real HTTP seam."""
+import time
 from fastapi.testclient import TestClient
 from tests.support.reader import HEADERS
 from tests.support.reading_cost import library, traced_app, tracing
@@ -8,6 +9,15 @@ def check(client, resources, storage=None):
     response = client.post('/api/v3/reading/check', json={'storage_id': storage, 'resources': resources})
     assert response.status_code == 200, response.text
     return response
+
+
+def changed_within_background_interval(client, request, storage):
+    deadline=time.monotonic()+2
+    while time.monotonic()<deadline:
+        resource=check(client,[request],storage).json()['resources'][0]
+        if resource['state']=='changed':return resource
+        time.sleep(.02)
+    raise AssertionError('Runtime did not publish the due transition within two seconds')
 
 
 def test_unchanged_versions_return_no_data_or_full_projection(tmp_path):
@@ -118,7 +128,7 @@ def test_due_fetch_publishes_a_new_material_version_without_dispatch(tmp_path):
         resource['known_version']=before['version']
         assert check(client,[resource],first['storage_id']).json()['resources'][0]['state']=='unchanged'
         clock[0]=11.0
-        after=check(client,[resource],first['storage_id']).json()['resources'][0]
+        after=changed_within_background_interval(client,resource,first['storage_id'])
         assert after['state']=='changed'
         assert int(after['version'])>int(before['version'])
         assert after['data']['content']['loading'] is True
@@ -207,7 +217,7 @@ def test_problem_expiry_advances_status_without_an_external_write(tmp_path):
         wall[0]+=86399
         assert check(client,[request],first['storage_id']).json()['resources'][0]['state']=='unchanged'
         wall[0]+=1
-        expired=check(client,[request],first['storage_id']).json()['resources'][0]
+        expired=changed_within_background_interval(client,request,first['storage_id'])
         assert expired['state']=='changed' and expired['data']['problems']['recent']==[]
 
 

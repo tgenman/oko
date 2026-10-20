@@ -1,0 +1,17 @@
+{
+  "name": "open",
+  "sql": 48,
+  "vm": 300,
+  "content_opens": 4,
+  "content_stats": 5,
+  "read_bytes": 689,
+  "json_loads": 10,
+  "json_input_bytes": 808,
+  "json_dumps": 3,
+  "json_output_bytes": 1582,
+  "response_bytes": 2115,
+  "ms": 14.794,
+  "selects": 39,
+  "writes": 7,
+  "max_file_reads": 2
+}
