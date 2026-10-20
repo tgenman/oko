@@ -116,7 +116,7 @@ def test_selected_date_includes_midnight_and_every_later_post(tmp_path):
     def reply(request):
         if request.url.path == '/feed':
             timestamps = ['2025-09-30T20:59:59Z', '2025-09-30T21:00:00Z', '2025-10-01T10:00:00Z']
-            return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>История</title>' + ''.join(f'<entry><id>{n}</id><title>Post {n}</title><link href="https://source.test/post/{n}"/><published>{stamp}</published></entry>' for n, stamp in enumerate(timestamps)) + '</feed>')
+            return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>История</title>' + ''.join(f'<entry><id>{n}</id><title>Post {n}</title><link href="https://source.test/post/{n}"/><published>{stamp}</published></entry>' for n, stamp in reversed(list(enumerate(timestamps)))) + '</feed>')
         return httpx.Response(200, text='<article>Текст</article>')
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'Europe/Moscow'}).json()
@@ -199,7 +199,7 @@ def test_rss_unknown_dates_included_and_window_warnings_survive_rotation(tmp_pat
         assert 'полнота истории за период не подтверждена' in ' '.join(history['progress']['warnings'])
 
 
-@pytest.mark.parametrize('dates, warning', [(['', '', ''], True), (['2025-10-03T12:00:00Z', '', '2025-10-01T12:00:00Z'], False), (['2025-10-01T12:00:00Z', '', '2025-10-03T12:00:00Z'], True)])
+@pytest.mark.parametrize('dates, warning', [(['', '', ''], True), (['2025-10-03T12:00:00Z', '', '2025-10-01T12:00:00Z'], True), (['2025-10-01T12:00:00Z', '', '2025-10-03T12:00:00Z'], True)])
 def test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed(tmp_path, dates, warning):
     import httpx
     from fastapi.testclient import TestClient

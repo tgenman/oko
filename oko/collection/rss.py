@@ -209,8 +209,13 @@ class RSSSource:
         return result
 
     async def discover(self, cursor: str | None) -> DiscoveryResult:
-        batch = await self.read_entries()
         previous = json.loads(cursor) if cursor else None
+        if self.initial_history and not (previous and 'history_ids' in previous):
+            return await self._discover_rss_history(previous)
+        return await self._discover_window(previous)
+
+    async def _discover_window(self, previous: dict[str, Any] | None) -> DiscoveryResult:
+        batch = await self.read_entries()
         if self.initial_history:
             if previous and 'history_ids' in previous:
                 excluded = set(previous['excluded'])
@@ -241,6 +246,31 @@ class RSSSource:
         # Keep the original import boundary. RSS order/dates are not a cursor:
         # replaying the finite window also captures delayed and out-of-order items.
         return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in batch if not e.publication.published_known or e.publication.published >= cutoff]), json.dumps({'since': cutoff}), SourceObservation(self.gap, self.changes, description=self.description))
+
+    async def _discover_rss_history(self, previous: dict[str, Any] | None) -> DiscoveryResult:
+        from oko.collection.rss_history import RSSHistory
+        assert self.initial_history is not None
+        walk = RSSHistory(self.url, self.initial_history, previous)
+        if walk.complete:
+            batch = await self.read_entries()
+            chosen = walk.updates(batch)
+        else:
+            try:
+                raw, final, _ = await self.download(walk.url)
+                batch = entries(raw, final)
+                if walk.requests == 0:
+                    self.description = feed_description(raw)
+                chosen = walk.accept(batch, raw, final)
+            except SourceError as error:
+                walk.fail(error.label)
+                chosen = []
+        self.gap = ' · '.join(walk.warnings) or None
+        publications = tuple(Publication(e.publication.id, e.publication.url, e.publication.published,
+            Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'),
+            published_known=e.publication.published_known) for e in chosen)
+        return DiscoveryResult(publications, json.dumps(walk.cursor()),
+            SourceObservation(self.gap, self.changes, description=self.description),
+            continuation=None if walk.complete else 0.)
 
     @staticmethod
     def excerpt(html: str) -> str:

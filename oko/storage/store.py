@@ -174,11 +174,13 @@ class Store:
         with self.db:
             return self.subscriptions.history.pause(feed, paused)
 
-    def change_youtube_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
+    def change_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
         self.subscriptions.check_owner('feed', feed)
         configured = next(f for f in self.subscriptions.feeds() if f['id'] == feed)
-        if configured['kind'] != 'youtube' or configured['transport'] != 'youtube':
-            raise ValueError('Догрузка доступна подключённому YouTube-фиду')
+        if configured['transport'] not in ('rss', 'youtube'):
+            raise ValueError('Догрузка доступна подключённому RSS/Atom или YouTube-фиду')
+        if configured['transport'] == 'youtube' and selection and selection.mode != 'count':
+            raise ValueError('Догрузка YouTube поддерживает последние N видео')
         with self.db:
             return self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
 
@@ -350,7 +352,7 @@ class Store:
             query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
         if not include_deletions:
             query += " AND kind NOT IN ('delete','feed-delete')"
-        query += " AND NOT (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed WHERE h.paused=1 OR (h.scan_complete=0 AND json_extract(h.selection,'$.mode')='count')))"
+        query += " AND NOT (kind='fetch' AND item IN (SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed WHERE h.paused=1 OR (h.scan_complete=0 AND (json_extract(h.selection,'$.mode')='count' OR h.feed IN (SELECT id FROM feeds WHERE transport='rss')))))"
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *('' if f == 'demo' else f for f in available), *available)

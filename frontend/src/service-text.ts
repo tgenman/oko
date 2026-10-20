@@ -311,6 +311,8 @@ const messages=new Map<string,string>([
 ["Внешнее встраивание не сохранено локально", "External embed not saved locally"],
 ["Файл статьи не предоставлен", "Article file not provided"],
 ["Telegram не предоставляет атомарный снимок истории: набор выбирается по доступным страницам; удалённые во время выбора публикации могли не попасть в него.", "Telegram does not provide an atomic history snapshot: items are selected from available pages; publications deleted during selection may be missing."],
+["RSS: полнота истории за период не подтверждена", "RSS: history coverage for the period is not confirmed"],
+["Страницы RSS могут меняться во время обхода: точность выбора последних N не подтверждена", "RSS pages may change during discovery: the accuracy of the latest N selection is not confirmed"],
 ["Порядок RSS неоднозначен: точность выбора последних N не подтверждена", "RSS order is ambiguous: the accuracy of the latest N selection is not confirmed"]
 ]);
 export function serviceText(value:string):string {

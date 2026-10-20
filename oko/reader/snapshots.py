@@ -147,6 +147,7 @@ class InitialHistoryStatus(WireModel):
     run: StrictStr | MISSING = Field(default=MISSING, title='Run')
     scan_complete: StrictBool = Field(..., title='Scan Complete')
     since: StrictFloat | None = Field(..., title='Since')
+    stop_reason: StrictStr | None | MISSING = MISSING
     state: Literal['pending', 'loading', 'done', 'selecting', 'paused', 'waiting', 'cancelled'] = Field(..., title='State')
     timezone: StrictStr = Field(..., title='Timezone')
     unavailable: StrictInt = Field(..., title='Unavailable')
@@ -282,6 +283,7 @@ class History(WireModel):
     run: StrictStr | MISSING = Field(default=MISSING, title='Run')
     scan_complete: StrictBool = Field(..., title='Scan Complete')
     since: StrictFloat | None = Field(..., title='Since')
+    stop_reason: StrictStr | None | MISSING = MISSING
     state: Literal['pending', 'loading', 'done', 'selecting', 'paused', 'waiting', 'cancelled'] = Field(..., title='State')
     timezone: StrictStr = Field(..., title='Timezone')
     unavailable: StrictInt = Field(..., title='Unavailable')

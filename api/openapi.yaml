@@ -6626,7 +6626,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HistoryCountSelection'
+              $ref: '#/components/schemas/HistorySelection'
             example:
               mode: count
               count: '20'
@@ -12880,9 +12880,29 @@ components:
       - material_id: example
         code: source_unavailable
         message: example
+    HistoryStopReason:
+      type: string
+      enum:
+      - count_reached
+      - date_boundary
+      - no_continuation
+      - archive_end
+      - request_failed
+      - cycle
+      - page_limit
+      - ambiguous_continuation
+      - cancelled
+      examples:
+      - no_continuation
     HistoryProgress:
       type: object
       properties:
+        stop_reason:
+          anyOf:
+          - $ref: '#/components/schemas/HistoryStopReason'
+          - type: 'null'
+          default: null
+          description: Why discovery ended; null for unfinished or historical runs with no recorded reason.
         loaded:
           type: integer
           minimum: 0

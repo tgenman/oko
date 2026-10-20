@@ -137,14 +137,14 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             return history(identity, await runtime.pause_history(identity, body.paused))
 
     @router.post('/api/v3/feeds/{identity}/history', response_model=wire.FeedHistoryState)
-    async def start(request: Request, identity: str, body: wire.HistoryCountSelection) -> wire.FeedHistoryState:
-        selected = selection(wire.HistorySelection(body))
+    async def start(request: Request, identity: str, body: wire.HistorySelection) -> wire.FeedHistoryState:
+        selected = selection(body)
         async with archive(request, identity, wire.CommandContext(wire.CommandHistoryStart(operation='history_start', feed_id=wire.FeedId(identity)))):
-            return history(identity, await runtime.change_youtube_history(identity, selected))
+            return history(identity, await runtime.change_history(identity, selected))
 
     @router.delete('/api/v3/feeds/{identity}/history', response_model=wire.FeedHistoryState)
     async def cancel(request: Request, identity: str) -> wire.FeedHistoryState:
         async with archive(request, identity, wire.CommandContext(wire.CommandHistoryCancel(operation='history_cancel', feed_id=wire.FeedId(identity)))):
-            return history(identity, await runtime.change_youtube_history(identity, None))
+            return history(identity, await runtime.change_history(identity, None))
 
     app.include_router(router)

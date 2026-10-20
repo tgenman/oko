@@ -95,8 +95,10 @@ class History:
         selection = json.loads(row['selection'])
         selection['warnings'] = cursor.get('warnings', selection.get('warnings', []))
         selection['discovery_error'] = cursor.get('history_error')
+        if 'rss_history' in cursor:
+            selection['stop_reason'] = cursor.get('stop_reason')
         selection['discovery_retry_at'] = cursor.get('history_retry_at')
-        if 'youtube_history' in cursor:
+        if 'youtube_history' in cursor or 'rss_history' in cursor:
             selection['waiting'] = cursor.get('history_waiting', False)
             selection['requests'] = cursor.get('history_requests', 0)
         self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
@@ -108,8 +110,6 @@ class History:
         current = self.status(feed)
         if current and current['state'] not in ('done', 'cancelled'):
             raise ValueError('Сначала остановите текущую загрузку истории')
-        if selection.mode != 'count':
-            raise ValueError('Догрузка YouTube поддерживает последние N видео')
         self.db.execute('DELETE FROM history_members WHERE feed=?', (feed,))
         value = dict(**selection.selection(), run=secrets.token_hex(16), resume=0)
         self.db.execute('''INSERT INTO initial_history(feed,selection) VALUES (?,?)
@@ -125,7 +125,7 @@ class History:
             raise ValueError('История не настроена')
         row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
         value = json.loads(row['selection'])
-        value.update(cancelled=True, waiting=False)
+        value.update(cancelled=True, waiting=False, stop_reason='cancelled')
         self.db.execute('UPDATE initial_history SET selection=?,paused=1 WHERE feed=?', (json.dumps(value), feed))
         self.db.execute("UPDATE jobs SET status='done',generation=generation+1 WHERE kind='fetch' AND item IN (SELECT item FROM history_members WHERE feed=?)", (feed,))
         result = self.status(feed)
@@ -149,7 +149,7 @@ class History:
             raise ValueError('Начальная история не настроена')
         if status.get('cancelled'):
             raise ValueError('История остановлена; начните новый подбор')
-        if not paused:
+        if not paused and not status.get('stop_reason'):
             row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
             selection = json.loads(row['selection'])
             selection.update(resume=selection.get('resume', 0) + 1, waiting=False, discovery_error=None)

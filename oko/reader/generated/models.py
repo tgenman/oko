@@ -426,6 +426,35 @@ class HistoryPauseRequest(WireModel):
     paused: StrictBool
 
 
+class HistoryStopReason(
+    RootModel[
+        Literal[
+            "count_reached",
+            "date_boundary",
+            "no_continuation",
+            "archive_end",
+            "request_failed",
+            "cycle",
+            "page_limit",
+            "ambiguous_continuation",
+            "cancelled",
+        ]
+    ]
+):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: Literal[
+        "count_reached",
+        "date_boundary",
+        "no_continuation",
+        "archive_end",
+        "request_failed",
+        "cycle",
+        "page_limit",
+        "ambiguous_continuation",
+        "cancelled",
+    ] = Field(..., examples=["no_continuation"])
+
+
 class HostNotAllowedError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["host_not_allowed"]
@@ -1831,6 +1860,10 @@ class HistoryProgress(WireModel):
     requests: StrictInt = Field(..., ge=0, le=9007199254740991)
     retrying: StrictInt = Field(..., ge=0, le=9007199254740991)
     scan_complete: StrictBool
+    stop_reason: HistoryStopReason | None = Field(
+        default=None,
+        description="Why discovery ended; null for unfinished or historical runs with no recorded reason.",
+    )
     unavailable: StrictInt = Field(..., ge=0, le=9007199254740991)
     viewed: StrictInt = Field(..., ge=0, le=9007199254740991)
     warnings: list[StrictStr]

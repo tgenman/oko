@@ -515,12 +515,12 @@ class Runtime:
             current.refresh_feed(identity)
             return result
 
-    async def change_youtube_history(self, identity: str, selection: InitialHistory | None) -> dict[str, Any]:
+    async def change_history(self, identity: str, selection: InitialHistory | None) -> dict[str, Any]:
         async with self._actions:
             self.require_work()
             current = self.require_store()
             try:
-                result = current.change_youtube_history(identity, selection)
+                result = current.change_history(identity, selection)
             except LookupError as error:
                 raise ActionError('missing', str(error)) from None
             except ValueError as error:

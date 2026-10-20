@@ -219,6 +219,7 @@ def history(value: facts.InitialHistoryStatus) -> wire.FeedHistoryState:
             raise ValueError('Date selection lacks date')
         selection = wire.HistorySelection(wire.HistoryDateSelection(mode='date', date=wire.LocalDate(value.date), timezone=wire.IanaTimezone(value.timezone)))
     progress = wire.HistoryProgress(loaded=value.loaded, viewed=value.viewed, incomplete=value.incomplete,
+        stop_reason=wire.HistoryStopReason.model_validate(value.stop_reason) if isinstance(value.stop_reason, str) else None,
         available=value.available, retrying=value.retrying, unavailable=value.unavailable,
         requests=value.requests if isinstance(value.requests, int) else 0,
         errors=[wire.HistoryItemError(material_id=wire.MaterialId(error.item), code='source_unavailable', message=error.message) for error in value.errors],

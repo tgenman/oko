@@ -110,7 +110,7 @@ class YouTubeSource(RSSSource):
         if selection and selection['mode'] == 'count' and (
                 not selection.get('frozen') or selection.get('run') or 'youtube_history' in previous):
             return await self.discover_history(previous, selection)
-        outcome = await super().discover(cursor)
+        outcome = await self._discover_window(previous)
         publications, next_cursor = list(outcome.publications), outcome.cursor
         if not self.rss_windows and self.rss_errors:
             raise SourceError(' · '.join(self.rss_errors))

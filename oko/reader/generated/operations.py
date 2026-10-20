@@ -70,7 +70,7 @@ REQUESTS: dict[tuple[str, str], Any] = {
     ('POST', '/api/v3/feeds/{feed}/completion'): models.CompleteFeedRequest,
     ('PATCH', '/api/v3/feeds/{identity}'): models.FeedPatchRequest,
     ('PATCH', '/api/v3/feeds/{identity}/history'): models.HistoryPauseRequest,
-    ('POST', '/api/v3/feeds/{identity}/history'): models.HistoryCountSelection,
+    ('POST', '/api/v3/feeds/{identity}/history'): models.HistorySelection,
     ('PATCH', '/api/v3/folders/{folder}'): models.RenameFolderRequest,
     ('POST', '/api/v3/folders/{folder}/completion'): models.CompleteFolderRequest,
     ('PUT', '/api/v3/power'): models.PowerRequest,

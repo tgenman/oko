@@ -1532,6 +1532,10 @@ export type HistoryProgress = {
     requests: number;
     retrying: number;
     scan_complete: boolean;
+    /**
+     * Why discovery ended; null for unfinished or historical runs with no recorded reason.
+     */
+    stop_reason?: HistoryStopReason | null;
     unavailable: number;
     viewed: number;
     warnings: Array<string>;
@@ -1566,6 +1570,8 @@ export type HistoryState = ({
 } & HistoryComplete) | ({
     state: 'cancelled';
 } & HistoryCancelled);
+
+export type HistoryStopReason = 'count_reached' | 'date_boundary' | 'no_continuation' | 'archive_end' | 'request_failed' | 'cycle' | 'page_limit' | 'ambiguous_continuation' | 'cancelled';
 
 export type HistoryWaiting = {
     progress: HistoryProgress;
@@ -4091,7 +4097,7 @@ export type HistoryPauseResponses = {
 export type HistoryPauseResponse = HistoryPauseResponses[keyof HistoryPauseResponses];
 
 export type HistoryStartData = {
-    body: HistoryCountSelection;
+    body: HistorySelection;
     headers?: {
         /**
          * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.

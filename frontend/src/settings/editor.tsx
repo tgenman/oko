@@ -1,3 +1,4 @@
+import {HistoryFields,selection,type Selection} from './connections';
 import {FeedDetails} from './feed-details';
 import {serviceText} from '../service-text';
 import {useId, useState, useSyncExternalStore, type ReactNode} from 'react';
@@ -60,6 +61,7 @@ function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefi
  return <><details hidden={!help}><summary>Update Detection Capabilities</summary><p id="source-help">{help&&serviceText(help)}</p></details><h2>Feed Connection</h2>
  {(history||feed.kind==='youtube'&&transport==='youtube')&&<><p id="history-progress" data-feed={feed.id} role="status" hidden={!history}>{historyProgress(history)}</p></>}
  {!history&&feed.kind!=='demo'&&<div id="history-legacy"><p>{storedHistory?.state==='absent'&&storedHistory.legacy_since?'Captured history start: '+new Date(storedHistory.legacy_since).toLocaleString():Number.isInteger(feed.initial_days)?'Saved history depth: '+feed.initial_days+' days; the actual boundary was not saved':'The actual history boundary was not saved'}</p><p>The initial download count and progress were not saved. The existing boundary and cursor are kept; history will not be downloaded again.</p></div>}
+ {transport==='rss'&&<RSSHistoryControls owner={owner} feed={feed} active={Boolean(active)} busy={historyBusy}/>}
  {feed.kind==='youtube'&&transport==='youtube'&&<><p>History includes regular videos and recorded streams, excluding Shorts. Saved videos are not duplicated. Older videos may lack dates and descriptions.</p><label>Latest N Videos<input id="youtube-history-count" type="number" min={1} step={1} required value={count} onChange={event=>owner.edit('feed/'+feed.id,'youtubeHistoryCount',event.target.value)}/></label><button id="youtube-history-start" disabled={!owner.workAllowed||historyBusy||Boolean(active)} onClick={()=>{const input=document.getElementById('youtube-history-count')as HTMLInputElement;input.setCustomValidity(/^\d+$/.test(count)?'':'Enter a whole number, at least 1');if(input.reportValidity())void owner.history(feed,'start',count);}}>Load Latest N Videos</button><button id="youtube-history-stop" disabled={!owner.workAllowed||historyBusy} hidden={!active} onClick={()=>void owner.history(feed,'stop')}>Stop History Download</button></>}
  <p>{connection}</p><p>Original addresses: {feed.original_urls?.join(', ')}</p>{feed.kind==='youtube'&&<p>{transport==='youtube'?'YouTube: updates are collected while the tab is open. ':'YouTube connects automatically when you add a feed URL. '}Summaries are enabled by default; available YouTube subtitles are requested. High importance also enables subtitles and summaries. Videos are not downloaded.</p>}
  <label>Feed Importance<select id="feed-importance" value={String(value('importance',feed.importance||'normal'))} onChange={event=>edit('importance',event.target.value)}>{Object.entries({normal:'Normal',elevated:'Elevated',high:'High'}).map(([key,title])=><option key={key} value={key}>{title}</option>)}</select></label><label>Allow Public AI Processing<input id="feed-public-ai" type="checkbox" checked={Boolean(value('public-ai',Boolean(feed.public_ai)))} onChange={event=>edit('public-ai',event.target.checked)}/></label>
@@ -71,4 +73,17 @@ function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefi
  <p role="status">{deleting?'Deleting: local cleanup in progress':''}</p><button id="feed-delete" disabled={deleting||owner.stopped} onClick={()=>setConfirm(true)}>Delete Feed</button>
  {confirm&&<dialog id="feed-delete-confirm" aria-label="Delete Feed" ref={node=>{if(node&&!node.open)node.showModal();}} onCancel={()=>setConfirm(false)}><h2>Delete feed “{feed.title}”?</h2><p>The local subscription, items, versions, media, processing results and settings will be deleted. Telegram messages will not be deleted or marked as read; you will not leave the group. Adding it again will start a new collection.</p><button id="feed-delete-cancel" onClick={()=>setConfirm(false)}>Cancel</button><button id="feed-delete-confirm-action" onClick={()=>{setConfirm(false);void owner.removeFeed(feed);}}>Delete Local Data</button></dialog>}
  </>;
+}
+
+function RSSHistoryControls({owner,feed,active,busy}:{owner:MenusOwner;feed:SubscriptionFeed;active:boolean;busy:boolean}){
+ const path='feed/'+feed.id, draft=owner.draft(path), saved=owner.getHistory(feed);
+ const history=saved&&saved.state!=='absent'?saved:null;
+ const value:Selection={mode:draft.rssHistoryMode==='date'?'date':draft.rssHistoryMode==='count'?'count':history?.selection.mode||'count',
+  count:String(draft.rssHistoryCount??(history?.selection.mode==='count'?history.selection.count:'200')),
+  date:String(draft.rssHistoryDate??(history?.selection.mode==='date'?history.selection.date:''))};
+ return <><HistoryFields prefix="rss-load" value={value} disabled={!owner.workAllowed} onChange={next=>{
+  owner.edit(path,'rssHistoryMode',next.mode);owner.edit(path,'rssHistoryCount',next.count);owner.edit(path,'rssHistoryDate',next.date);
+ }}/><p>History follows continuation links supplied by the source. The requested number may be unavailable.</p>
+ <button id="rss-load-history-start" disabled={!owner.workAllowed||busy||active} onClick={()=>{const chosen=selection(value,'rss-load');if(chosen)void owner.history(feed,'start',chosen);}}>Load History</button>
+ <button id="rss-load-history-stop" disabled={!owner.workAllowed||busy} hidden={!active} onClick={()=>void owner.history(feed,'stop')}>Stop History Download</button></>;
 }
