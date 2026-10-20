@@ -1,5 +1,5 @@
-from oko.storage.reading import reading_snapshot
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
+from oko.storage.reading import reading_snapshot
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -112,9 +112,9 @@ def attachments(values: list[facts.Attachment]) -> list[wire.Attachment]:
     return [wire.Attachment(kind=a.kind, mime=a.mime, url=media_url(a.url)) for a in values]
 
 
-def card(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed) -> wire.ReadingCard:
+def card(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed, shared: Common | None = None) -> wire.ReadingCard:
     current = runtime.require_store()
-    shared = common(runtime, value, feed)
+    shared = shared if shared is not None else common(runtime, value, feed)
     if not value.complete:
         return wire.ReadingCard(wire.PendingReadingCard(**shared, availability='pending', loading=value.loading is not False))
     if not isinstance(value.version, str) or not isinstance(value.full, bool) or not isinstance(value.reason, str):
@@ -217,8 +217,8 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             data.update(feed_title=owner.root.title, folder_id=owner.root.folder_id.root, importance=owner.root.importance.root,
                         snippet=snippet(value.description if isinstance(value.description, str) and value.description else value.display_text if isinstance(value.display_text, str) else value.text), published_known=value.published_known is not False)
             entry = facts.Card.model_validate(data)
-            projected = card(runtime, entry, owner).root
             shared = common(runtime, entry, owner)
+            projected = card(runtime, entry, owner, shared).root
             if isinstance(projected, wire.PendingReadingCard):
                 return wire.ReadableMaterial(wire.PendingReadableMaterial(**shared, availability='pending', content=wire.PendingPublicationContent(availability='pending', loading=projected.loading)))
             content = wire.AvailablePublicationContent(availability='available', text=value.text,

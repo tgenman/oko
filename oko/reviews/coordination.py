@@ -1,4 +1,3 @@
-from oko.storage.reading import reading_value
 """Current processing work and reconciliation of dependent reader results."""
 from oko.diagnostics import record_caught
 from collections.abc import Callable
@@ -72,7 +71,6 @@ class ProcessingCoordination:
             'theses': _Operation(self.theses.request, self.theses.signature, self._save_theses, 'Подготовка тезисов'),
         }
 
-    @reading_value
     def waiting(self, item: str, kind: Literal['filter', 'theses'], now: float, wall_now: float) -> ProcessingWait | None:
         row = self.store.db.execute("SELECT problem_code,error,next FROM jobs WHERE item=? AND kind=? AND status='pending'", (item, kind)).fetchone()
         if not row or not row['error']:

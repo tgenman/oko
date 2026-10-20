@@ -44,6 +44,7 @@ def traced_app(root):
         try:
             response = await call_next(request)
             response.headers['X-Test-SQL'] = str(len(queries))
+            app.state.last_sql = queries
             return response
         finally:
             _request_sql.reset(token)
@@ -82,6 +83,8 @@ def test_reading_http_budgets(tmp_path, count):
         assert response.status_code == 200
         assert response.json()['content']['description'] == 'Synthetic video'
         assert int(response.headers['X-Test-SQL']) < 35
+        waits = [q for q in app.state.last_sql if q.startswith('SELECT problem_code,error,next FROM jobs')]
+        assert len(waits) == 2 and len(set(waits)) == 2, waits
 
 
 def test_opening_one_material_does_not_read_unrelated_feeds(tmp_path):

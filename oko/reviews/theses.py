@@ -1,5 +1,5 @@
-from oko.storage.reading import reading_value, saved_bytes, saved_document
 """Publication theses: current inputs, durable results and their reader state."""
+from oko.storage.reading import reading_value, saved_bytes, saved_document
 from oko.diagnostics import record_caught
 import hashlib
 import json

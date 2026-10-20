@@ -1,5 +1,5 @@
-from oko.storage.reading import reading_snapshot
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
+from oko.storage.reading import reading_snapshot
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, TYPE_CHECKING, TypedDict
@@ -76,10 +76,22 @@ class ReadingComposition:
                                       + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
         cards = []
         for row in rows:
-            material = self._store.reading_material(row, compact=True)
+            material = _reading_heading(self._store.saved_publication(row), feeds[row['feed_id']])
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):
                 owner = feeds[row['feed_id']]
-                cards.append(dict(material, feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
+                text = material.pop('text')
+                description = material.pop('description', '')
+                preview = description or text
+                filtered = material.get('filter', {})
+                if not description and filtered.get('status') == 'done' and not filtered['restored']:
+                    # Preserve the existing preview of display_text followed by
+                    # its final fragment pass, including joined boundaries.
+                    for fragment in filtered['removed']:
+                        preview = preview.replace(fragment, '')
+                if filtered.get('status') == 'done' and not filtered['restored']:
+                    for fragment in filtered['removed']:
+                        preview = preview.replace(fragment, '')
+                cards.append(dict(material, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
         return cards
 
     @reading_snapshot()

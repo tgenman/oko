@@ -544,10 +544,18 @@ class Store:
 
     def material(self, item: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
-        return self.reading_material(row) if row else None
+        material = self.saved_publication(row) if row else None
+        if material and material['complete']:
+            display = material['text']
+            filtered = material['filter']
+            if filtered['status'] == 'done' and not filtered['restored']:
+                for fragment in filtered['removed']:
+                    display = display.replace(fragment, '')
+            material['display_text'] = display
+        return material
 
-    def reading_material(self, row: sqlite3.Row, *, compact: bool = False) -> dict[str, Any] | None:
-        """Shared saved facts; list projections skip the full display-text copy."""
+    def saved_publication(self, row: sqlite3.Row) -> dict[str, Any] | None:
+        """Saved publication facts without reader-specific text projections."""
         item = row['id']
         settings = self.subscriptions.effective('feed', row['feed_id'])
         base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'],
@@ -557,7 +565,7 @@ class Store:
         if not row['complete']:
             base.update(title='Материал загружается', loading=bool(self.db.execute(
                 "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()))
-            return dict(base, snippet='') if compact else dict(base, text='')
+            return dict(base, text='')
         try:
             header, text = self.original(item)
             filtered = self.filters.read(item)
@@ -572,17 +580,7 @@ class Store:
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
-            display = header.get('description') or text if compact else text
-            if filtered['status'] == 'done' and not filtered['restored']:
-                for fragment in filtered['removed']:
-                    display = display.replace(fragment, '')
-            if compact:
-                from oko.reader.composition import snippet
-                if settings['feed']['kind'] == 'telegram' and settings['feed'].get('transport') != 'rss' and text:
-                    base['title'] = text.split('\n', 1)[0] or base['title']
-                base['snippet'] = snippet(display)
-            else:
-                base.update(text=text, display_text=display, description=header.get('description', ''))
+            base.update(text=text, description=header.get('description', ''))
             return base
         except (OSError, ValueError, KeyError):
             record_caught('store.material')

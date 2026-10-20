@@ -132,3 +132,35 @@ def test_snippet_does_not_restore_filtered_fragments(tmp_path):
         card = next(c for c in cards if c['title'] == 'Материал 1')
         assert card['snippet'] == 'Открылась библиотека.'
         assert 'Реклама' in client.get('/api/v3/materials/' + card['id']).json()['content']['text']
+
+
+def test_preview_does_not_restore_fragment_formed_at_a_removed_boundary(tmp_path):
+    import json
+    from oko.collection.contracts import Material, Publication
+    from tests.support.filters import FilterSource
+    from tests.support.models import model_transport
+
+    class Source(FilterSource):
+        async def discover(self, cursor):
+            return DiscoveryResult(tuple([] if cursor else [Publication('edge', 'https://example.org/edge', 20)]), 'done')
+
+        async def fetch(self, publication, resources=FetchResources()):
+            return FetchResult(Material('Boundary', 'aabb'))
+
+    native = model_transport([])
+
+    def reply(request):
+        if request.url.path != '/v1/chat/completions':
+            return native.handler(request)
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {
+            'role': 'assistant', 'content': json.dumps(dict(hidden=False, reason='Removed fragment', removed=['ab']))}}]})
+
+    with TestClient(create_app(tmp_path, source=Source(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Remove ab'})
+        presence(client, 'reader')
+        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards').json()) == 1 and c[0]['filter']['attempt']['state'] == 'ready' else None))
+        assert cards[0]['snippet'] == ''
+        material = client.get('/api/v3/materials/' + cards[0]['id']).json()
+        assert material['content']['text'] == 'aabb'
+        assert material['content']['display_text'] == 'ab'
