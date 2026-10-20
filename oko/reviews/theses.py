@@ -1,4 +1,5 @@
 """Publication theses: current inputs, durable results and their reader state."""
+from oko.storage.reading import reading_value, saved_bytes, saved_document
 from oko.diagnostics import record_caught
 import hashlib
 import json
@@ -16,6 +17,7 @@ class PublicationTheses:
         self.store = store
         store.db.execute('CREATE TABLE IF NOT EXISTS retained_theses (item TEXT PRIMARY KEY, path TEXT, digest TEXT)')
 
+    @reading_value
     def signature(self, item: str) -> str | None:
         return self._signature(item)
 
@@ -31,8 +33,7 @@ class PublicationTheses:
         version = self.store.content_version(item)
         filter_input = filtered
         if settings['feed']['kind'] == 'youtube':
-            raw, text = self.store.path(item).read_text().split('\n\n', 1)
-            header = json.loads(raw)
+            header, text = self.store.original(item)
             if not self.store.subscriptions.youtube_theses(row['feed_id']) or header.get('captions') != 'available':
                 return None
             if not legacy:
@@ -122,6 +123,7 @@ class PublicationTheses:
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
         return True
 
+    @reading_value
     def status(self, item: str) -> dict[str, Any] | None:
         if not self.signature(item):
             return None
@@ -132,6 +134,7 @@ class PublicationTheses:
         accepted = self._accepted(item)
         return accepted[0] if accepted else None
 
+    @reading_value
     def _accepted(self, item: str, *, retain: bool = False) -> tuple[dict[str, Any], Path] | None:
         row = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
         if not row or row[0] not in ('done', 'pending', 'running'):
@@ -155,8 +158,8 @@ class PublicationTheses:
             if not path.is_file():
                 continue
             try:
-                raw = path.read_bytes()
-                header = json.loads(raw.decode().split('\n\n', 1)[0])
+                raw = saved_bytes(path)
+                header, _ = saved_document(path)
                 if header['signature'] == signature:
                     result = Theses.model_validate(header['result']).model_dump()
                     relative = str(path.relative_to(self.store.root))

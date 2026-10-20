@@ -1,3 +1,4 @@
+from oko.storage.reading import reading_value
 """Persistent subscription identity and field-by-field effective settings."""
 import hashlib
 import json
@@ -144,6 +145,7 @@ class Subscriptions:
             if inserted.rowcount:
                 self.details.created('demo')
 
+    @reading_value
     def folders(self) -> list[dict[str, Any]]:
         folders = [dict(row) for row in self.db.execute('SELECT * FROM folders ORDER BY position,id')]
         def order(folder: dict[str, Any]) -> tuple[int, int]:
@@ -179,40 +181,52 @@ class Subscriptions:
             self.db.execute("DELETE FROM settings WHERE scope='folder' AND owner=?", (identity,))
             self.db.execute('DELETE FROM folders WHERE id=?', (identity,))
 
-    def feeds(self, identity: str | None = None) -> list[dict[str, Any]]:
-        result = []
-        query = 'SELECT * FROM feeds' + (' WHERE id=?' if identity is not None else '') + ' ORDER BY rowid'
-        for row in self.db.execute(query, (identity,) if identity is not None else ()):
-            feed = dict(row)
-            feed.pop('telegram_topic', None)
-            avatar = self.db.execute('SELECT digest FROM telegram_avatars WHERE feed=?', (feed['id'],)).fetchone() if feed['kind'] == 'telegram' else None
-            if avatar:
-                feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar[0]
-            feed['original_urls'] = json.loads(feed['original_urls'])
-            binding = self.telegram.binding(feed['id'])
-            if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
-                profile = self.telegram.profile(binding['role'])
-                if not profile or profile['state'] != 'ready':
-                    feed['connection'] = 'unavailable'
-            feed['initial_history'] = self.history.status(feed['id'])
-            if feed['initial_history'] is None:
-                namespace = 'telegram:' if feed['transport'] == 'telegram' else ''
-                saved = self.db.execute('SELECT value FROM state WHERE key=?', ('cursor:' + namespace + feed['id'],)).fetchone()
+    @reading_value
+    def feeds(self, identity: str | None = None, *, folder: str | None = None) -> list[dict[str, Any]]:
+        conditions, parameters = [], []
+        if identity is not None:
+            conditions.append('id=?')
+            parameters.append(identity)
+        if folder is not None:
+            conditions.append('folder_id=?')
+            parameters.append(folder)
+        query = 'SELECT id FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
+        return [self._feed(row['id']) for row in self.db.execute(query, parameters)]
+
+    @reading_value
+    def _feed(self, identity: str) -> dict[str, Any]:
+        row = self.db.execute('SELECT * FROM feeds WHERE id=?', (identity,)).fetchone()
+        if row is None:
+            raise LookupError('Фид не найден')
+        feed = dict(row)
+        feed.pop('telegram_topic', None)
+        avatar = self.db.execute('SELECT digest FROM telegram_avatars WHERE feed=?', (feed['id'],)).fetchone() if feed['kind'] == 'telegram' else None
+        if avatar:
+            feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar[0]
+        feed['original_urls'] = json.loads(feed['original_urls'])
+        binding = self.telegram.binding(feed['id'])
+        if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
+            profile = self.telegram.profile(binding['role'])
+            if not profile or profile['state'] != 'ready':
+                feed['connection'] = 'unavailable'
+        feed['initial_history'] = self.history.status(feed['id'])
+        if feed['initial_history'] is None:
+            namespace = 'telegram:' if feed['transport'] == 'telegram' else ''
+            saved = self.db.execute('SELECT value FROM state WHERE key=?', ('cursor:' + namespace + feed['id'],)).fetchone()
+            try:
+                cursor = json.loads(saved['value']) if saved else {}
+            except json.JSONDecodeError:
+                cursor = {}  # Adapters may own opaque, non-JSON cursors.
+            if feed['transport']=='telegram' and saved:
                 try:
-                    cursor = json.loads(saved['value']) if saved else {}
-                except json.JSONDecodeError:
-                    cursor = {}  # Adapters may own opaque, non-JSON cursors.
-                if feed['transport']=='telegram' and saved:
-                    try:
-                        feed['legacy_since'] = HistoryEnvelope.decode(saved['value'],adapter='client').selection.since
-                    except SourceError:
-                        feed['legacy_since'] = None
-                else:
-                    feed['legacy_since'] = cursor.get('since') if isinstance(cursor,dict) else None
-            for field in ('public_ai', 'read_history', 'auto_read'):
-                feed[field] = None if feed[field] is None else bool(feed[field])
-            result.append(feed)
-        return result
+                    feed['legacy_since'] = HistoryEnvelope.decode(saved['value'],adapter='client').selection.since
+                except SourceError:
+                    feed['legacy_since'] = None
+            else:
+                feed['legacy_since'] = cursor.get('since') if isinstance(cursor,dict) else None
+        for field in ('public_ai', 'read_history', 'auto_read'):
+            feed[field] = None if feed[field] is None else bool(feed[field])
+        return feed
 
     def add_feed(self, body: AddFeed) -> dict[str, Any]:
         identity, kind, connection = identify(body.url)
@@ -247,12 +261,18 @@ class Subscriptions:
         row = self.db.execute("SELECT value FROM settings WHERE scope='oko' AND owner='global' AND field='feed_refresh_minutes'").fetchone()
         return int(json.loads(row['value'])) if row else DEFAULT_FEED_REFRESH_MINUTES
 
+    @reading_value
+    def _settings(self, scope: str, owner: str) -> list[sqlite3.Row]:
+        return self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (scope, owner)).fetchall()
+
+    @reading_value
     def effective(self, scope: str, owner: str) -> dict[str, Any]:
         self.check_owner(scope, owner)
-        feed = self.feeds(owner)[0] if scope == 'feed' else None
+        feed = self._feed(owner) if scope == 'feed' else None
         chain = [('oko', 'global')]
         if scope == 'feed':
-            folder = self.db.execute('SELECT folder_id FROM feeds WHERE id=?', (owner,)).fetchone()[0]
+            assert feed is not None
+            folder = feed['folder_id']
             chain.append(('folder', folder))
         if scope != 'oko':
             chain.append((scope, owner))
@@ -262,7 +282,7 @@ class Subscriptions:
             values['theses']['value'] = True
         overrides = {}
         for level, identity in chain:
-            for row in self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (level, identity)):
+            for row in self._settings(level, identity):
                 if row['field'] not in defaults:
                     continue
                 value = json.loads(row['value'])

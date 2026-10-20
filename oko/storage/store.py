@@ -1,3 +1,4 @@
+from oko.storage.reading import reading_value, saved_document
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
 import hashlib
@@ -114,6 +115,7 @@ class Store:
         if 'source_order' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
             self.db.execute('ALTER TABLE items ADD COLUMN source_order INTEGER')
             self.db.commit()
+        self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.filters = Filters(self)
         self.processing = ProcessingCoordination(self)
@@ -307,6 +309,7 @@ class Store:
             self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (item,))
         return True
 
+    @reading_value
     def item_feed(self, item: str) -> str:
         return str(self.db.execute('SELECT feed_id FROM items WHERE id=?', (item,)).fetchone()[0])
 
@@ -535,20 +538,50 @@ class Store:
             self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
             self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
 
+    @reading_value
+    def original(self, item: str) -> tuple[dict[str, Any], str]:
+        return saved_document(self.path(item))
+
     def material(self, item: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
-        if not row:
-            return None
-        if not row['complete']:
-            return dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), title='Материал загружается', text='', complete=False, source_order=row['source_order'], members=json.loads(row['members']), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()))
-        try:
-            header, text = self.path(item).read_text().split('\n\n', 1)
-            filtered = self.filters.read(item)
-            display_text = text
+        material = self.saved_publication(row) if row else None
+        if material and material['complete']:
+            display = material['text']
+            filtered = material['filter']
             if filtered['status'] == 'done' and not filtered['restored']:
                 for fragment in filtered['removed']:
-                    display_text = display_text.replace(fragment, '')
-            return dict(changed=bool(self.versions.previous(item)), previous=self.versions.previous(item), source_deleted=self.versions.deleted(item), originals=self.subscriptions.effective('feed', row['feed_id'])['effective']['originals']['value'], filter=filtered, display_text=display_text, id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'], published_known=bool(row['published_known']), source_order=row['source_order'], title=json.loads(header)['title'], text=text, complete=True, theses=self.processing.theses.read(item), provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item), version=self.content_version(item), loading=bool(self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))", (item,self.clock())).fetchone()), full=json.loads(header).get('full', True) and (not json.loads(header).get('members') or set(json.loads(header)['members']) == set(json.loads(row['members']))), reason=json.loads(header).get('reason', ''), captions=json.loads(header).get('captions'), description=json.loads(header).get('description', ''), members=json.loads(row['members']), attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in json.loads(header).get('attachments', [])], images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+                    display = display.replace(fragment, '')
+            material['display_text'] = display
+        return material
+
+    def saved_publication(self, row: sqlite3.Row) -> dict[str, Any] | None:
+        """Saved publication facts without reader-specific text projections."""
+        item = row['id']
+        settings = self.subscriptions.effective('feed', row['feed_id'])
+        base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'],
+                    published_known=bool(row['published_known']), source_order=row['source_order'],
+                    members=json.loads(row['members']), complete=bool(row['complete']),
+                    originals=settings['effective']['originals']['value'])
+        if not row['complete']:
+            base.update(title='Материал загружается', loading=bool(self.db.execute(
+                "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()))
+            return dict(base, text='')
+        try:
+            header, text = self.original(item)
+            filtered = self.filters.read(item)
+            previous = self.versions.previous(item)
+            base.update(changed=bool(previous), previous=previous, source_deleted=self.versions.deleted(item),
+                filter=filtered, title=header['title'], theses=self.processing.theses.read(item),
+                provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
+                version=self.content_version(item), loading=bool(self.db.execute(
+                    "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",
+                    (item, self.clock())).fetchone()),
+                full=header.get('full', True) and (not header.get('members') or set(header['members']) == set(base['members'])),
+                reason=header.get('reason', ''), captions=header.get('captions'),
+                attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
+                images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            base.update(text=text, description=header.get('description', ''))
+            return base
         except (OSError, ValueError, KeyError):
             record_caught('store.material')
             return None
@@ -596,11 +629,12 @@ class Store:
         row = self.db.execute('SELECT parameters FROM execution_settings WHERE job=? AND generation=?', (job.id, job.generation)).fetchone()
         return json.loads(row[0]) if row else None
 
+    @reading_value
     def derivative_provenance(self, path: Path, signature: str | None) -> dict[str, Any] | None:
         if signature is None:
             return None
         try:
-            header = json.loads(path.read_text().split('\n\n', 1)[0])
+            header, _ = saved_document(path)
             if header['signature'] == signature:
                 return header.get('provenance') or dict(model=None)
         except (OSError, ValueError, KeyError):
@@ -624,6 +658,7 @@ class Store:
         with self.db:
             self.db.execute("INSERT INTO state VALUES ('processor:codex',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
 
+    @reading_value
     def processor_config(self) -> ProcessorConfig | None:
         row = self.db.execute("SELECT value FROM state WHERE key='processor:llamacpp'").fetchone()
         return ProcessorConfig.model_validate_json(row[0]) if row else None
@@ -633,6 +668,7 @@ class Store:
             self.db.execute("INSERT INTO state VALUES ('processor:llamacpp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
         self.settings_changed()
 
+    @reading_value
     def settings_version(self) -> int:
         row = self.db.execute("SELECT value FROM state WHERE key='settings-version'").fetchone()
         return int(row[0]) if row else 0

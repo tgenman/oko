@@ -1,4 +1,5 @@
 """Durable filtered views; originals and media remain owned by Store."""
+from oko.storage.reading import reading_value, saved_document
 from oko.diagnostics import record_caught
 import hashlib
 import json
@@ -18,6 +19,7 @@ class Filters:
         CREATE TABLE IF NOT EXISTS filter_restores (item TEXT PRIMARY KEY, version TEXT);
         ''')
 
+    @reading_value
     def signature(self, item: str) -> str | None:
         store = self.store
         row = store.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
@@ -26,7 +28,7 @@ class Filters:
         settings = store.subscriptions.effective('feed', row['feed_id'])
         # Retired public metadata must not invalidate already accepted results.
         # This null field was part of the persisted processing signature.
-        settings['feed']['telegram_topic'] = None
+        settings = dict(settings, feed=dict(settings['feed'], telegram_topic=None))
         if not settings['effective']['prompt_filters']['value'].strip():
             return None
         config = store.processor_config()
@@ -52,6 +54,7 @@ class Filters:
                 else:
                     store.db.execute('DELETE FROM filter_inputs WHERE item=?', (item,))
 
+    @reading_value
     def read(self, item: str) -> dict[str, Any]:
         signature = self.signature(item)
         if not signature:
@@ -62,7 +65,7 @@ class Filters:
         row = store.db.execute("SELECT status,error FROM jobs WHERE kind='filter' AND item=?", (item,)).fetchone()
         if row and row['status'] == 'done':
             try:
-                data = json.loads((store.path(item).parent / 'filter.md').read_text().split('\n\n', 1)[0])
+                data, _ = saved_document(store.path(item).parent / 'filter.md')
                 if data['signature'] == signature:
                     result = FilterResult.model_validate(data['result']).model_dump()
                     return dict(result, hidden=False if restored else result['hidden'], restored=restored, status='done', error=None)
