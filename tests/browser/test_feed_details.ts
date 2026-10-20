@@ -92,7 +92,7 @@ test('late feed save preserves selection and new drafts; duplicate submit stays 
 });
 
 test('copy and metadata responses belong to their opening; activity never resets a draft', {timeout:30000},async t=>{
- const {page,one,two}=await scenario(t);
+ const {page,api,one,two}=await scenario(t);
  await page.evaluate(()=>{document.documentElement.dataset.copyDelay='yes';});
  await page.getByRole('button',{name:'Copy link',exact:true}).click();
  await page.locator('#feeds-close').click();await page.locator('#feeds-open').click();
@@ -104,6 +104,9 @@ test('copy and metadata responses belong to their opening; activity never resets
   const reply=await route.fetch(),body=await reply.json() as FeedSettingsSnapshot;seen=true;
   await held;try{await route.fulfill({json:{...body,activity:{created:null,modified:null,updated:null,marked_read:null,unread:99,description:'Late description'}}});}catch(error){if(!(error instanceof Error)||!error.message.includes('Route is already handled'))throw error;}
  });
+ // Idle status no longer reloads an unchanged form. A real source update
+ // refreshes activity through the existing settings owner.
+ await api('collect','POST',{scope:'feed',feed_id:one.id});
  await expect.poll(()=>seen,{timeout:10000}).toBe(true);
  await page.locator('#feed-tree').getByRole('button',{name:two.title,exact:true}).click();
  await page.locator('#feed-title').fill('Second keeps its draft');
@@ -115,7 +118,7 @@ test('copy and metadata responses belong to their opening; activity never resets
 });
 
 test('additional links copy exact bytes; missing and failed activity never becomes zero', {timeout:30000},async t=>{
- const {page,one}=await scenario(t);
+ const {page,api,one}=await scenario(t);
  let mode:'links'|'empty'|'failed'='links';
  const url='https://source.test/feed?value=a%2Fb&x=1';
  await page.route('**/api/v3/settings/feed/'+one.id,async route=>{
@@ -138,6 +141,7 @@ test('additional links copy exact bytes; missing and failed activity never becom
  await expect(page.locator('.feed-unread strong')).toHaveText('Unavailable');
  await page.locator('#feed-title').fill('Keep after read failure');
  mode='failed';
+ await api('collect','POST',{scope:'feed',feed_id:one.id});
  await expect(page.locator('.feed-activity').getByRole('button',{name:'Retry',exact:true})).toBeVisible({timeout:10000});
  await expect(page.locator('.feed-unread strong')).toHaveText('Unavailable');
  await expect(page.locator('#feed-title')).toHaveValue('Keep after read failure');

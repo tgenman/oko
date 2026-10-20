@@ -32,7 +32,7 @@ export function createReaderSession(options: Options) {
       // finish after a selection change, while its replacement is still loading.
       if (active && stamp === generation && sequence === refreshSequence) {
         window.clearTimeout(refreshTimer);
-        refreshTimer = window.setTimeout(() => void refresh(),500);
+        refreshTimer = window.setTimeout(() => void refresh(),1000);
       }
     }
   }

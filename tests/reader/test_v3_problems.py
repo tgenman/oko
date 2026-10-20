@@ -1,7 +1,7 @@
 """Domain problem/recovery contracts at the reader HTTP boundary."""
+from tests.support.storage import database
 from oko.collection.contracts import DiscoveryResult, FetchRequirements, FetchResources
 import json
-import sqlite3
 import pytest
 
 from tests.support.app import create_app
@@ -23,7 +23,7 @@ def test_live_model_producer_has_domain_code_and_recovery_without_server_navigat
         assert response.status_code==200,response.text
         observed=next(p for p in client.get('/api/v3/status').json()['problems']['current'] if p['command_id']=='setting-failed')
         assert observed['recovery']==[{'kind':'change_setting','target':{'scope':'oko','owner':'global'},'keys':['prompt_theses']}]
-    with sqlite3.connect(tmp_path/'state.sqlite') as db:
+    with database(tmp_path) as db:
         for (body,) in db.execute('SELECT body FROM reader_action_results UNION ALL SELECT body FROM reader_problems'):
             assert '"page"' not in body and '"reconnect"' not in body
 
@@ -127,7 +127,7 @@ def test_typed_conflict_recovery_never_proposes_reconnecting_an_existing_binding
 def test_unmapped_legacy_alias_has_no_role_and_deletion_finishes_it_as_irrelevant(tmp_path):
     from tests.support.subscriptions import saved_sources
     saved_sources(tmp_path,[('https://t.me/fixture','Legacy','Saved')])
-    with sqlite3.connect(tmp_path/'state.sqlite') as db:
+    with database(tmp_path) as db:
         db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_account='old-alias',telegram_peer=-10042")
     with TestClient(create_app(tmp_path,token='test',api_only=True),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})

@@ -1,7 +1,7 @@
 """Durable YouTube caption admission state, owned by Store."""
 import json
 import sqlite3
-from oko.storage.reading import reading_value
+from oko.storage.reading import reading_value, reader_wall
 import os
 from pathlib import Path
 import tempfile
@@ -49,6 +49,7 @@ class YouTubeAccess:
             Path(filename).unlink(missing_ok=True)
 
     def status(self, wall: float) -> dict[str, Any]:
+        wall = reader_wall(wall)
         config = self.config()
         row = self._limits()
         return dict(mode=config['mode'], address=config['address'], has_username=bool(config['username']),

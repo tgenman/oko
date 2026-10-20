@@ -59,7 +59,7 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
     from oko.reader import telegram_v3
     telegram_v3.register(app, runtime)
     connections_v3.register(app, runtime)
-    reading_v3.register(app, runtime)
+    material_reader = reading_v3.register(app, runtime)
     settings_v3.register(app, runtime)
     commands_v3.register(app, runtime)
     processors_v3.register(app, runtime)
@@ -92,6 +92,9 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
 
     @app.get('/api/v3/status', response_model=wire.RuntimeStatus)
     async def status() -> wire.RuntimeStatus:
+        return status_data()
+
+    def status_data() -> wire.RuntimeStatus:
         snapshot = runtime.status_snapshot()
         old = facts.Status.model_validate(snapshot.state)
         current = runtime._store if not runtime.stopped else None
@@ -122,6 +125,16 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
             problems=project.problems(old.problems,bindings,material_feeds,set(old.viewed_ids) if isinstance(old.viewed_ids,list) else set()) if isinstance(old.problems, facts.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
             diagnostic_count=len(journal.records), diagnostic_persistence_error=journal.persistence_error or None,
             viewed_ids=[wire.MaterialId(value) for value in old.viewed_ids] if isinstance(old.viewed_ids, list) else [])
+
+    from oko.reader import versions_v3
+    versions_v3.register(app,runtime,status_data,material_reader,lambda: dict(
+        enabled=runtime.enabled,stopped=runtime.stopped,work_allowed=runtime._live(),
+        clients=lifetime.active_clients,sources=sorted(runtime._sources),
+        diagnostics=[(r['id'],r['count'],r['last_time']) for r in journal.records],diagnostic_error=journal.persistence_error,
+        error=runtime._error,lifetime=lifetime.mode,
+        lease=lifetime.lease_seconds if lifetime.mode!='explicit' else None,
+        grace=lifetime.grace_seconds if lifetime.mode!='explicit' else None,
+        renew=lifetime.renew_after_seconds if lifetime.mode!='explicit' else None))
 
     @app.post('/api/v3/client-sessions', status_code=201, response_model=wire.ClientSession)
     async def create_client_session() -> wire.ClientSession:

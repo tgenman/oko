@@ -239,3 +239,27 @@ def test_open_launches_localhost_8765_without_logging_reader_credential(tmp_path
     assert 'synthetic-private-token' not in result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert calls[-1] == ['open', 'http://localhost:8765/#token=synthetic-private-token']
+
+
+def test_restored_reader_timeline_gets_new_identity_and_retains_entity_versions(tmp_path):
+    import runpy
+    import shutil
+    import sqlite3
+    import uuid
+    maintenance=runpy.run_path(str(SCRIPT))
+    original=tmp_path/'backup'
+    original.mkdir()
+    identity=str(uuid.uuid4())
+    with sqlite3.connect(original/'state.sqlite') as db:
+        db.executescript('CREATE TABLE reader_identity(id INTEGER PRIMARY KEY,value TEXT); CREATE TABLE reader_entities(kind TEXT,identity TEXT,version INTEGER);')
+        db.execute('INSERT INTO reader_identity VALUES (1,?)',(identity,))
+        db.execute("INSERT INTO reader_entities VALUES ('material','same-id',7)")
+    restored=tmp_path/'stage'
+    shutil.copytree(original,restored)
+    maintenance['reset_reading_identity'](restored)
+    with sqlite3.connect(restored/'state.sqlite') as db:
+        current=db.execute('SELECT value FROM reader_identity').fetchone()[0]
+        assert current!=identity and str(uuid.UUID(current))==current
+        assert db.execute('SELECT version FROM reader_entities').fetchone()[0]==7
+    with sqlite3.connect(original/'state.sqlite') as db:
+        assert db.execute('SELECT value FROM reader_identity').fetchone()[0]==identity

@@ -1,4 +1,4 @@
-from oko.storage.reading import reading_value, saved_document
+from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
 import hashlib
@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from oko.storage.aggregate_upgrade import remove_aggregates
 from oko.storage.versions import Versions
+from oko.storage.reader_versions import ReaderVersions, ReadingConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.reader.composition import FolderContents, ReadingComposition
@@ -53,8 +54,9 @@ class Store:
         self.wall_clock = wall_clock
         self.clock = clock
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.db = sqlite3.connect(root / 'state.sqlite')
+        self.db = ReadingConnection(root / 'state.sqlite')
         self.db.row_factory = sqlite3.Row
+        ReaderVersions.functions(self.db,self.clock,self.wall_clock)
         # Reject unsupported topic migration before any PRAGMA/schema/data write.
         if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feeds'").fetchone():
             columns = {r['name'] for r in self.db.execute('PRAGMA table_info(feeds)')}
@@ -139,6 +141,7 @@ class Store:
         self.recover_files()
         if self.db.execute("SELECT 1 FROM items WHERE feed_id='demo' LIMIT 1").fetchone():
             self.subscriptions.ensure_demo()
+        self.read_versions = ReaderVersions(self)
         self.subscriptions.watch_configuration()
         self.processing.recover()
         self.read_sync.recover()
@@ -584,7 +587,7 @@ class Store:
                 provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
                 version=self.content_version(item), loading=bool(self.db.execute(
                     "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",
-                    (item, self.clock())).fetchone()),
+                    (item, reader_now(self.clock()))).fetchone()),
                 full=header.get('full', True) and (not header.get('members') or set(header['members']) == set(base['members'])),
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
@@ -608,7 +611,7 @@ class Store:
         now, wall = self.clock(), self.wall_clock()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
                     row['problem_code'] or ('legacy-'+row['kind'] if row['errors'] else None),
-                    wall+max(0,row['next']-now) if row['status']=='pending' and row['errors'] and row['next'] else None)
+                    retry_time(row['next'],now,wall) if row['status']=='pending' and row['errors'] and row['next'] else None)
                 for row in rows]
 
     def status(self) -> dict[str, Any]:
@@ -672,10 +675,13 @@ class Store:
         row = self.db.execute("SELECT value FROM state WHERE key='processor:llamacpp'").fetchone()
         return ProcessorConfig.model_validate_json(row[0]) if row else None
 
-    def configure_processor(self, config: ProcessorConfig) -> None:
+    def configure_processor(self, config: ProcessorConfig) -> bool:
+        if self.processor_config() == config:
+            return False
         with self.db:
             self.db.execute("INSERT INTO state VALUES ('processor:llamacpp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
         self.settings_changed()
+        return True
 
     @reading_value
     def settings_version(self, feed: str | None = None) -> int:
@@ -744,3 +750,5 @@ class Store:
         if finish:
             with self.db:
                 self.finish(job)
+                if job.kind == 'filter':
+                    self.read_versions.sync_filter(job.item, bool(result['hidden']) and not self.filters.read(job.item).get('restored', False))

@@ -85,5 +85,5 @@ export function createFolderMenu({readerApi,isStopped,canRefresh,onRefresh,onSet
   }
   const host=document.createElement('div');document.body.append(host);mountSurface(host,<Surface/>);
   return {close,open(folder:Folder,next:Navigation,x:number,y:number,trigger:HTMLElement){if(isStopped())return;catalog=next;store.set({target:{folder,x,y,trigger},dialog:null,name:'',message:'',busy:pending.has(folder.id),generation:store.get().generation+1});},
-    update(next:Navigation){catalog=next;const state=store.get();if(!state.target)return;const folder=next.folders.find(folder=>folder.id===state.target!.folder.id);if(!folder){close(false);return;}store.set({...state,target:{...state.target,folder}});},stop(){close(false);}};
+    update(next:Navigation){catalog=next;const state=store.get();if(!state.target)return;const folder=next.folders.find(folder=>folder.id===state.target!.folder.id);if(!folder){close(false);return;}store.set({...state,target:{...state.target,folder},dialog:state.dialog==='blocked'&&!nonempty(folder.id)?'delete':state.dialog==='delete'&&nonempty(folder.id)?'blocked':state.dialog});},stop(){close(false);}};
 }

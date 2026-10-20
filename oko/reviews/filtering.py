@@ -53,10 +53,16 @@ class Filters:
             if signature and old and old[0] != signature and state and state['status'] == 'done':
                 self._upgrade_result(item, old[0], signature, state['id'], state['generation'])
                 old = store.db.execute('SELECT signature FROM filter_inputs WHERE item=?', (item,)).fetchone()
+            if signature is None:
+                store.read_versions.sync_filter(item, False)
             if signature is None and old is None and (not state or state['status'] == 'cancelled') and not (store.path(item).parent / 'filter.md').exists():
                 continue
-            if old and old[0] == signature and state and (state['status'] != 'done' or self.read(item).get('status') == 'done'):
-                continue
+            if old and old[0] == signature and state:
+                filtered = self.read(item)
+                store.read_versions.sync_filter(item, bool(filtered['hidden']))
+                if state['status'] != 'done' or filtered.get('status') == 'done':
+                    continue
+            store.read_versions.sync_filter(item, False)
             (store.path(item).parent / 'filter.md').unlink(missing_ok=True)
             with store.db:
                 store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='filter' AND item=?", (item,))

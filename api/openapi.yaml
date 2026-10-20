@@ -12242,6 +12242,368 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+  /api/v3/reading/check:
+    post:
+      summary: Check persisted reading entity versions in one batch
+      operationId: check_reading
+      description: Compare persisted versions and return only changed requested entities. A reset discards
+        all known versions; failed entities retain their old client version.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadingCheckRequest'
+      responses:
+        '200':
+          description: Current per-entity data, unchanged markers or an explicit storage reset. Reading
+            does not execute commands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingCheckResponse'
+              example:
+                state: current
+                storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
+                resources: []
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+  /api/v3/reading/materials/{item}:
+    get:
+      summary: Read one material with its persisted entity version
+      operationId: reading_material
+      description: Open one publication independently of polling. Text, filtering, theses and media carry
+        separate persisted versions and a shared source revision.
+      parameters:
+      - name: item
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed
+          by clients.
+      responses:
+        '200':
+          description: Current per-entity data, unchanged markers or an explicit storage reset. Reading
+            does not execute commands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingCheckResponse'
+              example:
+                state: current
+                storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
+                resources:
+                - kind: material
+                  id: example
+                  state: changed
+                  version: '1'
+                  data:
+                    id: example
+                    title: example
+                    feed_id: example
+                    source_url: https://example.test/post/1
+                    published_at: null
+                    source:
+                      kind: demo
+                      feed_id: example
+                      source_url: https://example.test/post/1
+                    source_position: null
+                    originals: false
+                    availability: available
+                    content:
+                      availability: available
+                      text: example
+                      revision_id: example
+                      version: 1
+                      completeness:
+                        state: complete
+                      loading: false
+                      source_deleted: false
+                      changed: false
+                      description: example
+                - kind: filter
+                  id: '["all","","newest",false]'
+                  state: changed
+                  version: '1'
+                  data:
+                    revision_id: '1'
+                    filter:
+                      attempt:
+                        state: ready
+                      result:
+                        hidden: false
+                        restored: false
+                        reason: example
+                        removed: []
+                        provenance:
+                          kind: unknown
+                          reason: legacy
+                      diagnostic_message: null
+                - kind: theses
+                  id: '["all","","newest",false]'
+                  state: changed
+                  version: '1'
+                  data:
+                    revision_id: '1'
+                    theses:
+                      attempt:
+                        state: ready
+                      result:
+                        points: []
+                        provenance:
+                          kind: unknown
+                          reason: legacy
+                      diagnostic_message: null
+                - kind: media
+                  id: '["all","","newest",false]'
+                  state: changed
+                  version: '1'
+                  data:
+                    revision_id: '1'
+                    images: []
+                    attachments: []
+                    previous_versions: []
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
 components:
   schemas:
     BrowserSessionRevoked:
@@ -21352,6 +21714,1358 @@ components:
       - value: 15
         origin:
           scope: default
+    ReadingEntityVersion:
+      type: string
+      pattern: ^[1-9][0-9]*$
+      maxLength: 20
+      examples:
+      - '1'
+    ReadingKnownVersion:
+      anyOf:
+      - $ref: '#/components/schemas/ReadingEntityVersion'
+      - type: 'null'
+      examples:
+      - null
+      - '1'
+    ReadingStorageId:
+      type: string
+      format: uuid
+      examples:
+      - 3f003741-d0c7-4e62-8d12-55fb652f404a
+    ReadingListTarget:
+      oneOf:
+      - $ref: '#/components/schemas/AllCollectionTarget'
+      - $ref: '#/components/schemas/FeedCollectionTarget'
+      - $ref: '#/components/schemas/FolderCollectionTarget'
+      examples:
+      - scope: all
+    ReadingListOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        target:
+          $ref: '#/components/schemas/ReadingListTarget'
+        sort:
+          type: string
+          enum:
+          - newest
+          - oldest
+          - importance
+        show_hidden:
+          type: boolean
+      required:
+      - target
+      - sort
+      - show_hidden
+      examples:
+      - target:
+          scope: all
+        sort: newest
+        show_hidden: false
+    ReadingResourceKind:
+      type: string
+      enum:
+      - status
+      - navigation
+      - feed
+      - card
+      - material
+      - list
+      - filter
+      - theses
+      - media
+      examples:
+      - card
+    CheckStatus:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: status
+          examples:
+          - status
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - known_version
+      examples:
+      - kind: status
+        known_version: null
+    CheckNavigation:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: navigation
+          examples:
+          - navigation
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - known_version
+      examples:
+      - kind: navigation
+        known_version: null
+    CheckFeed:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: feed
+          examples:
+          - feed
+        id:
+          $ref: '#/components/schemas/FeedId'
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - id
+      - known_version
+      examples:
+      - kind: feed
+        id: example
+        known_version: null
+    CheckCard:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: card
+          examples:
+          - card
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - id
+      - known_version
+      examples:
+      - kind: card
+        id: example
+        known_version: null
+    CheckMaterial:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: material
+          examples:
+          - material
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - id
+      - known_version
+      examples:
+      - kind: material
+        id: example
+        known_version: null
+    CheckFilter:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: filter
+          examples:
+          - filter
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - id
+      - known_version
+      examples:
+      - kind: filter
+        id: example
+        known_version: null
+    CheckTheses:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: theses
+          examples:
+          - theses
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - id
+      - known_version
+      examples:
+      - kind: theses
+        id: example
+        known_version: null
+    CheckMedia:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: media
+          examples:
+          - media
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+      required:
+      - kind
+      - id
+      - known_version
+      examples:
+      - kind: media
+        id: example
+        known_version: null
+    CheckList:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: list
+          examples:
+          - list
+        options:
+          $ref: '#/components/schemas/ReadingListOptions'
+        known_version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+        known_cards:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ReadingKnownVersion'
+          maxProperties: 50000
+      required:
+      - kind
+      - options
+      - known_version
+      - known_cards
+      examples:
+      - kind: list
+        options:
+          target:
+            scope: all
+          sort: newest
+          show_hidden: false
+        known_version: null
+        known_cards: {}
+    ReadingCheck:
+      oneOf:
+      - $ref: '#/components/schemas/CheckStatus'
+      - $ref: '#/components/schemas/CheckNavigation'
+      - $ref: '#/components/schemas/CheckFeed'
+      - $ref: '#/components/schemas/CheckCard'
+      - $ref: '#/components/schemas/CheckMaterial'
+      - $ref: '#/components/schemas/CheckFilter'
+      - $ref: '#/components/schemas/CheckTheses'
+      - $ref: '#/components/schemas/CheckMedia'
+      - $ref: '#/components/schemas/CheckList'
+      discriminator:
+        propertyName: kind
+        mapping:
+          status: '#/components/schemas/CheckStatus'
+          navigation: '#/components/schemas/CheckNavigation'
+          feed: '#/components/schemas/CheckFeed'
+          card: '#/components/schemas/CheckCard'
+          material: '#/components/schemas/CheckMaterial'
+          filter: '#/components/schemas/CheckFilter'
+          theses: '#/components/schemas/CheckTheses'
+          media: '#/components/schemas/CheckMedia'
+          list: '#/components/schemas/CheckList'
+      examples:
+      - kind: list
+        options:
+          target:
+            scope: all
+          sort: newest
+          show_hidden: false
+        known_version: null
+        known_cards: {}
+    ReadingCheckRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        storage_id:
+          anyOf:
+          - $ref: '#/components/schemas/ReadingStorageId'
+          - type: 'null'
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReadingCheck'
+          minItems: 1
+          maxItems: 50000
+      required:
+      - storage_id
+      - resources
+      examples:
+      - storage_id: null
+        resources:
+        - kind: list
+          options:
+            target:
+              scope: all
+            sort: newest
+            show_hidden: false
+          known_version: null
+          known_cards: {}
+    CompactReadingCard:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+        title:
+          type: string
+        published_at:
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        source_url:
+          $ref: '#/components/schemas/SourceUrl'
+        snippet:
+          type: string
+        availability:
+          type: string
+          enum:
+          - pending
+          - available
+        loading:
+          type: boolean
+        changed:
+          type: boolean
+        revision_id:
+          anyOf:
+          - $ref: '#/components/schemas/RevisionId'
+          - type: 'null'
+        preview_url:
+          anyOf:
+          - $ref: '#/components/schemas/MediaUrl'
+          - type: 'null'
+        hidden:
+          type: boolean
+        filter_state:
+          type: string
+          enum:
+          - disabled
+          - queued
+          - running
+          - ready
+          - waiting
+          - cancelled
+        theses_state:
+          type: string
+          enum:
+          - disabled
+          - queued
+          - running
+          - ready
+          - waiting
+          - cancelled
+      required:
+      - id
+      - feed_id
+      - title
+      - published_at
+      - source_url
+      - snippet
+      - availability
+      - loading
+      - changed
+      - revision_id
+      - preview_url
+      - hidden
+      - filter_state
+      - theses_state
+      examples:
+      - id: example
+        feed_id: example
+        title: Publication
+        published_at: null
+        source_url: https://example.org/item
+        snippet: Preview
+        availability: available
+        loading: false
+        changed: false
+        revision_id: '1'
+        preview_url: null
+        hidden: false
+        filter_state: disabled
+        theses_state: disabled
+    ReadingFolderEntity:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/FolderId'
+        title:
+          type: string
+        position:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+          description: Persisted ordering position; demo source legitimately uses -1.
+        count:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+      required:
+      - id
+      - title
+      - position
+      - count
+      - version
+      additionalProperties: false
+      examples:
+      - id: example
+        title: example
+        position: 0
+        count: 0
+        version: '1'
+    ReadingFeedReference:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/FeedId'
+        count:
+          type: integer
+          minimum: 0
+        has_unviewed:
+          type: boolean
+      required:
+      - id
+      - count
+      - has_unviewed
+      examples:
+      - id: example
+        count: 1
+        has_unviewed: true
+    ReadingIndex:
+      type: object
+      additionalProperties: false
+      properties:
+        folders:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReadingFolderEntity'
+        feeds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReadingFeedReference'
+        count:
+          type: integer
+          minimum: 0
+      required:
+      - folders
+      - feeds
+      - count
+      examples:
+      - folders: []
+        feeds: []
+        count: 0
+    ReadingListData:
+      type: object
+      additionalProperties: false
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/MaterialId'
+        options:
+          $ref: '#/components/schemas/ReadingListOptions'
+      required:
+      - ids
+      - options
+      examples:
+      - ids: []
+        options:
+          target:
+            scope: all
+          sort: newest
+          show_hidden: false
+    ReadingTextContent:
+      type: object
+      properties:
+        availability:
+          type: string
+          const: available
+        text:
+          type: string
+          description: Original stored publication text. Filtering is delivered separately for this source
+            revision.
+        revision_id:
+          $ref: '#/components/schemas/RevisionId'
+        version:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        completeness:
+          $ref: '#/components/schemas/ContentCompleteness'
+        loading:
+          type: boolean
+        source_deleted:
+          type: boolean
+        changed:
+          type: boolean
+        description:
+          type: string
+          description: Source description stored separately from publication text.
+      required:
+      - availability
+      - text
+      - revision_id
+      - version
+      - completeness
+      - loading
+      - source_deleted
+      - changed
+      - description
+      additionalProperties: false
+      examples:
+      - availability: available
+        text: example
+        revision_id: example
+        version: 1
+        completeness:
+          state: complete
+        loading: false
+        source_deleted: false
+        changed: false
+        description: example
+    ReadingFilterData:
+      type: object
+      additionalProperties: false
+      properties:
+        revision_id:
+          anyOf:
+          - $ref: '#/components/schemas/RevisionId'
+          - type: 'null'
+        filter:
+          $ref: '#/components/schemas/FilterState'
+      required:
+      - revision_id
+      - filter
+      examples:
+      - revision_id: '1'
+        filter:
+          attempt:
+            state: ready
+          result:
+            hidden: false
+            restored: false
+            reason: example
+            removed: []
+            provenance:
+              kind: unknown
+              reason: legacy
+          diagnostic_message: null
+    ReadingThesesData:
+      type: object
+      additionalProperties: false
+      properties:
+        revision_id:
+          anyOf:
+          - $ref: '#/components/schemas/RevisionId'
+          - type: 'null'
+        theses:
+          $ref: '#/components/schemas/ThesesState'
+      required:
+      - revision_id
+      - theses
+      examples:
+      - revision_id: '1'
+        theses:
+          attempt:
+            state: ready
+          result:
+            points: []
+            provenance:
+              kind: unknown
+              reason: legacy
+          diagnostic_message: null
+    ReadingMediaData:
+      type: object
+      additionalProperties: false
+      properties:
+        revision_id:
+          anyOf:
+          - $ref: '#/components/schemas/RevisionId'
+          - type: 'null'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaUrl'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        previous_versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviousVersionReference'
+      required:
+      - revision_id
+      - images
+      - attachments
+      - previous_versions
+      examples:
+      - revision_id: '1'
+        images: []
+        attachments: []
+        previous_versions: []
+    AvailableReadingEntityMaterial:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        title:
+          type: string
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+        source_url:
+          $ref: '#/components/schemas/SourceUrl'
+        published_at:
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        source:
+          $ref: '#/components/schemas/SourceReference'
+        source_position:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 9007199254740991
+          - type: 'null'
+        originals:
+          type: boolean
+        availability:
+          type: string
+          const: available
+        content:
+          $ref: '#/components/schemas/ReadingTextContent'
+      required:
+      - id
+      - title
+      - feed_id
+      - source_url
+      - published_at
+      - source
+      - source_position
+      - originals
+      - availability
+      - content
+      additionalProperties: false
+      examples:
+      - id: example
+        title: example
+        feed_id: example
+        source_url: https://example.test/post/1
+        published_at: null
+        source:
+          kind: demo
+          feed_id: example
+          source_url: https://example.test/post/1
+        source_position: null
+        originals: false
+        availability: available
+        content:
+          availability: available
+          text: example
+          revision_id: example
+          version: 1
+          completeness:
+            state: complete
+          loading: false
+          source_deleted: false
+          changed: false
+          description: example
+    PendingReadingEntityMaterial:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        title:
+          type: string
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+        source_url:
+          $ref: '#/components/schemas/SourceUrl'
+        published_at:
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        source:
+          $ref: '#/components/schemas/SourceReference'
+        source_position:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 9007199254740991
+          - type: 'null'
+        originals:
+          type: boolean
+        availability:
+          type: string
+          const: pending
+        content:
+          $ref: '#/components/schemas/PendingPublicationContent'
+      required:
+      - id
+      - title
+      - feed_id
+      - source_url
+      - published_at
+      - source
+      - source_position
+      - originals
+      - availability
+      - content
+      additionalProperties: false
+      examples:
+      - id: example
+        title: example
+        feed_id: example
+        source_url: https://example.test/post/1
+        published_at: null
+        source:
+          kind: demo
+          feed_id: example
+          source_url: https://example.test/post/1
+        source_position: null
+        originals: false
+        availability: pending
+        content:
+          availability: pending
+          loading: false
+    ReadingEntityMaterial:
+      oneOf:
+      - $ref: '#/components/schemas/AvailableReadingEntityMaterial'
+      - $ref: '#/components/schemas/PendingReadingEntityMaterial'
+      discriminator:
+        propertyName: availability
+        mapping:
+          available: '#/components/schemas/AvailableReadingEntityMaterial'
+          pending: '#/components/schemas/PendingReadingEntityMaterial'
+      examples:
+      - id: example
+        title: example
+        feed_id: example
+        source_url: https://example.test/post/1
+        published_at: null
+        source:
+          kind: demo
+          feed_id: example
+          source_url: https://example.test/post/1
+        source_position: null
+        originals: false
+        availability: available
+        content:
+          availability: available
+          text: example
+          revision_id: example
+          version: 1
+          completeness:
+            state: complete
+          loading: false
+          source_deleted: false
+          changed: false
+          description: example
+    ChangedStatusResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: status
+          examples:
+          - status
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/RuntimeStatus'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: status
+        id: runtime
+        state: changed
+        version: '1'
+        data:
+          api_version: 3.0.0
+          runtime_state: running
+          lifetime:
+            kind: explicit
+          work_allowed: true
+          active_client_sessions: 0
+          work: []
+          sources: []
+          ready_sources: 0
+          total_sources: 0
+          youtube:
+            mode: direct
+            address: example
+            has_password: false
+            has_username: false
+            admission: ready
+            retry_at: null
+            strikes: 0
+            reason: null
+          initial_histories: []
+          telegram_reads: []
+          problems:
+            current: []
+            recent: []
+            count: 0
+            updated_at: '2026-10-15T10:00:00Z'
+          diagnostic_count: 0
+          diagnostic_persistence_error: null
+          viewed_ids: []
+    ChangedNavigationResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: navigation
+          examples:
+          - navigation
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/ReadingIndex'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: navigation
+        id: navigation
+        state: changed
+        version: '1'
+        data:
+          folders: []
+          feeds: []
+          count: 0
+    ChangedFeedResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: feed
+          examples:
+          - feed
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/SubscriptionFeed'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: feed
+        id: example
+        state: changed
+        version: '1'
+        data:
+          id: example
+          title: example
+          folder_id: example
+          identity: example
+          original_urls: []
+          importance: normal
+          initial_days: 1
+          public_ai: null
+          history:
+            state: absent
+            legacy_since: null
+          kind: demo
+          connection: ready
+          transport: null
+    ChangedCardResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: card
+          examples:
+          - card
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/CompactReadingCard'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: card
+        id: example
+        state: changed
+        version: '1'
+        data:
+          id: example
+          feed_id: example
+          title: Publication
+          published_at: null
+          source_url: https://example.org/item
+          snippet: Preview
+          availability: available
+          loading: false
+          changed: false
+          revision_id: '1'
+          preview_url: null
+          hidden: false
+          filter_state: disabled
+          theses_state: disabled
+    ChangedMaterialResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: material
+          examples:
+          - material
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/ReadingEntityMaterial'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: material
+        id: example
+        state: changed
+        version: '1'
+        data:
+          id: example
+          title: example
+          feed_id: example
+          source_url: https://example.test/post/1
+          published_at: null
+          source:
+            kind: demo
+            feed_id: example
+            source_url: https://example.test/post/1
+          source_position: null
+          originals: false
+          availability: available
+          content:
+            availability: available
+            text: example
+            revision_id: example
+            version: 1
+            completeness:
+              state: complete
+            loading: false
+            source_deleted: false
+            changed: false
+            description: example
+    ChangedFilterResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: filter
+          examples:
+          - filter
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/ReadingFilterData'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: filter
+        id: '["all","","newest",false]'
+        state: changed
+        version: '1'
+        data:
+          revision_id: '1'
+          filter:
+            attempt:
+              state: ready
+            result:
+              hidden: false
+              restored: false
+              reason: example
+              removed: []
+              provenance:
+                kind: unknown
+                reason: legacy
+            diagnostic_message: null
+    ChangedThesesResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: theses
+          examples:
+          - theses
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/ReadingThesesData'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: theses
+        id: '["all","","newest",false]'
+        state: changed
+        version: '1'
+        data:
+          revision_id: '1'
+          theses:
+            attempt:
+              state: ready
+            result:
+              points: []
+              provenance:
+                kind: unknown
+                reason: legacy
+            diagnostic_message: null
+    ChangedMediaResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: media
+          examples:
+          - media
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/ReadingMediaData'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: media
+        id: '["all","","newest",false]'
+        state: changed
+        version: '1'
+        data:
+          revision_id: '1'
+          images: []
+          attachments: []
+          previous_versions: []
+    ChangedListResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          const: list
+          examples:
+          - list
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: changed
+          examples:
+          - changed
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+        data:
+          $ref: '#/components/schemas/ReadingListData'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - data
+      examples:
+      - kind: list
+        id: '["all","","newest",false]'
+        state: changed
+        version: '1'
+        data:
+          ids: []
+          options:
+            target:
+              scope: all
+            sort: newest
+            show_hidden: false
+    UnchangedReadingResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          $ref: '#/components/schemas/ReadingResourceKind'
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: unchanged
+          examples:
+          - unchanged
+        version:
+          $ref: '#/components/schemas/ReadingEntityVersion'
+      required:
+      - kind
+      - id
+      - state
+      - version
+      examples:
+      - kind: status
+        id: runtime
+        state: unchanged
+        version: '1'
+    UnavailableReadingResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          $ref: '#/components/schemas/ReadingResourceKind'
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: unavailable
+          examples:
+          - unavailable
+        version:
+          $ref: '#/components/schemas/ReadingKnownVersion'
+        reason:
+          type: string
+          enum:
+          - viewed
+          - not_found
+          - scope_removed
+          - runtime_stopped
+      required:
+      - kind
+      - id
+      - state
+      - version
+      - reason
+      examples:
+      - kind: material
+        id: fixture
+        state: unavailable
+        version: null
+        reason: viewed
+    FailedReadingResource:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          $ref: '#/components/schemas/ReadingResourceKind'
+        id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          const: failed
+          examples:
+          - failed
+        message:
+          type: string
+          minLength: 1
+      required:
+      - kind
+      - id
+      - state
+      - message
+      examples:
+      - kind: material
+        id: fixture
+        state: failed
+        message: Material unavailable
+    ReadingResource:
+      oneOf:
+      - $ref: '#/components/schemas/ChangedStatusResource'
+      - $ref: '#/components/schemas/ChangedNavigationResource'
+      - $ref: '#/components/schemas/ChangedFeedResource'
+      - $ref: '#/components/schemas/ChangedCardResource'
+      - $ref: '#/components/schemas/ChangedMaterialResource'
+      - $ref: '#/components/schemas/ChangedFilterResource'
+      - $ref: '#/components/schemas/ChangedThesesResource'
+      - $ref: '#/components/schemas/ChangedMediaResource'
+      - $ref: '#/components/schemas/ChangedListResource'
+      - $ref: '#/components/schemas/UnchangedReadingResource'
+      - $ref: '#/components/schemas/UnavailableReadingResource'
+      - $ref: '#/components/schemas/FailedReadingResource'
+      examples:
+      - kind: status
+        id: runtime
+        state: unchanged
+        version: '1'
+    ReadingFrame:
+      type: object
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          const: current
+          examples:
+          - current
+        storage_id:
+          $ref: '#/components/schemas/ReadingStorageId'
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReadingResource'
+      required:
+      - state
+      - storage_id
+      - resources
+      examples:
+      - state: current
+        storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
+        resources: []
+    ReadingReset:
+      type: object
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          const: reset
+          examples:
+          - reset
+        storage_id:
+          $ref: '#/components/schemas/ReadingStorageId'
+      required:
+      - state
+      - storage_id
+      examples:
+      - state: reset
+        storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
+    ReadingCheckResponse:
+      oneOf:
+      - $ref: '#/components/schemas/ReadingFrame'
+      - $ref: '#/components/schemas/ReadingReset'
+      discriminator:
+        propertyName: state
+        mapping:
+          current: '#/components/schemas/ReadingFrame'
+          reset: '#/components/schemas/ReadingReset'
+      examples:
+      - state: current
+        storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
+        resources: []
   securitySchemes:
     BrowserSession:
       type: apiKey

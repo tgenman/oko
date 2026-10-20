@@ -1,3 +1,4 @@
+from tests.support.storage import database
 from tests.support.reader import wait_for
 from tests.support.telegram import connected_feed
 from tests.support.presence import presence, close_presence
@@ -282,7 +283,7 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
 def test_legacy_rss_content_survives_and_cannot_switch_to_client(tmp_path: Path):
     saved_sources(tmp_path, [('https://source.test/telegram/channel/fixture', 'Источник', 'Новости')])
     import sqlite3
-    with sqlite3.connect(tmp_path/'state.sqlite') as db:
+    with database(tmp_path) as db:
         db.execute("UPDATE feeds SET transport='rss'")
     import httpx
     from datetime import datetime, timezone

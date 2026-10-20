@@ -126,14 +126,14 @@ test('previews are reused during polling and late media cannot repopulate anothe
   await r.page.addInitScript(path=>readerTransport.replies.set(path,{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='}),path);
   await r.start([material('one',{images:[path],version:'1'}),material('two',{feed_id:'second'})]);
   await r.page.evaluate(() => {const t=readerTransport;
-   t.replies.get('/api/v3/reading-composition')!.body!.feeds.push({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
+   t.replies.get('/api/v3/reading-composition')!.body!.feeds=t.replies.get('/api/v3/reading-composition')!.body!.feeds.filter(f=>f.id!=='second').concat({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
    t.replies.set('/api/v3/cards?sort=newest&feed=second',{body:[t.replies.get('/api/v3/cards')!.body![1]]});
   });
   await expect(r.page.locator('[data-card="one"] img')).toHaveCount(1);
   const requests=await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path);
   for (let cycle=0;cycle<2;cycle++) {
     await r.page.evaluate(cycle=>{readerTransport.replies.get('/api/v3/cards')!.body![0].title='Poll '+cycle;},cycle);
-    await r.page.clock.fastForward(500);
+    await r.page.clock.fastForward(1000);
     await expect(r.page.locator('[data-card="one"] .card-title')).toHaveText('Poll '+cycle);
   }
   expect(await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path)).toBe(requests);
@@ -153,7 +153,7 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
  const r=await reader(); try {
   await r.start([material('one'),material('two',{feed_id:'second'})]);
   await r.page.evaluate(() => {const t=readerTransport;
-   t.replies.get('/api/v3/reading-composition')!.body!.feeds.push({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
+   t.replies.get('/api/v3/reading-composition')!.body!.feeds=t.replies.get('/api/v3/reading-composition')!.body!.feeds.filter(f=>f.id!=='second').concat({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
    t.replies.set('/api/v3/cards?sort=newest&feed=second',{body:[t.replies.get('/api/v3/cards')!.body![1]]});
   });
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards?sort=newest',{status:500,body:{detail:'Сбой списка'}}));

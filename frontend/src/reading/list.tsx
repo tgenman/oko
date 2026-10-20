@@ -1,7 +1,6 @@
 import {newsTitle} from './title';
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {cards as readCards} from '../api/generated/sdk.gen';
-import type {ReadingCard as Card} from '../api/generated/types.gen';
+import type {CardView as Card} from './resources';
 import type {Navigation} from './tree';
 import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
@@ -12,7 +11,7 @@ import {createStore,useStore,saved,save,host} from './store';
 
 type MediaFetch=(path:string,signal?:AbortSignal)=>Promise<Response>;
 type Anchor={id?:string;offset:number;top:number};
-const previewPath=(card:Card)=>card.availability==='available'?(card.images[0]||card.attachments.find(item=>item.kind==='image')?.url):undefined;
+const previewPath=(card:Card)=>card.preview_url??undefined;
 function date(card:Card) {return card.published_at===null?'Unknown date':new Date(card.published_at!).toLocaleString('en',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function group(card:Card) {if(card.published_at===null)return 'Unknown date';const stamp=new Date(card.published_at!),today=new Date(),yesterday=new Date();yesterday.setDate(today.getDate()-1);return stamp.toDateString()===today.toDateString()?'Today':stamp.toDateString()===yesterday.toDateString()?'Yesterday':stamp.toLocaleDateString('en',{year:'numeric',month:'long',day:'numeric'});}
 function Preview({card,fetchMedia}:{card:Card;fetchMedia:MediaFetch}) {
@@ -29,7 +28,7 @@ function Preview({card,fetchMedia}:{card:Card;fetchMedia:MediaFetch}) {
 }
 function Row({card,selected,onOpen,onArrow,onContext,preview,fetchMedia,showSource,showDate}:{showSource:boolean;showDate:boolean;card:Card;selected:boolean;preview:boolean;onContext:(card:Card,x:number,y:number,trigger:HTMLElement)=>void;onOpen:(card:Card)=>void;onArrow:(id:string,offset:number)=>void;fetchMedia:MediaFetch}) {
   const title=newsTitle(card.title);
-  const kind=card.filter.result?.hidden?'Hidden':'';
+  const kind=card.hidden?'Hidden':'';
   const status=[kind,card.availability==='available'&&card.changed?'Updated':'',card.loading||card.availability==='pending'?'Loading':''].filter(Boolean).join(' · ');
   const sources=card.feed_title||card.feed_id||'';
   return <button type="button" className={'material-row '+(selected?'active ':'')+(preview?'news-range-preview':'')} data-card={card.id} aria-pressed={selected} aria-label={(kind?kind+' · ':'')+title+' · '+sources+' · '+date(card)} onClick={()=>onOpen(card)} onContextMenu={event=>{event.preventDefault();onContext(card,event.clientX,event.clientY,event.currentTarget);}} onKeyDown={event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();onContext(card,rect.left,rect.bottom,event.currentTarget);return;}if(['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();onArrow(card.id,event.key==='ArrowDown'?1:-1);}}}><Preview card={card} fetchMedia={fetchMedia}/><span className="card-body"><span className="card-title" title={title}>{title}</span>{status&&<span className="card-kind">{status}</span>}{(showSource||showDate)&&<span className="card-meta">{showSource&&<span className="card-source" title={sources}>{sources}</span>}{showDate&&<time className="card-date">{date(card)}</time>}</span>}</span></button>;
@@ -71,7 +70,6 @@ export function createMaterialList({readerApi,onOpen,onRetry,onContext,fetchMedi
     title(id:string){return store.get().cards.find(card=>card.id===id)?.title;},
     select,update,
     bindCommands(value:NonNullable<typeof commands>){commands=value;},
-    async load(params:URLSearchParams) {const sort=params.get('sort');return (await readCards({client:readerApi.client,query:{sort:sort==='oldest'||sort==='importance'?sort:'newest',...(params.get('show_hidden')==='true'?{show_hidden:true}:{}),...(params.has('folder')?{folder:params.get('folder')!}:{}),...(params.has('feed')?{feed:params.get('feed')!}:{})}})).data;},
     setArea(selection:Selection,catalog:Navigation) {const state=store.get(),area=selection.kind+'/'+(selection.id||''),changed=area!==state.area;if(changed){positions.set(state.area,anchor());restore=positions.get(area)||{top:0,offset:0};}store.set({...state,area,title:selection.kind==='all'?'All Items':catalog[selection.kind==='folder'?'folders':'feeds'].find(item=>item.id===selection.id)?.title||'Items',folder:selection.kind==='folder',...(changed?{cards:[],selected:null,status:'Loading items…',retry:false,menu:false}:{})});if(changed)host('card-scroll').scrollTop=0;},
     removed(identity:string) {const state=store.get(),index=state.cards.findIndex(card=>card.id===identity),affected=state.cards[index];if(!affected)return;const next=state.cards.filter(card=>card.id!==identity),focus=affected.id===state.selected||(document.activeElement as HTMLElement|null)?.dataset.card===affected.id;update(next,focus?null:state.selected);if(focus){const target=next[Math.min(index,next.length-1)];if(target)row(target.id)?.focus({preventScroll:true});else host('list-menu-toggle').focus({preventScroll:true});}},
     error(message:string) {store.set({...store.get(),status:'Could not refresh items: '+message,retry:true});},

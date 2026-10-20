@@ -154,6 +154,7 @@ class Runtime:
         self._detached: set[asyncio.Task[None]] = set()
         self._detached_ai: set[asyncio.Task[None]] = set()
         self.diagnostics: Journal | None = None
+        self.reader_finish: Callable[[], Awaitable[None]] | None = None
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
 
@@ -549,6 +550,10 @@ class Runtime:
         async with self._actions:
             current = self.require_store()
             try:
+                known = current.subscriptions.feeds(identity)
+                if not known:
+                    raise LookupError('Фид не найден')
+                previous = known[0]
                 result = current.subscriptions.update_feed(identity, body)
             except LookupError as error:
                 record_caught('runtime.patch_feed')
@@ -556,8 +561,11 @@ class Runtime:
             except ValueError as error:
                 record_caught('runtime.patch_feed')
                 raise ActionError('invalid', str(error)) from None
-            current.settings_changed('feed', identity)
-            await self._cancel({identity})
+            if result != previous:
+                if body.model_fields_set & {'folder_id','new_folder','importance','public_ai','transport'}:
+                    current.settings_changed('feed', identity)
+                if body.model_fields_set - {'title'}:
+                    await self._cancel({identity})
             if 'transport' in body.model_fields_set:
                 self._sync_sources()
             return result
@@ -619,9 +627,10 @@ class Runtime:
         async with self._actions:
             try:
                 current = self.require_store()
+                previous = current.subscriptions.effective(scope, owner)
                 result = current.subscriptions.update_settings(scope, owner, body)
                 self._collection_interval = current.subscriptions.feed_refresh_minutes() * 60
-                if body.model_fields_set - {'feed_refresh_minutes'}:
+                if body.model_fields_set - {'feed_refresh_minutes'} and result != previous:
                     current.settings_changed(scope, owner)
                     affected = None if scope == 'oko' else {f['id'] for f in current.subscriptions.feeds(owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
                     await self._cancel(affected)
@@ -635,8 +644,8 @@ class Runtime:
 
     async def configure_processor(self, config: ProcessorConfig) -> None:
         async with self._actions:
-            self.require_store().configure_processor(config)
-            await self._cancel()
+            if self.require_store().configure_processor(config):
+                await self._cancel()
 
     async def check_processor(self) -> dict[str, Any]:
         async with self._actions:
@@ -1210,6 +1219,8 @@ class Runtime:
             async with self._actions:
                 await self._cancel()
                 if self._store:
+                    if self.reader_finish:
+                        await self.reader_finish()
                     self._store.db.close()
                     self._store = None
                 self._closed = True

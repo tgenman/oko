@@ -75,6 +75,7 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
     started, release = threading.Event(), threading.Event()
 
     class Source:
+        changes = None
         fetch_requirements = FetchRequirements()
         attempts = 0
 

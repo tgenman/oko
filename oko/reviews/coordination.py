@@ -1,5 +1,6 @@
 """Current processing work and reconciliation of dependent reader results."""
 from oko.diagnostics import record_caught
+from oko.storage.reading import retry_time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
@@ -99,7 +100,7 @@ class ProcessingCoordination:
             reason = 'public_ai_not_allowed'
         else:
             reason = 'retry_scheduled'
-        return ProcessingWait(reason, wall_now + max(0, row['next'] - now) if row['next'] and reason != 'public_ai_not_allowed' else None)
+        return ProcessingWait(reason, retry_time(row['next'], now, wall_now) if row['next'] and reason != 'public_ai_not_allowed' else None)
 
     def recover(self) -> None:
         """Only startup scans the whole library, including interrupted file moves."""

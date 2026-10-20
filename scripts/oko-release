@@ -12,6 +12,8 @@ import plistlib
 import secrets
 import shutil
 import socket
+import sqlite3
+import uuid
 import subprocess
 import sys
 import tarfile
@@ -290,6 +292,16 @@ def migrate(args):
     print('Copied data with collection disabled. Original preserved. Validate Telegram paths before enabling.')
 
 
+def reset_reading_identity(data):
+    """A restored timeline must not reuse the versions known by existing tabs."""
+    database = data / 'state.sqlite'
+    if not database.is_file():
+        return
+    with sqlite3.connect(database) as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reader_identity'").fetchone():
+            db.execute('UPDATE reader_identity SET value=? WHERE id=1', (str(uuid.uuid4()),))
+
+
 def restore(args):
     if args.backup != args.acknowledge_data_loss or Path(args.backup).name != args.backup:
         raise ValueError('Repeat the backup id in --acknowledge-data-loss to approve discarding later changes')
@@ -304,6 +316,7 @@ def restore(args):
     if stage.exists():
         raise ValueError('Previous restore staging exists; inspect before retry')
     shutil.copytree(checkpoint / 'data', stage)
+    reset_reading_identity(stage)
     # Preserve the unsuccessful current state before switching the complete tree.
     retired = args.home / ('retired-data-' + preserved.name)
     (args.home / 'data').rename(retired)

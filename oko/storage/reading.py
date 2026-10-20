@@ -52,3 +52,32 @@ def saved_bytes(path: 'Path') -> bytes:
 def saved_document(path: 'Path') -> tuple[dict[str, Any], str]:
     header, text = saved_bytes(path).decode('utf-8').split('\n\n', 1)
     return json.loads(header), text
+
+
+_clock: ContextVar[tuple[float, float, float] | None] = ContextVar('reader_clock', default=None)
+
+
+@contextmanager
+def stable_reader_time(offset: float, now: float, wall: float) -> Iterator[None]:
+    token = _clock.set((offset, now, wall))
+    try:
+        yield
+    finally:
+        _clock.reset(token)
+
+
+def retry_time(deadline: float, now: float, wall: float) -> float | None:
+    stable = _clock.get()
+    if stable is not None:
+        return stable[0] + deadline if deadline > stable[1] else None
+    return wall + max(0, deadline - now)
+
+
+def reader_now(fallback: float) -> float:
+    stable = _clock.get()
+    return stable[1] if stable is not None else fallback
+
+
+def reader_wall(fallback: float) -> float:
+    stable = _clock.get()
+    return stable[2] if stable is not None else fallback

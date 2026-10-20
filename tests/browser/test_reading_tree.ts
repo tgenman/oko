@@ -31,7 +31,7 @@ test('tree keeps current choice across moves and deletion and rejects late cards
   await expect(r.page.locator('#cards button')).toHaveCount(1);
   await r.page.evaluate(() => {
    const t=readerTransport;
-   t.replies.set('/api/v3/reading-composition',{body:{folders:[{id:'f',title:'Тема',count:2},{id:'new',title:'Новая',count:1}],feeds:[{id:'feed',title:'Источник',folder_id:'new',kind:'youtube',count:1}],count:2}});
+   t.replies.set('/api/v3/reading-composition',{body:{folders:[{id:'f',title:'Тема',count:2},{id:'new',title:'Новая',count:1}],feeds:[{id:'feed',title:'Источник',folder_id:'new',kind:'youtube',count:1},{id:'second',title:'second',folder_id:'f',kind:'rss',count:1}],count:2}});
   });
   await expect(r.page.locator('[data-feed="feed"]')).toHaveAttribute('aria-pressed','true');
   await expect(r.page.locator('[data-collapse="new"]')).toHaveAttribute('aria-expanded','true');

@@ -1,3 +1,4 @@
+from tests.support.storage import database
 from datetime import date, timedelta
 from tests.support.presence import presence, close_presence
 from tests.support.telegram import connect_request
@@ -230,7 +231,6 @@ def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
 
 
 def test_legacy_viewed_tombstone_retains_right_to_confirm(tmp_path):
-    import sqlite3
     network = ReadTelegram()
     kwargs = dict(token='test', telegram_client=network)
     with TestClient(create_app(tmp_path, **kwargs), headers=H) as client:
@@ -240,7 +240,7 @@ def test_legacy_viewed_tombstone_retains_right_to_confirm(tmp_path):
         later = next(c for c in cards if [int(identity) for identity in c['source']['message_ids']] == [29])['id']
         client.post('/api/v3/materials/' + later + '/viewed')
     # Fixture models a store created before the read queue existed.
-    with sqlite3.connect(tmp_path / 'state.sqlite') as db:
+    with database(tmp_path) as db:
         db.executescript("DROP TABLE telegram_read_members; DROP TABLE telegram_read_state; DELETE FROM jobs WHERE kind='read';")
     with TestClient(create_app(tmp_path, **kwargs), headers=H) as client:
         presence(client, 'test')
