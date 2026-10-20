@@ -76,6 +76,8 @@ class RSSHistory:
         if final in self.state['visited']:
             if not self.state['pending']:
                 self.finish('archive_end' if self.state['archive'] else 'no_continuation')
+            elif self.requests >= 1000:
+                self.finish('page_limit')
             return []
         self.state['visited'].extend(dict.fromkeys([frame['url'], final]))
         path = list(dict.fromkeys([*path, frame['url'], final]))
@@ -129,8 +131,8 @@ class RSSHistory:
                     continue
                 try:
                     target = normalized(urljoin(urljoin(base, link.get(BASE, '')), link.attrib['href']))
-                except SourceError as error:
-                    self.state['error'] = error.label
+                except (SourceError, ValueError) as error:
+                    self.state['error'] = error.label if isinstance(error, SourceError) else 'Недопустимый адрес источника'
                     self.finish('request_failed')
                     return chosen
                 targets = links[link.attrib['rel']]

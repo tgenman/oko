@@ -65,13 +65,17 @@ def test_connection_errors_and_history_conflicts_have_canonical_receipts(tmp_pat
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
         feed=client.get('/api/v3/subscriptions').json()['feeds'][0]
         assert feed['history']=={'state':'absent','legacy_since':None}
-        for method,body in [('post',{'mode':'count','count':'20'}),('patch',{'paused':True}),('delete',None)]:
+        for method,body in [('patch',{'paused':True}),('delete',None)]:
             response=client.request(method,'/api/v3/feeds/'+feed['id']+'/history',**({'json':body} if body else {}),headers={'X-Oko-Action':method+'-history'})
             assert response.status_code==409, response.text
             assert response.json()['code']=='history_conflict'
             assert response.json()['details']['history']==feed['history']
             assert client.get('/api/v3/commands/'+method+'-history').json()['outcome']=='failed'
             assert client.request(method,'/api/v3/feeds/missing/history',**({'json':body} if body else {})).status_code==404
+        assert client.post('/api/v3/feeds/missing/history',json={'mode':'count','count':'20'}).status_code==404
+        started=client.post('/api/v3/feeds/'+feed['id']+'/history',json={'mode':'count','count':'20'},headers={'X-Oko-Action':'post-history'})
+        assert started.status_code==200, started.text
+        assert client.get('/api/v3/commands/post-history').json()['outcome']=='succeeded'
         result=client.post('/api/v3/feeds',json={'url':'https://source.test/new','title':'New','verification':'expired'})
         assert result.status_code==409 and result.json()['code']=='verification_expired'
         assert client.post('/api/v3/feeds/verify',json={'url':'https://t.me/example_channel'}).status_code==400

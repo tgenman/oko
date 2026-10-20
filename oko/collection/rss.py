@@ -210,7 +210,7 @@ class RSSSource:
 
     async def discover(self, cursor: str | None) -> DiscoveryResult:
         previous = json.loads(cursor) if cursor else None
-        if self.initial_history and not (previous and 'history_ids' in previous):
+        if self.initial_history and (self.initial_history.get('run') or not (previous and 'history_ids' in previous)):
             return await self._discover_rss_history(previous)
         return await self._discover_window(previous)
 

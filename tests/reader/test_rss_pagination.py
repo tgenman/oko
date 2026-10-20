@@ -24,8 +24,8 @@ def reader(root, reply):
                                  rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
 
 
-def wait_history(client, identity):
-    deadline = time.monotonic() + 30
+def wait_history(client, identity, timeout=30):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         response = client.get('/api/v3/settings/feed/' + identity)
         assert response.status_code == 200, response.text
@@ -181,10 +181,11 @@ def test_cycle_preserves_partial_history(tmp_path):
         assert progress['loaded'] == 2
 
 
-def test_invalid_continuation_preserves_current_page_publications(tmp_path):
+@pytest.mark.parametrize('target', ['file:///private/history', 'http://['])
+def test_invalid_continuation_preserves_current_page_publications(tmp_path, target):
     def reply(request):
         if request.url.path == '/feed':
-            return httpx.Response(200, text=page([3], '<atom:link rel="next" href="file:///private/history"/>'))
+            return httpx.Response(200, text=page([3], f'<atom:link rel="next" href="{target}"/>'))
         return httpx.Response(200, text='<article>Full article</article>')
     with reader(tmp_path, reply) as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':3}).json()['id']
@@ -348,3 +349,60 @@ def test_ambiguous_continuation_stops_after_saving_current_page(tmp_path):
         progress = wait_history(client, feed)['progress']
         assert progress['available'] == progress['loaded'] == 1
         assert progress['stop_reason'] == 'ambiguous_continuation'
+
+
+
+def test_explicit_history_after_upgrade_replaces_legacy_window_cursor(tmp_path):
+    import json
+    from tests.support.subscriptions import saved_sources
+    from oko.storage.store import Store
+    from oko.subscriptions.history import InitialHistory
+    saved_sources(tmp_path, [('https://source.test/feed','History','News')])
+    # This is an on-disk pre-upgrade fixture, prepared before starting the reader.
+    # All behavior below is observed through HTTP, not through storage internals.
+    store = Store(tmp_path, lambda _:None)
+    feed = store.subscriptions.feeds()[0]['id']
+    with store.db:
+        store.subscriptions.history.configure(feed, InitialHistory(mode='count', count=1))
+        store.db.execute('UPDATE initial_history SET frozen=1 WHERE feed=?', (feed,))
+        store.db.execute('INSERT INTO state VALUES (?,?)', ('cursor:'+feed, json.dumps(dict(history_ids=['3'], excluded=['2','1'], since=time.time(), warnings=[]))))
+    store.db.close()
+    def reply(request):
+        if request.url.path == '/feed':
+            return httpx.Response(200, text=page([3,2], '<atom:link rel="next" href="/older"/>'))
+        if request.url.path == '/older':
+            return httpx.Response(200, text=page([1]))
+        return httpx.Response(200, text='<article>Full article</article>')
+    with reader(tmp_path, reply) as client:
+        old = client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']
+        assert old['progress']['stop_reason'] is None
+        response = client.post('/api/v3/feeds/'+feed+'/history', json={'mode':'count','count':'3'})
+        assert response.status_code == 200, response.text
+        history = wait_history(client, feed, timeout=2)
+        assert history['progress']['available'] == history['progress']['loaded'] == 3
+        assert history['progress']['stop_reason'] == 'count_reached'
+
+
+
+def test_redirect_to_other_visited_branch_cannot_exceed_1000_page_budget(tmp_path):
+    calls = []
+    def reply(request):
+        path = request.url.path
+        calls.append(path)
+        if path == '/feed':
+            return httpx.Response(200, text=page([], '<atom:link rel="next" href="/first"/><atom:link rel="prev-archive" href="/archive/3"/>'))
+        if path == '/first':
+            return httpx.Response(200, text=page([]))
+        if path == '/alias':
+            return httpx.Response(302, headers={'location':'/first'})
+        if path.startswith('/archive/'):
+            number = int(path.rsplit('/',1)[1])
+            links = f'<atom:link rel="next" href="/archive/{number+1}"/>' if number<999 else '<atom:link rel="next" href="/alias"/><atom:link rel="prev-archive" href="/must-not-load"/>'
+            return httpx.Response(200, text=page([], links))
+        return httpx.Response(200, text=page([]))
+    with reader(tmp_path, reply) as client:
+        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':200}).json()['id']
+        progress = wait_history(client, feed, timeout=60)['progress']
+        assert progress['stop_reason'] == 'page_limit'
+        assert progress['requests'] == 1000
+        assert '/must-not-load' not in calls

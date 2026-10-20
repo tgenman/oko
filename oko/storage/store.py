@@ -289,6 +289,8 @@ class Store:
                     row = self.db.execute('SELECT viewed FROM items WHERE id=?', (item,)).fetchone()
                     if row['viewed']:
                         self.subscriptions.history.viewed(item)
+                    elif self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (item,)).fetchone():
+                        self.subscriptions.history.failed(item, unavailable=True)
                     elif self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status='done'", (item,)).fetchone():
                         material = self.material(item)
                         if material:
