@@ -1,5 +1,6 @@
 """Manual refresh through the reader HTTP boundary and synthetic sources."""
 import httpx
+import pytest
 from tests.support.app import create_app
 from tests.support.v3 import TestClient
 from tests.support.reader import wait_for
@@ -247,7 +248,10 @@ def test_refresh_retries_failed_filter_without_repeating_successful_filters(tmp_
         assert len(model.calls)==len(old)+1 and model.calls[-1]==old[0]
 
 
-def test_one_attempt_survives_partial_material_with_forced_source_wait(tmp_path):
+@pytest.mark.parametrize('wait_outcome', ['partial', 'exception'])
+@pytest.mark.parametrize('failure_outcome', ['partial', 'exception'])
+@pytest.mark.parametrize('restart', [False, True])
+def test_one_attempt_survives_forced_source_wait(tmp_path, wait_outcome, failure_outcome, restart):
     import time
     from oko.collection.demo import DemoSource
     from oko.collection.contracts import DiscoveryResult, Publication, SourceDeleted, SourceError, FetchResult, Material
@@ -263,12 +267,27 @@ def test_one_attempt_survives_partial_material_with_forced_source_wait(tmp_path)
             if self.calls==2:
                 raise SourceDeleted()
             if self.calls==3:
-                error=SourceError('Forced wait',delay=30)
+                error=SourceError('Forced wait',delay=30,code='fetch:FloodWaitError')
                 error.remote_type='FloodWaitError'
+                if wait_outcome=='exception':
+                    raise error
                 return FetchResult(Material('Saved','Old text',full=False,collection_error=error))
-            raise SourceError('Still unavailable',delay=.03)
+            error=SourceError('Still unavailable',delay=.03)
+            if failure_outcome=='exception':
+                raise error
+            return FetchResult(Material('Saved','Old text',full=False,collection_error=error))
     clock,source=Clock(),Source()
-    with TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS) as client:
+    def reader():
+        return TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS)
+    def finish_attempt(client):
+        wait_for(client,lambda:source.calls==4)
+        wait_for(client,lambda:any(p['message']=='Still unavailable' for p in client.get('/api/v3/status').json()['problems']['current']))
+        clock.now+=1
+        time.sleep(.12)
+        assert source.calls==4
+        item=client.get('/api/v3/cards').json()[0]['id']
+        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Old text'
+    with reader() as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         wait_for(client,lambda:len(client.get('/api/v3/cards').json())==1 and client.get('/api/v3/cards').json()[0]['availability']=='available')
         client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'})
@@ -276,9 +295,11 @@ def test_one_attempt_survives_partial_material_with_forced_source_wait(tmp_path)
         client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'})
         wait_for(client,lambda:any(p['message']=='Forced wait' for p in client.get('/api/v3/status').json()['problems']['current']))
         assert source.calls==3
+        if not restart:
+            clock.now+=31
+            finish_attempt(client)
+    if restart:
+        assert source.calls==3
         clock.now+=31
-        wait_for(client,lambda:source.calls==4)
-        wait_for(client,lambda:any(p['message']=='Still unavailable' for p in client.get('/api/v3/status').json()['problems']['current']))
-        clock.now+=1
-        time.sleep(.12)
-        assert source.calls==4
+        with reader() as client:
+            finish_attempt(client)

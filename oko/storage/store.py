@@ -296,10 +296,7 @@ class Store:
         if not self.valid(job) or not self._has_unviewed(job.item):
             return
         with self.db:
-            self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
-            self.subscriptions.history.failed(job.item, True)
-            self.finish(job)
-            self.db.execute("UPDATE jobs SET error=?,problem_code='source-deleted' WHERE id=?", ('Публикация удалена или недоступна в источнике', job.id))
+            self._record_fetch_removal(job, 'Публикация удалена или недоступна в источнике')
         self.processing.sync()
 
     def retry_material(self, item: str) -> bool:
@@ -390,7 +387,6 @@ class Store:
         item = job.item
         if not self.valid(job) or not self._has_unviewed(item):
             return
-        once = bool(self.db.execute('SELECT manual_once FROM jobs WHERE id=?',(job.id,)).fetchone()[0])
         prepared = self.versions.prepare(item, material, job, staging)
         self.fault('after_file_move')
         with self.db:
@@ -400,24 +396,37 @@ class Store:
                 self.db.execute('UPDATE items SET url=? WHERE id=?', (material.source_manifest.source_url,item))
             if material.members:
                 self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
-            if not material.collection_error or not self.subscriptions.history.member(item):
-                self.subscriptions.history.saved(item, material.full)
-            self.finish(job)
-            self.history_collection_error(job, material, self.clock() if now is None else now, once=once)
+            self._finish_fetch(job, material, self.clock() if now is None else now)
         self.processing.sync()
 
-    def history_collection_error(self, job: Job, material: Material, now: float, *, once: bool = False) -> None:
+    def _finish_fetch(self, job: Job, material: Material, now: float) -> None:
         error = material.collection_error
+        if not error or not self.subscriptions.history.member(job.item):
+            self.subscriptions.history.saved(job.item, material.full)
         if not error:
-            return
-        if isinstance(error, SourceDeleted):
-            self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
-            self.subscriptions.history.failed(job.item, True)
-            self.db.execute("UPDATE jobs SET error=?,problem_code='source-deleted' WHERE id=?", (error.label, job.id))
+            self.finish(job)
+        elif isinstance(error, SourceDeleted):
+            self._record_fetch_removal(job, error.label)
         else:
-            self.subscriptions.history.failed(job.item)
-            self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=?,manual_once=? WHERE id=?",
-                ('pending' if error.retryable and (not once or error.remote_type=='FloodWaitError') else 'done',now+error.delay,error.label,error.code or job.kind+':'+(error.remote_type or type(error).__name__),int(once),job.id))
+            self._record_fetch_failure(job, error.label,
+                error.code or job.kind+':'+(error.remote_type or type(error).__name__), now+error.delay,
+                terminal=not error.retryable, forced_wait=error.remote_type=='FloodWaitError')
+
+    def _record_fetch_removal(self, job: Job, label: str) -> None:
+        self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
+        self.subscriptions.history.failed(job.item, True)
+        self.finish(job)
+        self.db.execute("UPDATE jobs SET error=?,problem_code='source-deleted' WHERE id=?", (label, job.id))
+
+    def _record_fetch_failure(self, job: Job, label: str, code: str, retry_at: float, *, terminal: bool, forced_wait: bool) -> None:
+        # Participate in the caller's transaction: a saved copy, history outcome
+        # and retry intent must commit together. Only success/removal clears intent.
+        row = self.db.execute('SELECT manual_once FROM jobs WHERE id=?', (job.id,)).fetchone()
+        once = bool(row and row[0])
+        self.subscriptions.history.failed(job.item)
+        self.db.execute("""UPDATE jobs SET status=?,next=?,error=?,problem_code=?
+            WHERE id=? AND generation=? AND status='running'""",
+            ('done' if terminal or (once and not forced_wait) else 'pending', retry_at, label, code, job.id, job.generation))
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
@@ -501,10 +510,12 @@ class Store:
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False) -> None:
         with self.db:
+            if job.kind == 'fetch':
+                self._record_fetch_failure(job, error, code or job.kind, 0 if code == 'ai-permission' else now+delay,
+                    terminal=terminal, forced_wait=(code or '').endswith('FloodWaitError'))
+                return
             row = self.db.execute('SELECT manual_once FROM jobs WHERE id=?',(job.id,)).fetchone()
             once = row and row[0] and not (code or '').endswith('FloodWaitError')
-            if job.kind == 'fetch':
-                self.subscriptions.history.failed(job.item)
             self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
                             ('done' if once or terminal else 'pending', 0 if code == 'ai-permission' else now + delay, error, code or job.kind, job.id, job.generation))
 
