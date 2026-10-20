@@ -261,8 +261,8 @@ class RSSSource:
                 if walk.requests == 0:
                     self.description = feed_description(raw)
                 chosen = walk.accept(batch, raw, final)
-            except SourceError as error:
-                walk.fail(error.label)
+            except (SourceError, ValueError, httpx.InvalidURL) as error:
+                walk.fail(error.label if isinstance(error, SourceError) else 'Недопустимый адрес источника')
                 chosen = []
         self.gap = ' · '.join(walk.warnings) or None
         publications = tuple(Publication(e.publication.id, e.publication.url, e.publication.published,

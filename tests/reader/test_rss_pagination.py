@@ -406,3 +406,26 @@ def test_redirect_to_other_visited_branch_cannot_exceed_1000_page_budget(tmp_pat
         assert progress['stop_reason'] == 'page_limit'
         assert progress['requests'] == 1000
         assert '/must-not-load' not in calls
+
+
+@pytest.mark.parametrize('location, available', [('channel',1), ('root',0), ('entry',0)])
+def test_malformed_xml_base_finishes_attempt_without_retry(tmp_path, location, available):
+    calls = 0
+    def reply(request):
+        nonlocal calls
+        if request.url.path == '/feed':
+            calls += 1
+            # Verification receives a valid feed; discovery gets an invalid base.
+            xml = page([3], '<atom:link rel="next" href="older"/>')
+            if calls > 1:
+                element = {'channel':'channel', 'root':'rss', 'entry':'item'}[location]
+                opening = '<'+element
+                xml = xml.replace(opening, opening+' xml:base="http://["', 1)
+            return httpx.Response(200, text=xml)
+        return httpx.Response(200, text='<article>Full article</article>')
+    with reader(tmp_path, reply) as client:
+        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':2}).json()['id']
+        progress = wait_history(client, feed, timeout=2)['progress']
+        assert progress['stop_reason'] == 'request_failed'
+        assert progress['available'] == progress['loaded'] == available
+        assert progress['requests'] == 1

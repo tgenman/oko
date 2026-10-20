@@ -14,6 +14,23 @@ ORDER_WARNING = 'Порядок RSS неоднозначен: точность �
 DATE_WARNING = 'RSS: полнота истории за период не подтверждена'
 
 
+def continuation_links(raw: bytes, final: str) -> dict[str, list[str]]:
+    # entries() has already rejected unsafe/malformed XML. Resolve every level
+    # inside the caller's terminal page-error boundary, including xml:base.
+    root = ET.fromstring(raw)
+    parent = root if root.tag == ATOM + 'feed' else next((c for c in root if c.tag.rsplit('}', 1)[-1] == 'channel'), root)
+    base = urljoin(urljoin(final, root.get(BASE, '')), parent.get(BASE, '') if parent is not root else '')
+    links: dict[str, list[str]] = {'next': [], 'prev-archive': []}
+    for link in parent:
+        if link.tag != ATOM + 'link' or link.get('rel') not in links or not link.get('href'):
+            continue
+        target = normalized(urljoin(urljoin(base, link.get(BASE, '')), link.attrib['href']))
+        targets = links[link.attrib['rel']]
+        if target not in targets:
+            targets.append(target)
+    return links
+
+
 class RSSHistory:
     def __init__(self, url: str, selection: dict[str, Any], previous: dict[str, Any] | None) -> None:
         self.selection = selection
@@ -51,6 +68,9 @@ class RSSHistory:
 
     def fail(self, message: str) -> None:
         self.state['requests'] += 1
+        self.record_error(message)
+
+    def record_error(self, message: str) -> None:
         self.state['error'] = message
         self.finish('request_failed')
 
@@ -122,22 +142,11 @@ class RSSHistory:
         self.state['seen'] = list(seen | {e.publication.id for e in batch})
         self.state['seen_urls'] = list(seen_urls | {e.publication.url for e in batch})
         if not self.complete:
-            root = ET.fromstring(raw)  # entries() already rejected unsafe/malformed XML.
-            parent = root if root.tag == ATOM + 'feed' else next((c for c in root if c.tag.rsplit('}', 1)[-1] == 'channel'), root)
-            base = urljoin(urljoin(final, root.get(BASE, '')), parent.get(BASE, '') if parent is not root else '')
-            links: dict[str, list[str]] = {'next': [], 'prev-archive': []}
-            for link in parent:
-                if link.tag != ATOM + 'link' or link.get('rel') not in links or not link.get('href'):
-                    continue
-                try:
-                    target = normalized(urljoin(urljoin(base, link.get(BASE, '')), link.attrib['href']))
-                except (SourceError, ValueError) as error:
-                    self.state['error'] = error.label if isinstance(error, SourceError) else 'Недопустимый адрес источника'
-                    self.finish('request_failed')
-                    return chosen
-                targets = links[link.attrib['rel']]
-                if target not in targets:
-                    targets.append(target)
+            try:
+                links = continuation_links(raw, final)
+            except (SourceError, ValueError) as error:
+                self.record_error(error.label if isinstance(error, SourceError) else 'Недопустимый адрес источника')
+                return chosen
             if links['next']:
                 self.warn('Страницы RSS могут меняться во время обхода: точность выбора последних N не подтверждена')
             if any(len(targets) > 1 for targets in links.values()):
