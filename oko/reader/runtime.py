@@ -5,7 +5,8 @@ happen outside the action lock; admission, transitions and result commits share 
 """
 import asyncio
 from oko.reviews.coordination import ProcessingWait
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 import secrets
 import sqlite3
@@ -47,6 +48,55 @@ class ActionError(Exception):
         self.code = code
         self.diagnostic_skip = expected
         super().__init__(str(detail))
+
+
+class _ExternalCheck:
+    """One owned external wait and its guarded acceptance, private to Runtime.
+
+    Start is called under the action lock. Waiting releases it; accept reacquires
+    it at the scenario's existing commit points, including failures. Snapshots
+    preserve each scenario's synchronous preparation point.
+    """
+    def __init__(self, runtime: 'Runtime', store: Store, epoch: int | None = None) -> None:
+        self._runtime = runtime
+        self._store = store
+        self._epoch = runtime._epoch if epoch is None else epoch
+
+    def start(self, call: Awaitable[T]) -> Awaitable[T]:
+        task = asyncio.ensure_future(call)
+        self._runtime._requests.add(task)
+
+        async def wait() -> T:
+            try:
+                return await task
+            finally:
+                self._runtime._requests.discard(task)
+
+        return wait()
+
+    def follow(self, later: '_ExternalCheck') -> '_ExternalCheck':
+        # Telegram's multi-step connection keeps its original Store, but the
+        # final info call supplies the acceptance generation. Do not strengthen
+        # this to a single generation spanning the whole connection.
+        return _ExternalCheck(self._runtime, self._store, later._epoch)
+
+    @asynccontextmanager
+    async def accept(self, *, require_work: bool = False, failure: ActionError | None = None) -> AsyncIterator[Store]:
+        runtime = self._runtime
+        async with runtime._actions:
+            if require_work:
+                runtime.require_work()
+            if failure is not None:
+                # A failed identity check may mark a profile unavailable only
+                # in its original context; interruption rethrows the same error.
+                if failure.diagnostic_skip or runtime._store is not self._store or not runtime._live() or self._epoch != runtime._epoch:
+                    raise failure
+            else:
+                if runtime.stopped or runtime._store is not self._store or not runtime._live():
+                    raise ActionError('conflict', 'Око остановлено', expected=True)
+                if self._epoch != runtime._epoch:
+                    raise ActionError('conflict', 'Проверка подключения прервана; повторите действие', expected=True)
+            yield self._store
 
 
 class Runtime:
@@ -504,7 +554,7 @@ class Runtime:
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для проверки фида')
-            epoch = self._epoch
+            check = _ExternalCheck(self, current)
             try:
                 url = normalized(body.url)
                 _, kind, _ = identify(url)
@@ -514,15 +564,13 @@ class Runtime:
                 existing = current.subscriptions.existing_feed(url)
             except (ValueError, SourceError) as error:
                 raise ActionError('invalid', error.label if isinstance(error, SourceError) else str(error)) from error
-            async def check() -> str:
+            async def download_title() -> str:
                 async with asyncio.timeout(25):
                     raw, _, _ = await RSSSource(url, 1, self._rss_transport).download(url)
                     return feed_title(raw)
-            task = asyncio.create_task(check()) if not existing else None
-            if task:
-                self._requests.add(task)
+            pending = check.start(download_title()) if not existing else None
         try:
-            title = existing['title'] if existing else await task if task else ''
+            title = existing['title'] if existing else await pending if pending else ''
         except asyncio.CancelledError:
             caller = asyncio.current_task()
             if caller and caller.cancelling():
@@ -530,11 +578,7 @@ class Runtime:
             raise ActionError('conflict', 'Проверка фида прервана; повторите действие', expected=True) from None
         except (SourceError, TimeoutError, httpx.InvalidURL) as error:
             raise ActionError('invalid', error.label if isinstance(error, SourceError) else 'Неверный URL фида' if isinstance(error, httpx.InvalidURL) else 'Проверка фида не завершилась за 25 секунд', code='source_unavailable' if isinstance(error, (SourceError, TimeoutError)) else None) from error
-        finally:
-            if task:
-                self._requests.discard(task)
-        async with self._actions:
-            self._check_request(current, epoch)
+        async with check.accept() as current:
             verification = secrets.token_urlsafe(24)
             self._feed_checks[verification] = url
             if len(self._feed_checks) > 100:
@@ -573,21 +617,17 @@ class Runtime:
             config = current.processor_config()
             if not config:
                 raise ActionError('conflict', 'llama.cpp не настроен')
-            epoch = self._epoch
-            task = asyncio.create_task(LlamaCpp(config, self._ai_transport).check())
-            self._requests.add(task)
+            check = _ExternalCheck(self, current)
+            pending = check.start(LlamaCpp(config, self._ai_transport).check())
         try:
-            result = await task
+            result = await pending
         except ProcessingError as error:
             record_caught('runtime.check_processor')
             raise ActionError('conflict', error.label) from None
         except asyncio.CancelledError:
             raise ActionError('conflict', 'Проверка прервана', expected=True) from None
-        finally:
-            self._requests.discard(task)
-        async with self._actions:
-            self._check_request(current, epoch)
-        return result
+        async with check.accept():
+            return result
 
     def codex_status(self) -> dict[str, Any]:
         self.require_store()
@@ -600,20 +640,16 @@ class Runtime:
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения')
-            epoch = self._epoch
-            task = asyncio.create_task(self._codex_client.catalog())
-            self._requests.add(task)
+            check = _ExternalCheck(self, current)
+            pending = check.start(self._codex_client.catalog())
         try:
-            result = await task
+            result = await pending
         except ProcessingError as error:
             raise ActionError('conflict', error.label) from None
         except asyncio.CancelledError:
             raise ActionError('conflict', 'Загрузка каталога прервана', expected=True) from None
-        finally:
-            self._requests.discard(task)
-        async with self._actions:
-            self._check_request(current, epoch)
-        return result
+        async with check.accept():
+            return result
 
     async def configure_codex(self, config: CodexSettings) -> None:
         # Validate against fresh catalog outside the action lock. Saving cannot
@@ -635,17 +671,13 @@ class Runtime:
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения')
-            epoch = self._epoch
-            task = asyncio.create_task(self._codex_client.check())
-            self._requests.add(task)
+            check = _ExternalCheck(self, current)
+            pending = check.start(self._codex_client.check())
         try:
-            result = await task
+            result = await pending
         except asyncio.CancelledError:
             raise ActionError('conflict', 'Проверка Codex прервана', expected=True) from None
-        finally:
-            self._requests.discard(task)
-        async with self._actions:
-            self._check_request(current, epoch)
+        async with check.accept():
             self._codex_status = result
         return result
 
@@ -752,13 +784,12 @@ class Runtime:
             old = current.subscriptions.telegram.profile(role)
             generation = old['generation'] if old else 0
         try:
-            user_id, current, epoch = await self._call_telegram(lambda client: client.identity(account))
+            user_id, check = await self._call_telegram(lambda client: client.identity(account))
         except ActionError:
             raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Не удалось проверить существующую сессию', 503) from None
         if type(user_id) is not int or user_id <= 0:
             raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Клиент не подтвердил user ID', 503)
-        async with self._actions:
-            self._check_request(current, epoch)
+        async with check.accept() as current:
             current.subscriptions.telegram.save_profile(role, account, user_id, generation, self._wall_clock())
             await self._cancel()
             self._sources.clear()
@@ -773,17 +804,14 @@ class Runtime:
         profile = current.subscriptions.telegram.profile(role)
         if not profile:
             raise TelegramConflict('profile_not_configured', dict(role=role), 'Профиль Telegram не настроен')
-        verification_epoch = self._epoch
+        verification = _ExternalCheck(self, current)
         try:
-            user_id, owner, epoch = await self._call_telegram(lambda client: client.identity(profile['account']))
+            user_id, check = await self._call_telegram(lambda client: client.identity(profile['account']))
         except ActionError as error:
-            async with self._actions:
-                if error.diagnostic_skip or self._store is not current or not self._live() or verification_epoch != self._epoch:
-                    raise
+            async with verification.accept(failure=error) as current:
                 current.subscriptions.telegram.checked(role, profile['generation'], None, self._wall_clock())
             raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Сессия Telegram недоступна', 503) from None
-        async with self._actions:
-            self._check_request(owner, epoch)
+        async with check.accept():
             if not current.subscriptions.telegram.checked(role, profile['generation'], user_id, self._wall_clock()):
                 raise TelegramConflict('account_identity_mismatch', dict(role=role), 'Личность аккаунта изменилась')
             if isinstance(self._telegram_client, LocalTelegram):
@@ -801,29 +829,24 @@ class Runtime:
             duplicates = current.subscriptions.telegram.owners([(kind, str(address))])
             if duplicates:
                 raise TelegramConflict('duplicate_source', current.subscriptions.telegram.duplicates(duplicates), 'Источник уже подключён')
-            epoch = self._epoch
+            connection = _ExternalCheck(self, current)
         profile = await self._verify_telegram_profile(role) if role else None
         if profile:
-            info, _, epoch = await self._call_telegram(lambda client: client.info(profile['account'], '@' + str(address) if kind == 'username' else address))
+            info, check = await self._call_telegram(lambda client: client.info(profile['account'], '@' + str(address) if kind == 'username' else address))
+            connection = connection.follow(check)
             binding = dict(kind='client', role=role, account_user_id=str(profile['user_id']), peer_id=str(info['peer']))
         else:
             if kind != 'username':
                 raise ValueError('Веб-доступ требует публичный username')
             from oko.collection.telegram.web import preview
-            async with self._actions:
-                self.require_work()
-                self._check_request(current, epoch)
-                task = asyncio.create_task(preview(str(address), self._rss_transport))
-                self._requests.add(task)
+            async with connection.accept(require_work=True):
+                pending = connection.start(preview(str(address), self._rss_transport))
             try:
-                info = await task
+                info = await pending
             except SourceError as error:
                 raise TelegramConflict('source_unavailable', dict(retry_at=None), error.label, 503) from None
-            finally:
-                self._requests.discard(task)
             binding = dict(kind='web', username=info['username'], preview_url=info['preview_url'])
-        async with self._actions:
-            self._check_request(current, epoch)
+        async with connection.accept() as current:
             if profile:
                 latest = current.subscriptions.telegram.profile(str(role))
                 if not latest or latest['generation'] != profile['generation']:
@@ -840,22 +863,15 @@ class Runtime:
             raise ActionError('conflict', 'Telegram-клиент не настроен')
         return current, self._telegram_client
 
-    def _check_request(self, current: Store, epoch: int) -> None:
-        if self.stopped or self._store is not current or not self._live():
-            raise ActionError('conflict', 'Око остановлено', expected=True)
-        if epoch != self._epoch:
-            raise ActionError('conflict', 'Проверка подключения прервана; повторите действие', expected=True)
-
-    async def _call_telegram(self, call: Callable[[TelegramClient], Awaitable[T]]) -> tuple[T, Store, int]:
+    async def _call_telegram(self, call: Callable[[TelegramClient], Awaitable[T]]) -> tuple[T, _ExternalCheck]:
         async with self._actions:
             self.require_work()
             current, client = self._telegram_ready()
-            epoch = self._epoch
-            task = asyncio.ensure_future(call(client))
-            self._requests.add(task)
+            check = _ExternalCheck(self, current)
+            pending = check.start(call(client))
         try:
             # Network work is deliberately outside the mutation seam.
-            result = await task
+            result = await pending
         except SourceError as error:
             record_caught('runtime._call_telegram')
             raise ActionError('conflict', error.label) from None
@@ -864,14 +880,11 @@ class Runtime:
             if caller and caller.cancelling():
                 raise
             raise ActionError('conflict', 'Око остановлено' if self.stopped else 'Подключение Telegram прервано; повторите действие', expected=True) from None
-        finally:
-            self._requests.discard(task)
-        async with self._actions:
-            self._check_request(current, epoch)
-        return result, current, epoch
+        async with check.accept():
+            return result, check
 
     async def telegram_accounts(self) -> list[str]:
-        result, _, _ = await self._call_telegram(lambda client: client.accounts())
+        result, _ = await self._call_telegram(lambda client: client.accounts())
         return result
 
     async def connect_telegram(self, body: ConnectTelegram) -> dict[str, Any]:
@@ -888,10 +901,8 @@ class Runtime:
             profile = await self._verify_telegram_profile(profile['role'])
             if profile['account'] != body.account:
                 raise ActionError('conflict', 'Профиль изменился; повторите подключение', expected=True)
-            info, current, epoch = await self._call_telegram(lambda client: client.info(body.account, int(body.peer) if body.peer.startswith('-') else body.peer))
-            async with self._actions:
-                self.require_work()
-                self._check_request(current, epoch)
+            info, check = await self._call_telegram(lambda client: client.info(body.account, int(body.peer) if body.peer.startswith('-') else body.peer))
+            async with check.accept(require_work=True) as current:
                 latest = current.subscriptions.telegram.profile(profile['role'])
                 if not latest or latest['generation'] != profile['generation']:
                     raise ActionError('conflict', 'Профиль изменился; повторите подключение', expected=True)

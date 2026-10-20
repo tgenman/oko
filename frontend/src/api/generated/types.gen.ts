@@ -4806,6 +4806,10 @@ export type CodexStateErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
+    409: RuntimeStoppedError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
     422: RequestInvalidError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
@@ -4853,7 +4857,7 @@ export type CodexSaveErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeDisabledError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4865,7 +4869,7 @@ export type CodexSaveErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: StorageUnavailableError;
+    503: CodexModels503Errors;
 };
 
 export type CodexSaveError = CodexSaveErrors[keyof CodexSaveErrors];
@@ -4900,7 +4904,7 @@ export type CodexCheckErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeDisabledError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -4912,7 +4916,7 @@ export type CodexCheckErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    503: StorageUnavailableError;
+    503: CodexModels503Errors;
 };
 
 export type CodexCheckError = CodexCheckErrors[keyof CodexCheckErrors];
@@ -4941,7 +4945,7 @@ export type CodexModelsErrors = {
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
-    409: RuntimeDisabledError;
+    409: RuntimeStoppedError | RuntimeDisabledError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */

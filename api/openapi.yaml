@@ -2364,6 +2364,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+        '409':
+          description: Operation-specific typed error. No raw submitted values, secret context or
+            stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStoppedError'
+              examples:
+                RuntimeStoppedError:
+                  value:
+                    code: runtime_stopped
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
     put:
       summary: Codex save
       operationId: codex_save
@@ -2532,13 +2557,21 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '503':
-          description: Operation-specific typed error. No raw submitted values, secret context
-            or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret
+            context or stack traces are returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StorageUnavailableError'
+                $ref: '#/components/schemas/CodexModels503Errors'
               examples:
+                ProcessorUnavailableError:
+                  value:
+                    code: processor_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
                 StorageUnavailableError:
                   value:
                     code: storage_unavailable
@@ -2563,11 +2596,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeDisabledError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeDisabledError:
                   value:
                     code: runtime_disabled
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeStoppedError:
+                  value:
+                    code: runtime_stopped
                     message: example
                     details: null
                     diagnostic_id: null
@@ -2762,11 +2804,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeDisabledError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeDisabledError:
                   value:
                     code: runtime_disabled
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeStoppedError:
+                  value:
+                    code: runtime_stopped
                     message: example
                     details: null
                     diagnostic_id: null
@@ -2927,8 +2978,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StorageUnavailableError'
+                $ref: '#/components/schemas/CodexModels503Errors'
               examples:
+                ProcessorUnavailableError:
+                  value:
+                    code: processor_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
                 StorageUnavailableError:
                   value:
                     code: storage_unavailable
@@ -2953,11 +3012,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RuntimeDisabledError'
+                oneOf:
+                - $ref: '#/components/schemas/RuntimeStoppedError'
+                - $ref: '#/components/schemas/RuntimeDisabledError'
               examples:
                 RuntimeDisabledError:
                   value:
                     code: runtime_disabled
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                RuntimeStoppedError:
+                  value:
+                    code: runtime_stopped
                     message: example
                     details: null
                     diagnostic_id: null
