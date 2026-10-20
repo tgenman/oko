@@ -1,0 +1,201 @@
+{
+  "started_at": "20261020T183611Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [
+      "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_rss_pagination.py",
+      "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_initial_history.py",
+      "/private/tmp/oko-rss-pagination-check-03/tests/collection/test_rss.py"
+    ],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.45s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "/private/tmp/oko-rss-pagination-check-03/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "types": {
+      "status": "PASS (2.06s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "-m",
+            "mypy",
+            "oko",
+            "tests/support/codex.py",
+            "tests/support/app.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "python-tests": {
+      "status": "FAIL (1.68s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_rss_pagination.py"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rss-pagination-check-03/tests/collection/test_rss.py"
+          ],
+          "exit_code": 1
+        },
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_initial_history.py"
+          ],
+          "exit_code": 1
+        }
+      ],
+      "failures": [
+        "tests/collection/test_rss.py::test_rss_article_images_are_local_and_viewed_identity_stays_deleted",
+        "tests/collection/test_rss.py::test_incomplete_article_can_be_retried_without_losing_excerpt",
+        "tests/collection/test_rss.py::test_initial_period_resume_atom_and_source_errors_are_independent",
+        "tests/collection/test_rss.py::test_old_initial_items_excluded_and_ambiguous_guids_not_hidden",
+        "tests/collection/test_rss.py::test_retry_missing_image_preserves_local_text_and_cleans_old_assets",
+        "tests/collection/test_rss.py::test_source_disabled_switch_cannot_continue_collecting",
+        "tests/collection/test_rss.py::test_rss_saved_jobs_recover_after_failed_file_commit",
+        "tests/collection/test_rss.py::test_rss_viewed_during_image_download_blocks_late_result",
+        "tests/collection/test_rss.py::test_url_identity_normalizes_default_port_and_fragment_without_guid",
+        "tests/collection/test_rss.py::test_atom_xhtml_keeps_text_images_and_xml_base",
+        "tests/collection/test_rss.py::test_reader_allows_authenticated_blob_images_without_remote_images",
+        "tests/collection/test_rss.py::test_reused_guid_cannot_replace_saved_teaser_with_another_url",
+        "tests/reader/test_initial_history.py::test_new_feed_saves_default_history_before_collection_and_restarts",
+        "tests/reader/test_initial_history.py::test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count[posts0]",
+        "tests/reader/test_initial_history.py::test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count[posts1]",
+        "tests/reader/test_initial_history.py::test_date_boundary_uses_user_zone_and_invalid_values_are_rejected",
+        "tests/reader/test_initial_history.py::test_two_of_four_restart_keeps_selected_history_and_progress",
+        "tests/reader/test_initial_history.py::test_selected_date_includes_midnight_and_every_later_post",
+        "tests/reader/test_initial_history.py::test_youtube_count_uses_video_publications_without_waiting_for_theses",
+        "tests/reader/test_initial_history.py::test_count_has_no_product_limit_and_preserves_large_integer",
+        "tests/reader/test_initial_history.py::test_rss_unknown_dates_included_and_window_warnings_survive_rotation",
+        "tests/reader/test_initial_history.py::test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed[dates0-True]",
+        "tests/reader/test_initial_history.py::test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed[dates1-True]",
+        "tests/reader/test_initial_history.py::test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed[dates2-True]",
+        "tests/reader/test_initial_history.py::test_finite_rss_history_reports_requested_and_available_without_archive"
+      ],
+      "workers": {
+        "python-tests-1": {
+          "status": "PASS (61.06s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_rss_pagination.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        },
+        "python-tests-2": {
+          "status": "FAIL (1.68s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rss-pagination-check-03/tests/collection/test_rss.py"
+              ],
+              "exit_code": 1
+            }
+          ],
+          "failures": [
+            "tests/collection/test_rss.py::test_rss_article_images_are_local_and_viewed_identity_stays_deleted",
+            "tests/collection/test_rss.py::test_incomplete_article_can_be_retried_without_losing_excerpt",
+            "tests/collection/test_rss.py::test_initial_period_resume_atom_and_source_errors_are_independent",
+            "tests/collection/test_rss.py::test_old_initial_items_excluded_and_ambiguous_guids_not_hidden",
+            "tests/collection/test_rss.py::test_retry_missing_image_preserves_local_text_and_cleans_old_assets",
+            "tests/collection/test_rss.py::test_source_disabled_switch_cannot_continue_collecting",
+            "tests/collection/test_rss.py::test_rss_saved_jobs_recover_after_failed_file_commit",
+            "tests/collection/test_rss.py::test_rss_viewed_during_image_download_blocks_late_result",
+            "tests/collection/test_rss.py::test_url_identity_normalizes_default_port_and_fragment_without_guid",
+            "tests/collection/test_rss.py::test_atom_xhtml_keeps_text_images_and_xml_base",
+            "tests/collection/test_rss.py::test_reader_allows_authenticated_blob_images_without_remote_images",
+            "tests/collection/test_rss.py::test_reused_guid_cannot_replace_saved_teaser_with_another_url"
+          ]
+        },
+        "python-tests-3": {
+          "status": "FAIL (1.68s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_initial_history.py"
+              ],
+              "exit_code": 1
+            }
+          ],
+          "failures": [
+            "tests/reader/test_initial_history.py::test_new_feed_saves_default_history_before_collection_and_restarts",
+            "tests/reader/test_initial_history.py::test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count[posts0]",
+            "tests/reader/test_initial_history.py::test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count[posts1]",
+            "tests/reader/test_initial_history.py::test_date_boundary_uses_user_zone_and_invalid_values_are_rejected",
+            "tests/reader/test_initial_history.py::test_two_of_four_restart_keeps_selected_history_and_progress",
+            "tests/reader/test_initial_history.py::test_selected_date_includes_midnight_and_every_later_post",
+            "tests/reader/test_initial_history.py::test_youtube_count_uses_video_publications_without_waiting_for_theses",
+            "tests/reader/test_initial_history.py::test_count_has_no_product_limit_and_preserves_large_integer",
+            "tests/reader/test_initial_history.py::test_rss_unknown_dates_included_and_window_warnings_survive_rotation",
+            "tests/reader/test_initial_history.py::test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed[dates0-True]",
+            "tests/reader/test_initial_history.py::test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed[dates1-True]",
+            "tests/reader/test_initial_history.py::test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed[dates2-True]",
+            "tests/reader/test_initial_history.py::test_finite_rss_history_reports_requested_and_available_without_archive"
+          ]
+        }
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 1,
+  "duration_seconds": 63.79,
+  "log": "/private/tmp/oko-rss-pagination-check-03/.scratch/check-runs/20261020T183611Z-eedab46e/output.log"
+}

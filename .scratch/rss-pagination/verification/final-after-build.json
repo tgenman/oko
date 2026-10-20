@@ -1,0 +1,104 @@
+{
+  "started_at": "20261020T183800Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [
+      "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_initial_history.py",
+      "/private/tmp/oko-rss-pagination-check-03/tests/collection/test_rss.py"
+    ],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.41s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "/private/tmp/oko-rss-pagination-check-03/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "python-tests": {
+      "status": "PASS (4.60s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rss-pagination-check-03/tests/collection/test_rss.py"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_initial_history.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "workers": {
+        "python-tests-1": {
+          "status": "PASS (4.58s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rss-pagination-check-03/tests/collection/test_rss.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        },
+        "python-tests-2": {
+          "status": "PASS (4.60s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-rss-pagination-check-03/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rss-pagination-check-03/tests/reader/test_initial_history.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        }
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 5.2,
+  "log": "/private/tmp/oko-rss-pagination-check-03/.scratch/check-runs/20261020T183800Z-2d89b5d9/output.log"
+}

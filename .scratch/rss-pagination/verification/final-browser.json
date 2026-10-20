@@ -1,0 +1,84 @@
+{
+  "started_at": "20261020T183909Z",
+  "selected_files": {
+    "browser": [
+      "/private/tmp/oko-rss-pagination-check-03/tests/browser/test_rss_pagination.ts"
+    ],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (0.81s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-rss-pagination-check-03/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (1.34s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-rss-pagination-check-03/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (2.90s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/private/tmp/oko-rss-pagination-check-03/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-reporter=tap",
+            "--test-concurrency=4",
+            "/private/tmp/oko-rss-pagination-check-03/tests/browser/test_rss_pagination.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 1,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 5.33,
+  "log": "/private/tmp/oko-rss-pagination-check-03/.scratch/check-runs/20261020T183909Z-ac0dca40/output.log"
+}

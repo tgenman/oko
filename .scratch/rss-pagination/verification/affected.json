@@ -1,0 +1,341 @@
+{
+  "started_at": "20261020T183346Z",
+  "selected_files": {
+    "browser": [
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_rss_pagination.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_connections_v3_http.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_existing_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_initial_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_youtube_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_history_outcomes.ts"
+    ],
+    "python-tests": [
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_rss_pagination.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_initial_history.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_history_outcomes.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_v3_connections.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_youtube_history.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_existing_history.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_telegram_history.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_history_pause.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/collection/test_rss.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/collection/test_source_revisions.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/lifecycle/test_power.py",
+      "/private/tmp/oko-rss-pagination-check-02/tests/lifecycle/test_runtime_actions.py"
+    ],
+    "tool-tests": [],
+    "syntax": [
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_rss_pagination.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_connections_v3_http.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_existing_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_initial_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_youtube_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_history_outcomes.ts"
+    ],
+    "lint": [
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_rss_pagination.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_connections_v3_http.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_existing_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_initial_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_youtube_history.ts",
+      "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_history_outcomes.ts"
+    ]
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.43s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-02/.venv/bin/python",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "tooling-types": {
+      "status": "PASS (0.99s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "syntax": {
+      "status": "PASS (0.28s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/check-ts.cts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_rss_pagination.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_connections_v3_http.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_existing_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_initial_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_youtube_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_history_outcomes.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "lint": {
+      "status": "PASS (0.51s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/lint-js.cts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_rss_pagination.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_connections_v3_http.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_existing_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_initial_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_youtube_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_history_outcomes.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "types": {
+      "status": "PASS (2.03s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-02/.venv/bin/python",
+            "-m",
+            "mypy",
+            "oko",
+            "tests/support/codex.py",
+            "tests/support/app.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (1.39s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "build": {
+      "status": "PASS (8.93s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/build-frontend.mts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/build-frontend.mts",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "http": {
+      "status": "PASS (2.31s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-02/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/reader/test_web_assets.py",
+            "tests/reader/test_frontend_delivery.py",
+            "tests/reader/test_frontend_build.py",
+            "tests/reader/test_http_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (11.61s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/private/tmp/oko-rss-pagination-check-02/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-reporter=tap",
+            "--test-concurrency=4",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_rss_pagination.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_connections_v3_http.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_existing_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_initial_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_youtube_history.ts",
+            "/private/tmp/oko-rss-pagination-check-02/tests/browser/test_history_outcomes.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 14,
+      "checkout_changes": []
+    },
+    "diff": {
+      "status": "PASS (0.16s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "python-tests": {
+      "status": "PASS (73.32s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-02/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_rss_pagination.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_initial_history.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_youtube_history.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_v3_connections.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_history_pause.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_history_outcomes.py"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/private/tmp/oko-rss-pagination-check-02/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rss-pagination-check-02/tests/collection/test_source_revisions.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/collection/test_rss.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_telegram_history.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/lifecycle/test_power.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/lifecycle/test_runtime_actions.py",
+            "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_existing_history.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "workers": {
+        "python-tests-1": {
+          "status": "PASS (73.32s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-rss-pagination-check-02/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_rss_pagination.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_initial_history.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_youtube_history.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_v3_connections.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_history_pause.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_history_outcomes.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        },
+        "python-tests-2": {
+          "status": "PASS (18.41s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-rss-pagination-check-02/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rss-pagination-check-02/tests/collection/test_source_revisions.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/collection/test_rss.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_telegram_history.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/lifecycle/test_power.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/lifecycle/test_runtime_actions.py",
+                "/private/tmp/oko-rss-pagination-check-02/tests/reader/test_existing_history.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        }
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 90.73,
+  "log": "/private/tmp/oko-rss-pagination-check-02/.scratch/check-runs/20261020T183346Z-0dcab97e/output.log"
+}

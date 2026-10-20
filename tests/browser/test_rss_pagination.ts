@@ -23,7 +23,7 @@ test('RSS settings show the shortage reason and can request count or inclusive d
   await expect(r.page.locator('#history-progress')).not.toContainText('Initial history complete');
   for(const [width,height,name] of [[1280,900,'rss-history-desktop.png'],[390,844,'rss-history-mobile.png']] as const){
    await r.page.setViewportSize({width,height});
-   await r.page.screenshot({path:artifactPath(name),fullPage:true});
+   await r.page.screenshot({path:artifactPath(name),animations:'disabled'});
   }
   await r.page.locator('#rss-load-history-count').fill('200');
   await r.page.locator('#rss-load-history-start').click();

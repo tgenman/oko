@@ -1,6 +1,6 @@
 # Пагинация истории RSS/Atom и явные причины недобора
 
-Status: claimed
+Status: done
 Assignee: Codex
 GitHub: https://github.com/tgenman/oko/issues/63
 Blocked by: Нет
@@ -14,3 +14,6 @@ Playwright с просмотром desktop/mobile скриншотов. Прим
 ## Comments
 
 2026-10-20: начата реализация. Рабочий экземпляр не перезапускается.
+
+2026-10-20: критерии согласованной спецификации проверены; открытых замечаний
+Standards/Spec нет. [Проверки и ограничения](../../../../docs/verification/rss-pagination.md).
