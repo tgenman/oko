@@ -1,3 +1,4 @@
+from oko.storage.reading import reading_snapshot
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -151,9 +152,9 @@ def preview(value: facts.CompletionPreview) -> wire.CompletionPreview:
 def register(app: FastAPI, runtime: Runtime) -> None:
     router = APIRouter(dependencies=[Depends(no_query)])
 
-    def feeds() -> dict[str, wire.SubscriptionFeed]:
+    def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
         saved = runtime.require_store().subscriptions
-        return {v['id']: project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds()}
+        return {v['id']: project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds(identity)}
 
     def composition() -> wire.ReadingComposition:
         current = runtime.require_store()
@@ -163,63 +164,70 @@ def register(app: FastAPI, runtime: Runtime) -> None:
 
     @router.get('/api/v3/reading-composition', response_model=wire.ReadingComposition)
     async def navigation() -> wire.ReadingComposition:
-        return composition()
+        with reading_snapshot():
+            return composition()
 
     @router.get('/api/v3/folders', response_model=list[wire.ReadingFolder])
     async def folders() -> list[wire.ReadingFolder]:
-        return composition().folders
+        with reading_snapshot():
+            return composition().folders
 
     @app.get('/api/v3/cards', response_model=list[wire.ReadingCard])
     async def cards(request: Request) -> list[wire.ReadingCard]:
-        allowed = {'folder', 'feed', 'sort', 'show_hidden'}
-        for key in request.query_params:
-            if key not in allowed or len(request.query_params.getlist(key)) != 1:
-                raise ApiError(422, invalid('query', key))
-        sort = request.query_params.get('sort', 'newest')
-        if sort not in ('newest', 'oldest', 'importance'):
-            raise ApiError(422, invalid('query', 'sort'))
-        folder, feed = request.query_params.get('folder'), request.query_params.get('feed')
-        for key, value in (('folder', folder), ('feed', feed)):
-            if value is not None:
-                try:
-                    wire.FolderId(value) if key == 'folder' else wire.FeedId(value)
-                except ValueError:
-                    raise ApiError(422, invalid('query', key)) from None
-        current = runtime.require_store()
-        values = [facts.Card.model_validate(v) for v in current.reading.cards(scalar_boolean(request, 'show_hidden'), folder, feed)]
-        if sort == 'importance':
-            values.sort(key=lambda c: (-{'normal':0, 'elevated':1, 'high':2}[c.importance], -c.published, c.id))
-        else:
-            values.sort(key=lambda c: (not c.published_known, c.published if c.published_known and sort == 'oldest' else -c.published if c.published_known else 0, c.feed_id, (-1 if sort == 'oldest' else 1) * (c.source_order if isinstance(c.source_order, int) else 0), c.id))
-        owners = feeds()
-        return [card(runtime, value, owners[value.feed_id]) for value in values]
+        with reading_snapshot():
+            allowed = {'folder', 'feed', 'sort', 'show_hidden'}
+            for key in request.query_params:
+                if key not in allowed or len(request.query_params.getlist(key)) != 1:
+                    raise ApiError(422, invalid('query', key))
+            sort = request.query_params.get('sort', 'newest')
+            if sort not in ('newest', 'oldest', 'importance'):
+                raise ApiError(422, invalid('query', 'sort'))
+            folder, feed = request.query_params.get('folder'), request.query_params.get('feed')
+            for key, value in (('folder', folder), ('feed', feed)):
+                if value is not None:
+                    try:
+                        wire.FolderId(value) if key == 'folder' else wire.FeedId(value)
+                    except ValueError:
+                        raise ApiError(422, invalid('query', key)) from None
+            current = runtime.require_store()
+            values = [facts.Card.model_validate(v) for v in current.reading.cards(scalar_boolean(request, 'show_hidden'), folder, feed)]
+            if sort == 'importance':
+                values.sort(key=lambda c: (-{'normal':0, 'elevated':1, 'high':2}[c.importance], -c.published, c.id))
+            else:
+                values.sort(key=lambda c: (not c.published_known, c.published if c.published_known and sort == 'oldest' else -c.published if c.published_known else 0, c.feed_id, (-1 if sort == 'oldest' else 1) * (c.source_order if isinstance(c.source_order, int) else 0), c.id))
+            owners = {}
+            for owner_id in {value.feed_id for value in values}:
+                owners.update(feeds(owner_id))
+            return [card(runtime, value, owners[value.feed_id]) for value in values]
 
     @router.get('/api/v3/materials/{item}', response_model=wire.ReadableMaterial)
     async def material(item: str) -> wire.ReadableMaterial:
-        identity(item)
-        current = runtime.require_store()
-        raw = current.reading.material(item)
-        if raw is None:
-            raise missing(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=identity(item))))
-        value = facts.Material.model_validate(raw)
-        owner = feeds()[value.feed_id]
-        from oko.reader.composition import snippet
-        data = value.model_dump(exclude_unset=True)
-        for key in ('text', 'description', 'display_text'):
-            data.pop(key, None)
-        data.update(feed_title=owner.root.title, folder_id=owner.root.folder_id.root, importance=owner.root.importance.root,
-                    snippet=snippet(value.description if isinstance(value.description, str) and value.description else value.display_text if isinstance(value.display_text, str) else value.text), published_known=value.published_known is not False)
-        entry = facts.Card.model_validate(data)
-        shared, projected = common(runtime, entry, owner), card(runtime, entry, owner).root
-        if isinstance(projected, wire.PendingReadingCard):
-            return wire.ReadableMaterial(wire.PendingReadableMaterial(**shared, availability='pending', content=wire.PendingPublicationContent(availability='pending', loading=projected.loading)))
-        content = wire.AvailablePublicationContent(availability='available', text=value.text,
-            display_text=value.display_text if isinstance(value.display_text, str) else value.text,
-            description=value.description if isinstance(value.description, str) else '',
-            images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
-            loading=projected.loading, changed=projected.changed, source_deleted=projected.source_deleted,
-            revision_id=projected.revision_id, version=projected.version, previous_versions=projected.previous_versions)
-        return wire.ReadableMaterial(wire.AvailableReadableMaterial(**shared, availability='available', content=content))
+        with reading_snapshot():
+            identity(item)
+            current = runtime.require_store()
+            raw = current.reading.material(item)
+            if raw is None:
+                raise missing(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=identity(item))))
+            value = facts.Material.model_validate(raw)
+            owner = feeds(value.feed_id)[value.feed_id]
+            from oko.reader.composition import snippet
+            data = value.model_dump(exclude_unset=True)
+            for key in ('text', 'description', 'display_text'):
+                data.pop(key, None)
+            data.update(feed_title=owner.root.title, folder_id=owner.root.folder_id.root, importance=owner.root.importance.root,
+                        snippet=snippet(value.description if isinstance(value.description, str) and value.description else value.display_text if isinstance(value.display_text, str) else value.text), published_known=value.published_known is not False)
+            entry = facts.Card.model_validate(data)
+            projected = card(runtime, entry, owner).root
+            shared = common(runtime, entry, owner)
+            if isinstance(projected, wire.PendingReadingCard):
+                return wire.ReadableMaterial(wire.PendingReadableMaterial(**shared, availability='pending', content=wire.PendingPublicationContent(availability='pending', loading=projected.loading)))
+            content = wire.AvailablePublicationContent(availability='available', text=value.text,
+                display_text=value.display_text if isinstance(value.display_text, str) else value.text,
+                description=value.description if isinstance(value.description, str) else '',
+                images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
+                loading=projected.loading, changed=projected.changed, source_deleted=projected.source_deleted,
+                revision_id=projected.revision_id, version=projected.version, previous_versions=projected.previous_versions)
+            return wire.ReadableMaterial(wire.AvailableReadableMaterial(**shared, availability='available', content=content))
 
     @router.get('/api/v3/materials/{item}/versions/{number}', response_model=wire.PublicationVersion)
     async def version(item: str, number: str) -> wire.PublicationVersion:

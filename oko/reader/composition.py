@@ -1,3 +1,4 @@
+from oko.storage.reading import reading_snapshot
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -61,30 +62,27 @@ class ReadingComposition:
     def __init__(self, store: 'Store') -> None:
         self._store = store
 
+    @reading_snapshot()
     def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
-        feeds = {feed['id']: feed for feed in self._store.subscriptions.feeds()}
+        feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds(feed, folder=folder)}
+        where, parameters = ['i.viewed=0'], []
+        if feed is not None:
+            where.append('i.feed_id=?')
+            parameters.append(feed)
+        if folder is not None:
+            where.append('f.folder_id=?')
+            parameters.append(folder)
+        rows = self._store.db.execute('SELECT i.* FROM items i JOIN feeds f ON f.id=i.feed_id WHERE '
+                                      + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
         cards = []
-        for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall():
-            owner = feeds.get(row['feed_id'])
-            if owner is None or (folder is not None and owner['folder_id'] != folder) or (feed is not None and row['feed_id'] != feed):
-                continue
-            material = _reading_heading(self._store.material(row['id']), owner)
+        for row in rows:
+            material = self._store.reading_material(row, compact=True)
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):
-                card = dict(material)
-                preview_text = material.get('description') or material.get('display_text', material['text'])
-                filtered = material.get('filter', {})
-                if filtered.get('status') == 'done' and not filtered.get('restored'):
-                    for fragment in filtered['removed']:
-                        preview_text = preview_text.replace(fragment, '')
-                card['snippet'] = snippet(preview_text)
-                card.pop('description', None)
-                card.pop('display_text', None)
-                del card['text']
-                cards.append(card)
-        return [dict(card, feed_title=feeds[card['feed_id']]['title'],
-                     folder_id=feeds[card['feed_id']]['folder_id'],
-                     importance=feeds[card['feed_id']]['importance']) for card in cards]
+                owner = feeds[row['feed_id']]
+                cards.append(dict(material, feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
+        return cards
 
+    @reading_snapshot()
     def navigation(self) -> Navigation:
         """Count visible original publications in their current feeds and folders."""
         folders = self._store.subscriptions.folders()
@@ -124,6 +122,7 @@ class ReadingComposition:
         return FolderContents(tuple((row['id'], row['members']) for row in rows),
                               tuple(sorted(card['id'] for card in self.cards(True, feed=feed))))
 
+    @reading_snapshot()
     def material(self, identity: str) -> dict[str, Any] | None:
         material = self._store.material(identity)
         if material:

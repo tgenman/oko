@@ -1,3 +1,4 @@
+from oko.storage.reading import reading_value
 """Immutable content versions; SQLite selects only a durably published directory."""
 import hashlib
 import json
@@ -30,6 +31,7 @@ class Versions:
                 if (path / 'original.md').is_file() and not self.number(row['id']):
                     self._register(row['id'], 1, self.fingerprint(path), True)
 
+    @reading_value
     def number(self, item: str) -> int:
         row = self.store.db.execute('SELECT number FROM content_current WHERE item=?', (item,)).fetchone()
         return int(row[0]) if row else 0
@@ -220,10 +222,12 @@ class Versions:
         self._register(item, number, fingerprint, visible)
         self.store.db.execute('DELETE FROM source_deleted WHERE item=?', (item,))
 
+    @reading_value
     def version(self, item: str) -> str:
         row = self.store.db.execute('SELECT fingerprint FROM content_versions WHERE item=? AND number=?', (item, self.number(item))).fetchone()
         return str(row[0]) if row else self.fingerprint(self.path(item).parent)
 
+    @reading_value
     def previous(self, item: str) -> list[dict[str, Any]]:
         rows = self.store.db.execute('SELECT number,fingerprint FROM content_versions WHERE item=? AND visible=1 AND number!=? ORDER BY number DESC', (item, self.number(item))).fetchall()
         return [dict(number=r['number'], version=r['fingerprint'], url=f"/api/v3/materials/{item}/versions/{r['number']}") for r in rows]
@@ -244,6 +248,7 @@ class Versions:
         except (OSError, ValueError, KeyError):
             return None
 
+    @reading_value
     def deleted(self, item: str) -> bool:
         return bool(self.store.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (item,)).fetchone())
 
