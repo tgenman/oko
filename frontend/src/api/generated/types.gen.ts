@@ -181,8 +181,148 @@ export type AvailableReadingCard = {
     version: number;
 };
 
+export type AvailableReadingEntityMaterial = {
+    availability: 'available';
+    content: ReadingTextContent;
+    feed_id: FeedId;
+    id: MaterialId;
+    originals: boolean;
+    published_at: Timestamp | null;
+    source: SourceReference;
+    source_position: number | null;
+    source_url: SourceUrl;
+    title: string;
+};
+
 export type BrowserSessionRevoked = {
     revoked: true;
+};
+
+export type ChangedCardResource = {
+    data: CompactReadingCard;
+    id: string;
+    kind: 'card';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedFeedResource = {
+    data: SubscriptionFeed;
+    id: string;
+    kind: 'feed';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedFilterResource = {
+    data: ReadingFilterData;
+    id: string;
+    kind: 'filter';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedListResource = {
+    data: ReadingListData;
+    id: string;
+    kind: 'list';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedMaterialResource = {
+    data: ReadingEntityMaterial;
+    id: string;
+    kind: 'material';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedMediaResource = {
+    data: ReadingMediaData;
+    id: string;
+    kind: 'media';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedNavigationResource = {
+    data: ReadingIndex;
+    id: string;
+    kind: 'navigation';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedStatusResource = {
+    data: RuntimeStatus;
+    id: string;
+    kind: 'status';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type ChangedThesesResource = {
+    data: ReadingThesesData;
+    id: string;
+    kind: 'theses';
+    state: 'changed';
+    version: ReadingEntityVersion;
+};
+
+export type CheckCard = {
+    id: MaterialId;
+    kind: 'card';
+    known_version: ReadingKnownVersion;
+};
+
+export type CheckFeed = {
+    id: FeedId;
+    kind: 'feed';
+    known_version: ReadingKnownVersion;
+};
+
+export type CheckFilter = {
+    id: MaterialId;
+    kind: 'filter';
+    known_version: ReadingKnownVersion;
+};
+
+export type CheckList = {
+    kind: 'list';
+    known_cards: {
+        [key: string]: ReadingKnownVersion;
+    };
+    known_version: ReadingKnownVersion;
+    options: ReadingListOptions;
+};
+
+export type CheckMaterial = {
+    id: MaterialId;
+    kind: 'material';
+    known_version: ReadingKnownVersion;
+};
+
+export type CheckMedia = {
+    id: MaterialId;
+    kind: 'media';
+    known_version: ReadingKnownVersion;
+};
+
+export type CheckNavigation = {
+    kind: 'navigation';
+    known_version: ReadingKnownVersion;
+};
+
+export type CheckStatus = {
+    kind: 'status';
+    known_version: ReadingKnownVersion;
+};
+
+export type CheckTheses = {
+    id: MaterialId;
+    kind: 'theses';
+    known_version: ReadingKnownVersion;
 };
 
 /**
@@ -711,6 +851,23 @@ export type CommandYoutubeConfigure = {
     operation: 'youtube_configure';
 };
 
+export type CompactReadingCard = {
+    availability: 'pending' | 'available';
+    changed: boolean;
+    feed_id: FeedId;
+    filter_state: 'disabled' | 'queued' | 'running' | 'ready' | 'waiting' | 'cancelled';
+    hidden: boolean;
+    id: MaterialId;
+    loading: boolean;
+    preview_url: MediaUrl | null;
+    published_at: Timestamp | null;
+    revision_id: RevisionId | null;
+    snippet: string;
+    source_url: SourceUrl;
+    theses_state: 'disabled' | 'queued' | 'running' | 'ready' | 'waiting' | 'cancelled';
+    title: string;
+};
+
 export type CompleteContent = {
     state: 'complete';
 };
@@ -1050,6 +1207,13 @@ export type ExistingTelegramFeed = {
 
 export type ExplicitLifetimePolicy = {
     kind: 'explicit';
+};
+
+export type FailedReadingResource = {
+    id: string;
+    kind: ReadingResourceKind;
+    message: string;
+    state: 'failed';
 };
 
 export type FeedActivity = {
@@ -1716,6 +1880,19 @@ export type PendingReadingCard = {
     title: string;
 };
 
+export type PendingReadingEntityMaterial = {
+    availability: 'pending';
+    content: PendingPublicationContent;
+    feed_id: FeedId;
+    id: MaterialId;
+    originals: boolean;
+    published_at: Timestamp | null;
+    source: SourceReference;
+    source_position: number | null;
+    source_url: SourceUrl;
+    title: string;
+};
+
 export type PersonalTelegramProfileIdentityMismatch = {
     checked_at: Timestamp;
     configuration_ref: ConfigurationRef;
@@ -1955,10 +2132,60 @@ export type ReadingCard = ({
     availability: 'available';
 } & AvailableReadingCard);
 
+export type ReadingCheck = ({
+    kind: 'status';
+} & CheckStatus) | ({
+    kind: 'navigation';
+} & CheckNavigation) | ({
+    kind: 'feed';
+} & CheckFeed) | ({
+    kind: 'card';
+} & CheckCard) | ({
+    kind: 'material';
+} & CheckMaterial) | ({
+    kind: 'filter';
+} & CheckFilter) | ({
+    kind: 'theses';
+} & CheckTheses) | ({
+    kind: 'media';
+} & CheckMedia) | ({
+    kind: 'list';
+} & CheckList);
+
+export type ReadingCheckRequest = {
+    resources: Array<ReadingCheck>;
+    storage_id: ReadingStorageId | null;
+};
+
+export type ReadingCheckResponse = ({
+    state: 'current';
+} & ReadingFrame) | ({
+    state: 'reset';
+} & ReadingReset);
+
 export type ReadingComposition = {
     count: number;
     feeds: Array<NavigationFeed>;
     folders: Array<ReadingFolder>;
+};
+
+export type ReadingEntityMaterial = ({
+    availability: 'available';
+} & AvailableReadingEntityMaterial) | ({
+    availability: 'pending';
+} & PendingReadingEntityMaterial);
+
+export type ReadingEntityVersion = string;
+
+export type ReadingFeedReference = {
+    count: number;
+    has_unviewed: boolean;
+    id: FeedId;
+};
+
+export type ReadingFilterData = {
+    filter: FilterState;
+    revision_id: RevisionId | null;
 };
 
 export type ReadingFolder = {
@@ -1969,6 +2196,85 @@ export type ReadingFolder = {
      */
     position: number;
     title: string;
+};
+
+export type ReadingFolderEntity = {
+    count: number;
+    id: FolderId;
+    /**
+     * Persisted ordering position; demo source legitimately uses -1.
+     */
+    position: number;
+    title: string;
+    version: ReadingEntityVersion;
+};
+
+export type ReadingFrame = {
+    resources: Array<ReadingResource>;
+    state: 'current';
+    storage_id: ReadingStorageId;
+};
+
+export type ReadingIndex = {
+    count: number;
+    feeds: Array<ReadingFeedReference>;
+    folders: Array<ReadingFolderEntity>;
+};
+
+export type ReadingKnownVersion = ReadingEntityVersion | null;
+
+export type ReadingListData = {
+    ids: Array<MaterialId>;
+    options: ReadingListOptions;
+};
+
+export type ReadingListOptions = {
+    show_hidden: boolean;
+    sort: 'newest' | 'oldest' | 'importance';
+    target: ReadingListTarget;
+};
+
+export type ReadingListTarget = AllCollectionTarget | FeedCollectionTarget | FolderCollectionTarget;
+
+export type ReadingMediaData = {
+    attachments: Array<Attachment>;
+    images: Array<MediaUrl>;
+    previous_versions: Array<PreviousVersionReference>;
+    revision_id: RevisionId | null;
+};
+
+export type ReadingReset = {
+    state: 'reset';
+    storage_id: ReadingStorageId;
+};
+
+export type ReadingResource = ChangedStatusResource | ChangedNavigationResource | ChangedFeedResource | ChangedCardResource | ChangedMaterialResource | ChangedFilterResource | ChangedThesesResource | ChangedMediaResource | ChangedListResource | UnchangedReadingResource | UnavailableReadingResource | FailedReadingResource;
+
+export type ReadingResourceKind = 'status' | 'navigation' | 'feed' | 'card' | 'material' | 'list' | 'filter' | 'theses' | 'media';
+
+export type ReadingStorageId = string;
+
+export type ReadingTextContent = {
+    availability: 'available';
+    changed: boolean;
+    completeness: ContentCompleteness;
+    /**
+     * Source description stored separately from publication text.
+     */
+    description: string;
+    loading: boolean;
+    revision_id: RevisionId;
+    source_deleted: boolean;
+    /**
+     * Original stored publication text. Filtering is delivered separately for this source revision.
+     */
+    text: string;
+    version: number;
+};
+
+export type ReadingThesesData = {
+    revision_id: RevisionId | null;
+    theses: ThesesState;
 };
 
 export type RecoveryChangeSetting = {
@@ -2637,6 +2943,21 @@ export type ThesesState = ThesesReadyState | ThesesAttemptState;
  * RFC 3339 timestamp with a mandatory timezone offset, normalized to UTC in responses.
  */
 export type Timestamp = string;
+
+export type UnavailableReadingResource = {
+    id: string;
+    kind: ReadingResourceKind;
+    reason: 'viewed' | 'not_found' | 'scope_removed' | 'runtime_stopped';
+    state: 'unavailable';
+    version: ReadingKnownVersion;
+};
+
+export type UnchangedReadingResource = {
+    id: string;
+    kind: ReadingResourceKind;
+    state: 'unchanged';
+    version: ReadingEntityVersion;
+};
 
 export type UnfinishedProcessingAttempt = ({
     state: 'queued';
@@ -5138,6 +5459,85 @@ export type ReadingCompositionResponses = {
 };
 
 export type ReadingCompositionResponse = ReadingCompositionResponses[keyof ReadingCompositionResponses];
+
+export type CheckReadingData = {
+    body: ReadingCheckRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v3/reading/check';
+};
+
+export type CheckReadingErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type CheckReadingError = CheckReadingErrors[keyof CheckReadingErrors];
+
+export type CheckReadingResponses = {
+    /**
+     * Current per-entity data, unchanged markers or an explicit storage reset. Reading does not execute commands.
+     */
+    200: ReadingCheckResponse;
+};
+
+export type CheckReadingResponse = CheckReadingResponses[keyof CheckReadingResponses];
+
+export type ReadingMaterialData = {
+    body?: never;
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        item: string;
+    };
+    query?: never;
+    url: '/api/v3/reading/materials/{item}';
+};
+
+export type ReadingMaterialErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type ReadingMaterialError = ReadingMaterialErrors[keyof ReadingMaterialErrors];
+
+export type ReadingMaterialResponses = {
+    /**
+     * Current per-entity data, unchanged markers or an explicit storage reset. Reading does not execute commands.
+     */
+    200: ReadingCheckResponse;
+};
+
+export type ReadingMaterialResponse = ReadingMaterialResponses[keyof ReadingMaterialResponses];
 
 export type FeedRefreshSettingsData = {
     body?: never;

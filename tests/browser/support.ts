@@ -105,10 +105,74 @@ async function reader() {
           resolve(response(url, window.readerTransport.requests.filter(request=>request.url===url).at(-1)?.method||'GET', body, status));
         },
       };
+      // Existing scenarios describe publication snapshots. Adapt those snapshots
+      // to the new wire protocol here; requests still record only actual HTTP calls.
+      const entityVersions=new Map<string,{version:number;json:string}>();
+      async function fixtureRead(url:string) {
+        if(held.has(url)){const result=await new Promise<Response>(resolve=>pending.set(url,resolve)),body=await result.json();if(!result.ok)throw new Error(body.message||body.detail||'Synthetic reading failure');return body;}
+        const pathname=url.split('?')[0],reply=replies.get('GET '+url)||replies.get(url)||replies.get('GET '+pathname)||replies.get(pathname);
+        if(!reply)throw new Error('Missing selective fixture: '+url);
+        for(const [route,next] of reply.next||[])replies.set(route,next);
+        const result=await response(url,'GET',reply.body,reply.status||200),body=await result.json();
+        if(!result.ok)throw new Error(body.message||body.detail||'Synthetic reading failure');
+        return body;
+      }
+      const storageId='3f003741-d0c7-4e62-8d12-55fb652f404a';
+      async function selective(request:import('../../frontend/src/api/generated/types.gen').ReadingCheckRequest) {
+        type Resource=import('../../frontend/src/api/generated/types.gen').ReadingResource;
+        type Card=import('../../frontend/src/api/generated/types.gen').ReadingCard;
+        type Material=import('../../frontend/src/api/generated/types.gen').ReadableMaterial;
+        const resources:Resource[]=[],added=new Set<string>();
+        const changed=(kind:Resource['kind'],id:string,data:unknown,known:string|null)=>{
+          const key=kind+'/'+id;if(added.has(key))return;added.add(key);
+          const json=JSON.stringify(data),old=entityVersions.get(key),version=old?(old.json===json?old.version:old.version+1):1;
+          entityVersions.set(key,{version,json});
+          resources.push(known===String(version)?{kind,id,state:'unchanged',version:String(version)}:{kind,id,state:'changed',version:String(version),data} as Resource);
+        };
+        let catalog:import('../../frontend/src/api/generated/types.gen').ReadingComposition|undefined;
+        const navigation=async():Promise<import('../../frontend/src/api/generated/types.gen').ReadingComposition>=>catalog??=await fixtureRead('/api/v3/reading-composition');
+        const opened=new Map<string,Material>();
+        async function material(id:string){if(!opened.has(id))opened.set(id,await fixtureRead('/api/v3/materials/'+id));return opened.get(id)!;}
+        const compact=(card:Card)=>({id:card.id,feed_id:card.feed_id,title:card.title,published_at:card.published_at,source_url:card.source_url,snippet:card.snippet,availability:card.availability,loading:card.loading,changed:card.availability==='available'&&card.changed,revision_id:card.availability==='available'?card.revision_id:null,preview_url:card.availability==='available'?(card.images[0]||card.attachments.find(a=>a.kind==='image')?.url||null):null,hidden:!!card.filter.result?.hidden,filter_state:card.filter.attempt.state,theses_state:card.theses.attempt.state});
+        if(request.storage_id&&request.storage_id!==storageId)return {state:'reset',storage_id:storageId};
+        for(const item of request.resources){
+          const kind=item.kind;
+          if(kind==='status')changed(kind,'runtime',await fixtureRead('/api/v3/status'),item.known_version);
+          else if(kind==='navigation'){
+            const nav=await navigation();
+            changed(kind,'navigation',{...nav,folders:nav.folders.map(f=>({...f,version:'1'})),feeds:nav.feeds.map(f=>({id:f.feed.id,count:f.count,has_unviewed:f.has_unviewed}))},item.known_version);
+            for(const ref of nav.feeds){const known=request.resources.find(r=>r.kind==='feed'&&r.id===ref.feed.id);changed('feed',ref.feed.id,ref.feed,known?.known_version??null);}
+          }else if(kind==='feed'){
+            const feed=(await navigation()).feeds.find(f=>f.feed.id===item.id)?.feed;
+            if(feed)changed(kind,item.id,feed,item.known_version);
+            else resources.push({kind,id:item.id,state:'unavailable',version:null,reason:'not_found'});
+          }else if(kind==='list'){
+            const o=item.options,p=new URLSearchParams({sort:o.sort});if(o.show_hidden)p.set('show_hidden','true');if(o.target.scope==='feed')p.set('feed',o.target.feed_id);if(o.target.scope==='folder')p.set('folder',o.target.folder_id);
+            const cards:Card[]=await fixtureRead('/api/v3/cards?'+p);
+            for(const card of cards)changed('card',card.id,compact(card),item.known_cards[card.id]??null);
+            changed(kind,JSON.stringify([o.target.scope,o.target.scope==='feed'?o.target.feed_id:o.target.scope==='folder'?o.target.folder_id:'',o.sort,o.show_hidden]),{ids:cards.map(c=>c.id),options:o},item.known_version);
+          }else if(kind==='card'){
+            const card=(await fixtureRead('/api/v3/cards') as Card[]).find(c=>c.id===item.id);if(card)changed(kind,item.id,compact(card),item.known_version);
+          }else{
+            const m=await material(item.id),revision=m.availability==='available'?m.content.revision_id:null;
+            if(kind==='filter')changed(kind,item.id,{revision_id:revision,filter:m.filter},item.known_version);
+            else if(kind==='theses')changed(kind,item.id,{revision_id:revision,theses:m.theses},item.known_version);
+            else if(kind==='media')changed(kind,item.id,{revision_id:revision,images:m.availability==='available'?m.content.images:[],attachments:m.availability==='available'?m.content.attachments:[],previous_versions:m.availability==='available'?m.content.previous_versions:[]},item.known_version);
+            else{
+              const {feed_title,folder_id,importance,snippet,filter,theses,...text}=m;
+              if(text.availability==='available'){const {images,attachments,previous_versions,display_text,...content}=text.content;text.content=content as typeof text.content;}
+              changed(kind,item.id,text,item.known_version);
+            }
+          }
+        }
+        return {state:'current',storage_id:storageId,resources};
+      }
       window.fetch = async (url, options) => {
         const key = String(url);
         window.readerTransport.requests.push({url: key, method: options?.method || 'GET', body: options?.body ? JSON.parse(String(options.body)) : null});
         if (window.readerTransport.native.has(key)) return nativeFetch(url, options);
+        if(key==='/api/v3/reading/check')return response(key,'POST',await selective(JSON.parse(String(options?.body))));
+        if(key.startsWith('/api/v3/reading/materials/')){const id=key.split('/')[5];return response(key,'GET',await selective({storage_id:null,resources:(['material','filter','theses','media'] as const).map(kind=>({kind,id,known_version:null}))}));}
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
         const method = options?.method || 'GET', pathname = key.split('?')[0];
         const reply = replies.get(method + ' ' + key) || replies.get(key) || replies.get(method + ' ' + pathname) || replies.get(pathname);
@@ -130,7 +194,7 @@ async function reader() {
         const t = window.readerTransport;
         t.replies.set('/api/v3/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
         t.replies.set('/api/v3/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
-        t.replies.set('/api/v3/reading-composition', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0}], count:0}});
+        t.replies.set('/api/v3/reading-composition', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[...new Map(materials.map(m=>[m.feed_id,{id:m.feed_id,title:m.feed_title||m.feed_id,folder_id:m.folder_id||'f',kind:'rss',count:0}])).values()], count:0}});
         t.replies.set('/api/v3/processors/codex', {body:{config:null}});
         t.replies.set('/api/v3/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
         t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});

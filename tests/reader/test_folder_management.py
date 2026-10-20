@@ -1,5 +1,5 @@
 """Folder identity and mutations through the public HTTP boundary."""
-import sqlite3
+from tests.support.storage import database
 
 import httpx
 import pytest
@@ -74,7 +74,7 @@ def test_new_rss_folders_use_opaque_ids_and_resolve_renamed_titles(tmp_path):
 @pytest.mark.parametrize('connection', ['needs_connection', 'deleting', 'unavailable'])
 def test_nonempty_folder_blocks_deletion_even_without_visible_items(tmp_path, connection):
     saved_sources(tmp_path, [('https://source.test/feed', 'Alpha', 'Folder')])
-    with sqlite3.connect(tmp_path / 'state.sqlite') as db:
+    with database(tmp_path) as db:
         db.execute('UPDATE feeds SET connection=?', (connection,))
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         catalog = client.get('/api/v3/subscriptions').json()

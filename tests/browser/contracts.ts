@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, '../..');
 const ajv = new Ajv({allErrors:true,strict:false});
 addFormats(ajv);
 const routes: Record<string, string> = {
+  reading_check:'/api/v3/reading/check',reading_material:'/api/v3/reading/materials/{item}',
   navigation: '/api/v3/reading-composition', cards: '/api/v3/cards',
   material: '/api/v3/materials/{item}', version: '/api/v3/materials/{item}/versions/{number}', status: '/api/v3/status',
   navigation_v3: '/api/v3/reading-composition', cards_v3: '/api/v3/cards', status_v3:'/api/v3/status',
@@ -18,8 +19,10 @@ const routes: Record<string, string> = {
 const loaded = new Set<string>();
 const validators = new Map<string, ValidateFunction>();
 function contractFor(url: string, method = 'GET') {
+  if(method==='POST'&&new URL(url,'http://localhost').pathname==='/api/v3/reading/check')return 'reading_check';
   if (method !== 'GET') return null;
   const pathname = new URL(url, 'http://localhost').pathname;
+  if(/^\/api\/v3\/reading\/materials\/[^/]+$/.test(pathname))return 'reading_material';
   if (pathname === '/api/v3/status') return 'status_v3';
   if (pathname === '/api/v3/cards') return 'cards_v3';
   if (pathname === '/api/v3/reading-composition') return 'navigation_v3';
@@ -44,7 +47,7 @@ function validate(name: string, body: unknown) {
       // response schemas, preserving their local #/components references.
       ajv.addSchema({components: document.components, responses: Object.fromEntries(
         Object.entries(routes)
-          .map(([alias, url]) => [alias, document.paths[url].get.responses['200'].content['application/json'].schema]),
+          .map(([alias, url]) => [alias, document.paths[url][alias==='reading_check'?'post':'get'].responses['200'].content['application/json'].schema]),
       )}, library);
       loaded.add(library);
     }

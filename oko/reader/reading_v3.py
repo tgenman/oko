@@ -1,6 +1,7 @@
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
 from oko.storage.reading import reading_snapshot
 from pathlib import Path
+from collections.abc import Callable
 from typing import Literal, TypedDict
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Request
@@ -54,10 +55,17 @@ def filter_state(value: facts.Filter | None, waiting: ProcessingWait | None) -> 
 
 
 def theses_state(value: facts.Card, waiting: ProcessingWait | None) -> wire.ThesesState:
-    origin = value.provenance if isinstance(value.provenance, (facts.CodexProvenance, facts.LocalProvenance, facts.UnknownProvenance)) else None
-    result = wire.PublicationTheses(points=[wire.ThesesPoint(text=p.text, references=[wire.PublicationReference(material_id=wire.MaterialId(r.id), source_url=wire.SourceUrl(r.url)) for r in p.sources]) for p in value.theses.points], provenance=provenance(origin)) if isinstance(value.theses, facts.Summary) else None
-    status = value.ai.status if isinstance(value.ai, facts.AI) else 'off'
-    message = value.ai.error if isinstance(value.ai, facts.AI) else None
+    return theses_parts(value.theses if isinstance(value.theses, facts.Summary) else None,
+        value.provenance if isinstance(value.provenance, (facts.CodexProvenance, facts.LocalProvenance, facts.UnknownProvenance)) else None,
+        value.ai if isinstance(value.ai, facts.AI) else None, waiting)
+
+
+def theses_parts(summary: facts.Summary | None,
+                 origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance | None,
+                 ai: facts.AI | None, waiting: ProcessingWait | None) -> wire.ThesesState:
+    result = wire.PublicationTheses(points=[wire.ThesesPoint(text=p.text, references=[wire.PublicationReference(material_id=wire.MaterialId(r.id), source_url=wire.SourceUrl(r.url)) for r in p.sources]) for p in summary.points], provenance=provenance(origin)) if summary is not None else None
+    status = ai.status if ai is not None else 'off'
+    message = ai.error if ai is not None else None
     if status == 'done' and result is not None:
         return wire.ThesesState(wire.ThesesReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
     return wire.ThesesState(wire.ThesesAttemptState(attempt=attempt(status, message, waiting), diagnostic_message=message, result=result))
@@ -149,7 +157,7 @@ def preview(value: facts.CompletionPreview) -> wire.CompletionPreview:
     return wire.CompletionPreview(cards_count=value.cards, publications_count=value.originals, token=value.token)
 
 
-def register(app: FastAPI, runtime: Runtime) -> None:
+def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMaterial]:
     router = APIRouter(dependencies=[Depends(no_query)])
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
@@ -202,6 +210,9 @@ def register(app: FastAPI, runtime: Runtime) -> None:
 
     @router.get('/api/v3/materials/{item}', response_model=wire.ReadableMaterial)
     async def material(item: str) -> wire.ReadableMaterial:
+        return read_material(item)
+
+    def read_material(item: str) -> wire.ReadableMaterial:
         with reading_snapshot():
             identity(item)
             current = runtime.require_store()
@@ -381,3 +392,4 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         return await execute(request, wire.CommandContext(wire.CommandRestoreFilter(operation='restore_filter', material_id=identity(item))))
 
     app.include_router(router)
+    return read_material

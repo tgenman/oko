@@ -94,7 +94,7 @@ test('object and global drafts are independent, field save preserves other unsav
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'two',exact:true}).click();
     await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Черновик второго');
-    const writes = await r.page.evaluate(() => readerTransport.requests.filter(q => ['PATCH','PUT','POST'].includes(q.method) && !q.url.includes('/tabs/') && !/^\/api\/v3\/client-sessions(?:\/[^/?]+)?$/.test(q.url) && q.url !== '/api/v3/diagnostics'));
+    const writes = await r.page.evaluate(() => readerTransport.requests.filter(q => ['PATCH','PUT','POST'].includes(q.method) && !q.url.includes('/tabs/') && !/^\/api\/v3\/client-sessions(?:\/[^/?]+)?$/.test(q.url) && q.url !== '/api/v3/diagnostics' && q.url !== '/api/v3/reading/check'));
     expect(writes).toEqual([{url:'/api/v3/settings/feed/one',method:'PATCH',body:{prompt_theses:'Черновик первого'}}]);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
@@ -298,6 +298,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
   const r = await reader();
   try {
     await r.start([material('before')]); await objects(r);
+    await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;nav.feeds.push({id:'one',title:'one',folder_id:'f',kind:'rss',count:1});});
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/v3/subscriptions')!.body);
@@ -308,17 +309,18 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
       if (++catalogRead === 1) heldCatalog = route;
       else await route.fulfill({json:subscriptions});
     });
-    await r.page.route('**/api/v3/status', async route => {
+    await r.page.route('**/api/v3/reading/check', async route => {
       if (++statusRead === 1) heldStatus = route;
       else await route.fulfill({json:domainStatus});
     });
     await r.page.evaluate(() => {
-      readerTransport.native.add('/api/v3/status');
+      readerTransport.native.add('/api/v3/reading/check');
       readerTransport.native.add('/api/v3/subscriptions');
       readerTransport.replies.set('PATCH /api/v3/feeds/one',{body:{}});
     });
     // An old background read is still pending when the server write completes.
     await expect.poll(() => Boolean(heldStatus)).toBe(true);
+    await r.page.evaluate(()=>readerTransport.native.delete('/api/v3/reading/check'));
     await r.page.evaluate(() => {readerTransport.replies.get('/api/v3/cards')!.body = [{id:'after',title:'После сохранения',published:100,folder_id:'f',feed_id:'one',url:'https://example.org/after',complete:true,published_known:true,feed_title:'one',importance:'high',snippet:''}];});
     await feedOptions(r.page);
     await r.page.locator('#feed-importance').selectOption('high');

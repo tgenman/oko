@@ -3,7 +3,7 @@ import {copyText} from '../browser-platform';
 import {useEffect,useLayoutEffect,useRef} from 'react';
 import {createPortal} from 'react-dom';
 import {viewed} from '../api/generated/sdk.gen';
-import type {ReadingCard} from '../api/generated/types.gen';
+import type {CardView as ReadingCard} from './resources';
 import {ReaderError,type ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {reportError} from '../status/debug';

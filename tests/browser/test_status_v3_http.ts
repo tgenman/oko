@@ -105,7 +105,7 @@ test('a status reply started before YouTube save cannot overwrite the saved conn
  await expect(page.locator('#youtube-mode')).toHaveValue('direct');
  let releaseOld:(()=>Promise<void>)|undefined;
  const waiting:import('playwright').Route[]=[];
- await page.route('**/api/v3/status',async route=>{if(!releaseOld){const reply=await route.fetch();releaseOld=()=>route.fulfill({response:reply});}else waiting.push(route);});
+ await page.route('**/api/v3/reading/check',async route=>{if(!releaseOld){const reply=await route.fetch();releaseOld=()=>route.fulfill({response:reply});}else waiting.push(route);});
  await expect.poll(()=>Boolean(releaseOld)).toBe(true);
  await page.locator('#youtube-mode').selectOption('proxy');
  await page.locator('#youtube-address').fill('http://127.0.0.1:9999');

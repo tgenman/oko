@@ -46,7 +46,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
       } catch(error) {
         if (onError && !['/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {
           if (error instanceof Error) {
-            Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : []});
+            Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : url.pathname.startsWith('/api/v3/reading/materials/') ? [url.pathname.split('/')[5]] : []});
             reported.add(error);
           }
           onError(error,request.method+' '+url.pathname);

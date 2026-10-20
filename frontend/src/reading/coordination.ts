@@ -1,3 +1,5 @@
+import {createReadingResources,listIdentity} from './resources';
+import type {ReadingListOptions} from '../api/generated/types.gen';
 import {createNewsActions} from './news-actions';
 import {createMaterialList} from './list';
 import {createReadingTree, type Navigation} from './tree';
@@ -31,6 +33,11 @@ type Options = {
 // Coordinates accepted reading changes. Local owners retain DOM, scroll, drafts
 // and media; the session alone owns polling, presence and browser resources.
 export function createReadingCoordination({readerApi, fetchMedia, debug, menus, statusPanel, actions, progress, onStopped, onPowerState}: Options) {
+  const resources=createReadingResources(readerApi);
+  let checking:AbortController|undefined;
+  let unavailable=false;
+  let displayedList:string|undefined;
+  let listOnly=false;
   let contentEpoch = 0;
   let refreshSequence = 0;
   let stopped = false;
@@ -48,6 +55,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
 
   function viewed(id: string, broadcast: boolean) {
     contentEpoch++;
+    resources.forget([id]);
     debug.forgetMaterials([id]);
     statusPanel.forgetMaterials([id]);
     opened.viewed(id);
@@ -60,6 +68,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   }
   const opened = createOpenedMaterial({
     readerApi,
+    acceptStorage:identity=>resources.storageId===null||resources.storageId===identity,
     fetchMedia: (path, signal) => fetchMedia(path, signal, 'no-store'),
     onViewed: id => { viewed(id, true); void refresh(); },
     onChanged: contentChanged => {if (contentChanged) contentEpoch++; void refresh();},
@@ -116,6 +125,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       contentEpoch++;
       opened.clear();
       list.setArea(selection, readingCatalog);
+      listOnly=true;
       void refresh();
     },
     onFeedMenu: (feed, folders, x, y, trigger) => {folderMenu.close(false);newsActions.close(false);feedActions.open(feed, folders, x, y, trigger);},
@@ -155,6 +165,8 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   function refresh() {return session.refresh();}
   async function updateReader() {
     if (stopped) return;
+    checking?.abort();
+    const controller=new AbortController();checking=controller;
     const epoch = contentEpoch;
     const sequence = ++refreshSequence;
     const active = () => !stopped && epoch === contentEpoch && sequence === refreshSequence;
@@ -162,9 +174,22 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     const settingsRevision = menus.statusRevision();
     let statusAvailable = false;
     try {
-      const state = await readerApi.status();
-      if (!active()) return;
+      const selection=tree.selection;
+      const sort=input('sort').value;
+      const options:ReadingListOptions={target:selection.kind==='feed'?{scope:'feed',feed_id:selection.id!}:selection.kind==='folder'?{scope:'folder',folder_id:selection.id!}:{scope:'all'},sort:sort==='oldest'||sort==='importance'?sort:'newest',show_hidden:input('show-hidden').checked};
+      const openedCheck=opened.poll();
+      const selectedOnly=listOnly;listOnly=false;
+      const frame=await resources.check(resources.plan(options,openedCheck.resources,selectedOnly),controller.signal);
+      if(!active())return;
+      const accepted=resources.accept(frame);
+      if(accepted.reset){opened.clear();void refresh();return;}
+      if(frame.state!=='current')return;
+      if(openedCheck.session)opened.apply(frame.resources,openedCheck.session);
+      const state=resources.status;
+      if(!state)throw new Error('Reading status temporarily unavailable');
+      const recovered=unavailable;unavailable=false;
       statusAvailable = true;
+      if(recovered||accepted.changed.has('status')){
       debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
       menus.status(state,settingsRevision);
       if (state.runtime_state==='stopped') { stopUi('Oko stopped'); return; }
@@ -179,27 +204,31 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       void actions.flush();
       progress(`${workText(state)} · sources ${state.ready_sources}/${state.total_sources}`);
       menus.sources(state.sources || []);
-      const navigation = await tree.load();
-      if (!active()) return;
-      readingCatalog = navigation;
-      feedActions.update(navigation);
-      folderMenu.update(navigation);
-      folderActions.update(navigation.folders);
-      if (tree.update(navigation, state.sources || [])) return;
-      list.setArea(tree.selection, navigation);
-      if (state.runtime_state==='unavailable') { opened.clear(); list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable'); return; }
-      const params = new URLSearchParams({sort: input('sort').value});
-      if (input('show-hidden').checked) params.set('show_hidden', 'true');
-      const selection = tree.selection;
-      if (selection.kind === 'folder' && selection.id) params.set('folder', selection.id);
-      if (selection.kind === 'feed' && selection.id) params.set('feed', selection.id);
-      const cards = await list.load(params);
-      if (!active()) return;
-      opened.reconcile(cards);
-      list.update(cards, opened.selection?.id);
-      newsActions.update(list.context());
+      }
+      const navigation=resources.navigation();
+      if(!navigation)throw new Error('Reading navigation temporarily unavailable');
+      const navigationChanged=recovered||accepted.changed.has('navigation')||accepted.changed.has('feed');
+      if(navigationChanged){
+        readingCatalog=navigation;
+        feedActions.update(navigation);
+        folderMenu.update(navigation);
+        folderActions.update(navigation.folders);
+        if(tree.update(navigation,state.sources||[]))return;
+        list.setArea(tree.selection,navigation);
+      } else if(accepted.changed.has('status'))tree.update(navigation,state.sources||[]);
+      if(state.runtime_state==='unavailable'){opened.clear();list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable');return;}
+      const cards=resources.cards(options);
+      if(!cards)throw new Error('Reading list temporarily unavailable');
+      if(recovered||displayedList!==listIdentity(options)||navigationChanged||accepted.changed.has('list')||accepted.changed.has('card')){
+        displayedList=listIdentity(options);
+        opened.reconcile(cards);
+        list.update(cards,opened.selection?.id);
+        newsActions.update(list.context());
+      }
 
     } catch (error) {
+      if(controller.signal.aborted)return;
+      unavailable=true;
       reportError(error, 'Oko interface');
       if (!active()) return;
       if (!statusAvailable) {workAllowed=false;onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);opened.clear(); statusPanel.unavailable();}

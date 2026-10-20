@@ -30,8 +30,8 @@ def library(root, counts):
     return feeds, items
 
 
-def traced_app(root):
-    app = create_app(root, token='test')
+def traced_app(root, **options):
+    app = create_app(root, token='test', api_only=True, **options)
 
     @app.middleware('http')
     async def trace(request, call_next):
