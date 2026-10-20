@@ -1,5 +1,6 @@
 """Current reader obstacles; identity and recovery are independent of message text."""
 import json
+from oko.storage.reading import reading_snapshot
 from dataclasses import dataclass
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,8 @@ class Problems:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self.db = store.db
+        self._headers: dict[str, tuple[tuple[str, int, int, int], dict[str, Any]]] = {}
+        self._numbers: dict[str, int] = {}
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS reader_problems (
               id TEXT PRIMARY KEY, identity TEXT NOT NULL, origin TEXT NOT NULL,
@@ -35,10 +38,17 @@ class Problems:
               sequence INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, identity TEXT NOT NULL,
               body TEXT NOT NULL, started REAL NOT NULL, completed REAL, result TEXT NOT NULL);
         ''')
+        self.db.execute('CREATE INDEX IF NOT EXISTS reader_action_identity_sequence ON reader_action_results(identity,sequence)')
         # Recovery projection only: preserve the original service records for rollback.
         self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result='pending'")}
 
     def snapshot(self, now: float) -> dict[str, Any]:
+        with reading_snapshot():
+            candidates = self.candidates(now)
+            feeds = {f['id']: f for f in self.store.subscriptions.feeds()}
+        return self.reconcile(candidates, now, feeds)
+
+    def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
         scopes = [('oko','global')] + [('feed', feed['id']) for feed in self.store.subscriptions.feeds()]
         needs_codex = any((values := self.store.subscriptions.effective(scope, owner)['effective'])['processor']['value'] == 'codex' and
@@ -72,6 +82,7 @@ class Problems:
                     objects=[],action=None,operation='producer:profile',created_at=now,state='current',finished_at=None,outcome=None,next_at=None)
             groups[identity]['objects'].append(dict(kind='feed',id=saved_feed['id']))
         youtube = self.store.youtube.status(now)
+        read_states = {state['feed_id']: state for state in self.store.read_sync.statuses()}
         jobs = self.db.execute("SELECT jobs.*,items.feed_id,items.viewed FROM jobs LEFT JOIN items ON items.id=jobs.item WHERE (jobs.status IN ('pending','running') OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL)) AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)").fetchall()
         for job in jobs:
             code = job['problem_code']
@@ -79,7 +90,7 @@ class Problems:
                 continue
             if code is None and job['kind'] == 'fetch' and feeds.get(job['feed_id'], {}).get('kind') == 'youtube' and self.store.youtube.ready_at() > now:
                 continue
-            if code is None and job['kind'] == 'read' and not next((state['error'] for state in self.store.read_sync.statuses() if state['feed_id'] == job['item']), ''):
+            if code is None and job['kind'] == 'read' and not read_states.get(job['item'], {}).get('error', ''):
                 continue
             if code == 'youtube-admission':
                 continue
@@ -119,16 +130,22 @@ class Problems:
                 consequence=f'Ожидают субтитров: {len(objects)}.',next_step='Око повторит получение после паузы.',
                 objects=objects,action=None,created_at=now,state='retrying',finished_at=None,outcome=None,next_at=youtube['next_at'])
         affected = {obj['id'] for group in groups.values() for obj in group['objects'] if obj['kind'] == 'material'}
-        for row in self.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 AND complete=1').fetchall():
-            if row['id'] in affected or self.store.versions.deleted(row['id']):
+        known_partial = {obj['id'] for record in self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND json_extract(body,'$.code')='material-incomplete'") for obj in json.loads(record['body'])['objects']}
+        saved = self.db.execute("""SELECT i.id,i.feed_id,c.number FROM items i
+            LEFT JOIN content_current c ON c.item=i.id
+            LEFT JOIN source_deleted d ON d.item=i.id
+            WHERE i.viewed=0 AND i.complete=1 AND d.item IS NULL""").fetchall()
+        self._numbers = {row['id']: row['number'] or 1 for row in saved}
+        self._headers = {key: value for key, value in self._headers.items() if key in self._numbers}
+        for row in saved:
+            if row['id'] in affected:
                 continue
             header = self.header(row['id'])
             if header.get('full', True) or (youtube['paused'] and feeds.get(row['feed_id'], {}).get('kind') == 'youtube'):
                 continue
             cause = header.get('captions')
             waiting = self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running') AND problem_code IS NULL", (row['id'],)).fetchone()
-            known_partial = any(any(obj['id'] == row['id'] for obj in json.loads(record['body'])['objects']) for record in self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND json_extract(body,'$.code')='material-incomplete'"))
-            if waiting and not known_partial:
+            if waiting and row['id'] not in known_partial:
                 continue
             identity = 'incomplete:' + row['feed_id'] + ':' + (cause if cause in ('missing','error') else row['id'])
             if identity not in groups:
@@ -163,7 +180,7 @@ class Problems:
                 next_step='Проверьте состояние после восстановления связи.' if unknown else 'Вернитесь к действию, чтобы исправить проблему.',
                 objects=context['objects'],action=receipt_action,operation=operation,request_id=receipt['id'],
                 state='retrying' if receipt['result'] == 'pending' and not unknown else 'current',created_at=receipt['started'],finished_at=None,outcome=None,next_at=None))
-        return self.reconcile(current, now)
+        return current
 
     def command_record(self, identity: str) -> CommandRecord | None:
         row = self.db.execute('SELECT * FROM reader_action_results WHERE id=?', (identity,)).fetchone()
@@ -226,6 +243,9 @@ class Problems:
 
     def forget_materials(self, members: set[str], now: float) -> None:
         """Deletion wins over keeping an expanded/history row; retain only service facts."""
+        for identity in members:
+            self._headers.pop(identity, None)
+            self._numbers.pop(identity, None)
         for row in self.db.execute('SELECT * FROM reader_problems').fetchall():
             body = json.loads(row['body'])
             before = body['objects']
@@ -250,16 +270,19 @@ class Problems:
                 result = row['result'] if body.get('command_context') else 'abandoned'
                 self.db.execute("UPDATE reader_action_results SET body=?,result=? WHERE id=?", (json.dumps(body), result, row['id']))
 
-    def reconcile(self, candidates: list[dict[str, Any]], now: float) -> dict[str, Any]:
+    def reconcile(self, candidates: list[dict[str, Any]], now: float, feeds: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""
-        identities = {candidate['id'] for candidate in candidates}
+        by_identity = {candidate['id']: candidate for candidate in candidates}
+        identities = set(by_identity)
+        feeds = feeds if feeds is not None else {f['id']: f for f in self.store.subscriptions.feeds()}
+        existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
         with self.db:
-            for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL").fetchall():
+            for row in existing.values():
                 if row['identity'] not in identities:
                     body = json.loads(row['body'])
                     irrelevant = body['code'] == 'codex-choice' and self.store.codex_config() is None
                     irrelevant = irrelevant or any(obj['kind'] == 'material' and self.store.versions.deleted(obj['id']) for obj in body['objects'])
-                    irrelevant = irrelevant or any(obj['kind'] == 'feed' and not any(feed['id'] == obj['id'] and feed['connection'] != 'deleting' for feed in self.store.subscriptions.feeds()) for obj in body['objects'])
+                    irrelevant = irrelevant or any(obj['kind'] == 'feed' and feeds.get(obj['id'], {}).get('connection', 'deleting') == 'deleting' for obj in body['objects'])
                     self.db.execute('UPDATE reader_problems SET finished=?,outcome=? WHERE id=?', (now, 'irrelevant' if irrelevant else 'resolved', row['id']))
             for candidate in candidates:
                 if not candidate['id'].startswith('action:'):
@@ -268,9 +291,11 @@ class Problems:
                 body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome')}
                 # Object labels are hydrated at read time, never an archive of titles.
                 body['objects'] = [{key: value for key, value in obj.items() if key != 'label'} for obj in candidate['objects']]
-                row = self.db.execute('SELECT id FROM reader_problems WHERE identity=? AND finished IS NULL', (identity,)).fetchone()
+                encoded = json.dumps(body)
+                row = existing.get(identity)
                 if row:
-                    self.db.execute('UPDATE reader_problems SET body=? WHERE id=?', (json.dumps(body), row['id']))
+                    if row['body'] != encoded:
+                        self.db.execute('UPDATE reader_problems SET body=? WHERE id=?', (encoded, row['id']))
                 else:
                     self.db.execute('INSERT INTO reader_problems VALUES (?,?,?,?,?,NULL,NULL)',
                                     (uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', json.dumps(body), now))
@@ -279,14 +304,18 @@ class Problems:
                 (SELECT max(sequence) FROM reader_action_results GROUP BY identity)''', (now - 86400,))
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
+        labels: dict[tuple[str, str], str] = {}
         for row in self.db.execute('SELECT * FROM reader_problems ORDER BY created DESC').fetchall():
             problem = json.loads(row['body'])
             if row['finished'] is None:
-                candidate = next((p for p in candidates if p['id'] == row['identity']), {})
+                candidate = by_identity.get(row['identity'], {})
                 if candidate.get('reason'):
                     problem['reason'] = candidate['reason']
             for obj in problem['objects']:
-                obj['label'] = self.label(obj)
+                key = (obj['kind'], obj['id'])
+                if key not in labels:
+                    labels[key] = feeds.get(obj['id'], {}).get('title', 'Источник недоступен') if obj['kind'] == 'feed' else self.label(obj)
+                obj['label'] = labels[key]
             problem.update(id=row['id'], created_at=row['created'], finished_at=row['finished'],
                            outcome=row['outcome'], state='finished' if row['finished'] is not None else problem['state'])
             if row['finished'] is not None:
@@ -308,8 +337,20 @@ class Problems:
 
     def header(self, identity: str) -> dict[str, Any]:
         try:
-            with self.store.path(identity).open() as source:
+            number = self._numbers.get(identity)
+            path = self.store.versions.path(identity, number) if number else self.store.path(identity)
+            stat = path.stat()
+            revision = (str(path), stat.st_ino, stat.st_mtime_ns, stat.st_size)
+            cached = self._headers.get(identity)
+            if cached and cached[0] == revision:
+                return cached[1]
+            with path.open() as source:
                 value = json.loads(source.readline())
-                return value if isinstance(value, dict) else {}
+            value = value if isinstance(value, dict) else {}
+            # Only diagnostic fields are retained, not descriptions or payloads.
+            value = {field: value[field] for field in ('title', 'full', 'captions', 'reason') if field in value}
+            self._headers[identity] = (revision, value)
+            return value
         except (OSError, ValueError):
+            self._headers.pop(identity, None)
             return {}

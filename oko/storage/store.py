@@ -116,6 +116,9 @@ class Store:
             self.db.execute('ALTER TABLE items ADD COLUMN source_order INTEGER')
             self.db.commit()
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
+        self.db.execute('CREATE INDEX IF NOT EXISTS jobs_item ON jobs(item)')
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_active ON jobs(status,kind,item) WHERE status IN ('pending','running') OR error IS NOT NULL")
+        self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.filters = Filters(self)
@@ -609,7 +612,7 @@ class Store:
                 for row in rows]
 
     def status(self) -> dict[str, Any]:
-        rows = self.db.execute('SELECT kind,status,error,count(*) AS count FROM jobs GROUP BY kind,status,error').fetchall()
+        rows = self.db.execute("SELECT kind,status,error,count(*) AS count FROM jobs WHERE status IN ('pending','running') OR error IS NOT NULL GROUP BY kind,status,error").fetchall()
         # The durable feed sweep is deletion work, not a new public job kind.
         jobs = [dict(r, kind='delete' if r['kind'] == 'feed-delete' else r['kind']) for r in rows]
         errors = sorted({r['error'] for r in rows if r['error']})

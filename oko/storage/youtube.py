@@ -1,9 +1,11 @@
 """Durable YouTube caption admission state, owned by Store."""
 import json
+import sqlite3
+from oko.storage.reading import reading_value
 import os
 from pathlib import Path
 import tempfile
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from oko.collection.youtube.access import proxy_settings
 
@@ -27,6 +29,7 @@ class YouTubeAccess:
               item TEXT PRIMARY KEY, attempts INTEGER DEFAULT 0, terminal INTEGER DEFAULT 0);
         ''')
 
+    @reading_value
     def config(self) -> dict[str, str]:
         default = dict(mode='direct', address='', username='', password='')
         if not self.path.exists():
@@ -47,15 +50,21 @@ class YouTubeAccess:
 
     def status(self, wall: float) -> dict[str, Any]:
         config = self.config()
-        row = self.db.execute('SELECT * FROM youtube_access WHERE id=1').fetchone()
+        row = self._limits()
         return dict(mode=config['mode'], address=config['address'], has_username=bool(config['username']),
                     has_password=bool(config['password']), paused=row['blocked_until'] > wall,
                     next_at=max(row['next_at'], row['blocked_until']), strikes=row['strikes'],
                     reason='YouTube ограничил получение субтитров' if row['blocked_until'] > wall else '')
 
+    @reading_value
+    def _limits(self) -> sqlite3.Row:
+        row = self.db.execute('SELECT * FROM youtube_access WHERE id=1').fetchone()
+        assert row is not None
+        return cast(sqlite3.Row, row)
+
     def ready_at(self) -> float:
-        row = self.db.execute('SELECT next_at,blocked_until FROM youtube_access WHERE id=1').fetchone()
-        return float(max(row))
+        row = self._limits()
+        return float(max(row['next_at'], row['blocked_until']))
 
     def terminal(self, item: str) -> bool:
         row = self.db.execute('SELECT terminal,attempts FROM youtube_attempts WHERE item=?', (item,)).fetchone()

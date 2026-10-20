@@ -92,10 +92,12 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
 
     @app.get('/api/v3/status', response_model=wire.RuntimeStatus)
     async def status() -> wire.RuntimeStatus:
-        old = facts.Status.model_validate(runtime.status())
+        snapshot = runtime.status_snapshot()
+        old = facts.Status.model_validate(snapshot.state)
         current = runtime._store if not runtime.stopped else None
-        bindings = {feed['id']: wire.TelegramAccess.model_validate(binding) for feed in current.subscriptions.feeds() if (binding := current.subscriptions.telegram.binding(feed['id']))} if current else {}
-        material_feeds = {row['id']:row['feed_id'] for row in current.db.execute('SELECT id,feed_id FROM items WHERE viewed=0')} if current else {}
+        bindings = {identity: wire.TelegramAccess.model_validate(binding) for identity, binding in snapshot.bindings.items()}
+        identities = {obj.id for p in [*old.problems.current, *old.problems.recent] for obj in p.objects if obj.kind == 'material'} if isinstance(old.problems, facts.ProblemSnapshot) else set()
+        material_feeds = {row['id']: row['feed_id'] for row in current.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 AND id IN (' + ','.join('?' for _ in identities) + ')', tuple(identities))} if current and identities else {}
         policy: wire.ExplicitLifetimePolicy | wire.ClientPresenceLifetimePolicy
         if lifetime.mode == 'explicit':
             policy = wire.ExplicitLifetimePolicy(kind='explicit')

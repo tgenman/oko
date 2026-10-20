@@ -217,7 +217,7 @@ class Subscriptions:
             self.db.execute('DELETE FROM folders WHERE id=?', (identity,))
 
     @reading_value
-    def feeds(self, identity: str | None = None, *, folder: str | None = None) -> list[dict[str, Any]]:
+    def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None) -> list[dict[str, Any]]:
         conditions, parameters = [], []
         if identity is not None:
             conditions.append('id=?')
@@ -225,6 +225,9 @@ class Subscriptions:
         if folder is not None:
             conditions.append('folder_id=?')
             parameters.append(folder)
+        if transport is not None:
+            conditions.append('transport=?')
+            parameters.append(transport)
         query = 'SELECT id FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
         return [self._feed(row['id']) for row in self.db.execute(query, parameters)]
 

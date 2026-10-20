@@ -3,7 +3,9 @@
 Store remains responsible for durable identity/content/recovery. Network waits
 happen outside the action lock; admission, transitions and result commits share it.
 """
+from oko.storage.reading import reading_snapshot
 import asyncio
+from dataclasses import dataclass
 from oko.reviews.coordination import ProcessingWait
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -48,6 +50,12 @@ class ActionError(Exception):
         self.code = code
         self.diagnostic_skip = expected
         super().__init__(str(detail))
+
+
+@dataclass(frozen=True)
+class StatusSnapshot:
+    state: dict[str, Any]
+    bindings: dict[str, dict[str, Any]]
 
 
 class _ExternalCheck:
@@ -274,10 +282,26 @@ class Runtime:
         return identity in self._viewed_ids
 
     def status(self) -> dict[str, Any]:
+        return self.status_snapshot().state
+
+    def status_snapshot(self) -> StatusSnapshot:
+        candidates = None
+        with reading_snapshot():
+            if self._store and not self.stopped:
+                candidates = self._store.problems.candidates(self._wall_clock())
+            feeds = {f['id']: f for f in self._store.subscriptions.feeds()} if self._store else {}
+            bindings = {identity: binding for identity in feeds if self._store and not self.stopped and (binding := self._store.subscriptions.telegram.binding(identity))}
+            state = self._status()
+        if candidates is not None and self._store:
+            self._last_problems = self._store.problems.reconcile(candidates, self._wall_clock(), feeds)
+            if not self._error:
+                state['problems'] = self._last_problems
+        return StatusSnapshot(state, bindings)
+
+    def _status(self) -> dict[str, Any]:
         state: dict[str, Any] = self._store.status() if self._store and not self.stopped else dict(jobs=[], errors=[], deleting=False)
         state['youtube'] = self.youtube_status() if self._store and not self.stopped else None
         if self._store and not self.stopped:
-            self._last_problems = self._store.problems.snapshot(self._wall_clock())
             self._viewed_ids = [row['id'] for row in self._store.db.execute('SELECT id FROM items WHERE viewed=1')]
         state['problems'] = self._last_problems
         if self._error:
@@ -328,7 +352,6 @@ class Runtime:
         async with self._actions:
             if self._store and not self.stopped:
                 self._store.problems.action_finished(identity, succeeded, self._wall_clock())
-                self._last_problems = self._store.problems.snapshot(self._wall_clock())
 
     async def report_action(self, identity: str, context: dict[str, Any], result: str) -> str:
         async with self._actions:
