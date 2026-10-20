@@ -38,6 +38,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   let unavailable=false;
   let displayedList:string|undefined;
   let listOnly=false;
+  let settingsAppliedRevision:number|undefined;
   let contentEpoch = 0;
   let refreshSequence = 0;
   let stopped = false;
@@ -189,9 +190,15 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       if(!state)throw new Error('Reading status temporarily unavailable');
       const recovered=unavailable;unavailable=false;
       statusAvailable = true;
+      const statusConfirmed=frame.resources.some(resource=>resource.kind==='status'&&(resource.state==='changed'||resource.state==='unchanged'));
+      // Local form actions can replace their own optimistic state after this
+      // server version was accepted. Reapply confirmed cached status for the
+      // new owner revision, without loading an unchanged form every poll.
+      if(statusConfirmed&&(recovered||accepted.changed.has('status')||settingsAppliedRevision!==settingsRevision)){
+        menus.status(state,settingsRevision);settingsAppliedRevision=settingsRevision;
+      }
       if(recovered||accepted.changed.has('status')){
       debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
-      menus.status(state,settingsRevision);
       if (state.runtime_state==='stopped') { stopUi('Oko stopped'); return; }
       const enabled=state.runtime_state!=='disabled';
       onPowerState(enabled,state.runtime_state==='running'||state.runtime_state==='disabled');
