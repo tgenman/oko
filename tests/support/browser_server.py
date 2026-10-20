@@ -1,5 +1,6 @@
 """Production HTTP reader with temporary storage and synthetic RSS/model adapters."""
 import json
+import asyncio
 from pathlib import Path
 import secrets
 import socket
@@ -63,9 +64,15 @@ def response(request):
     return httpx.Response(200, text=f'<article><p>Открылась библиотека на 24 места.</p><img src="https://{request.url.host}/image.png"></article>')
 
 
-def build_app(root, token, *, persistent=False, public_url=None):
-    return create_app(root, token=token, rss_enabled=True, persistent=persistent, public_url=public_url,
-                     rss_transport=httpx.MockTransport(response), telegram_client=BrowserTelegram(), ai_transport=model_transport([]), codex_client=CodexService(),
+def build_app(root, token, *, persistent=False, public_url=None,collection=True,processing_delay=0):
+    models=model_transport([])
+    async def delayed_model(request):
+        if request.url.path=='/v1/chat/completions':
+            await asyncio.sleep(processing_delay)
+        return await models.handle_async_request(request)
+    ai=httpx.MockTransport(delayed_model) if processing_delay else models
+    return create_app(root, token=token, rss_enabled=collection, persistent=persistent, public_url=public_url,
+                     rss_transport=httpx.MockTransport(response), telegram_client=BrowserTelegram(), ai_transport=ai, codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
                      lease=60, grace=60)
 

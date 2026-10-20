@@ -14,8 +14,9 @@ from tests.support.browser_server import build_app
 
 
 class Scenario:
-    def __init__(self, data, token, persistent=False, port=0, hostname='127.0.0.1'):
+    def __init__(self, data, token, persistent=False, port=0, hostname='127.0.0.1',collection=True,processing_delay=0):
         self.data, self.persistent, self.hostname = data, persistent, hostname
+        self.collection,self.processing_delay=collection,processing_delay
         self.socket = socket.socket()
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(('127.0.0.1', port))
@@ -24,7 +25,7 @@ class Scenario:
         try:
             # Browser aborts can leave an unfinished HTTP request. Bound its
             # drain time before the normal application lifespan shutdown.
-            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token, persistent=persistent, public_url=self.origin), log_level='error',
+            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token, persistent=persistent, public_url=self.origin,collection=collection,processing_delay=processing_delay), log_level='error',
                                                        timeout_graceful_shutdown=1))
         except BaseException:
             self.socket.close()
@@ -68,7 +69,7 @@ def main():
             key = command['id']
             try:
                 if command['op'] == 'start':
-                    scenario = Scenario(command['data'], command['token'], bool(command.get('persistent')), hostname=command.get('hostname', '127.0.0.1'))
+                    scenario = Scenario(command['data'], command['token'], bool(command.get('persistent')), hostname=command.get('hostname', '127.0.0.1'),collection=bool(command.get('collection',1)),processing_delay=command.get('processing_delay',0))
                     scenarios[key] = scenario
                     result = {'origin': scenario.origin}
                 elif command['op'] == 'stop':
@@ -78,7 +79,7 @@ def main():
                     old = scenarios.pop(command['scenario'])
                     port = int(old.origin.rsplit(':', 1)[1])
                     old.close()
-                    scenario = Scenario(old.data, secrets.token_urlsafe(24), old.persistent, port, old.hostname)
+                    scenario = Scenario(old.data, secrets.token_urlsafe(24), old.persistent, port, old.hostname,old.collection,old.processing_delay)
                     scenarios[command['scenario']] = scenario
                     result = {'origin': scenario.origin}
                 else:

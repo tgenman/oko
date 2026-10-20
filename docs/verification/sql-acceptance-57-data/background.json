@@ -1,0 +1,42 @@
+{
+  "background": [
+    {
+      "total": 104,
+      "idle_processing_sql": 1,
+      "viewed_store_sql": 107,
+      "new_publication_transaction_sql": 93
+    },
+    {
+      "total": 400,
+      "idle_processing_sql": 1,
+      "viewed_store_sql": 107,
+      "new_publication_transaction_sql": 93
+    }
+  ],
+  "feeds": [
+    {
+      "feeds": 4,
+      "old_get_sql": 21,
+      "versioned_get_sql": 40
+    },
+    {
+      "feeds": 20,
+      "old_get_sql": 21,
+      "versioned_get_sql": 40
+    }
+  ],
+  "telegram": [
+    {
+      "feeds": 5,
+      "sql": 73
+    },
+    {
+      "feeds": 20,
+      "sql": 268
+    },
+    {
+      "feeds": 50,
+      "sql": 658
+    }
+  ]
+}
