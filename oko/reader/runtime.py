@@ -112,6 +112,7 @@ class Runtime:
         self._ai_transport = ai_transport
         self._ai: asyncio.Task[None] | None = None
         self._ai_sync = 0.0
+        self._source_revision: int | None = None
         self._ai_stage = 'Проверка обработчика'
         self._root, self._source, self._clock, self._fault = root, source, clock, fault
         self._shutdown = shutdown
@@ -210,8 +211,12 @@ class Runtime:
     def _sync_sources(self) -> None:
         if not self._store:
             return
+        revision = self._store.subscriptions.source_revision()
+        if revision == self._source_revision:
+            return
         settings = []
-        for feed in self._store.subscriptions.feeds():
+        feeds = self._store.subscriptions.feeds()
+        for feed in feeds:
             if feed['id'] == self._source_feed and self._source:
                 continue
             binding = self._store.subscriptions.telegram.binding(feed['id'])
@@ -232,7 +237,7 @@ class Runtime:
         for identity, want_captions in updates.captions:
             self._store.prepare_youtube(identity, want_captions)
         self._telegram_bindings = {}
-        for feed in self._store.subscriptions.feeds():
+        for feed in feeds:
             binding = self._store.subscriptions.telegram.binding(feed['id'])
             bound_source = self._sources.get(feed['id'])
             if bound_source and binding and binding['kind'] == 'web' and feed['connection'] != 'deleting':
@@ -248,6 +253,7 @@ class Runtime:
                         deadline = self._account_retry.setdefault(profile['user_id'], self._clock() + max(0, float(wait[0]) - self._wall_clock()))
                         self._store.restore_telegram_wait(feed['id'], deadline)
                         self._restored_wait_feeds.add(feed['id'])
+        self._source_revision = revision
 
     @property
     def stopped(self) -> bool:
@@ -527,8 +533,8 @@ class Runtime:
             except ValueError as error:
                 record_caught('runtime.patch_feed')
                 raise ActionError('invalid', str(error)) from None
-            current.settings_changed()
-            await self._cancel()
+            current.settings_changed('feed', identity)
+            await self._cancel({identity})
             if 'transport' in body.model_fields_set:
                 self._sync_sources()
             return result
@@ -593,8 +599,9 @@ class Runtime:
                 result = current.subscriptions.update_settings(scope, owner, body)
                 self._collection_interval = current.subscriptions.feed_refresh_minutes() * 60
                 if body.model_fields_set - {'feed_refresh_minutes'}:
-                    current.settings_changed()
-                    await self._cancel()
+                    current.settings_changed(scope, owner)
+                    affected = None if scope == 'oko' else {f['id'] for f in current.subscriptions.feeds(owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
+                    await self._cancel(affected)
                 return result
             except LookupError as error:
                 record_caught('runtime.update_settings')

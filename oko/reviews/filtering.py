@@ -21,6 +21,9 @@ class Filters:
 
     @reading_value
     def signature(self, item: str) -> str | None:
+        return self._signature(item)
+
+    def _signature(self, item: str, *, legacy: bool = False) -> str | None:
         store = self.store
         row = store.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0 AND complete=1', (item,)).fetchone()
         if not row or not store.path(item).is_file():
@@ -32,18 +35,27 @@ class Filters:
         if not settings['effective']['prompt_filters']['value'].strip():
             return None
         config = store.processor_config()
-        return hashlib.sha256(json.dumps([store.content_version(item), settings, store.settings_version(), config.model_dump() if config else None], sort_keys=True).encode()).hexdigest()
+        if legacy:
+            payload = [store.content_version(item), settings, store.settings_version(), config.model_dump() if config else None]
+        else:
+            # Display metadata and history progress are not processing inputs.
+            feed = {key: settings['feed'][key] for key in ('id', 'kind', 'transport', 'public_ai')}
+            payload = ['filter-v2', store.content_version(item), settings['effective'], feed,
+                       store.settings_version(row['feed_id']), config.model_dump() if config else None]
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
-    def sync(self) -> None:
+    def sync(self, items: list[str]) -> None:
         store = self.store
-        for row in store.db.execute('SELECT id FROM items WHERE viewed=0').fetchall():
-            item = row['id']
+        for item in items:
             signature = self.signature(item)
             old = store.db.execute('SELECT signature FROM filter_inputs WHERE item=?', (item,)).fetchone()
-            state = store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=?", (item,)).fetchone()
-            if signature is None and old is None and (not state or state[0] == 'cancelled') and not (store.path(item).parent / 'filter.md').exists():
+            state = store.db.execute("SELECT id,generation,status FROM jobs WHERE kind='filter' AND item=?", (item,)).fetchone()
+            if signature and old and old[0] != signature and state and state['status'] == 'done':
+                self._upgrade_result(item, old[0], signature, state['id'], state['generation'])
+                old = store.db.execute('SELECT signature FROM filter_inputs WHERE item=?', (item,)).fetchone()
+            if signature is None and old is None and (not state or state['status'] == 'cancelled') and not (store.path(item).parent / 'filter.md').exists():
                 continue
-            if old and old[0] == signature and state and (state[0] != 'done' or self.read(item).get('status') == 'done'):
+            if old and old[0] == signature and state and (state['status'] != 'done' or self.read(item).get('status') == 'done'):
                 continue
             (store.path(item).parent / 'filter.md').unlink(missing_ok=True)
             with store.db:
@@ -53,6 +65,24 @@ class Filters:
                     store.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0,error=NULL", (item,))
                 else:
                     store.db.execute('DELETE FROM filter_inputs WHERE item=?', (item,))
+
+    def _upgrade_result(self, item: str, old: str, signature: str, identity: int, generation: int) -> None:
+        if old != self._signature(item, legacy=True):
+            return
+        path = self.store.path(item).parent / 'filter.md'
+        try:
+            header, text = saved_document(path)
+            if header['signature'] not in (old, signature):
+                return
+            result = FilterResult.model_validate(header['result']).model_dump()
+        except (OSError, ValueError, KeyError):
+            return
+        if header['signature'] == old:
+            from oko.storage.store import Job
+            self.store.save_derivative(Job(identity, 'filter', item, generation), signature, result, text,
+                                       finish=False, provenance=header.get('provenance'))
+        with self.store.db:
+            self.store.db.execute('UPDATE filter_inputs SET signature=? WHERE item=?', (signature, item))
 
     @reading_value
     def read(self, item: str) -> dict[str, Any]:
@@ -72,6 +102,7 @@ class Filters:
             except (OSError, ValueError, KeyError):
                 record_caught('filtering.read')
                 pass
+            store.processing.repair(item)
         return dict(status='pending' if not row or row['status'] == 'done' else row['status'], error=row['error'] if row else None, hidden=False, restored=restored, reason='', removed=[])
 
     def request(self, job: 'Job') -> tuple[ProcessingRequest, str, bool] | None:
@@ -83,7 +114,7 @@ class Filters:
             return None
         settings = store.subscriptions.effective('feed', material['feed_id'])
         values = settings['effective']
-        request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text']),), settings_version=store.settings_version(), prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
+        request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text']),), settings_version=store.settings_version(material['feed_id']), prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, settings['feed']['public_ai']
 
     def save(self, job: 'Job', signature: str, result: FilterResult) -> None:

@@ -459,6 +459,9 @@ def test_public_peer_is_resolved_again_after_restart_without_session_entity_cach
     # Simulate the user's existing database from before username persistence.
     import sqlite3
     with sqlite3.connect(tmp_path / 'state.sqlite') as database:
+        # The old schema predates current feed triggers as well as this column.
+        for trigger in database.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='feeds'").fetchall():
+            database.execute('DROP TRIGGER "' + trigger[0].replace('"', '""') + '"')
         database.execute('ALTER TABLE feeds DROP COLUMN telegram_username')
     def interrupt_migration(point):
         if point == 'before_telegram_username_commit':
