@@ -144,3 +144,30 @@ def test_legacy_filter_upgrade_keeps_result_and_origin_without_model_call(tmp_pa
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/materials/' + identity).json()['filter']['result'] == accepted
         assert not [r for r in calls if r.url.path == '/v1/chat/completions']
+
+
+def test_progress_writes_do_not_rebuild_source_configuration(tmp_path):
+    library(tmp_path, 1)
+    store = Store(tmp_path, lambda _: None)
+    feed = store.subscriptions.feeds()[0]['id']
+    with store.db:
+        store.db.execute("INSERT INTO telegram_profiles VALUES ('personal','synthetic',101,1,'ready',0,NULL)")
+        store.db.execute("INSERT OR REPLACE INTO initial_history(feed,selection) VALUES (?,?)", (feed, '{"mode":"count","count":20,"since":null,"date":null,"timezone":"UTC"}'))
+    store.read_sync.sync()
+    with store.db:
+        store.db.execute("UPDATE feeds SET title=title")
+        store.db.execute("UPDATE telegram_profiles SET checked=10,message='checked'")
+        store.db.execute("UPDATE initial_history SET selection=json_set(selection,'$.warnings',json('[\"progress\"]'))")
+    queries = []
+    store.db.set_trace_callback(queries.append)
+    store.read_sync.sync()
+    store.db.set_trace_callback(None)
+    assert not any('FROM feeds' in q for q in queries), queries
+    with store.db:
+        store.db.execute("UPDATE telegram_profiles SET user_id=202,state='unavailable'")
+    queries.clear()
+    store.db.set_trace_callback(queries.append)
+    store.read_sync.sync()
+    store.db.set_trace_callback(None)
+    assert any('FROM feeds' in q for q in queries)
+    store.db.close()

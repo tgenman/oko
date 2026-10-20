@@ -134,6 +134,8 @@ class Store:
         self.versions.recover()
         remove_aggregates(self)
         self.recover_files()
+        if self.db.execute("SELECT 1 FROM items WHERE feed_id='demo' LIMIT 1").fetchone():
+            self.subscriptions.ensure_demo()
         self.subscriptions.watch_configuration()
         self.processing.recover()
         self.read_sync.recover()

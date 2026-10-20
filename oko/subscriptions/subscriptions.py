@@ -139,20 +139,35 @@ class Subscriptions:
         self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
 
     def watch_configuration(self) -> None:
-        """A durable revision of source settings, independent of job progress."""
-        for table in ('feeds', 'settings', 'initial_history', 'telegram_bindings', 'telegram_profiles'):
-            for event in ('INSERT', 'UPDATE', 'DELETE'):
-                self.db.execute(f"""CREATE TRIGGER IF NOT EXISTS source_configuration_{table}_{event}
-                    AFTER {event} ON {table} BEGIN
-                    INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
-                    DO UPDATE SET value=CAST(state.value AS INTEGER)+1;
-                    END""")
-        self.db.executescript("""
-        CREATE TRIGGER IF NOT EXISTS source_read_initial AFTER UPDATE OF initial ON telegram_read_state
-          WHEN NEW.initial IS NOT OLD.initial BEGIN
-          INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
-          DO UPDATE SET value=CAST(state.value AS INTEGER)+1; END;
-        """)
+        """A durable revision of source inputs, independent of progress writes."""
+        columns = {
+            'feeds': ('id', 'identity', 'kind', 'folder_id', 'original_urls', 'connection', 'transport',
+                      'importance', 'initial_days', 'public_ai', 'read_history', 'auto_read',
+                      'telegram_peer', 'telegram_account', 'telegram_username'),
+            'settings': ('scope', 'owner', 'field', 'value'),
+            'telegram_profiles': ('role', 'account', 'user_id', 'generation', 'state'),
+        }
+        history_fields = ('mode', 'count', 'date', 'timezone', 'since', 'run', 'resume', 'cancelled')
+        predicates = {table: ' OR '.join(f'NEW.{field} IS NOT OLD.{field}' for field in fields)
+                      for table, fields in columns.items()}
+        predicates['initial_history'] = ' OR '.join([
+            *(f'NEW.{field} IS NOT OLD.{field}' for field in ('feed', 'frozen', 'paused', 'scan_complete')),
+            *(f"json_extract(NEW.selection,'$.{field}') IS NOT json_extract(OLD.selection,'$.{field}')" for field in history_fields)])
+        predicates['telegram_bindings'] = "NEW.feed IS NOT OLD.feed OR NEW.binding IS NOT OLD.binding"
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            for table, predicate in predicates.items():
+                for event in ('INSERT', 'UPDATE', 'DELETE'):
+                    name = f'source_configuration_{table}_{event}'
+                    self.db.execute(f'DROP TRIGGER IF EXISTS {name}')
+                    guard = ' WHEN ' + predicate if event == 'UPDATE' else ''
+                    self.db.execute(f"""CREATE TRIGGER {name} AFTER {event} ON {table}{guard} BEGIN
+                        INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
+                        DO UPDATE SET value=CAST(state.value AS INTEGER)+1; END""")
+            self.db.execute("""CREATE TRIGGER IF NOT EXISTS source_read_initial AFTER UPDATE OF initial ON telegram_read_state
+              WHEN NEW.initial IS NOT OLD.initial BEGIN
+              INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
+              DO UPDATE SET value=CAST(state.value AS INTEGER)+1; END""")
 
     def source_revision(self) -> int:
         row = self.db.execute("SELECT value FROM state WHERE key='sources-version'").fetchone()
