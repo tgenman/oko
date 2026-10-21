@@ -72,7 +72,8 @@ browser-types, build, http, browser, diff, python-tests, entrypoint, tool-tests.
 - Браузер: 207 passed, 2 штатно skipped; дополнительно 4 сценария задержки чтения
   passed. Всего 211 прошедших браузерных проверок.
 - Инструменты и процесс разработки: 136 passed (67 + 69), 0 failed.
-- После этого прогона изменены только отчёт и статусы документации задачи.
+- После этого прогона код приложения не менялся; изменения документации и
+  ожидания готовности в двух тестах CI описаны ниже.
 
 ## Независимое ревью
 
@@ -95,3 +96,20 @@ worker SDK и локальные proxy-серверы. Личные подпис
 ИИ-обработчик не запускались. Рабочая установка не перезапускалась; слияние в main
 не выполнялось. Прототипы сохранены отдельно в локальной primary-source ветке
 `codex/source-update-prototype-20261021`; production их не импортирует.
+
+## Проверка GitHub CI и гонка готовности старых сценариев
+
+CI коммита `1c80a3d` (run 39661807097) прошёл build/static, Python и tools,
+но два Telegram browser-сценария получили 503 «Откройте читатель для подключения».
+Они вызывали connect сразу после page.goto, не дожидаясь регистрации presence.
+Приложение в этот момент корректно запрещает внешнюю работу.
+
+В `test_external_telegram_media.ts` и `test_telegram_post_unavailable.ts` добавлено
+ожидание доступной кнопки `#collect` перед connect. Это ожидание существующей
+публичной готовности, без sleep, изменения авторизации и повторов команды.
+
+`./scripts/check browser --files tests/browser/test_external_telegram_media.ts tests/browser/test_telegram_post_unavailable.ts --compact --in-place`:
+PASS, 8.53 с; 4 browser-сценария, tooling-types и browser-types прошли.
+Машинный результат: [checks/ci-race-browser-repeat.json](checks/ci-race-browser-repeat.json).
+Приложение после успешного полного прогона не менялось; полный локальный набор
+повторно не запускался из-за изменения только ожиданий в этих двух тестах.

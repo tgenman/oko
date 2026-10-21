@@ -7,6 +7,7 @@ test('external Telegram media show typed badges and cards without false download
  const {page,api,origin,token}=await productionReader(t);
  await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
  await page.goto(origin+'/#token='+token);
+ await expect(page.locator('#collect')).toBeEnabled();
  await api('v3/telegram/connect','POST',{source_locator:'@externalmedia',folder:'News'});
  const video=page.locator('[data-card]').filter({hasText:'External video post'});
  await expect(video.locator('[aria-label="Видео доступно в Telegram"]')).toBeVisible();
