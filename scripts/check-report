@@ -22,7 +22,11 @@ def summary(path):
         status, failures = value['status'], value.get('failures', [])
         if not isinstance(status, str) or not status or not text_list(failures):
             raise ValueError('Invalid suite: ' + name)
-        suites[name] = dict(status=status, failures=failures)
+        details = value.get('failure_details', [])
+        fields = ('test', 'reason', 'log', 'retry')
+        if not isinstance(details, list) or any(not isinstance(item, dict) or not all(isinstance(item.get(key), str) for key in fields) for item in details):
+            raise ValueError('Invalid failure details: ' + name)
+        suites[name] = dict(status=status, failures=failures, failure_details=[{key:item[key] for key in fields} for item in details])
     guard = data.get('checkout', dict(status='NOT RECORDED', changed_files=[]))
     if guard['status'] not in ('PASS', 'FAIL', 'NOT RECORDED') or not text_list(guard['changed_files']):
         raise ValueError('Invalid checkout result')
@@ -54,6 +58,11 @@ def main():
                 print(name + ': ' + suite['status'])
                 for failure in suite['failures']:
                     print('  ' + failure)
+                    for detail in suite['failure_details']:
+                        if detail['test'] == failure:
+                            print('    Reason: ' + detail['reason'])
+                            print('    Log: ' + detail['log'])
+                            print('    Retry: ' + detail['retry'])
             guard = value['checkout']
             print('checkout: ' + guard['status'])
             for name in guard['changed_files']:

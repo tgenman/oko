@@ -50,3 +50,21 @@ def test_json_and_text_reject_wrong_field_types_before_printing(tmp_path):
         assert result.returncode == 2
         assert result.stdout == ''
         assert 'Traceback' not in result.stderr
+
+
+def test_saved_report_retains_early_failure_reason_log_and_retry(tmp_path):
+    report=tmp_path/'report.json'
+    detail=dict(test='tests/test_example.py::test_retry',reason='expected detail',log='/tmp/shard.log',retry='./scripts/check python --files tests/test_example.py::test_retry')
+    report.write_text(json.dumps(dict(exit_code=1,duration_seconds=2,log='/tmp/full.log',suites={'python-tests':dict(status='FAIL',failures=[detail['test']],failure_details=[detail])})))
+    result=subprocess.run([sys.executable,str(CLI),str(report),'--json'],text=True,capture_output=True)
+    assert result.returncode==1
+    assert json.loads(result.stdout)['suites']['python-tests']['failure_details']==[detail]
+    result=subprocess.run([sys.executable,str(CLI),str(report)],text=True,capture_output=True)
+    assert 'expected detail' in result.stdout and 'Retry:' in result.stdout and '/tmp/shard.log' in result.stdout
+
+
+def test_report_rejects_nontext_early_failure_details(tmp_path):
+    report=tmp_path/'report.json'
+    report.write_text(json.dumps(dict(exit_code=1,duration_seconds=1,log='/tmp/full.log',suites={'python-tests':dict(status='FAIL',failures=['test'],failure_details=[dict(test='test',reason={'raw':'bad'},log='/tmp/shard',retry='retry')])})))
+    result=subprocess.run([sys.executable,str(CLI),str(report),'--json'],text=True,capture_output=True)
+    assert result.returncode==2 and result.stdout==''
