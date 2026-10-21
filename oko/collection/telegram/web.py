@@ -214,7 +214,7 @@ def parse_page(data: bytes, username: str) -> WebPage:
             published = None
         if published is None:
             raise SourceError('Telegram не предоставил дату публикации')
-        post_web_unavailable = bool('text_not_supported_wrap' in wrapper.get('class', [])
+        post_web_unavailable = bool('text_not_supported_wrap' in wrapper.get_attribute_list('class')
             and wrapper.select_one('.message_media_not_supported .message_media_view_in_telegram')
             and not body and reply_preview is None
             and not wrapper.select_one(MEDIA_WIDGETS))
