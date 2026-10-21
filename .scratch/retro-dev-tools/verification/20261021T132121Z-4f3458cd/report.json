@@ -1,0 +1,59 @@
+{
+  "started_at": "20261021T132121Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [],
+    "tool-tests": [
+      "/private/tmp/oko-retro-134-check/tests/development/test_browser_host.py"
+    ],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.44s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-retro-134-check/.venv/bin/python",
+            "/private/tmp/oko-retro-134-check/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "tool-tests": {
+      "status": "PASS (6.01s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-retro-134-check/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-retro-134-check/tests/development/test_browser_host.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 6.66,
+  "log": "/private/tmp/oko-retro-134-check/.scratch/check-runs/20261021T132121Z-4f3458cd/output.log"
+}

@@ -303,6 +303,16 @@ def checkout(root, prepared, output):
     plan = load_snapshot(root, prepared)
     prepared_entries(root, prepared, plan)
     checkout_tree(root, plan['head'], plan['task_tree'], output)
+    reuse_dependencies(root, output)
+
+
+def reuse_dependencies(root, target):
+    """Reuse installed dependencies only; preserve any captured destination."""
+    for name in ('node_modules', '.venv'):
+        dependency = root / name
+        destination = target / name
+        if dependency.is_dir() and not os.path.lexists(destination):
+            destination.symlink_to(dependency.resolve(), target_is_directory=True)
 
 def checkout_tree(root, head, tree, output):
     """Materialize a captured tree without sharing an index or remotes."""

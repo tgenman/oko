@@ -10,6 +10,51 @@ import sys
 SCRIPT = Path(__file__).resolve().parents[2] / 'scripts/oko-release'
 
 
+@pytest.mark.parametrize('released', [True, False])
+def test_port_wait_handles_transient_bind_and_preserves_persistent_listener(released):
+    import runpy
+    import socket
+    import threading
+    release = runpy.run_path(str(SCRIPT))
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        if released:
+            closer = threading.Timer(.05, listener.close)
+            closer.start()
+            try:
+                release['available'](port, wait=.5)
+            finally:
+                closer.join()
+        else:
+            with pytest.raises(ValueError, match='no foreign process was stopped'):
+                release['available'](port, wait=.15)
+            assert listener.getsockname()[1] == port
+
+
+def test_update_waits_for_port_only_after_stopping_owned_release(tmp_path, monkeypatch):
+    import runpy
+    release = runpy.run_path(str(SCRIPT))
+    scope = release['main'].__globals__
+    home = tmp_path / 'installed'
+    home.mkdir()
+    (home / 'current.json').write_text(json.dumps({'release': 'old'}))
+    events = []
+    monkeypatch.setattr(sys, 'argv', [str(SCRIPT), '--home', str(home), 'update', '--release', 'new'])
+    for name in ('release', 'stop', 'configure'):
+        monkeypatch.setitem(scope, name, lambda *args, name=name: events.append(name))
+    monkeypatch.setitem(scope, 'backup', lambda home: tmp_path / 'backup')
+    monkeypatch.setitem(scope, 'tree_digest', lambda path: 'digest')
+    monkeypatch.setitem(scope, 'start', lambda home, port_wait=0: events.append(('start', port_wait)))
+    previous_mask = os.umask(0o077)
+    try:
+        release['main']()
+    finally:
+        os.umask(previous_mask)
+    assert events == ['release', 'stop', 'configure', ('start', 5)]
+
+
 def invoke(repo, home, *args, env=None):
     return subprocess.run([sys.executable, str(SCRIPT), '--repo', str(repo), '--home', str(home), *args],
                           text=True, capture_output=True, env=env)

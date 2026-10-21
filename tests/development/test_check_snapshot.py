@@ -57,6 +57,9 @@ def run(root, env, reports):
 
 def test_all_isolates_working_files_and_excludes_untracked_data(tmp_path):
     root, env = fixture(tmp_path)
+    for name in ('.venv', 'node_modules'):
+        (root / name).mkdir()
+        (root / name / 'installed').write_text(name)
     index = git(root, 'write-tree')
     reports = tmp_path / 'reports'
     result = run(root, env, reports)
@@ -70,6 +73,9 @@ def test_all_isolates_working_files_and_excludes_untracked_data(tmp_path):
     assert git(root, 'write-tree') == index
     assert report['checkout']['status'] == 'PASS'
     assert not git(snapshot, 'remote')
+    for name in ('.venv', 'node_modules'):
+        assert (snapshot / name).is_symlink()
+        assert (snapshot / name / 'installed').read_text() == name
 
 
 def test_snapshot_still_detects_test_mutation(tmp_path):
