@@ -87,7 +87,7 @@ def test_recorded_album_anchors_are_one_web_publication(tmp_path):
                     headers={'Authorization':'Bearer test'}) as client:
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@durov',folder='Inbox'))
         assert result.status_code == 200, result.text
-        cards = settled(client,19)
+        cards = settled(client,19,timeout=30)
         albums = [c for c in cards if 373 in [int(identity) for identity in c['source']['message_ids']]]
         assert len(albums) == 1
         assert [int(identity) for identity in albums[0]['source']['message_ids']] == list(range(373,382))
@@ -272,6 +272,9 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
         from tests.support.reader import wait_for
         wait_for(client,lambda:not any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']))
         client.post('/api/v3/collect')
+        time.sleep(.7)
+        assert calls[0] == 2
+        client.post('/api/v3/materials/'+original['id']+'/retry')
         wait_for(client,lambda:calls[0]==3)
         deadline = time.monotonic()+2
         while time.monotonic()<deadline and any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']):
@@ -292,7 +295,8 @@ def test_album_first_part_deletion_and_new_url_keep_one_card_and_tombstone(tmp_p
         assert [int(identity) for identity in original['source']['message_ids']] == [11,12]
         phase[0] = 1
         client.post('/api/v3/collect')
-        deadline = time.monotonic()+2
+        client.post('/api/v3/materials/'+original['id']+'/retry')
+        deadline = time.monotonic()+4
         while time.monotonic()<deadline:
             cards = client.get('/api/v3/cards').json()
             if len(cards)==1 and [int(identity) for identity in cards[0]['source']['message_ids']]==[12,13] and not cards[0].get('loading'):

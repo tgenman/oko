@@ -27,6 +27,7 @@ from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
 from oko.reviews.coordination import PreparedWork
+from oko.reader.telegram_http import TelegramHTTP
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
@@ -128,8 +129,12 @@ class Runtime:
         self._source_feed = source_feed
         self._rss_enabled, self._rss_transport = rss_enabled, rss_transport
         self._telegram_client = telegram_client
+        self._telegram_http = TelegramHTTP(rss_transport, clock, wall_clock,
+            lambda group: self.require_store().telegram_http_state(group),
+            lambda group, state: self.require_store().telegram_http_wait(group, state),
+            lambda: self._live() and not self._cancelling)
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport, telegram_client,
-                                   self._youtube_captions, self._youtube_history)
+                                   self._youtube_captions, self._youtube_history, self._telegram_http)
         self._sources = self._collection.sources
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
@@ -881,7 +886,7 @@ class Runtime:
                 raise ValueError('Веб-доступ требует публичный username')
             from oko.collection.telegram.web import preview
             async with connection.accept(require_work=True):
-                pending = connection.start(preview(str(address), self._rss_transport))
+                pending = connection.start(preview(str(address), self._telegram_http))
             try:
                 info = await pending
             except SourceError as error:
@@ -1229,6 +1234,7 @@ class Runtime:
                     self._store.db.close()
                     self._store = None
                 self._closed = True
+            await self._telegram_http.close()
             self._shutdown()
             active_journal.reset(journal_context)
 

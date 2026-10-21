@@ -14,7 +14,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 
-from oko.collection.contracts import Material, DownloadStage, SourceError, SourceManifest, ArticleManifest, ResourceManifest
+from oko.collection.contracts import Material, DownloadStage, SourceError, SourceDeferred, SourceManifest, ArticleManifest, ResourceManifest
 from oko.collection.telegram.contracts import ExpectedMedia
 from oko.collection.telegram.media import Downloader
 
@@ -143,6 +143,8 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
             if known and known.text is not None and (known.title,known.text,known.resource_keys)!=(article.title,article.text,article.resource_keys):
                 reasons.extend(resource.reason for resource in collected.resources if resource.reason)
         except SourceError as error:
+            if isinstance(error, SourceDeferred):
+                raise
             old = old_articles.get(url)
             if old and old.text is not None:
                 article = old.model_copy(update={'reason':error.label})

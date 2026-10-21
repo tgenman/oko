@@ -1,6 +1,7 @@
 # Telegram web: общий HTTP-бюджет и сохранённые паузы
 
-Status: ready-for-agent
+Status: claimed
+GitHub: https://github.com/tgenman/oko/issues/64
 Blocked by: Нет
 
 ## Результат

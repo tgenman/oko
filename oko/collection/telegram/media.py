@@ -15,7 +15,7 @@ from urllib.parse import urljoin, urlsplit
 import httpcore
 import httpx
 
-from oko.collection.contracts import DownloadStage, SourceError, StagedPayload, Attachment, Material, ResourceManifest
+from oko.collection.contracts import DownloadStage, SourceError, SourceDeferred, StagedPayload, Attachment, Material, ResourceManifest
 
 from oko.collection.telegram.contracts import ExpectedMedia
 
@@ -196,6 +196,8 @@ class Downloader:
                 attachments.append(Attachment(name,payload,resource.kind,resource.mime))
                 resource = resource.model_copy(update={'status':'loaded','reason':'','sha256':payload.sha256})
             except SourceError as error:
+                if isinstance(error, SourceDeferred):
+                    raise
                 if retained and old:
                     attachments.append(retained)
                     resource = resource.model_copy(update={'status':'loaded','sha256':old.sha256,'reason':error.label})

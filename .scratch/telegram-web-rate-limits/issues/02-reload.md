@@ -1,6 +1,7 @@
 # Telegram: полная локальная копия и явная перезагрузка поста
 
-Status: ready-for-agent
+Status: claimed
+GitHub: https://github.com/tgenman/oko/issues/65
 Blocked by: 01
 
 ## Результат
