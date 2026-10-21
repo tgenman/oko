@@ -1,5 +1,6 @@
 """Telegram reply context through the reader HTTP interface."""
 import httpx
+import pytest
 
 from tests.support.app import create_app
 from tests.support.telegram import settled
@@ -7,12 +8,13 @@ from tests.support.telegram_web import page
 from tests.support.v3 import TestClient
 
 
-def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path):
+@pytest.mark.parametrize('href', ['/fixture/10', '10', 'https://t.me/fixture/10'])
+def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
     reply = '''<a class="tgme_widget_message_reply" href="/fixture/10">
 <div class="tgme_widget_message_author"><span class="tgme_widget_message_author_name">Reply author</span></div>
 <div class="tgme_widget_message_text js-message_reply_text">Quoted<br> context <img alt="🙂"> …</div></a>'''
     async def response(request):
-        return httpx.Response(200, text=page([(11, reply+'Own first line<br><br>Own paragraph')]))
+        return httpx.Response(200, text=page([(11, reply.replace('href="/fixture/10"', 'href="'+href+'"')+'Own first line<br><br>Own paragraph')]))
     options = dict(token='test', api_only=True, rss_transport=httpx.MockTransport(response))
     headers = {'Authorization': 'Bearer test'}
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
@@ -79,15 +81,14 @@ def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(t
         assert len(calls) == count
         phase[0] = 'HIDE_CONTEXT'
         client.post(url+'/retry')
-        wait_for(client,lambda: client.get(url).json()['filter']['result'] and client.get(url).json()['filter']['result']['hidden'])
+        wait_for(client,lambda: (result:=client.get(url).json()['filter']['result']) and result['hidden'])
         assert calls[-1]['operation'] == 'filter'
 
-
-import pytest
 
 @pytest.mark.parametrize('author,fragment,address,expected', [
     ('', 'Only quoted context', 'javascript:alert(1)', None),
     ('Named author', '', '', None),
+    ('Named author', 'Readable malformed URL context', 'https://t.me/fixture/10 bad', None),
     ('', 'Quote with <b>formatting</b><script>bad()</script>', 'https://t.me/fixture/10', 'https://t.me/fixture/10'),
 ])
 def test_reply_only_and_partial_preview_have_no_invented_media(tmp_path,author,fragment,address,expected):

@@ -410,6 +410,7 @@ test('reply context is a compact separate card with safe navigation and local ex
     assert.equal(await link.getAttribute('target'),'_blank');
     assert.equal(await link.getAttribute('rel'),'noopener noreferrer');
     assert.equal(await card.locator('.reply-preview-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'2');
+    await r.page.screenshot({path:artifactPath('telegram-reply-compact-desktop.png')});
     const requests=await r.page.evaluate(()=>readerTransport.requests.length);
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();
     await r.page.keyboard.press('Enter');
@@ -418,6 +419,7 @@ test('reply context is a compact separate card with safe navigation and local ex
     assert.equal(await r.page.evaluate(()=>readerTransport.requests.length),requests);
     await r.page.screenshot({path:artifactPath('telegram-reply-desktop.png')});
     await r.page.setViewportSize({width:1120,height:900});
+    await card.getByRole('button',{name:'Свернуть'}).click();
     await r.page.screenshot({path:artifactPath('telegram-reply-narrow.png')});
     assert.equal(await card.evaluate(e=>e.scrollWidth<=e.clientWidth),true);
     await r.page.setViewportSize({width:1280,height:900});

@@ -167,9 +167,9 @@ def parse_page(data: bytes, username: str) -> WebPage:
             fragment = clean(reply.select_one('.js-message_reply_text, .tgme_widget_message_text'))
             safe = None
             try:
-                reply_address = urljoin('https://t.me/', str(reply.get('href', ''))) if reply.get('href') else None
+                reply_address = urljoin(f'https://t.me/{username}/{message}', str(reply.get('href', ''))) if reply.get('href') else None
                 parsed = urlsplit(reply_address) if reply_address else None
-                if parsed and parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.username and not parsed.password:
+                if parsed and parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.username and not parsed.password and re.fullmatch(r'https?://[^\s]+', reply_address or ''):
                     safe = reply_address
             except ValueError:
                 pass  # Malformed source addresses do not discard the saved excerpt.
