@@ -1,4 +1,5 @@
 """One Telegraph enrichment path shared by web and verified client collection."""
+from tests.support.telegram import configure_fast_web
 import httpx
 import pytest
 
@@ -45,6 +46,7 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
     if access == 'client':
         options['telegram_client'] = TelegraphClient()
     with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         body = dict(source_locator='@fixture',folder='Inbox')
         if access == 'client':
             client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
@@ -86,6 +88,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
     if access=='client':
         options['telegram_client'] = telegram
     with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         body = dict(source_locator='@fixture',folder='Inbox')
         if access=='client':
             client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
@@ -142,6 +145,7 @@ def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
         return httpx.Response(200,text=page([(11,'Original https://telegra.ph/Embed')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         assert (material['content']['completeness']['state']=='complete') is False
@@ -175,6 +179,7 @@ def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_p
         return httpx.Response(200,text=page([(11,'Original https://telegra.ph/Late')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         assert started.wait(2)
         try:
@@ -214,6 +219,7 @@ FakeClient.rows = linked_rows
     root = tmp_path/'reader'
     with TestClient(create_app(root,token='test',api_only=True,telegram_client=LocalTelegram(env,root),rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@forum',folder='Forum',
                     access={'kind':'client','profile':'personal'},initial_history={'mode':'count','count':'1'}))
@@ -273,6 +279,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
         return httpx.Response(200,text=page([(11,'Post https://telegra.ph/Article')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response),
             ai_transport=httpx.MockTransport(model)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':'Убирай рекламу' if filtered else '','processor':'llamacpp'})
         assert client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True}).status_code==200
         assert client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web')).status_code==200
@@ -346,6 +353,7 @@ def test_retained_theses_and_provenance_come_from_the_same_committed_bytes(tmp_p
         return httpx.Response(200,text=page([(11,'https://telegra.ph/Article')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,codex_client=codex,fault=fault,
             rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         config={kind:dict(model='synthetic',reasoning_effort='low',fast=False) for kind in ('filter','theses')}
         assert client.put('/api/v3/processors/codex',json=config).status_code==200
         client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':'','processor':'codex'})

@@ -1,4 +1,5 @@
 """Telegram reply context through the reader HTTP interface."""
+from tests.support.telegram import configure_fast_web
 import httpx
 import pytest
 
@@ -18,6 +19,7 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
     options = dict(token='test', api_only=True, rss_transport=httpx.MockTransport(response))
     headers = {'Authorization': 'Bearer test'}
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
+        configure_fast_web(client)
         assert client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture',folder='Inbox')).status_code == 200
         card = settled(client)[0]
         assert card['title'] == 'Own first line'
@@ -30,6 +32,7 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
         assert entity['title'] == card['title']
         assert material['content']['completeness']['state'] == 'complete'
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
+        configure_fast_web(client)
         saved = client.get('/api/v3/materials/'+card['id']).json()
         assert saved['content']['reply_preview'] == material['content']['reply_preview']
 
@@ -57,6 +60,7 @@ def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(t
         reply = '<a class="tgme_widget_message_reply" href="https://t.me/fixture/10"><span class="tgme_widget_message_author_name">Other author</span><div class="js-message_reply_text">'+phase[0]+'</div></a>'
         return httpx.Response(200,text=page([(11,reply+'Own text marker')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response),ai_transport=httpx.MockTransport(model)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.put('/api/v3/processors/llamacpp',json=dict(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
         client.patch('/api/v3/settings/oko/global',json=dict(processor='llamacpp',theses=True,prompt_filters='Evaluate everything'))
         presence(client,'reader')
@@ -96,6 +100,7 @@ def test_reply_only_and_partial_preview_have_no_invented_media(tmp_path,author,f
         markup = f'<a class="tgme_widget_message_reply" href="{address}"><span class="tgme_widget_message_author_name">{author}</span><div class="js-message_reply_text">{fragment}</div></a>'
         return httpx.Response(200,text=page([(11,markup)]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card = settled(client)[0]
         m = client.get('/api/v3/materials/'+card['id']).json()
@@ -127,6 +132,7 @@ def test_ai_can_process_reply_without_own_text_but_skips_metadata_only(tmp_path,
     async def response(request):
         return httpx.Response(200,text=page([(11,'<a class="tgme_widget_message_reply" href="https://t.me/fixture/10"><span class="tgme_widget_message_author_name">Author only</span><div class="js-message_reply_text">'+fragment+'</div></a>')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response),ai_transport=httpx.MockTransport(model)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.put('/api/v3/processors/llamacpp',json=dict(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
         client.patch('/api/v3/settings/oko/global',json=dict(theses=False,prompt_filters=''))
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
@@ -162,6 +168,7 @@ def test_legacy_copy_can_be_processed_offline_then_reloaded_without_losing_histo
     calls=[]
     options=dict(token='test',api_only=True,source=source,ai_transport=model_transport(calls))
     with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.patch('/api/v3/settings/oko/global',json=dict(theses=False,prompt_filters=''))
         card=settled(client)[0]
         url='/api/v3/materials/'+card['id']

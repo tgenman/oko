@@ -1,4 +1,5 @@
 """External Telegram media are readable saved publications, not download errors."""
+from tests.support.telegram import configure_fast_web
 import httpx
 
 from tests.support.app import create_app
@@ -12,6 +13,7 @@ def test_external_audio_is_saved_without_errors_and_is_typed_for_reader(tmp_path
     def response(request):
         return httpx.Response(200, text=page([(11, 'Own text'+AUDIO)],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         result = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         assert result.status_code == 200, result.text
         cards = settled(client)
@@ -32,6 +34,7 @@ def test_web_video_size_limit_preserves_cover_and_real_cover_failure(tmp_path):
     options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
     headers={'Authorization':'Bearer test'}
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0]
         url='/api/v3/materials/'+card['id']
@@ -42,10 +45,12 @@ def test_web_video_size_limit_preserves_cover_and_real_cover_failure(tmp_path):
         assert client.get('/api/v3/status').json()['problems']['count']==0
     # Persisted availability and covers survive a restart, without a personal source.
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
+        configure_fast_web(client)
         assert client.get(url).json()['content']['external_attachments'][0]==media
         assert client.get('/api/v3/status').json()['problems']['count']==0
     broken[0]=True
     with TestClient(create_app(tmp_path/'failed',**options),headers=headers) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0]
         content=client.get('/api/v3/materials/'+card['id']).json()['content']
@@ -63,6 +68,7 @@ def test_external_metadata_changes_keep_old_version_context_without_false_update
         video=VIDEO if phase[0]!=1 else VIDEO.replace('Media is too big','Not supported')
         return httpx.Response(200,text=page([(11,('Original text' if phase[0]<2 else 'Edited own text')+video)],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0];url='/api/v3/materials/'+card['id']
         phase[0]=1
@@ -96,6 +102,7 @@ def test_local_video_copy_wins_over_later_web_restriction(tmp_path):
         body=VIDEO if restricted[0] else '<a class="tgme_widget_message_video_player"><video src="https://cdn.example/video.mp4"></video></a>'
         return httpx.Response(200,text=page([(11,'Same own text'+body)],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0];url='/api/v3/materials/'+card['id']
         first=client.get(url).json()['content'];video=next(a for a in first['attachments'] if a['kind']=='video')
@@ -120,6 +127,7 @@ def test_real_download_failures_are_not_reclassified_as_external(tmp_path,failur
             return httpx.Response(failure,headers={'retry-after':'60'})
         return httpx.Response(200,text=page([(11,'Own text'+AUDIO+'<audio src="https://cdn.example/media.ogg"></audio>')],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0]
         content=client.get('/api/v3/materials/'+card['id']).json()['content']
@@ -135,6 +143,7 @@ def test_reassessment_closes_only_the_recovered_material_problem(tmp_path):
         own=AUDIO if recognized[0] else '<iframe src="https://example.org/embed"></iframe>'
         return httpx.Response(200,text=page([(11,'Own text'+own),(12,'Other broken post<audio src="https://cdn.example/media.ogg"></audio>')],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         cards=settled(client,2)
         target=next(c for c in cards if c['source']['message_ids']==['11'])
@@ -159,6 +168,7 @@ def test_new_external_attachment_after_complete_text_is_not_a_failure(tmp_path):
     def response(request):
         return httpx.Response(200,text=page([(11,'Same own text'+(AUDIO if external[0] else ''))],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
         assert client.get(url).json()['content']['completeness']['state']=='complete'
@@ -175,6 +185,7 @@ def test_unchanged_external_only_post_is_not_refetched_on_collect(tmp_path):
         if request.url.params.get('before'):fetches.append(str(request.url))
         return httpx.Response(200,text=page([(11,'Same own text'+AUDIO)],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'));settled(client)
         # The first fetch establishes the saved external-only state.
         baseline=len(fetches)
@@ -195,6 +206,7 @@ def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
         video=VIDEO if restricted[0] else '<a class="tgme_widget_message_video_player"><video src="https://cdn.example/video.mp4"></video></a>'
         return httpx.Response(200,text=page([(11,'Own text'+video)],before=int(request.url.params.get('before','0'))))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
         attachment=client.get(url).json()['content']['attachments'][0]

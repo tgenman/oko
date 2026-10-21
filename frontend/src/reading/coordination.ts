@@ -209,10 +209,12 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       statusPanel.update(state.problems, state);
       debug.forgetMaterials(state.viewed_ids || []);
       statusPanel.forgetMaterials(state.viewed_ids || []);
-      void actions.flush();
       progress(`${workText(state)} · sources ${state.ready_sources}/${state.total_sources}`);
       menus.sources(state.sources || []);
       }
+      // A lost command response can remain pending while server status stays
+      // unchanged. Every confirmed poll admits receipt reconciliation.
+      if(statusConfirmed)void actions.flush();
       const navigation=resources.navigation();
       if(!navigation)throw new Error('Reading navigation temporarily unavailable');
       const navigationChanged=recovered||accepted.changed.has('navigation')||accepted.changed.has('feed');

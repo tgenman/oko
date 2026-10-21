@@ -99,3 +99,9 @@ def connected_feed(client, response):
     assert response.status_code == 200, response.text
     identity=response.json()['feed_id']
     return next(feed for feed in client.get('/api/v3/subscriptions').json()['feeds'] if feed['id']==identity)
+
+
+def configure_fast_web(client):
+    """Explicit fast transport in functional fixtures; budget tests keep their own rate."""
+    response = client.patch('/api/v3/settings/oko/global', json={'telegram_http_rps':10})
+    assert response.status_code == 200, response.text

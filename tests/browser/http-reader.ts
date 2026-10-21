@@ -1,6 +1,7 @@
 import type {TestContext} from 'node:test';
 import type {BrowserContext} from 'playwright';
 import type {ApiReply} from './fixture-types.ts';
+import {expect} from 'playwright/test';
 import {randomBytes} from 'node:crypto';
 import {newContext} from './browser-context.ts';
 import * as fs from 'node:fs/promises';
@@ -39,6 +40,6 @@ export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>
     }
     const page=await readyContext.newPage();
     t?.signal.throwIfAborted();
-    return {page,context:readyContext,api,origin,token,close,restart:()=>servers.restart(scenario!.id)};
+    return {page,context:readyContext,api,origin,token,close,openReader:async()=>{await page.goto(origin+'/#token='+token);await expect.poll(async()=>{const state=await api('v3/status');return state.lifetime.kind==='explicit'||state.active_client_sessions>0;}).toBe(true);},restart:()=>servers.restart(scenario!.id)};
   } catch(error) {await close();throw error;}
 };

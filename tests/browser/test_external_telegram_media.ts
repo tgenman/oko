@@ -4,9 +4,9 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
 test('external Telegram media show typed badges and cards without false download errors',{timeout:25000},async t=>{
- const {page,api,origin,token}=await productionReader(t);
- await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
- await page.goto(origin+'/#token='+token);
+ const {page,api,openReader}=await productionReader(t);
+ await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
+ await openReader();
  await api('v3/telegram/connect','POST',{source_locator:'@externalmedia',folder:'News'});
  const video=page.locator('[data-card]').filter({hasText:'External video post'});
  await expect(video.locator('[aria-label="Видео доступно в Telegram"]')).toBeVisible();
