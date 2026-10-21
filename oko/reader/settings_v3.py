@@ -80,6 +80,10 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         return wire.EffectiveFeedRefreshMinutes.model_validate({
             'value': value['value'], 'origin': {'scope': value['scope'], **({'owner': 'global'} if value['scope'] == 'oko' else {})}})
 
+    @router.get('/api/v3/settings/telegram-http', response_model=wire.EffectiveTelegramHttpRps)
+    async def telegram_http_settings() -> wire.EffectiveTelegramHttpRps:
+        return wire.EffectiveTelegramHttpRps.model_validate(runtime.require_store().subscriptions.telegram_http_settings())
+
     @router.get('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def settings(scope: Literal['oko', 'folder', 'feed'], owner: str) -> wire.EffectiveSettingsSnapshot:
         target(scope, owner)
@@ -88,12 +92,17 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.patch('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def patch(request: Request, scope: Literal['oko', 'folder', 'feed'], owner: str, body: wire.SettingsPatch) -> wire.EffectiveSettingsSnapshot:
         from oko.reader.commands_v3 import track
-        context = wire.CommandContext(wire.CommandSettingsPatch(operation='settings_patch', target=target(scope, owner), keys=[wire.SettingKey.model_validate(key) for key in sorted(body.model_fields_set - {'feed_refresh_minutes'})]))
+        context = wire.CommandContext(wire.CommandSettingsPatch(operation='settings_patch', target=target(scope, owner), keys=[wire.SettingKey.model_validate(key) for key in sorted(body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'})]))
         async with track(runtime, request, context):
             if scope != 'oko' and 'feed_refresh_minutes' in body.model_fields_set:
                 raise ApiError(400, wire.ErrorEnvelope(wire.SettingScopeInvalidError(
                     code='setting_scope_invalid', message='Интервал обновления задаётся только в Настройках Око',
                     details=wire.SettingScopeInvalidErrorDetails(reason='feed_refresh_is_global_only'),
+                    diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
+            if scope != 'oko' and 'telegram_http_rps' in body.model_fields_set:
+                raise ApiError(400, wire.ErrorEnvelope(wire.SettingScopeInvalidError(
+                    code='setting_scope_invalid', message='Лимит Telegram задаётся только в Настройках Око',
+                    details=wire.SettingScopeInvalidErrorDetails(reason='telegram_http_is_global_only'),
                     diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
             result = await runtime.update_settings(scope, owner, Overrides.model_validate(body.model_dump(exclude_unset=True)))
             return snapshot(scope, owner, facts.EffectiveSettings.model_validate(result), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None, activity_for(scope, owner))
@@ -120,7 +129,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             from oko.reader.api_v3 import invalid
             raise ApiError(422, invalid('body', 'title'))
         feed = facts.SubscriptionFeed.model_validate(runtime.require_store().subscriptions.feeds(identity)[0])
-        context = wire.CommandContext(wire.CommandFeedPatch(operation='feed_patch', feed_id=wire.FeedId(identity), fields=[wire.FeedField.model_validate(key) for key in sorted(body.model_fields_set - {'feed_refresh_minutes'})]))
+        context = wire.CommandContext(wire.CommandFeedPatch(operation='feed_patch', feed_id=wire.FeedId(identity), fields=[wire.FeedField.model_validate(key) for key in sorted(body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'})]))
         async with track(runtime, request, context):
             if feed.kind == 'telegram' and 'transport' in body.model_fields_set:
                 raise ApiError(409, wire.ErrorEnvelope(wire.AccessImmutableError(code='access_immutable', message='Способ доступа Telegram нельзя менять настройкой фида', details=wire.AccessImmutableErrorDetails(feed_id=wire.FeedId(identity)), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))

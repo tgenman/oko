@@ -190,6 +190,10 @@ class SourceError(Exception):
         return error
 
 
+class SourceDeferred(SourceError):
+    """Shared external wait; stop further requests in the current attempt."""
+
+
 class SourceDeleted(SourceError):
     def __init__(self) -> None:
         super().__init__('Публикация удалена или недоступна в источнике')

@@ -20,13 +20,14 @@ import httpx
 
 from oko.collection.rss import RSSSource, feed_title, normalized
 from oko.collection.sources import Sources, SourceSettings, TelegramAccess
-from oko.collection.contracts import FetchResources, SourceError, SourceDeleted, SourceSkipped, DownloadStage
+from oko.collection.contracts import FetchResources, SourceError, SourceDeleted, SourceSkipped, SourceDeferred, DownloadStage
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
 from oko.reviews.coordination import PreparedWork
+from oko.reader.telegram_http import TelegramHTTP
 from oko.reader.composition import FolderContents
 from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
@@ -128,8 +129,13 @@ class Runtime:
         self._source_feed = source_feed
         self._rss_enabled, self._rss_transport = rss_enabled, rss_transport
         self._telegram_client = telegram_client
+        self._telegram_http = TelegramHTTP(rss_transport, clock, wall_clock,
+            lambda group: self.require_store().telegram_http_state(group),
+            self._save_telegram_http_wait,
+            lambda: self._live() and not self._cancelling, lambda: self._epoch,
+            lambda: float(self.require_store().subscriptions.telegram_http_settings()['value']))
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport, telegram_client,
-                                   self._youtube_captions, self._youtube_history)
+                                   self._youtube_captions, self._youtube_history, self._telegram_http)
         self._sources = self._collection.sources
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
@@ -159,6 +165,18 @@ class Runtime:
         self._reader_advanced = float('-inf')
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
+
+    async def _save_telegram_http_wait(self, group: str, server_delay: float | None, generation: int) -> float:
+        async with self._actions:
+            if not self._live() or self._cancelling or generation != self._epoch:
+                raise SourceDeferred('Запрос Telegram прерван', code='source_unavailable')
+            current = self.require_store()
+            state = current.telegram_http_state(group)
+            strikes = min(int(state.get('strikes', 0)) + 1, 7)
+            delay = max(float(min(60 * 2 ** (strikes - 1), 3600)), server_delay or 0)
+            until = max(float(state.get('until', 0)), self._wall_clock() + delay)
+            current.telegram_http_wait(group, dict(until=until, strikes=strikes))
+            return until
 
     def _live(self) -> bool:
         return not self.stopped and self.enabled and self._admitted()
@@ -632,7 +650,7 @@ class Runtime:
                 previous = current.subscriptions.effective(scope, owner)
                 result = current.subscriptions.update_settings(scope, owner, body)
                 self._collection_interval = current.subscriptions.feed_refresh_minutes() * 60
-                if body.model_fields_set - {'feed_refresh_minutes'} and result != previous:
+                if body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'} and result != previous:
                     current.settings_changed(scope, owner)
                     affected = None if scope == 'oko' else {f['id'] for f in current.subscriptions.feeds(owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
                     await self._cancel(affected)
@@ -881,7 +899,7 @@ class Runtime:
                 raise ValueError('Веб-доступ требует публичный username')
             from oko.collection.telegram.web import preview
             async with connection.accept(require_work=True):
-                pending = connection.start(preview(str(address), self._rss_transport))
+                pending = connection.start(preview(str(address), self._telegram_http))
             try:
                 info = await pending
             except SourceError as error:
@@ -1229,6 +1247,7 @@ class Runtime:
                     self._store.db.close()
                     self._store = None
                 self._closed = True
+            await self._telegram_http.close()
             self._shutdown()
             active_journal.reset(journal_context)
 

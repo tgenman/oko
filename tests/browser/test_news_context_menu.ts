@@ -11,7 +11,7 @@ test('news menu uses original links and marks only above/below in the displayed 
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(origin+'/#token='+token);await expect(page.locator('#cards [data-card]')).toHaveCount(3);
  const original=await api('cards');const row=(id:string)=>page.locator('[data-card="'+id+'"]');const target=original[1],above=original[0],below=original[2];
  const open=original.find(c=>c.availability==='available'&&c.id!==target.id)!;await row(open.id).click();await expect(page.locator('#title')).toHaveText(open.title);const title=open.title;
- await row(target.id).click({button:'right'});await expect(page.locator('#title')).toHaveText(title!);expect(await page.locator('#news-context-menu [role=menuitem]').count()).toBe(5);
+ await row(target.id).click({button:'right'});await expect(page.locator('#title')).toHaveText(title!);expect(await page.locator('#news-context-menu [role=menuitem]').count()).toBe(6);
  await page.keyboard.press('Escape');await expect(row(target.id)).toBeFocused();await row(target.id).press('Shift+F10');
  await page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).hover();await expect(page.locator('.news-range-preview')).toHaveCount(1);await page.screenshot({path:artifactPath('news-context-menu-a.png')});
  await page.getByRole('menuitem',{name:'Copy Link',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Link copied'})).toBeVisible();expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(target.source_url);
@@ -72,5 +72,42 @@ test('above follows current sorting, visible hidden rows and feed selection',asy
   await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('importance');await expect(r.page.locator('#cards [data-card]').first()).toHaveAttribute('data-card','b');await above('a',['b']);
   await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('newest');await r.page.locator('#show-hidden').check();await expect(r.page.locator('#cards [data-card]')).toHaveCount(4);await above('b',['a','hidden']);
   await r.page.locator('#list-menu-toggle').click();await r.page.locator('#show-hidden').uncheck();await r.page.locator('[data-feed="feed"]').click();await expect(r.page.locator('#cards [data-card]')).toHaveCount(2);await above('b',['a']);expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});
+
+test('news context menu reloads a full copy without marking it viewed',async()=>{
+ const r=await reader();try{
+  await r.start([material('reload')]);
+  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/reload/retry',{body:{ok:true}}));
+  await r.page.locator('[data-card="reload"]').click();
+  await expect(r.page.locator('#text')).toContainText('Текст reload');
+  await r.page.locator('[data-card="reload"]').click({button:'right'});
+  await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
+  await r.page.screenshot({path:artifactPath('telegram-reload-menu-desktop.png')});
+  await r.page.getByRole('menuitem',{name:'Reload Publication',exact:true}).click();
+  await expect.poll(()=>r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/retry')).length)).toBe(1);
+  await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
+  await expect(r.page.locator('#text')).toContainText('Текст reload');
+  expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/viewed')).length)).toBe(0);
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});
+
+
+test('reload command fits the mobile context menu',async()=>{
+ const r=await reader();try{
+  await r.page.setViewportSize({width:390,height:844});
+  await r.start([material('reload')]);
+  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/reload/retry',{body:{ok:true}}));
+  const row=r.page.locator('[data-card="reload"]');
+  await row.scrollIntoViewIfNeeded();
+  await r.page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+  const box=await row.boundingBox();if(!box)throw new Error('Missing card');
+  await r.page.mouse.click(Math.max(8,box.x+12),box.y+12,{button:'right'});
+  await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
+  await r.page.screenshot({path:artifactPath('telegram-reload-menu-mobile.png')});
+  await r.page.getByRole('menuitem',{name:'Reload Publication',exact:true}).click();
+  await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
+  expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

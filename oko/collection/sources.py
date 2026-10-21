@@ -43,11 +43,13 @@ class SourceUpdates:
 class Sources:
     def __init__(self, source: Source | None, source_feed: str, rss_enabled: bool,
                  transport: httpx.AsyncBaseTransport | None, telegram: TelegramClient | None,
-                 captions: CaptionsClient, history: HistoryClient | None) -> None:
+                 captions: CaptionsClient, history: HistoryClient | None,
+                 telegram_transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.sources: dict[str, Source] = {source_feed: source} if source else {}
         self._injected = source_feed if source else None
         self._rss_enabled, self._transport, self._telegram = rss_enabled, transport, telegram
         self._captions, self._history = captions, history
+        self._telegram_transport = telegram_transport or transport
         self._settings: dict[str, SourceSettings] = {}
 
     def configure(self, settings: list[SourceSettings]) -> SourceUpdates:
@@ -70,12 +72,13 @@ class Sources:
             elif access and access.kind == 'web':
                 assert access.username is not None
                 source = previous if isinstance(previous, TelegramSource) else TelegramSource(
-                    WebTelegram(access.username, self._transport), '', 0, config.initial_days, access.username)
+                    WebTelegram(access.username, self._telegram_transport), '', 0, config.initial_days, access.username,
+                    http_transport=self._telegram_transport)
             elif config.transport == 'telegram' and self._telegram and access and access.peer:
                 assert access.account is not None
                 source = previous if isinstance(previous, TelegramSource) else TelegramSource(
                     self._telegram, access.account, access.peer, config.initial_days, access.username,
-                    http_transport=self._transport)
+                    http_transport=self._telegram_transport)
             elif config.transport == 'rss' and self._rss_enabled:
                 source = previous if isinstance(previous, RSSSource) else RSSSource(config.url, config.initial_days, self._transport)
             else:

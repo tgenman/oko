@@ -35,6 +35,7 @@ class AddFeed(FeedURL):
 class Overrides(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     feed_refresh_minutes: int | None = Field(default=None, ge=1, le=1440)
+    telegram_http_rps: float | None = Field(default=None, ge=.1, le=10, allow_inf_nan=False)
     originals: bool | None = None
     theses: bool | None = None
     prompt_theses: str | None = Field(default=None, max_length=20000)
@@ -299,6 +300,11 @@ class Subscriptions:
     def feed_refresh_minutes(self) -> int:
         row = self.db.execute("SELECT value FROM settings WHERE scope='oko' AND owner='global' AND field='feed_refresh_minutes'").fetchone()
         return int(json.loads(row['value'])) if row else DEFAULT_FEED_REFRESH_MINUTES
+
+    def telegram_http_settings(self) -> dict[str, Any]:
+        row = self.db.execute("SELECT value FROM settings WHERE scope='oko' AND owner='global' AND field='telegram_http_rps'").fetchone()
+        return dict(value=float(json.loads(row['value'])) if row else 2.,
+                    origin=dict(scope='oko', owner='global') if row else dict(scope='default'))
 
     @reading_value
     def _settings(self, scope: str, owner: str) -> list[sqlite3.Row]:

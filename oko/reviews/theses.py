@@ -4,6 +4,7 @@ from oko.storage.reading import reading_value, saved_bytes, saved_document
 from oko.diagnostics import record_caught
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -173,6 +174,17 @@ class PublicationTheses:
                         if not saved or (saved['path'], saved['digest']) != (relative, digest):
                             continue
                     elif retain:
+                        # A retry may replace theses.md before its transaction commits.
+                        # Keep the accepted inode and its provenance independently.
+                        accepted_path = path.with_name('accepted-theses-'+digest+'.md')
+                        if not accepted_path.exists():
+                            os.link(path, accepted_path)
+                            fd = os.open(accepted_path.parent, os.O_RDONLY)
+                            try:
+                                os.fsync(fd)
+                            finally:
+                                os.close(fd)
+                        relative = str(accepted_path.relative_to(self.store.root))
                         self.store.db.execute('INSERT INTO retained_theses VALUES (?,?,?) ON CONFLICT(item) DO UPDATE SET path=excluded.path,digest=excluded.digest', (item, relative, digest))
                     return result, path
             except (OSError, ValueError, KeyError):

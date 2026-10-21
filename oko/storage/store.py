@@ -23,7 +23,7 @@ from oko.collection.telegram.read_sync import ReadSync
 from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
-from oko.collection.contracts import SourceDeleted, Attachment, Image, Material, Publication, DownloadStage, StagedPayload, SourceManifest
+from oko.collection.contracts import SourceError, SourceDeleted, Attachment, Image, Material, Publication, DownloadStage, StagedPayload, SourceManifest
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
@@ -203,10 +203,12 @@ class Store:
             self.db.execute("""UPDATE jobs SET status='pending',next=CASE
                 WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' THEN next ELSE 0 END,
                 generation=generation+1 WHERE kind='discover' AND item=? AND status!='running'""", (discovery,))
-            for row in self.db.execute("""SELECT i.id,j.error,j.status FROM items i JOIN jobs j ON j.item=i.id AND j.kind='fetch'
+            for row in self.db.execute("""SELECT i.id,i.members,j.error,j.status FROM items i JOIN jobs j ON j.item=i.id AND j.kind='fetch'
                     WHERE i.feed_id=? AND i.viewed=0 AND j.status!='running'""", (feed,)).fetchall():
                 material = self.material(row['id'])
                 unavailable = self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone()
+                if row['members'] != '[]' and material and material['full']:
+                    continue
                 if row['error'] or unavailable or not material or not material['full']:
                     self.youtube.reset(row['id'])
                     self.db.execute("""UPDATE jobs SET manual_once=CASE WHEN (status='done' AND error IS NOT NULL)
@@ -260,7 +262,7 @@ class Store:
                     history_items.append(row['id'])
                 if row and row['viewed'] and namespace=='telegram-web':
                     self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(sorted(set(json.loads(row['members'])) | set(p.members))),row['id']))
-                if row and not row['viewed'] and not self.db.execute("SELECT 1 FROM source_deleted WHERE item=?", (row['id'],)).fetchone():
+                if row and not row['viewed'] and (not envelope or self._needs_collection(row['id'])) and not self.db.execute("SELECT 1 FROM source_deleted WHERE item=?", (row['id'],)).fetchone():
                     members = sorted(set(json.loads(row['members'])) | set(p.members))
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
@@ -298,7 +300,10 @@ class Store:
             if selection:
                 self.subscriptions.history.discovery_state(feed, selection)
             if envelope:
-                self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND status='done' AND (error IS NULL OR problem_code IS NULL) AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT item FROM source_deleted))", (feed,))
+                candidates = self.db.execute("SELECT item FROM jobs WHERE kind='fetch' AND status='done' AND (error IS NULL OR problem_code IS NULL) AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT item FROM source_deleted))", (feed,)).fetchall()
+                for candidate in candidates:
+                    if self._needs_collection(candidate['item']):
+                        self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (candidate['item'],))
                 if namespace == 'telegram':
                     self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
             if successful:
@@ -307,6 +312,19 @@ class Store:
             self.fault('before_discovery_commit')
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
+
+    def telegram_http_state(self, group: str) -> dict[str, Any]:
+        row = self.db.execute('SELECT value FROM state WHERE key=?', ('telegram-http:'+group,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def telegram_http_wait(self, group: str, state: dict[str, Any]) -> None:
+        with self.db:
+            self.db.execute('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                            ('telegram-http:'+group, json.dumps(state)))
+
+    def _needs_collection(self, item: str) -> bool:
+        material = self.material(item)
+        return not material or not material['full']
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM items WHERE id=? AND viewed=0',(item,)).fetchone() is not None
@@ -323,7 +341,7 @@ class Store:
             return False
         with self.db:
             self.youtube.reset(item)
-            self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (item,))
+            self.db.execute("UPDATE jobs SET status='pending',manual_once=0,next=CASE WHEN problem_code LIKE '%FloodWaitError' THEN next ELSE 0 END,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (item,))
         return True
 
     @reading_value
@@ -404,7 +422,7 @@ class Store:
     def publication(self, item: str, staging: DownloadStage | None = None) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         fallback = self.material(item) if row else None
-        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', [])), captions=fallback.get('captions'), description=fallback.get('description', ''), attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []))) if fallback else None
+        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', []) if (self.path(item).parent / Path(url).name).is_file()), captions=fallback.get('captions'), description=fallback.get('description', ''), attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []) if (self.path(item).parent / Path(a['url']).name).is_file())) if fallback else None
         if teaser and fallback:
             header = json.loads(self.path(item).read_text().split('\n\n',1)[0]) if self.path(item).is_file() else {}
             manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if 'source_manifest' in header else None
@@ -414,6 +432,15 @@ class Store:
     def save(self, job: Job, material: Material, now: float | None = None, staging: DownloadStage | None = None) -> None:
         item = job.item
         if not self.valid(job) or not self._has_unviewed(item):
+            return
+        previous = self.material(item)
+        if material.members and previous and previous['full'] and (not material.full or material.collection_error):
+            error = material.collection_error or SourceError(material.reason or 'Повторная загрузка не завершена',
+                retryable=not bool(material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources)))
+            if error.retryable and material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources):
+                error = SourceError(material.reason or error.label, retryable=False)
+            with self.db:
+                self._finish_fetch(job, replace(material, collection_error=error), self.clock() if now is None else now)
             return
         prepared = self.versions.prepare(item, material, job, staging)
         self.fault('after_file_move')
@@ -432,6 +459,7 @@ class Store:
         if not error or not self.subscriptions.history.member(job.item):
             self.subscriptions.history.saved(job.item, material.full)
         if not error:
+            self.db.execute('DELETE FROM source_deleted WHERE item=?', (job.item,))
             self.finish(job)
         elif isinstance(error, SourceDeleted):
             self._record_fetch_removal(job, error.label)

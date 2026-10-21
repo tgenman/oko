@@ -79,8 +79,9 @@ def connect_request(client, *, json):
     return client.post('/api/v3/telegram/connect', json=payload)
 
 
-def settled(client, count=1):
-    for _ in range(200):
+def settled(client, count=1, timeout=4):
+    deadline = time.monotonic()+timeout
+    while time.monotonic()<deadline:
         cards = client.get('/api/v3/cards').json()
         if len(cards) == count and all((c.get('availability') == 'available') and not c.get('loading') for c in cards):
             return cards

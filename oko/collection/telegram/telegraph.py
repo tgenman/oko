@@ -14,7 +14,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import httpx
 
-from oko.collection.contracts import Material, DownloadStage, SourceError, SourceManifest, ArticleManifest, ResourceManifest
+from oko.collection.contracts import Material, DownloadStage, SourceError, SourceDeferred, SourceManifest, ArticleManifest, ResourceManifest
 from oko.collection.telegram.contracts import ExpectedMedia
 from oko.collection.telegram.media import Downloader
 
@@ -136,13 +136,17 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
             resources.extend(resource.model_copy(update={'order':offset+index}) for index,resource in enumerate(collected.resources))
             attachments.extend(collected.attachments)
             reasons.extend(collected.reasons)
-            if collected.error and (retry is None or collected.error.retryable):
+            if collected.error and (retry is None or not collected.error.retryable):
                 retry = collected.error
             article = ArticleManifest(url=url,title=result['title'],text=body,resource_keys=tuple(resource.key for resource in collected.resources))
             known = old_articles.get(url)
             if known and known.text is not None and (known.title,known.text,known.resource_keys)!=(article.title,article.text,article.resource_keys):
                 reasons.extend(resource.reason for resource in collected.resources if resource.reason)
         except SourceError as error:
+            if isinstance(error, SourceDeferred):
+                if retry is not None and not retry.retryable:
+                    raise retry
+                raise
             old = old_articles.get(url)
             if old and old.text is not None:
                 article = old.model_copy(update={'reason':error.label})
@@ -158,7 +162,7 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
             else:
                 article = article.model_copy(update={'reason':error.label})
                 reasons.append(error.label+' · '+url)
-            if retry is None or error.retryable:
+            if retry is None or not error.retryable:
                 retry = error
         articles.append(article)
         if article.text is not None:

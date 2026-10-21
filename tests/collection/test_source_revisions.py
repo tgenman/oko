@@ -112,7 +112,7 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
         assert not (tmp_path / 'staging' / item).exists()
 
 
-def test_telegram_rechecks_known_ids_including_media_only_edits_and_deletions(tmp_path):
+def test_explicit_telegram_reload_checks_known_ids_including_media_only_edits_and_deletions(tmp_path):
     from tests.support.telegram import Telegram, connect, settled
     class Editable(Telegram):
         text = 'Текст до правки'
@@ -133,18 +133,18 @@ def test_telegram_rechecks_known_ids_including_media_only_edits_and_deletions(tm
         item = settled(client)[0]['id']
         source.text = ''  # A real edit may remove all text.
         source.data = b'edited-image'
-        client.post('/api/v3/collect')
+        client.post('/api/v3/materials/' + item + '/retry')
         edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == '' else None)
         assert client.get(edited['content']['attachments'][0]['url']).content == b'edited-image'
         previous = client.get(edited['content']['previous_versions'][0]['url']).json()
         assert previous['text'] == 'Текст до правки'
         assert client.get(previous['attachments'][0]['url']).content == b'first-image'
         source.data = b'media-only-edit'
-        client.post('/api/v3/collect')
+        client.post('/api/v3/materials/' + item + '/retry')
         edited = wait_for(client, lambda: m if len((m := client.get('/api/v3/materials/' + item).json())['content'].get('previous_versions', [])) == 2 else None)
         assert client.get(edited['content']['attachments'][0]['url']).content == b'media-only-edit'
         source.missing = True
-        client.post('/api/v3/collect')
+        client.post('/api/v3/materials/' + item + '/retry')
         wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['content']['source_deleted'])
         assert client.get(edited['content']['attachments'][0]['url']).content == b'media-only-edit'
         client.post('/api/v3/materials/' + item + '/viewed')
@@ -263,7 +263,7 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
         assert client.get('/api/v3/materials/' + item).json()['theses']['diagnostic_message']
 
 
-def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_media(tmp_path):
+def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_media(tmp_path):
     from tests.support.telegram import Telegram, connect, settled
     from oko.collection.contracts import SourceError
     class Editable(Telegram):
@@ -285,7 +285,7 @@ def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_med
         original = settled(client)[0]
         item = original['id']
         source.fail = True
-        client.post('/api/v3/collect')
+        client.post('/api/v3/materials/' + item + '/retry')
         wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']) or client.get('/api/v3/materials/' + item).json()['content']['changed'])
         retained = client.get('/api/v3/materials/' + item).json()
         assert retained['content']['revision_id'] == original['revision_id']
@@ -299,9 +299,13 @@ def test_failed_unchanged_telegram_recheck_does_not_create_revision_or_erase_med
         assert client.get('/api/v3/materials/' + item).json()['content']['revision_id'] == original['revision_id']
         source.text = 'Настоящая правка текста при недоступном вложении'
         source.fail = True
-        client.post('/api/v3/collect')
+        client.post('/api/v3/materials/' + item + '/retry')
+        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']))
+        assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Неизменный пост'
+        source.fail = False
+        client.post('/api/v3/materials/' + item + '/retry')
         edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
-        assert edited['content']['changed'] is True and (edited['content']['completeness']['state']=='complete') is False
+        assert edited['content']['changed'] is True and (edited['content']['completeness']['state']=='complete') is True
         assert len(edited['content']['previous_versions']) == 1
         assert client.get(edited['content']['previous_versions'][0]['url']).json()['text'] == 'Неизменный пост'
 
