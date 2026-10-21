@@ -22,7 +22,8 @@
   },
   "dependencies": {
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "markdown-it": "15.0.3"
   },
   "scripts": {
     "build": "node --import tsx scripts/build-frontend.mts",

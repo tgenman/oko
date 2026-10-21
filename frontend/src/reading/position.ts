@@ -4,14 +4,15 @@ export function readingPosition() {
   const article=document.querySelector('article');
   if(!article)return ()=>{};
   const paragraphs=()=>Array.from(article.querySelectorAll<HTMLElement>('[data-reading-paragraph]')).filter(node=>node.getClientRects().length);
+  const region=(node:HTMLElement)=>node.closest('[data-reading-region]')?.id;
   const top=article.getBoundingClientRect().top,nodes=paragraphs();
   const index=nodes.findIndex(node=>node.getBoundingClientRect().bottom>top);
-  const section=nodes[index]?.parentElement?.id;
-  const candidates=nodes.map((node,index)=>({text:node.textContent,section:node.parentElement?.id,offset:node.getBoundingClientRect().top-top,index})).filter(node=>node.section===section).sort((a,b)=>Math.abs(a.index-index)-Math.abs(b.index-index));
+  const section=nodes[index]&&region(nodes[index]!);
+  const candidates=nodes.map((node,index)=>({text:node.textContent,section:region(node),offset:node.getBoundingClientRect().top-top,index})).filter(node=>node.section===section).sort((a,b)=>Math.abs(a.index-index)-Math.abs(b.index-index));
   const progress=article.scrollTop/Math.max(1,article.scrollHeight-article.clientHeight),scroll=article.scrollTop;
   return ()=>{
     const next=new Map<string|null,{node:HTMLElement;index:number}[]>();
-    paragraphs().forEach((node,index)=>{if(node.parentElement?.id!==section)return;const matches=next.get(node.textContent)||[];matches.push({node,index});next.set(node.textContent,matches);});
+    paragraphs().forEach((node,index)=>{if(region(node)!==section)return;const matches=next.get(node.textContent)||[];matches.push({node,index});next.set(node.textContent,matches);});
     for(const candidate of candidates){
       const matches=next.get(candidate.text);
       if(!matches?.length)continue;

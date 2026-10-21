@@ -13,17 +13,18 @@ test('a completed field write reconciles after Back without discarding a newer d
     await r.page.route('**/api/v3/settings/oko/global',async route=>{
       if (route.request().method()==='PATCH') held=route; else await route.continue();
     });
-    await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
-    await r.page.locator('#setting-originals').uncheck();
+    await r.api('settings/oko/global','PATCH',{theses:true});
+    await r.page.locator('#settings-open').click();await editSetting(r.page,'theses');
+    await r.page.locator('#setting-theses').uncheck();
     await r.page.getByRole('button',{name:'Save',exact:true}).click();
     await expect.poll(()=>Boolean(held)).toBe(true);
-    await r.page.locator('#setting-originals').check();
+    await r.page.locator('#setting-theses').check();
     await r.page.locator('#settings-dialog .settings-back').click();
     await held!.continue(); held=null;
-    await expect(r.page.getByRole('button',{name:'Show Original Publication',exact:true})).toContainText('Disabled');
-    await expect(r.page.getByRole('button',{name:'Show Original Publication',exact:true})).toBeFocused();
-    await r.page.getByRole('button',{name:'Show Original Publication',exact:true}).click();
-    await expect(r.page.locator('#setting-originals')).toBeChecked();
+    await expect(r.page.getByRole('button',{name:'Publication Summaries',exact:true})).toContainText('Disabled');
+    await expect(r.page.getByRole('button',{name:'Publication Summaries',exact:true})).toBeFocused();
+    await r.page.getByRole('button',{name:'Publication Summaries',exact:true}).click();
+    await expect(r.page.locator('#setting-theses')).toBeChecked();
     await expect(r.page.locator('.setting-row:visible details summary')).toBeVisible();
     await r.page.locator('.setting-row:visible details summary').click();
     await expect(r.page.locator('.setting-row:visible details')).toContainText('Disabled');
@@ -34,11 +35,12 @@ test('a completed field write reconciles after Back without discarding a newer d
 test('Back restores the current field and section links after a saved editor rerenders', async () => {
   const r=await reader();try{
     await r.start([]);await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});readerTransport.native.add('/api/v3/settings/oko/global');});
-    await r.page.locator('#settings-open').click();await editSetting(r.page,'originals');
-    await r.page.locator('#setting-originals').uncheck();await r.page.getByRole('button',{name:'Save',exact:true}).click();
+    await r.api('settings/oko/global','PATCH',{theses:true});
+    await r.page.locator('#settings-open').click();await editSetting(r.page,'theses');
+    await r.page.locator('#setting-theses').uncheck();await r.page.getByRole('button',{name:'Save',exact:true}).click();
     await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
     await r.page.locator('#settings-dialog .settings-back').click();
-    const field=r.page.getByRole('button',{name:'Show Original Publication',exact:true});
+    const field=r.page.getByRole('button',{name:'Publication Summaries',exact:true});
     await expect(field).toBeFocused();
     await expect(field).toHaveAccessibleDescription('Disabled');
     await r.page.locator('#settings-dialog .settings-back').click();

@@ -234,7 +234,8 @@ test('news titles show link labels without Markdown destinations', async () => {
    await row.click();
    await expect(r.page.locator('#title')).toHaveText(title!);
    await expect(r.page.locator('#title a')).toHaveAttribute('href',new RegExp('^https?://'));
-   await expect(r.page.locator('#text')).toHaveText('Текст [ссылка](https://example.test/body)');
+   await expect(r.page.locator('#text')).toHaveText('Текст ссылка');
+   await expect(r.page.locator('#text').getByRole('link',{name:'ссылка',exact:true})).toHaveAttribute('href','https://example.test/body');
   }
   await r.page.locator('[data-card="link-0"]').click();
   await expect(r.page.locator('#title')).toHaveText(cases[0]![1]!);

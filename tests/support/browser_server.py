@@ -56,10 +56,13 @@ def response(request):
     assert request.url.host in ('a.test', 'b.test', 'empty.test', 'source.test'), request.url
     if request.url.path == '/image.png':
         return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
-    if request.url.path == '/feed' or request.url.host == 'source.test':
+    if request.url.path in ('/feed', '/markdown-feed') or request.url.host == 'source.test':
         date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
-        item = '' if request.url.host == 'empty.test' else f'<item><guid>article</guid><title>Статья {request.url.host}</title><link>https://{request.url.host}/article</link><pubDate>{date}</pubDate><description>Анонс библиотеки.</description></item>'
+        article_path = 'markdown-article' if request.url.path == '/markdown-feed' else 'article'
+        item = '' if request.url.host == 'empty.test' else f'<item><guid>article</guid><title>Статья {request.url.host}</title><link>https://{request.url.host}/{article_path}</link><pubDate>{date}</pubDate><description>Анонс библиотеки.</description></item>'
         return httpx.Response(200, text=f'<rss version="2.0"><channel><title>Синтетический источник</title>{item}</channel></rss>')
+    if request.url.path == '/markdown-article':
+        return httpx.Response(200, text='<article><p>[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)</p><p>[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)</p></article>')
     assert request.url.path == '/article'
     return httpx.Response(200, text=f'<article><p>Открылась библиотека на 24 места.</p><img src="https://{request.url.host}/image.png"></article>')
 
