@@ -362,3 +362,36 @@ test('reconnect resumes missing media for unchanged text without replacing loade
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
 });
+
+test('current publication text is first-class and previous versions start collapsed',async()=>{
+ const r=await reader();try{
+  await r.start([material('A',{originals:false,title:'AI-агент Tolan, которым пользуются в основном женщины, поднял $30 млн',text:'Сегодня новостью про AI-агента сложно удивить. Но я сегодня погрузился [в историю от Upstarts Media про стартап Tolan](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust).\n\nОснователи Tolan — Квинтен Фармер, Аджай Мехта и Эван Голдшмидт. Их агент помогает с повседневными задачами.\n\nОн может запоминать, о чём с ним разговаривали, и поддерживать беседу на базе этих знаний.',previous:[{number:1,url:'/api/v3/materials/A/versions/1'},{number:2,url:'/api/v3/materials/A/versions/2'}]}),material('B')]);
+  await r.page.locator('[data-card="A"]').click();
+  await expect(r.page.locator('#text')).toBeVisible();
+  assert.equal(await r.page.locator('#text').locator('xpath=ancestor::details').count(),0);
+  await expect(r.page.locator('#original-panel')).toHaveCount(0);
+  await expect(r.page.locator('#versions h2')).toHaveText('Previous Versions · 2');
+  assert.deepEqual(await r.page.locator('#versions summary').allTextContents(),['Version 2','Version 1']);
+  await expect(r.page.locator('#versions details[open]')).toHaveCount(0);
+  await r.page.setViewportSize({width:1512,height:1000});
+  await r.page.screenshot({path:artifactPath('current-and-history-desktop.png')});
+  await r.page.setViewportSize({width:1120,height:1000});
+  assert.equal(await r.page.locator('#text').evaluate(node=>node.scrollWidth<=node.clientWidth),true);
+  assert.equal(await r.page.locator('#versions').evaluate(node=>node.scrollWidth<=node.clientWidth),true);
+  await r.page.screenshot({path:artifactPath('current-and-history-narrow.png')});
+  await r.page.evaluate(()=>{
+   for(const number of [1,2])readerTransport.replies.set('/api/v3/materials/A/versions/'+number,{body:{title:'Прежняя версия',text:'Прежний текст',full:true,images:[],attachments:[]}});
+  });
+  await r.page.locator('#versions summary').first().focus();
+  await r.page.keyboard.press('Enter');
+  await expect(r.page.locator('#versions')).toContainText('Прежний текст');
+  await r.page.locator('#versions summary').last().click();
+  await expect(r.page.locator('#versions details[open]')).toHaveCount(2);
+  await r.page.locator('#versions summary').first().click();
+  await r.page.locator('#versions summary').first().click();
+  await expect(r.page.locator('#versions')).toContainText('Прежний текст');
+  await r.page.locator('[data-card="B"]').click();
+  await expect(r.page.locator('#versions')).toBeEmpty();
+  assert.deepEqual(r.errors,[]);
+ }finally{await r.close();}
+});

@@ -1,6 +1,6 @@
 import type {Page} from 'playwright';
-const sections = {originals:'Reading',theses:'Reading',prompt_theses:'Prompts',prompt_filters:'Filtering',processor:'Processor'};
-const titles = {originals:'Show Original Publication',theses:'Publication Summaries',prompt_theses:'Summary Prompt',prompt_filters:'Filtering Rules',processor:'Processor'};
+const sections = {theses:'Reading',prompt_theses:'Prompts',prompt_filters:'Filtering',processor:'Processor'};
+const titles = {theses:'Publication Summaries',prompt_theses:'Summary Prompt',prompt_filters:'Filtering Rules',processor:'Processor'};
 async function settingsHome(page: Page) {
   const dialog = page.locator('dialog[open]');
   while (await dialog.locator('.settings-back').isVisible()) await dialog.locator('.settings-back').click();

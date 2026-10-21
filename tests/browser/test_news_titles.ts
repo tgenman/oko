@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import {reader,material,expect} from './support';
+import {artifactPath} from './artifacts';
 
 test('long news heading keeps its full text and list omits post excerpt', async()=>{
  const r=await reader();try{
@@ -13,8 +14,9 @@ test('long news heading keeps its full text and list omits post excerpt', async(
   await expect(row.locator('.card-snippet')).toHaveCount(0);
   await row.click();
   await expect(r.page.locator('#title')).toHaveText(expected);
-  await expect(r.page.locator('#text')).toHaveText(title+'\n\nСледующий абзац публикации.');
-  await r.page.screenshot({path:'/tmp/oko-full-title-no-excerpt.png',fullPage:true});
+  await expect(r.page.locator('#text')).toHaveText(expected+'\n\nСледующий абзац публикации.');
+  await expect(r.page.locator('#text').getByRole('link',{name:label,exact:true})).toHaveAttribute('href',url);
+  await r.page.screenshot({path:artifactPath('full-title-no-excerpt.png'),fullPage:true});
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

@@ -1,0 +1,10 @@
+.publication-markdown{white-space:normal;line-height:1.75;overflow-wrap:anywhere;min-width:0}
+.publication-markdown p{margin:0 0 1.2em}
+.publication-markdown :is(h3,h4,h5,h6){line-height:1.4;margin:1.5em 0 .7em}
+.publication-markdown h3{font-size:1.2em}.publication-markdown h4{font-size:1.1em}
+.publication-markdown blockquote{margin:1em 0;padding:0 0 0 1em;border-left:3px solid #d9ded5}
+.publication-markdown :is(ul,ol){padding-left:1.7em;margin:0 0 1em}
+.publication-markdown pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f4f1;padding:12px;border-radius:6px;font-size:.9em;max-width:100%}
+.publication-markdown code{font-size:.9em}
+.publication-markdown a{text-decoration:underline;text-underline-offset:2px}
+.publication-markdown :last-child{margin-bottom:0}
