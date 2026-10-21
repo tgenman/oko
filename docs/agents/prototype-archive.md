@@ -95,3 +95,18 @@ Primary-source ветка: `codex/telegram-external-prototype-20261021` (лок�
 В архивном дереве сохранены все варианты и команда `npm run prototype:telegram-attachment`.
 Спецификация и снимки: `.scratch/telegram-attachment-prototype/`; задача: [#74](https://github.com/tgenman/oko/issues/74).
 Production использует отдельную реализацию; dev entry и команда прототипа удалены.
+
+## Пост Telegram без веб-содержимого — 21 октября 2026
+
+Выбран C: карточка ссылки с пояснением «Telegram не предоставляет содержимое
+этого поста для веб-просмотра» и действием «Открыть в Telegram».
+Это состояние всей публикации отдельно от внешнего аудио и видео с подтверждённым
+ограничением размера; их согласованные карточки и значки сохраняются.
+
+Primary-source ветка: `codex/telegram-post-prototype-20261021` (локальная).
+Коммит: `d4c2a7b05f782511e9732802c1bde5fc3e95a503`.
+Исходники: `frontend/src/reading/telegram-post.prototype.{tsx,css,mjs}`;
+команда: `npm run prototype:telegram-post`.
+Спецификация: `.scratch/telegram-post-prototype/spec.md`.
+Прототип удалён из рабочего frontend при реализации; карточка C реализована
+отдельным production-компонентом. Задача: [#76](https://github.com/tgenman/oko/issues/76).
