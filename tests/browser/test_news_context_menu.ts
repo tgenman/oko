@@ -98,8 +98,16 @@ test('reload command fits the mobile context menu',async()=>{
  const r=await reader();try{
   await r.page.setViewportSize({width:390,height:844});
   await r.start([material('reload')]);
-  await r.page.locator('[data-card="reload"]').click({button:'right'});
+  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/reload/retry',{body:{ok:true}}));
+  const row=r.page.locator('[data-card="reload"]');
+  await row.scrollIntoViewIfNeeded();
+  await r.page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+  const box=await row.boundingBox();if(!box)throw new Error('Missing card');
+  await r.page.mouse.click(Math.max(8,box.x+12),box.y+12,{button:'right'});
   await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
   await r.page.screenshot({path:artifactPath('telegram-reload-menu-mobile.png')});
+  await r.page.getByRole('menuitem',{name:'Reload Publication',exact:true}).click();
+  await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
+  expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

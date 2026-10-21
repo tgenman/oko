@@ -144,6 +144,8 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
                 reasons.extend(resource.reason for resource in collected.resources if resource.reason)
         except SourceError as error:
             if isinstance(error, SourceDeferred):
+                if retry is not None and not retry.retryable:
+                    raise retry
                 raise
             old = old_articles.get(url)
             if old and old.text is not None:

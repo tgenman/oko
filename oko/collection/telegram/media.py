@@ -197,6 +197,8 @@ class Downloader:
                 resource = resource.model_copy(update={'status':'loaded','reason':'','sha256':payload.sha256})
             except SourceError as error:
                 if isinstance(error, SourceDeferred):
+                    if retry is not None and not retry.retryable:
+                        raise retry
                     raise
                 if retained and old:
                     attachments.append(retained)
