@@ -1,0 +1,68 @@
+{
+  "started_at": "20261021T132104Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (0.86s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-retro-134-check/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "build": {
+      "status": "PASS (9.13s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-retro-134-check/scripts/build-frontend.mts"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-retro-134-check/scripts/build-frontend.mts",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 10.03,
+  "log": "/private/tmp/oko-retro-134-check/.scratch/check-runs/20261021T132104Z-a6bbc06d/output.log"
+}

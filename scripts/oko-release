@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install immutable, paired Oko releases. Never operates on development data."""
 import argparse
+import errno
 import fcntl
 import hashlib
 import io
@@ -172,12 +173,17 @@ def confirm_helper_stopped(home, wait=0):
             return
 
 
-def available(port):
-    with socket.socket() as listener:
-        try:
-            listener.bind(('127.0.0.1', port))
-        except OSError as exc:
-            raise ValueError('Port %s is occupied; no foreign process was stopped' % port) from exc
+def available(port, wait=0):
+    deadline = time.monotonic() + wait
+    while True:
+        with socket.socket() as listener:
+            try:
+                listener.bind(('127.0.0.1', port))
+                return
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE or time.monotonic() >= deadline:
+                    raise ValueError('Port %s is occupied; no foreign process was stopped' % port) from exc
+        time.sleep(.1)
 
 
 def readiness(home, timeout=30):
@@ -196,10 +202,10 @@ def readiness(home, timeout=30):
     raise ValueError('Reader readiness failed; release remains selected for inspection, collection must stay disabled')
 
 
-def start(home):
+def start(home, port_wait=0):
     running = bool(compose(home, 'ps', '--status', 'running', '--quiet', capture=True).strip())
     if not running:
-        available(8765)
+        available(8765, wait=port_wait)
     autostart = Path(read(home / 'installation.json')['launchagents']) / (label(home) + '.plist')
     autostart.parent.mkdir(parents=True, exist_ok=True)
     if autostart.exists() or autostart.is_symlink():
@@ -380,7 +386,7 @@ def main():
                 raise ValueError('Rollback blocked: data changed or incompatible; preserve current data and plan restore explicitly')
         save(args.home / 'previous.json', dict(release=old, digest=tree_digest(args.home / 'data'), backup=str(checkpoint)))
         configure(args.home, args.release)
-        start(args.home)
+        start(args.home, port_wait=5)
     elif args.command == 'start':
         start(args.home)
     elif args.command == 'stop':
