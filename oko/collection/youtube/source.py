@@ -1,5 +1,6 @@
 """YouTube Atom updates and captions only; never downloads video/audio."""
 from oko.diagnostics import record_caught
+from oko.collection import request_observation as observation
 import asyncio
 import json
 import re
@@ -43,6 +44,8 @@ class LocalCaptions:
             result = json.loads(raw)
             if process.returncode or not isinstance(result, dict):
                 raise ValueError('worker')
+            if not result.get('error') or result.get('blocked'):
+                observation.remote(result)
             if result.get('skip'):
                 raise SourceSkipped('Анонс будущей трансляции пропущен')
             if result.get('error'):

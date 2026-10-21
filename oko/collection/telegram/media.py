@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpcore
 import httpx
+from oko.collection import request_observation as observation
 
 from oko.collection.contracts import DownloadStage, SourceError, SourceDeferred, StagedPayload, Attachment, Material, ResourceManifest
 
@@ -101,19 +102,22 @@ class Downloader:
         self.transport = transport
 
     @asynccontextmanager
-    async def open(self, url: str) -> AsyncIterator[httpx.Response]:
+    async def open(self, url: str, *, purpose: str = 'attachment') -> AsyncIterator[httpx.Response]:
+        original_url = url
         try:
             async with httpx.AsyncClient(transport=self.transport or PublicTransport(),timeout=20,
                                          follow_redirects=False,trust_env=False) as client:
                 for _ in range(5):
                     public_url(url)
-                    async with client.stream('GET',url) as response:
-                        if response.is_redirect:
-                            url = urljoin(url,response.headers['location'])
-                            continue
-                        response.raise_for_status()
-                        yield response
-                        return
+                    with observation.request(url, purpose=purpose, original_url=original_url):
+                        async with client.stream('GET',url) as response:
+                            observation.response_received(response)
+                            if response.is_redirect:
+                                url = urljoin(url,response.headers['location'])
+                                continue
+                            response.raise_for_status()
+                            yield response
+                            return
                 raise SourceError('Слишком много перенаправлений вложения')
         except (httpx.HTTPError,httpcore.NetworkError,httpcore.TimeoutException,TimeoutError,OSError,KeyError) as error:
             delay,code = 60,'media-unavailable'
@@ -127,7 +131,7 @@ class Downloader:
 
     async def metadata(self, url: str) -> Any:
         try:
-            async with asyncio.timeout(30), self.open(url) as response:
+            async with asyncio.timeout(30), self.open(url, purpose='publication') as response:
                 data = bytearray()
                 async for part in response.aiter_bytes():
                     data.extend(part)

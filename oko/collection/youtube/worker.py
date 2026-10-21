@@ -9,6 +9,7 @@ import traceback
 from urllib.parse import unquote, urlsplit
 from oko.collection.youtube.access import CaptionsBlocked
 from oko.diagnostics import redact
+from oko.collection import request_observation as observation
 from typing import Any
 
 
@@ -19,7 +20,9 @@ def check_response(response: Any, **kwargs: Any) -> Any:
             delay = float(value) if value.isdigit() else parsedate_to_datetime(value).timestamp() - time.time()
         except (ValueError, TypeError, OverflowError):
             delay = 0
-        raise CaptionsBlocked(delay)
+        error = CaptionsBlocked(delay)
+        setattr(error, 'response', response)
+        raise error
     return response
 
 
@@ -44,13 +47,34 @@ def main() -> None:
     logging.disable(logging.CRITICAL)
     result: dict[str, Any]
     proxy = None
+    capture = observation.Capture()
     try:
         from requests import Session
         from youtube_transcript_api import YouTubeTranscriptApi
         from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnplayable
         config = json.loads(sys.stdin.read() or '{}')
         proxy = config.get('proxy')
-        with Session() as session:
+        class ObservedSession(Session):
+            def send(self, request: Any, **kwargs: Any) -> Any:
+                try:
+                    response = super().send(request, **kwargs)
+                except Exception as error:
+                    # The SDK/requests owns retries and redirects. Observe only
+                    # a request that was actually attempted.
+                    failed_response = getattr(error, 'response', None)
+                    failed_url = str(getattr(getattr(error, 'request', None), 'url', '') or getattr(failed_response, 'url', '') or request.url)
+                    capture.failed(failed_url, error, purpose='publication', method=request.method,
+                                   original_url=request.url,
+                                   http_status=getattr(failed_response, 'status_code', None))
+                    raise
+                if response.status_code >= 400:
+                    from requests import HTTPError
+                    status_error = HTTPError(f'{response.status_code} {response.reason}', response=response)
+                    capture.failed(response.url, status_error, purpose='publication', method=request.method,
+                                   original_url=request.url, http_status=response.status_code)
+                return response
+
+        with ObservedSession() as session:
             session.trust_env = False
             session.hooks['response'].append(check_response)
             options = {}
@@ -64,7 +88,7 @@ def main() -> None:
     except (TranscriptsDisabled, NoTranscriptFound):
         result = dict(text=None)
     except CaptionsBlocked as error:
-        result = dict(error=True, blocked=True, retry_after=error.retry_after)
+        result = dict(error=True, blocked=True, retry_after=error.retry_after, **safe_details(error, proxy))
     except VideoUnplayable as error:
         if re.match(r'^This live event will begin\b', error.reason or '', re.IGNORECASE):
             result = dict(skip=True)
@@ -72,9 +96,10 @@ def main() -> None:
             result = dict(error=True, **safe_details(error, proxy))
     except Exception as error:
         if type(error).__name__ in ('RequestBlocked', 'IpBlocked'):
-            result = dict(error=True, blocked=True, retry_after=0)
+            result = dict(error=True, blocked=True, retry_after=0, **safe_details(error, proxy))
         else:
             result = dict(error=True, **safe_details(error, proxy))
+    result.update(observation.worker_details(capture))
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
 
 

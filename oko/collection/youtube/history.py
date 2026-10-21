@@ -5,6 +5,7 @@ import sys
 from typing import Any, Protocol
 
 from oko.collection.contracts import SourceError
+from oko.collection import request_observation as observation
 
 
 class HistoryClient(Protocol):
@@ -32,6 +33,7 @@ class LocalHistory:
             result: dict[str, Any] = json.loads(raw)
             if process.returncode or not isinstance(result, dict) or 'entries' not in result:
                 raise ValueError('worker')
+            observation.remote(result)
             return result
         except (ValueError, OSError, TimeoutError):
             raise SourceError('Не удалось подобрать историю YouTube; продолжите вручную') from None

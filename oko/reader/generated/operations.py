@@ -9,6 +9,8 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('DELETE', '/api/v3/client-sessions/{identity}'): models.ClientSessionClosed,
     ('PUT', '/api/v3/client-sessions/{identity}'): models.ClientSession,
     ('POST', '/api/v3/collect'): models.CommandAcknowledgement,
+    ('GET', '/api/v3/collection-status'): models.CollectionSnapshot,
+    ('GET', '/api/v3/collection-status/{feed_id}'): models.CollectionDetails,
     ('POST', '/api/v3/command-observations'): models.CommandReceipt,
     ('GET', '/api/v3/commands/{identity}'): models.CommandReceipt,
     ('DELETE', '/api/v3/diagnostics'): models.DiagnosticClearResult,

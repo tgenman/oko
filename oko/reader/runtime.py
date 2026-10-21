@@ -3,6 +3,7 @@
 Store remains responsible for durable identity/content/recovery. Network waits
 happen outside the action lock; admission, transitions and result commits share it.
 """
+from oko.collection.request_observation import Capture
 from oko.storage.reading import reading_snapshot
 import asyncio
 from dataclasses import dataclass
@@ -115,6 +116,8 @@ class Runtime:
         self._youtube_captions = youtube_captions or LocalCaptions()
         self._youtube_history = youtube_history
         self._wall_clock = wall_clock
+        self._collection_instance = secrets.token_hex(16)
+        self._collection_revision = 0
         self._captions_active = False
         self._codex_client = codex_client or LocalCodex()
         self._codex_status = codex_status()
@@ -301,6 +304,18 @@ class Runtime:
             row = self._store.db.execute('SELECT viewed FROM items WHERE id=?', (identity,)).fetchone()
             return bool(row and row['viewed'])
         return identity in self._viewed_ids
+
+    def collection_snapshot(self) -> dict[str, Any]:
+        current = self.require_store()
+        feeds = current.subscriptions.feeds()
+        for feed in feeds:
+            binding = current.subscriptions.telegram.binding(feed['id']) if feed['kind']=='telegram' else None
+            feed['collection_access'] = 'Веб' if binding and binding['kind']=='web' else 'Личный аккаунт' if binding and binding.get('role')=='personal' else 'Аккаунт для сбора' if binding and binding.get('role')=='collection' else feed.get('transport', feed['kind'])
+        sources = current.collection_status.snapshot(feeds, self._live(),
+            'Око выключено' if not self.enabled else 'Ожидание присутствия читателя' if not self._admitted() else 'Работа приостановлена')
+        self._collection_revision += 1
+        return dict(instance_id=self._collection_instance, revision=self._collection_revision,
+                    observed_at=self._wall_clock(), work_allowed=self._live(), sources=sources)
 
     def status(self) -> dict[str, Any]:
         return self.status_snapshot().state
@@ -1068,11 +1083,18 @@ class Runtime:
                 self._store.db.execute("UPDATE jobs SET problem_code=? WHERE id=? AND generation=? AND status='pending'", (job.kind+':FloodWaitError', job.id, job.generation))
 
     async def _execute(self, job: Job) -> None:
+        capture = Capture()
+        with capture.scope():
+            await self._execute_observed(job, capture)
+
+    async def _execute_observed(self, job: Job, capture: Capture) -> None:
         diagnostic_materials.set((job.item,) if job.kind in ('fetch','delete') else ())
         capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
         feed = ''
         staging: DownloadStage | None = None
+        collection_error: BaseException | None = None
+        cancelled = False
         try:
             async with self._actions:
                 current = self._store
@@ -1083,6 +1105,7 @@ class Runtime:
                     self._delete(job, current)
                     return
                 feed = (job.item or 'demo') if job.kind in ('discover', 'read') else current.item_feed(job.item)
+                current.collection_status.start(job, feed, capture)
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 source = self._sources.get(feed)
                 staging = current.download_stage(job,lambda:self._store is current and self._live() and current.valid(job)) if job.kind == 'fetch' and source and source.fetch_requirements.staging else None
@@ -1110,6 +1133,7 @@ class Runtime:
                     if self._store is current and self._live() and current.valid(job):
                         if outcome.observation.identity:
                             current.subscriptions.telegram.refresh(feed, outcome.observation.identity.as_info())
+                        collection_error = outcome.retry_error
                         self._account_wait(feed, outcome.retry_error)
                         current.discovered(list(outcome.publications), outcome.cursor, job, feed, namespace, description=outcome.observation.description, successful=outcome.retry_error is None)
                         if outcome.continuation is not None:
@@ -1119,6 +1143,7 @@ class Runtime:
             elif publication:
                 fetched = await source.fetch(publication, resources)
                 material = fetched.material
+                collection_error = material.collection_error
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
                         if fetched.observation.identity:
@@ -1134,15 +1159,19 @@ class Runtime:
         except CaptionsDeferred:
             pass
         except asyncio.CancelledError:
+            cancelled = True
             raise
         except Exception as error:
+            collection_error = error
             record_caught('runtime._execute')
             async with self._actions:
                 if current and self._store is current and not self.stopped and current.valid(job):
                     if isinstance(error, SourceSkipped) and job.kind == 'fetch':
+                        collection_error = None
                         current.viewed(job.item)
                         return
                     if isinstance(error, SourceDeleted) and job.kind == 'fetch':
+                        collection_error = None
                         current.source_removed(job)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
@@ -1165,6 +1194,8 @@ class Runtime:
                         current.feed_status(feed, error=label, gap=None)
 
         finally:
+            if current and self._store is current and not self.stopped and job.kind in ('discover','fetch'):
+                current.collection_status.finish(job, feed, collection_error, capture, cancelled=cancelled)
             if staging:
                 shutil.rmtree(staging.path,ignore_errors=True)
 

@@ -40,6 +40,9 @@ class BrowserError(BaseModel):
 
 def redact(value: str, secret: str = '') -> str:
     value = value.replace(secret, '[session]') if secret else value
+    sensitive = r'(?:signature|sig|signed|policy|key-pair-id|expires|x-amz-[a-z0-9-]+|x-goog-[a-z0-9-]+|awsaccesskeyid|googleaccessid|auth|cookie|set-cookie|session|sessionid|session_id|jwt|credential)'
+    value = re.sub(r'(?i)([?&#]' + sensitive + r'=)[^\s&#\"\']+', r'\1[hidden]', value)
+    value = re.sub(r'''(?im)(["']?(?:cookie|set-cookie)["']?\s*[:=]\s*)[^\r\n]+''', r'\1[hidden]', value)
     value = re.sub(r'''(?is)(["']?(?:password|api[_-]?key|access[_-]?token|token|secret|authorization|session_string|string_session)["']?\s*[:=]\s*)(["'])(?:\\.|(?!\2).)*\2''', r'\1\2[hidden]\2', value)
     value = re.sub(r'(?i)((?:Bearer|Basic)\s+)[^\s"\']+', r'\1[hidden]', value)
     value = re.sub(r'(?i)([?&#](?:token|api_key|access_token|password|secret)=)[^\s&#"\']+', r'\1[hidden]', value)
@@ -49,8 +52,8 @@ def redact(value: str, secret: str = '') -> str:
 
 def exception_details(error: BaseException) -> dict[str, str]:
     frames = traceback.extract_tb(error.__traceback__)
-    return dict(traceback=''.join(traceback.format_exception(error)), error_type=type(error).__name__,
-                message=str(error), location=f'{frames[-1].filename}:{frames[-1].lineno}:{frames[-1].name}' if frames else type(error).__name__)
+    return dict(traceback=redact(''.join(traceback.format_exception(error))), error_type=type(error).__name__,
+                message=redact(str(error)), location=f'{frames[-1].filename}:{frames[-1].lineno}:{frames[-1].name}' if frames else type(error).__name__)
 
 
 class Journal:
@@ -206,5 +209,19 @@ capture_scope: ContextVar[str] = ContextVar('oko_debug_scope', default='')
 
 def record_caught(source: str) -> None:
     journal, error = active_journal.get(), sys.exception()
+    if error is not None and not isinstance(error, (SourceDeleted, asyncio.CancelledError)):
+        # Partial adapters deliberately catch errors. Retain their original
+        # exception for the owning collection attempt as well as the journal.
+        from oko.collection.request_observation import active_capture
+        from oko.collection.contracts import SourceError
+        if capture := active_capture.get():
+            current = error
+            seen: set[int] = set()
+            while current.__cause__ is not None and id(current) not in seen:
+                seen.add(id(current))
+                current = current.__cause__
+            if capture.error is None or not isinstance(current, SourceError):
+                details = exception_details(current)
+                capture.error = dict(details, occurred_at=datetime.now(timezone.utc).timestamp(), origin='server')
     if journal is not None and error is not None:
         journal.capture(error, source)

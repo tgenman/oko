@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 import httpx
+from oko.collection import request_observation as observation
 
 from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, DownloadStage, Attachment, SourceManifest, ResourceManifest, ExternalMedia, ReplyPreview
 from oko.collection.telegram.contracts import TelegramPublication, ExpectedMedia
@@ -249,22 +250,25 @@ def parse_page(data: bytes, username: str) -> WebPage:
 
 async def load(username: str, before: int, transport: httpx.AsyncBaseTransport | None) -> tuple[WebPage,str]:
     url = 'https://t.me/s/'+username+('?before='+str(before) if before else '')
+    original_url = url
     try:
         async with httpx.AsyncClient(transport=transport, timeout=20, follow_redirects=False, trust_env=False) as client:
             for _ in range(5):
                 parsed = urlsplit(url)
                 if parsed.scheme != 'https' or parsed.hostname not in ('t.me','telegram.me') or parsed.username or parsed.port or parsed.path.lower() != '/s/'+username.lower():
                     raise ValueError('redirect outside public source')
-                async with client.stream('GET',url) as response:
-                    if response.is_redirect:
-                        url = urljoin(url,response.headers['location'])
-                        continue
-                    response.raise_for_status()
-                    data = bytearray()
-                    async for part in response.aiter_bytes():
-                        data.extend(part)
-                        if len(data)>2*1024*1024:
-                            raise ValueError('preview too large')
+                with observation.request(url, purpose='feed', original_url=original_url):
+                    async with client.stream('GET',url) as response:
+                        observation.response_received(response)
+                        if response.is_redirect:
+                            url = urljoin(url,response.headers['location'])
+                            continue
+                        response.raise_for_status()
+                        data = bytearray()
+                        async for part in response.aiter_bytes():
+                            data.extend(part)
+                            if len(data)>2*1024*1024:
+                                raise ValueError('preview too large')
                 page = parse_page(bytes(data),username)
                 if before and any(int(post.publication.id)>=before for post in page.posts):
                     raise SourceError('Telegram вернул страницу вне запрошенной границы')
