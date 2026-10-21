@@ -23,6 +23,21 @@ def summary(path):
         if not isinstance(status, str) or not status or not text_list(failures):
             raise ValueError('Invalid suite: ' + name)
         suites[name] = dict(status=status, failures=failures)
+        if 'worker_durations' in value:
+            workers = value['worker_durations']
+            if not isinstance(workers, dict) or not all(isinstance(key, str) and valid_seconds(seconds) for key,seconds in workers.items()):
+                raise ValueError('Invalid worker timings')
+            suites[name]['worker_durations'] = workers
+        if 'file_durations' in value:
+            files = value['file_durations']
+            if not isinstance(files, dict) or not all(isinstance(key, str) and valid_seconds(seconds) for key,seconds in files.items()):
+                raise ValueError('Invalid file timings')
+            suites[name]['slow_files'] = [dict(file=key,seconds=seconds) for key,seconds in sorted(files.items(),key=lambda item:(-item[1],item[0]))[:5]]
+        if 'test_durations' in value:
+            tests = value['test_durations']
+            if not isinstance(tests, list) or not all(isinstance(test, dict) and isinstance(test.get('file'), str) and isinstance(test.get('name'), str) and valid_seconds(test.get('seconds')) for test in tests):
+                raise ValueError('Invalid test timings')
+            suites[name]['slow_tests'] = [dict(file=test['file'],name=test['name'],seconds=test['seconds']) for test in sorted(tests,key=lambda test:-test['seconds'])[:5]]
     guard = data.get('checkout', dict(status='NOT RECORDED', changed_files=[]))
     if guard['status'] not in ('PASS', 'FAIL', 'NOT RECORDED') or not text_list(guard['changed_files']):
         raise ValueError('Invalid checkout result')
@@ -34,6 +49,10 @@ def summary(path):
             raise ValueError('Invalid snapshot')
         result['snapshot'] = snapshot
     return result
+
+
+def valid_seconds(value):
+    return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
 def text_list(value):
@@ -54,6 +73,8 @@ def main():
                 print(name + ': ' + suite['status'])
                 for failure in suite['failures']:
                     print('  ' + failure)
+                for file in suite.get('slow_files', [])[:3]:
+                    print(f"  slow: {file['seconds']:.3f}s {file['file']}")
             guard = value['checkout']
             print('checkout: ' + guard['status'])
             for name in guard['changed_files']:

@@ -50,3 +50,18 @@ def test_json_and_text_reject_wrong_field_types_before_printing(tmp_path):
         assert result.returncode == 2
         assert result.stdout == ''
         assert 'Traceback' not in result.stderr
+
+
+def test_compact_report_exposes_worker_times_and_slowest_files_and_tests(tmp_path):
+    report=tmp_path/'report.json'
+    report.write_text(json.dumps(dict(exit_code=1,duration_seconds=3.2,log='/tmp/full.log',suites={
+        'python-tests':dict(status='FAIL (3.00s)',failures=['test_bad'],duration_seconds=3,
+            worker_durations={'python-tests-1':1,'python-tests-2':3},
+            file_durations={'tests/fast.py':.1,'tests/slow.py':2},
+            test_durations=[dict(file='tests/slow.py',name='test_bad',seconds=2),dict(file='tests/fast.py',name='test_ok',seconds=.1)])})))
+    result=subprocess.run([sys.executable,str(CLI),str(report),'--json'],capture_output=True,text=True)
+    assert result.returncode==1
+    suite=json.loads(result.stdout)['suites']['python-tests']
+    assert suite['worker_durations']['python-tests-2']==3
+    assert suite['slow_files'][0]==dict(file='tests/slow.py',seconds=2)
+    assert suite['slow_tests'][0]['name']=='test_bad'

@@ -782,7 +782,7 @@ sys.exit(0)
     commands = reported
     assert len(commands) == workers
     assert all(command[command.index('-q') + 1:] for command in commands)
-    selected = [value for command in commands for value in command[command.index('-q') + 1:]]
+    selected = [value for command in commands for value in command[command.index('-q') + 1:] if value.endswith('.py')]
     assert sorted(selected) == sorted(str(ROOT / name) for name in files)
     assert len(group['workers']) == workers and group['status'].startswith('FAIL')
     assert group['failures'] == ['tests/reader/test_frontend_build.py::test_fixture']
@@ -832,3 +832,68 @@ def test_compact_console_preserves_verbose_output_in_report_log(tmp_path):
     assert 'PASS syntax' in result.stdout
     report = json.loads(next(reports.glob('*/report.json')).read_text())
     assert 'full tool detail' in Path(report['log']).read_text()
+
+
+@pytest.mark.parametrize('changed,expected',[
+    ('tests/support/telegram_web.py',{'test_browser_host.py'}),
+    ('scripts/check-report',{'test_check_report.py'}),
+    ('scripts/task_changes.py',None),
+    ('tests/support/build_tools.py',{'test_frontend_builder.py','test_build_speed.py','test_governance.py'}),
+    ('scripts/unclassified-tool',None),
+])
+def test_cli_selects_affected_tool_families_and_falls_back_for_unknown_inputs(tmp_path,changed,expected):
+    import json
+    import shutil
+    checkout=tmp_path/'selection';checkout.mkdir()
+    (checkout/'scripts').mkdir()
+    shutil.copy2(REPO/'scripts/check',checkout/'scripts/check')
+    # The CLI executes synthetic runtimes; only Git selection and reporting are real.
+    tests=__import__('runpy').run_path(str(REPO/'scripts/check'))['TOOL_TESTS']
+    for name in tests:
+        p=checkout/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('')
+    def git(*args):return subprocess.check_output(['git',*args],cwd=checkout,text=True).strip()
+    git('init','-q');git('config','user.name','Test');git('config','user.email','test@example.test')
+    git('add','.');git('commit','-qm','base');base=git('rev-parse','HEAD')
+    p=checkout/changed;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('# changed\n')
+    env=runtimes(tmp_path);(tmp_path/'git').unlink()
+    result=subprocess.run([sys.executable,str(checkout/'scripts/check'),'tools','--if-changed','--base',base,'--report-dir',str(tmp_path/'reports')],env=env,capture_output=True,text=True,timeout=15)
+    assert result.returncode==0,result.stdout+result.stderr
+    report=json.loads(next((tmp_path/'reports').glob('*/report.json')).read_text())
+    selected={Path(arg).name for command in report['suites']['tool-tests']['commands'] for arg in command['command'][4:] if arg.endswith('.py')}
+    assert selected==(expected or {Path(p).name for p in tests})
+
+
+@pytest.mark.parametrize('failure',[False,True])
+def test_pytest_cli_reports_test_and_file_timings(tmp_path,failure):
+    import json
+    import shutil
+    checkout=tmp_path/'timing';(checkout/'scripts').mkdir(parents=True)
+    shutil.copy2(REPO/'scripts/check',checkout/'scripts/check')
+    (checkout/'tests').mkdir()
+    subprocess.run(['git','init','-q'],cwd=checkout,check=True)
+    (checkout/'.gitignore').write_text('__pycache__/\n.pytest_cache/\n')
+    (checkout/'scripts/check_test_contracts.py').write_text('pass\n')
+    (checkout/'tests/test_first.py').write_text('def test_fast(): '+('assert False' if failure else 'pass')+'\n')
+    (checkout/'tests/test_second.py').write_text('def test_other(): pass\n')
+    result=subprocess.run([sys.executable,str(checkout/'scripts/check'),'python','--files','tests/test_first.py','tests/test_second.py','--report-dir',str(tmp_path/'reports')],env={**os.environ,'OKO_PYTHON':sys.executable},capture_output=True,text=True,timeout=15)
+    assert result.returncode==int(failure),result.stdout+result.stderr
+    report=json.loads(next((tmp_path/'reports').glob('*/report.json')).read_text())
+    suite=report['suites']['python-tests']
+    assert {entry['file'] for entry in suite['test_durations']}=={'tests/test_first.py','tests/test_second.py'}
+    assert {entry['name'] for entry in suite['test_durations']}=={'test_fast','test_other'}
+    assert all(entry['seconds']>=0 for entry in suite['test_durations'])
+    assert suite['duration_seconds']>=max(suite['worker_durations'].values())
+
+
+def test_worker_killed_without_report_keeps_measured_elapsed(tmp_path):
+    import json
+    env=runtimes(tmp_path)
+    runtime=Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "if 'pytest' in sys.argv:\n    import signal,time\n    time.sleep(.15)\n    os.kill(os.getppid(),signal.SIGKILL)\nsys.exit(0)"))
+    result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'python','--report-dir',str(tmp_path/'reports')],env=env,capture_output=True,text=True,timeout=15)
+    assert result.returncode==1
+    report=json.loads(next((tmp_path/'reports').glob('*/report.json')).read_text())
+    suite=report['suites']['python-tests']
+    assert suite['status'].startswith('FAIL')
+    assert suite['duration_seconds']>=.15
+    assert all(seconds>=.15 for seconds in suite['worker_durations'].values())
