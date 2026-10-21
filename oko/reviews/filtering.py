@@ -29,7 +29,10 @@ class Filters:
         row = material_read.item(store.db, item)
         if not row or row['viewed'] or not row['complete'] or not store.path(item).is_file():
             return None
-        header, own_text = store.original(item)
+        try:
+            header, own_text = store.original(item)
+        except (OSError, ValueError):
+            return None
         reply = header.get('reply_preview')
         if reply is not None and not own_text.strip() and not reply.get('text', '').strip():
             return None

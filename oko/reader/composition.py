@@ -81,7 +81,9 @@ class ReadingComposition:
                                       + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
         cards = []
         for row in rows:
-            material = _reading_heading(self._store.saved_publication(row), feeds[row['feed_id']], self._store.original(row['id'])[0] if row['complete'] else {})
+            material = self._store.saved_publication(row)
+            if material:
+                material = _reading_heading(material, feeds[row['feed_id']], self._store.original(row['id'])[0] if material['complete'] else {})
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):
                 owner = feeds[row['feed_id']]
                 text = material.pop('text')
