@@ -152,3 +152,34 @@ def test_redirects_share_html_budget_and_429_without_header_increases_pause(tmp_
         wall[0] += 61
         client.post('/api/v3/telegram/connect', json={'source_locator':'@secondchannel','folder':'Inbox'})
         assert len(calls) == count+1
+
+
+def test_late_429_after_power_off_cannot_pause_new_work(tmp_path):
+    import asyncio
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    async def response(request):
+        calls.append(str(request.url))
+        if len(calls) == 1:
+            entered.set()
+            while not release.is_set():
+                try:
+                    await asyncio.sleep(.02)
+                except asyncio.CancelledError:
+                    pass  # The external response deliberately ignores cancellation.
+            return httpx.Response(429, headers={'Retry-After':'600'})
+        return httpx.Response(200, text=page([]).replace('fixture','secondchannel'))
+    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
+        with ThreadPoolExecutor() as pool:
+            first = pool.submit(client.post,'/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
+            assert entered.wait(2)
+            try:
+                assert client.put('/api/v3/power',json={'enabled':False}).status_code == 200
+            finally:
+                release.set()
+            assert first.result(timeout=3).status_code != 200
+        assert client.put('/api/v3/power',json={'enabled':True}).status_code == 200
+        assert client.post('/api/v3/telegram/connect',json={'source_locator':'@secondchannel','folder':'Inbox'}).status_code == 200
+        assert len(calls) >= 2

@@ -160,7 +160,7 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
             else:
                 article = article.model_copy(update={'reason':error.label})
                 reasons.append(error.label+' · '+url)
-            if retry is None or error.retryable:
+            if retry is None or not error.retryable:
                 retry = error
         articles.append(article)
         if article.text is not None:

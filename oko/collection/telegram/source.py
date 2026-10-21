@@ -461,6 +461,7 @@ class TelegramSource:
                 continue
             if media['kind'] == 'unsupported':
                 reasons.append('Тип вложения пока не поддерживается')
+                collection_error = SourceError('Тип вложения пока не поддерживается', code='media-unsupported', retryable=False)
                 continue
             try:
                 name = f"media-{msg['id']}.{media['extension']}"
@@ -474,7 +475,7 @@ class TelegramSource:
                 reasons.append(error.label)
                 if isinstance(error,SourceDeleted) or error.remote_type in ('OverflowError','FileNotFoundError'):
                     error = SourceError(error.label,code='media-too-large' if error.remote_type=='OverflowError' else 'media-not-found',retryable=False)
-                if collection_error is None or error.retryable:
+                if collection_error is None or not error.retryable:
                     collection_error = error
         names = {a.name for a in attachments}
         failed_names = {f"media-{m['id']}.{m['media']['extension']}" for m in rows if m['media'] and m['media']['kind'] != 'unsupported'}

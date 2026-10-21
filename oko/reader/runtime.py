@@ -131,8 +131,8 @@ class Runtime:
         self._telegram_client = telegram_client
         self._telegram_http = TelegramHTTP(rss_transport, clock, wall_clock,
             lambda group: self.require_store().telegram_http_state(group),
-            lambda group, state: self.require_store().telegram_http_wait(group, state),
-            lambda: self._live() and not self._cancelling)
+            self._save_telegram_http_wait,
+            lambda: self._live() and not self._cancelling, lambda: self._epoch)
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport, telegram_client,
                                    self._youtube_captions, self._youtube_history, self._telegram_http)
         self._sources = self._collection.sources
@@ -164,6 +164,12 @@ class Runtime:
         self._reader_advanced = float('-inf')
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
+
+    async def _save_telegram_http_wait(self, group: str, state: dict[str, Any], generation: int) -> None:
+        async with self._actions:
+            if not self._live() or self._cancelling or generation != self._epoch:
+                raise asyncio.CancelledError
+            self.require_store().telegram_http_wait(group, state)
 
     def _live(self) -> bool:
         return not self.stopped and self.enabled and self._admitted()

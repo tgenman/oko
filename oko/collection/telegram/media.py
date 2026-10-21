@@ -204,7 +204,7 @@ class Downloader:
                 else:
                     resource = resource.model_copy(update={'status':'unsupported' if isinstance(error,MediaLimit) or error.code in terminal else 'missing','reason':error.label})
                     reasons.append(error.label)
-                if retry is None or error.retryable:
+                if retry is None or not error.retryable:
                     retry = error
             resources.append(resource)
         return CollectedMedia(tuple(attachments),tuple(resources),tuple(reasons),retry)

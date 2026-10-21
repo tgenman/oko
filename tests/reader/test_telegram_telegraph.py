@@ -230,6 +230,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
     import asyncio
     import json
     import threading
+    import time
     from tests.support.filters import transport
     from tests.support.reader import wait_for
     calls=[]
@@ -244,7 +245,8 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
             late=regenerating and block_ai[0] and not regeneration_started.is_set()
             if late:
                 regeneration_started.set()
-            while block_ai[0]:
+            deadline = time.monotonic()+15
+            while block_ai[0] and time.monotonic()<deadline:
                 try:
                     await asyncio.sleep(.005)
                 except asyncio.CancelledError:
@@ -278,6 +280,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
         path='/api/v3/materials/'+identity
         initial=wait_for(client,lambda: v if (v:=client.get(path).json())['theses']['result'] else None)
         accepted=initial['theses']['result']
+        initial_calls=len([r for r in calls if r.url.path=='/v1/chat/completions'])
         if regenerating:
             block_ai[0]=True
             assert client.post(path+'/regenerate').status_code==200
@@ -289,7 +292,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
         assert retained['content']['revision_id']==initial['content']['revision_id']
         assert retained['theses']['result']==accepted
         assert retained['filter']['result']==initial['filter']['result']
-        assert len([r for r in calls if r.url.path=='/v1/chat/completions'])==(2 if filtered else 1)
+        assert len([r for r in calls if r.url.path=='/v1/chat/completions'])==initial_calls
         assert retained['content']['text']==initial['content']['text']
         phase[0]=3
         block_ai[0]=True
@@ -307,7 +310,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
             assert regeneration_finished.wait(2)
             assert client.get(path).json()['theses']['result']==regenerated
         completed=[r for r in calls if r.url.path=='/v1/chat/completions']
-        expected=4 if filtered else 2
+        expected=initial_calls+(2 if filtered else 1)
         # An explicitly requested regeneration may already have reached the
         # external model when its cancellation races the actual source edit.
         assert expected<=len(completed)<=expected+int(regenerating)

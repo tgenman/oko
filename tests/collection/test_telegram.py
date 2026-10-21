@@ -357,7 +357,7 @@ def test_new_album_part_updates_existing_material_and_member_ids(tmp_path: Path)
         connect(client)
         original = settled(client)[0]
         tg.rows = tg.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=dict(kind='video', mime='video/mp4', extension='mp4'))]
-        client.post('/api/v3/collect')
+        client.post('/api/v3/materials/' + original['id'] + '/retry')
         for _ in range(150):
             material = client.get('/api/v3/materials/' + original['id']).json()
             if not material['content'].get('loading') and len(material['content'].get('attachments', [])) == 2:

@@ -84,16 +84,22 @@ test('news context menu reloads a full copy without marking it viewed',async()=>
   await r.page.locator('[data-card="reload"]').click({button:'right'});
   await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
   await r.page.screenshot({path:artifactPath('telegram-reload-menu-desktop.png')});
-  await r.page.setViewportSize({width:390,height:844});
-  await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
-  await r.page.locator('[data-card="reload"]').click({button:'right'});
-  await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
-  await r.page.screenshot({path:artifactPath('telegram-reload-menu-mobile.png')});
   await r.page.getByRole('menuitem',{name:'Reload Publication',exact:true}).click();
   await expect.poll(()=>r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/retry')).length)).toBe(1);
   await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
   await expect(r.page.locator('#text')).toContainText('Текст reload');
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/viewed')).length)).toBe(0);
   expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});
+
+
+test('reload command fits the mobile context menu',async()=>{
+ const r=await reader();try{
+  await r.page.setViewportSize({width:390,height:844});
+  await r.start([material('reload')]);
+  await r.page.locator('[data-card="reload"]').click({button:'right'});
+  await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
+  await r.page.screenshot({path:artifactPath('telegram-reload-menu-mobile.png')});
  }finally{await r.close();}
 });

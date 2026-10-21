@@ -110,7 +110,7 @@ def test_repeated_close_does_not_extend_shutdown_grace(tmp_path: Path):
         assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
 
 
-def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
+def test_reload_restores_missing_local_media_without_stopping_reader(tmp_path: Path):
     from tests.support.telegram import settled
     class Client(Telegram):
         rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777,
@@ -129,13 +129,13 @@ def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
         # an unhandled task exception which closes the whole reader.
         next((tmp_path / 'content' / card['id']).glob('*/media-11.jpg')).unlink()
         source.rows = source.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=None)]
-        client.post('/api/v3/collect')
-        for _ in range(100):
+        client.post('/api/v3/materials/' + card['id'] + '/retry')
+        for _ in range(200):
             state = client.get('/api/v3/status').json()
-            if any(p['code']=='material_read_failed' for p in state['problems']['current']) or state['runtime_state']=='stopped':
+            if list((tmp_path / 'content' / card['id']).glob('*/media-11.jpg')) or state['runtime_state']=='stopped':
                 break
             time.sleep(.01)
         assert state['runtime_state']=='running'
-        assert any(p['code']=='material_read_failed' for p in state['problems']['current'])
+        assert list((tmp_path / 'content' / card['id']).glob('*/media-11.jpg'))
         assert client.get('/api/v3/cards').status_code == 200
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200

@@ -1,6 +1,6 @@
 """Runtime-owned HTTP admission shared by Telegram collection and connections."""
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from email.utils import parsedate_to_datetime
 import math
 from typing import Any
@@ -14,10 +14,12 @@ from oko.collection.telegram.media import PublicTransport
 class TelegramHTTP(httpx.AsyncBaseTransport):
     def __init__(self, transport: httpx.AsyncBaseTransport | None, clock: Callable[[], float],
                  wall_clock: Callable[[], float], read: Callable[[str], dict[str, Any]],
-                 write: Callable[[str, dict[str, Any]], None], admitted: Callable[[], bool]) -> None:
+                 write: Callable[[str, dict[str, Any], int], Awaitable[None]], admitted: Callable[[], bool],
+                 generation: Callable[[], int]) -> None:
         self._transport = transport or PublicTransport()
         self._clock, self._wall = clock, wall_clock
         self._read, self._write, self._admitted = read, write, admitted
+        self._generation = generation
         self._next: dict[str, float] = {}
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -34,7 +36,11 @@ class TelegramHTTP(httpx.AsyncBaseTransport):
                 self._next[group] = self._clock() + .5
                 break
             await asyncio.sleep(min(spacing, .5))
+        generation = self._generation()
         response = await self._transport.handle_async_request(request)
+        if not self._admitted() or generation != self._generation():
+            await response.aclose()
+            raise asyncio.CancelledError
         if response.status_code != 429:
             return response
         state = self._read(group)
@@ -48,8 +54,10 @@ class TelegramHTTP(httpx.AsyncBaseTransport):
         except (ValueError, TypeError, OverflowError):
             pass
         until = max(float(state.get('until', 0)), self._wall() + delay)
-        self._write(group, dict(until=until, strikes=strikes))
-        await response.aclose()
+        try:
+            await self._write(group, dict(until=until, strikes=strikes), generation)
+        finally:
+            await response.aclose()
         raise SourceDeferred('Telegram ограничил запросы; загрузка будет повторена после паузы', until-self._wall(), code='source_unavailable')
 
     async def aclose(self) -> None:
