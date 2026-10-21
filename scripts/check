@@ -242,9 +242,8 @@ API_TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development
 TOOL_FAMILIES = (
     (('api/', 'frontend/src/api/generated/', 'oko/reader/generated/'), API_TOOL_TESTS),
     (('scripts/check-report',), ('tests/development/test_check_report.py',)),
-    (('scripts/task_changes.py',), ('tests/development/test_task_changes.py',)),
     (('tests/support/telegram_web.py', 'tests/support/telegram.py', 'tests/support/browser_server.py'), ('tests/development/test_browser_host.py',)),
-    (('tests/support/build_tools.py',), ('tests/development/test_frontend_builder.py', 'tests/development/test_build_speed.py')),
+    (('tests/support/build_tools.py',), ('tests/development/test_frontend_builder.py', 'tests/development/test_build_speed.py', 'tests/api/test_governance.py')),
     (('tests/support/processes.py',), ('tests/development/test_process_logs.py',)),
 )
 
@@ -328,12 +327,14 @@ def parallel_tests(names, commands, environment, report, results, match=None):
     names = jobs
     baseline = checkout_state(report.directory)
     children = {}
+    worker_started, worker_ended = {}, {}
     completed = {}
     interrupted = False
     try:
         for name in names:
             report.output(f'\nRUN {name} (parallel)\n')
             result_file = report.directory / (name + '-result.json')
+            launched = time.monotonic()
             pid = os.fork()
             if pid == 0:
                 os.setsid()
@@ -366,11 +367,13 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                         result_file.write_text(json.dumps({'report': str(child_report.directory / 'report.json')}))
                 os._exit(code if 0 <= code <= 255 else 1)
             children[pid] = (name, result_file)
+            worker_started[pid] = launched
         while len(completed) < len(children):
             for pid in children.keys() - completed.keys():
                 ended, status = os.waitpid(pid, os.WNOHANG)
                 if ended:
                     completed[pid] = status
+                    worker_ended[pid] = time.monotonic()
             if len(completed) < len(children):
                 time.sleep(.02)
     except KeyboardInterrupt:
@@ -395,6 +398,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                 ended, status = os.waitpid(pid, os.WNOHANG)
                 if ended:
                     completed[pid] = status
+                    worker_ended[pid] = time.monotonic()
                     pending.remove(pid)
             if pending:
                 time.sleep(.02)
@@ -410,16 +414,17 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                 pass
         for pid in pending:
             _, completed[pid] = os.waitpid(pid, 0)
+            worker_ended[pid] = time.monotonic()
         job_results = {}
         job_seconds = {}
         for pid, (name, result_file) in children.items():
             owner = owners[name]
             report.current = owner
+            job_seconds[name] = round(worker_ended.get(pid, time.monotonic()) - worker_started[pid], 4)
             if result_file.exists():
                 child = json.loads(Path(json.loads(result_file.read_text())['report']).read_text())
                 report.output(Path(child['log']).read_text())
                 data = child['suites'][name]
-                job_seconds[name] = child['duration_seconds']
                 if name == owner:
                     report.data['suites'][owner] = data
                 else:

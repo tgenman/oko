@@ -837,6 +837,8 @@ def test_compact_console_preserves_verbose_output_in_report_log(tmp_path):
 @pytest.mark.parametrize('changed,expected',[
     ('tests/support/telegram_web.py',{'test_browser_host.py'}),
     ('scripts/check-report',{'test_check_report.py'}),
+    ('scripts/task_changes.py',None),
+    ('tests/support/build_tools.py',{'test_frontend_builder.py','test_build_speed.py','test_governance.py'}),
     ('scripts/unclassified-tool',None),
 ])
 def test_cli_selects_affected_tool_families_and_falls_back_for_unknown_inputs(tmp_path,changed,expected):
@@ -881,3 +883,17 @@ def test_pytest_cli_reports_test_and_file_timings(tmp_path,failure):
     assert {entry['name'] for entry in suite['test_durations']}=={'test_fast','test_other'}
     assert all(entry['seconds']>=0 for entry in suite['test_durations'])
     assert suite['duration_seconds']>=max(suite['worker_durations'].values())
+
+
+def test_worker_killed_without_report_keeps_measured_elapsed(tmp_path):
+    import json
+    env=runtimes(tmp_path)
+    runtime=Path(env['OKO_PYTHON'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "if 'pytest' in sys.argv:\n    import signal,time\n    time.sleep(.15)\n    os.kill(os.getppid(),signal.SIGKILL)\nsys.exit(0)"))
+    result=subprocess.run([sys.executable,str(ROOT/'scripts/check'),'python','--report-dir',str(tmp_path/'reports')],env=env,capture_output=True,text=True,timeout=15)
+    assert result.returncode==1
+    report=json.loads(next((tmp_path/'reports').glob('*/report.json')).read_text())
+    suite=report['suites']['python-tests']
+    assert suite['status'].startswith('FAIL')
+    assert suite['duration_seconds']>=.15
+    assert all(seconds>=.15 for seconds in suite['worker_durations'].values())
