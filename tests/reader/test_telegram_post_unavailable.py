@@ -130,6 +130,7 @@ def test_unknown_unsupported_post_is_reclassified_only_after_source_confirmation
         confirmed[0] = True
         client.post(url+'/retry'); settled(client)
         assert client.get(url).json()['content']['post_web_unavailable'] is True
+        assert client.get(url).json()['content']['changed'] is False
         assert client.get('/api/v3/status').json()['problems']['count'] == 0
 
 

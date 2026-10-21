@@ -98,7 +98,7 @@ class Versions:
     @staticmethod
     def source_progress(previous: Path, current: Path) -> bool | None:
         old_raw,old_text = (previous/'original.md').read_text().split('\n\n',1)
-        new_raw,_ = (current/'original.md').read_text().split('\n\n',1)
+        new_raw,new_text = (current/'original.md').read_text().split('\n\n',1)
         old_header,new_header = json.loads(old_raw),json.loads(new_raw)
         if 'source_manifest' not in new_header:
             return None
@@ -111,6 +111,11 @@ class Versions:
             common = {p.name for p in previous.iterdir() if p.name.startswith(('media-','image-'))} & {p.name for p in current.iterdir()}
             return all(Versions.file_digest(previous/name)==Versions.file_digest(current/name) for name in common)
         old = SourceManifest.model_validate_json(json.dumps(old_header['source_manifest']))
+        if new.post_web_unavailable and not old_text and not new_text and not new.resources and all(r.status=='unsupported' and r.kind=='file' for r in old.resources):
+            # Replacing an old unknown placeholder with an explicit access
+            # restriction changes our knowledge, not the publication's content.
+            if {k:v for k,v in old.post.items() if k!='resources'}=={k:v for k,v in new.post.items() if k!='resources'}:
+                return True
         if old.post!=new.post:
             return False
         resources = {resource.key:resource for resource in old.resources}
