@@ -1,3 +1,4 @@
+import {createCollectionPanel} from './status/collection';
 import {createReadingCoordination} from './reading/coordination';
 import {createMenus} from './settings/menus';
 import {createDebugPanel, reportError} from './status/debug';
@@ -21,7 +22,8 @@ const debug = createDebugPanel({token, readerApi});
 setRenderReporter(reportError);
 const byId = (id:string):HTMLElement => {const node=document.getElementById(id);if(!node)throw new Error("Missing reader element: "+id);return node;};
 const button=(id:string)=>byId(id) as HTMLButtonElement;
-const progress=(text:string)=>{mountSurface(byId("progress"),<>{text}</>);};
+const collectionPanel=createCollectionPanel(readerApi,byId("progress"));
+const progress=(text:string)=>{collectionPanel.notice(text);};
 let commandsAvailable = false;
 let powerEnabled=true,powerAvailable=false;
 const commandHosts = new Map<string,HTMLElement>();
@@ -46,6 +48,7 @@ statusPanel = createStatusPanel({debug, actions,resourceName:resource=>reading.r
   }, onRefresh:()=>reading.refresh()});
 
 reading = createReadingCoordination({readerApi, fetchMedia:transport.media, debug, menus, statusPanel, actions, progress,
+  onCollectionPoll:()=>{void collectionPanel.refresh();},
   onPowerState:(enabled,available)=>{if(available)powerEnabled=enabled;powerAvailable=available;renderCommands();},
   onStopped:()=>{powerAvailable=false;button('stop').disabled=true;button('collect').disabled=true;button('folder-viewed').disabled=true;},
 });

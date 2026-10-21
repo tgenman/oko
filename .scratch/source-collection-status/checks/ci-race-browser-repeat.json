@@ -1,0 +1,95 @@
+{
+  "started_at": "20261021T193425Z",
+  "selected_files": {
+    "browser": [
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_external_telegram_media.ts",
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_telegram_post_unavailable.ts"
+    ],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (1.02s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/repo_personal/oko/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (1.24s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/repo_personal/oko/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (5.88s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/Users/dabondarev/repo_personal/oko/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-reporter=tap",
+            "--test-concurrency=4",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_external_telegram_media.ts",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_telegram_post_unavailable.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 4,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "api/openapi.yaml",
+      "frontend/src/api/generated/index.ts",
+      "frontend/src/api/generated/revision.ts",
+      "frontend/src/api/generated/sdk.gen.ts",
+      "frontend/src/api/generated/types.gen.ts",
+      "oko/reader/generated/models.py",
+      "oko/reader/generated/openapi.json",
+      "oko/reader/generated/operations.py",
+      "oko/reader/generated/revision.py",
+      "package.json"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 8.53,
+  "log": "/Users/dabondarev/repo_personal/oko/.scratch/check-runs/20261021T193425Z-af2b152a/output.log"
+}

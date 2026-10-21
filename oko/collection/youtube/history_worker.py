@@ -6,6 +6,7 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 from oko.diagnostics import exception_details
+from oko.collection import request_observation as observation
 
 
 class PortionEnd(Exception):
@@ -21,6 +22,7 @@ def collect(channel: str, count: int, state: dict[str, Any]) -> dict[str, Any]:
     state.setdefault('done', [])
     state.setdefault('anchors', {})
     state.setdefault('replay', {})
+    capture = observation.Capture()
     calls = 0
     portion_ended = False
     network_error: Exception | None = None
@@ -43,6 +45,9 @@ def collect(channel: str, count: int, state: dict[str, Any]) -> dict[str, Any]:
                 return super().urlopen(request)
             except Exception as exc:
                 network_error = exc
+                status = getattr(exc, 'status', None) or getattr(getattr(exc, 'response', None), 'status', None)
+                capture.failed(request if isinstance(request, str) else request.url, exc, purpose='feed',
+                               method=getattr(request, 'method', 'GET'), http_status=status)
                 raise
 
     options = dict(extract_flat=True, simulate=True, skip_download=True, quiet=True,
@@ -114,7 +119,7 @@ def collect(channel: str, count: int, state: dict[str, Any]) -> dict[str, Any]:
     if not complete and kind:
         state['replay'][kind] = max(state['replay'].get(kind, 0), calls - start_calls)
     return dict(entries=state['lists'].get('UU', [])[:count], state=state,
-                complete=complete, error=error, requests=calls, diagnostic=diagnostic)
+                complete=complete, error=error, requests=calls, diagnostic=diagnostic, **observation.worker_details(capture))
 
 
 def main() -> None:

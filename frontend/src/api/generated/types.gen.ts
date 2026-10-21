@@ -535,6 +535,101 @@ export type Collect409Errors = ({
     code: 'deletion_in_progress';
 } & DeletionInProgressError);
 
+export type CollectionCounts = {
+    collecting: number;
+    complete: number;
+    deleting: number;
+    error: number;
+    never: number;
+    paused: number;
+    queued: number;
+    unavailable: number;
+    waiting: number;
+};
+
+export type CollectionDetails = {
+    instance_id: string;
+    last_error: CollectionFailure | null;
+    observed_at: Timestamp;
+    operations: Array<CollectionOperation>;
+    revision: number;
+    source: CollectionSource;
+    work_allowed: boolean;
+};
+
+export type CollectionFailure = {
+    attempt_id: string;
+    error_type: string;
+    message: string;
+    message_truncated: boolean;
+    occurred_at: Timestamp;
+    operation_id: string;
+    request_count: number;
+    requests: Array<CollectionRequestFailure>;
+    resolved: boolean;
+    source: 'server' | 'worker';
+    traceback: string;
+    traceback_truncated: boolean;
+};
+
+export type CollectionOperation = {
+    attempt_id: string | null;
+    elapsed_seconds: number | null;
+    finished_at: Timestamp | null;
+    kind: 'discover' | 'fetch';
+    last_error: CollectionFailure | null;
+    operation_id: string;
+    queued_at: Timestamp | null;
+    reason: string;
+    retry_at: Timestamp | null;
+    stage: string;
+    started_at: Timestamp | null;
+    state: 'collecting' | 'queued' | 'waiting' | 'error' | 'paused' | 'complete' | 'never' | 'deleting' | 'unavailable';
+    time_kind: 'attempt' | 'waiting' | 'queue';
+};
+
+export type CollectionRequestFailure = {
+    count: number;
+    error_type: string;
+    first_at: number;
+    http_status: number | null;
+    last_at: number;
+    message: string;
+    message_truncated: boolean;
+    method: string;
+    occurred_at: number;
+    original_url: string | null;
+    purpose: string;
+    redacted: boolean;
+    url: string;
+};
+
+export type CollectionSnapshot = {
+    counts: CollectionCounts;
+    instance_id: string;
+    observed_at: Timestamp;
+    revision: number;
+    sources: Array<CollectionSource>;
+    work_allowed: boolean;
+};
+
+export type CollectionSource = {
+    access: string;
+    error_count: number;
+    feed_id: FeedId;
+    has_details: boolean;
+    history: string | null;
+    last_success_at: Timestamp | null;
+    last_success_seconds: number | null;
+    operation: CollectionOperation | null;
+    operation_count: number;
+    source_kind: string;
+    source_url: string;
+    state: 'collecting' | 'queued' | 'waiting' | 'error' | 'paused' | 'complete' | 'never' | 'deleting' | 'unavailable';
+    title: string;
+    waiting_count: number;
+};
+
 export type CollectionTarget = ({
     scope: 'all';
 } & AllCollectionTarget) | ({
@@ -3468,6 +3563,86 @@ export type CollectResponses = {
 };
 
 export type CollectResponse = CollectResponses[keyof CollectResponses];
+
+export type CollectionStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v3/collection-status';
+};
+
+export type CollectionStatusErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type CollectionStatusError = CollectionStatusErrors[keyof CollectionStatusErrors];
+
+export type CollectionStatusResponses = {
+    /**
+     * Current collection attempts; original diagnostics are authenticated, redacted and never cached.
+     */
+    200: CollectionSnapshot;
+};
+
+export type CollectionStatusResponse = CollectionStatusResponses[keyof CollectionStatusResponses];
+
+export type CollectionSourceStatusData = {
+    body?: never;
+    path: {
+        feed_id: FeedId;
+    };
+    query?: never;
+    url: '/api/v3/collection-status/{feed_id}';
+};
+
+export type CollectionSourceStatusErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type CollectionSourceStatusError = CollectionSourceStatusErrors[keyof CollectionSourceStatusErrors];
+
+export type CollectionSourceStatusResponses = {
+    /**
+     * Current collection attempts; original diagnostics are authenticated, redacted and never cached.
+     */
+    200: CollectionDetails;
+};
+
+export type CollectionSourceStatusResponse = CollectionSourceStatusResponses[keyof CollectionSourceStatusResponses];
 
 export type ObserveCommandData = {
     body: CommandObservation;

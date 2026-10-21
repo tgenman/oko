@@ -204,13 +204,20 @@ class SourceError(Exception):
         self.retryable = retryable
         self.remote_traceback = remote_traceback
         self.remote_type = self.remote_message = self.remote_location = ''
+        self.request_failures: list[dict[str, Any]] = []
+        self.request_failure_count = 0
 
     @classmethod
-    def from_worker(cls, label: str, details: dict[str, str], delay: float = 60) -> 'SourceError':
-        error = cls(label, delay, remote_traceback=details.get('traceback', ''))
-        error.remote_type = details.get('error_type', '')
-        error.remote_message = details.get('message', '')
-        error.remote_location = details.get('location', '')
+    def from_worker(cls, label: str, details: dict[str, Any], delay: float = 60) -> 'SourceError':
+        from oko.collection.request_observation import remote
+        from oko.diagnostics import redact
+        remote(details)
+        error = cls(label, delay, remote_traceback=redact(details.get('traceback', '')))
+        error.remote_type = redact(details.get('error_type', ''))
+        error.remote_message = redact(details.get('message', ''))
+        error.remote_location = redact(details.get('location', ''))
+        error.request_failures = details.get('request_failures', [])[:100]
+        error.request_failure_count = details.get('request_failure_count', len(error.request_failures))
         return error
 
 

@@ -1,3 +1,4 @@
+from oko.collection import request_observation as observation
 """Telegram source and cancellable worker for Oko-owned Telethon client."""
 from dataclasses import replace
 from oko.diagnostics import record_caught
@@ -118,6 +119,7 @@ class _TelegramWorker(_TelegramOperations):
         self._configuration_digest: str | None = None
 
     async def request(self, operation: str, **args: Any) -> Any:
+        observation.stage('Загрузка вложения' if operation == 'download' else 'Ожидание Telegram worker')
         target = args.pop('_target', None)
         generation = self.generation
         async with self.lock:

@@ -1,4 +1,5 @@
 from oko.collection.external_media import saved_external, expected_incomplete
+from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
@@ -125,6 +126,7 @@ class Store:
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
+        self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock)
         self.filters = Filters(self)
         self.processing = ProcessingCoordination(self)
         self.reading = ReadingComposition(self)

@@ -9,7 +9,6 @@ import {createFolderMenu} from './folder-menu';
 import {createFolderActions} from './folder-actions';
 import {createReaderSession, type ReaderMessage} from '../reader-session';
 import {reportError, type createDebugPanel} from '../status/debug';
-import {workText} from '../status/recovery';
 import {errorMessage} from '../api/errors';
 import type {ReaderApi} from '../api/reader';
 import type {AffectedResource} from '../api/generated/types.gen';
@@ -26,13 +25,14 @@ type Options = {
   statusPanel: ReturnType<typeof createStatusPanel>;
   actions: ReturnType<typeof createReaderActions>;
   progress: (text: string) => void;
+  onCollectionPoll: () => void;
   onStopped: () => void;
   onPowerState: (enabled:boolean,available:boolean) => void;
 };
 
 // Coordinates accepted reading changes. Local owners retain DOM, scroll, drafts
 // and media; the session alone owns polling, presence and browser resources.
-export function createReadingCoordination({readerApi, fetchMedia, debug, menus, statusPanel, actions, progress, onStopped, onPowerState}: Options) {
+export function createReadingCoordination({readerApi, fetchMedia, debug, menus, statusPanel, actions, progress, onCollectionPoll, onStopped, onPowerState}: Options) {
   const resources=createReadingResources(readerApi);
   let checking:AbortController|undefined;
   let unavailable=false;
@@ -191,6 +191,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       if(!state)throw new Error('Reading status temporarily unavailable');
       const recovered=unavailable;unavailable=false;
       statusAvailable = true;
+      onCollectionPoll();
       const statusConfirmed=frame.resources.some(resource=>resource.kind==='status'&&(resource.state==='changed'||resource.state==='unchanged'));
       // Local form actions can replace their own optimistic state after this
       // server version was accepted. Reapply confirmed cached status for the
@@ -209,7 +210,6 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       statusPanel.update(state.problems, state);
       debug.forgetMaterials(state.viewed_ids || []);
       statusPanel.forgetMaterials(state.viewed_ids || []);
-      progress(`${workText(state)} · sources ${state.ready_sources}/${state.total_sources}`);
       menus.sources(state.sources || []);
       }
       // A lost command response can remain pending while server status stays

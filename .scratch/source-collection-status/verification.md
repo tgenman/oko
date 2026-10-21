@@ -1,0 +1,133 @@
+# Проверка окна состояния обновления источников
+
+Дата: 21 октября 2026. Задача: https://github.com/tgenman/oko/issues/78.
+PR: https://github.com/tgenman/oko/pull/80.
+Ветка: `codex/source-collection-status`.
+
+## Объём
+
+Выбранное окно A реализовано через read-only HTTP-контракт, наблюдения настоящих
+запросов adapters/workers и сохранённые факты попыток. Runtime владеет живыми
+попытками; Store хранит их результаты и ошибки. Сбор отделён от ИИ и read sync.
+Общий закрытый RuntimeStatus сохранён. Тексты ошибок и URL очищаются до записи
+и выдачи, включая буквальное значение локального токена читателя.
+
+Исходная база ревью: `675b795b97a4333303eff89d9f524a7d8e625e99`.
+Первичная реализация: `27164edb7de38205eae0eb14fd288659f5fcbd81`.
+Исправления: `1c80a3d977f410c6060821f71a00194ed2c879aa`.
+Итоговый полный прогон проверяет дерево `37d593f9cee408ecd3e69fcb3d8a2802516dcbc3`,
+совпадающее с деревом коммита исправлений. Подготовленные копии не включали
+посторонние изменения package.json, старые прототипы или исследования.
+
+## Выполненные целевые проверки
+
+- Новый HTTP-сценарий сначала вернул 404, затем прошёл: общая идентичность попытки
+  для клиентов, отсутствие сброса часов от Refresh, завершение и отсутствие фида.
+- HTTP: ожидание/Stop/перезапуск/Start, замораживание длительности и новая
+  идентичность после отмены; исходные RSS/вложения/worker ошибки, подписи URL,
+  неизвестный HTTP status при таймауте, ограничения сообщений и traceback.
+- Дополнительные регрессии: буквальный токен сессии отсутствует в JSON и SQLite;
+  подтверждённое удаление публикации не становится ошибкой сбора; 404 ленты и
+  вложения имеют URL/status; последние 100 URL выбираются по времени запроса
+  сразу по всем операциям; успешная старая операция не заменяет свежую ошибку.
+- 17 HTTP/worker-прокси сценариев прошли после исправлений; оба диагностических
+  HTTP-набора (исходные ошибки и retention) — 8 прошедших сценариев.
+- `node --require tsx/cjs --require ./scripts/register-browser-typescript.cts --test`
+  для `test_collection_status.ts`, `test_opened_material.ts`,
+  `test_reader_appearance.ts`, `test_reading_versions_http.ts`,
+  `test_status_panel.ts`: 38 passed, 0 failed. Проверены реальный dialog,
+  исходный текст как текст, ссылки, копирование через clipboard, поздние ответы,
+  повторное открытие, связь, фокус, сохранение чтения и узкий экран.
+- `mypy oko`: 85 файлов, успешно. Проверка точного индекса первой реализации
+  `./scripts/check staged --compact`: PASS, 13.69 с.
+
+Скриншоты настоящего браузерного интерфейса просмотрены:
+[screenshots/desktop.png](screenshots/desktop.png),
+[screenshots/mobile.png](screenshots/mobile.png).
+
+## Первый полный прогон
+
+`./scripts/check all --compact --in-place`, подготовленная изолированная копия:
+FAIL, 364.94 с; полный машинный результат — [checks/initial-all.json](checks/initial-all.json).
+
+Остальные наборы прошли, но было 5 браузерных и 4 Python-падения:
+старые ожидания общей англоязычной строки прогресса, подтверждённая остановка,
+выдача подписанного caption URL через новый канал, отсутствующее описание
+операции OpenAPI и зависимость новых SQLite-триггеров от application-only UDF.
+
+Исправлены реальные регрессии (остановка, приватность worker, совместимость SQLite
+и описание контракта); браузерные ожидания обновлены под согласованную строку
+состояния сбора. Старые проверки сохранения материалов, scroll и восстановления
+связи продолжают проверять прежнее поведение. Этот неудачный прогон не считается
+доказательством завершения; успешные целевые повторы относятся только к своим наборам.
+
+## Итоговый полный прогон
+
+`./scripts/check all --compact --in-place`: **PASS**, 320.40 с.
+Машинный результат: [checks/final-all.json](checks/final-all.json).
+Все 13 наборов прошли: contracts, tooling-types, syntax, lint, types,
+browser-types, build, http, browser, diff, python-tests, entrypoint, tool-tests.
+
+- Python приложения: 721 passed (356 + 365), 0 failed.
+- Браузер: 207 passed, 2 штатно skipped; дополнительно 4 сценария задержки чтения
+  passed. Всего 211 прошедших браузерных проверок.
+- Инструменты и процесс разработки: 136 passed (67 + 69), 0 failed.
+- After this full run, collection code stayed unchanged. Documentation, CI readiness
+  waits and the later coordination integration from main are described below.
+
+## Независимое ревью
+
+Standards: два замечания — живые Capture в Store и запись результата вне action
+lock. Реестр перенесён в Runtime; успешные/ошибочные результаты сохраняются внутри
+уже существующего принятия под action lock, отмена фиксируется отменяющим сценарием.
+`finally` больше не пишет в SQLite. Повторное Standards-ревью: замечаний нет.
+
+Spec: пять замечаний — буквальный токен сессии, domain removal, RSS 404,
+общий лимит URL и замена свежей ошибки старой. Все исправлены и покрыты
+HTTP-регрессиями; повторное Spec-ревью: замечаний нет.
+
+Числовой SQLite job ID заменён в operation_id на `kind:item`, чтобы повторное
+использование удалённого ID не разрешало ошибку другой операции.
+
+## Ограничения проверки
+
+Использовались только временные SQLite/файлы и синтетические внешние источники,
+worker SDK и локальные proxy-серверы. Личные подписки, Telegram-аккаунт и настоящий
+ИИ-обработчик не запускались. Рабочая установка не перезапускалась; слияние в main
+не выполнялось. Прототипы сохранены отдельно в локальной primary-source ветке
+`codex/source-update-prototype-20261021`; production их не импортирует.
+
+## Проверка GitHub CI и гонка готовности старых сценариев
+
+CI коммита `1c80a3d` (run 39661807097) прошёл build/static, Python и tools,
+но два Telegram browser-сценария получили 503 «Откройте читатель для подключения».
+Они вызывали connect сразу после page.goto, не дожидаясь регистрации presence.
+Приложение в этот момент корректно запрещает внешнюю работу.
+
+В `test_external_telegram_media.ts` и `test_telegram_post_unavailable.ts` добавлено
+ожидание доступной кнопки `#collect` перед connect. Это ожидание существующей
+публичной готовности, без sleep, изменения авторизации и повторов команды.
+
+`./scripts/check browser --files tests/browser/test_external_telegram_media.ts tests/browser/test_telegram_post_unavailable.ts --compact --in-place`:
+PASS, 8.53 с; 4 browser-сценария, tooling-types и browser-types прошли.
+Машинный результат: [checks/ci-race-browser-repeat.json](checks/ci-race-browser-repeat.json).
+This CI readiness fix changed tests only; the full local suite was not repeated.
+The separate integration from main and its targeted checks are recorded below.
+
+## Интеграция с параллельно обновившимся main
+
+В main вошёл `f213a76` (#79). Ветка задачи согласована с ним; разрешены три
+пересечения: coordination и два Telegram browser-сценария.
+Сохранены `onCollectionPoll`, отдельная сводка сбора и main-правило сверки
+receipts при каждом подтверждённом статусе, включая unchanged. В Telegram-тестах
+использован общий `openReader()` из main вместо отдельного ожидания #collect.
+Работающий экземпляр не перезапускался. Серверный код реализации не менялся.
+
+Повторное Standards/Spec ревью разрешений против обоих родителей — без замечаний.
+Проверены пять браузерных файлов: collection status, external Telegram media,
+Telegram post unavailable, reader readiness и settings v3 HTTP.
+`./scripts/check browser --files … --compact --in-place`: PASS, 27.77 с;
+базовая типизация инструментов/браузера и все выбранные сценарии прошли.
+Машинный результат: [checks/main-integration.json](checks/main-integration.json).
+Полный локальный прогон выше относится к явно указанному дереву до интеграции;
+успешный целевой прогон относится к разрешённым пересечениям.

@@ -127,6 +127,46 @@ class CodexResultProvenance(WireModel):
     reasoning_effort: StrictStr = Field(..., min_length=1)
 
 
+class CollectionCounts(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    collecting: StrictInt = Field(..., ge=0)
+    complete: StrictInt = Field(..., ge=0)
+    deleting: StrictInt = Field(..., ge=0)
+    error: StrictInt = Field(..., ge=0)
+    never: StrictInt = Field(..., ge=0)
+    paused: StrictInt = Field(..., ge=0)
+    queued: StrictInt = Field(..., ge=0)
+    unavailable: StrictInt = Field(..., ge=0)
+    waiting: StrictInt = Field(..., ge=0)
+
+
+class ElapsedSeconds(RootModel[StrictFloat]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictFloat = Field(..., ge=0.0)
+
+
+class CollectionRequestFailure(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    count: StrictInt = Field(..., ge=0)
+    error_type: StrictStr
+    first_at: StrictFloat = Field(..., ge=0.0)
+    http_status: StrictInt | None
+    last_at: StrictFloat = Field(..., ge=0.0)
+    message: StrictStr
+    message_truncated: StrictBool
+    method: StrictStr
+    occurred_at: StrictFloat = Field(..., ge=0.0)
+    original_url: StrictStr | None
+    purpose: StrictStr
+    redacted: StrictBool
+    url: StrictStr
+
+
+class LastSuccessSeconds(RootModel[StrictFloat]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictFloat = Field(..., ge=0.0)
+
+
 class CollectionTelegramProfileUnconfigured(WireModel):
     model_config = ConfigDict(extra="forbid")
     role: Literal["collection"]
@@ -1442,6 +1482,77 @@ class CodexModelCatalog(WireModel):
     models: list[CodexModelDescriptor]
 
 
+class CollectionFailure(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    attempt_id: StrictStr
+    error_type: StrictStr
+    message: StrictStr
+    message_truncated: StrictBool
+    occurred_at: Timestamp
+    operation_id: StrictStr
+    request_count: StrictInt = Field(..., ge=0)
+    requests: list[CollectionRequestFailure] = Field(..., max_length=100)
+    resolved: StrictBool
+    source: Literal["server", "worker"]
+    traceback: StrictStr
+    traceback_truncated: StrictBool
+
+
+class CollectionOperation(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    attempt_id: StrictStr | None
+    elapsed_seconds: ElapsedSeconds | None
+    finished_at: Timestamp | None
+    kind: Literal["discover", "fetch"]
+    last_error: CollectionFailure | None
+    operation_id: StrictStr
+    queued_at: Timestamp | None
+    reason: StrictStr
+    retry_at: Timestamp | None
+    stage: StrictStr
+    started_at: Timestamp | None
+    state: Literal[
+        "collecting",
+        "queued",
+        "waiting",
+        "error",
+        "paused",
+        "complete",
+        "never",
+        "deleting",
+        "unavailable",
+    ]
+    time_kind: Literal["attempt", "waiting", "queue"]
+
+
+class CollectionSource(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    access: StrictStr
+    error_count: StrictInt = Field(..., ge=0)
+    feed_id: FeedId
+    has_details: StrictBool
+    history: StrictStr | None
+    last_success_at: Timestamp | None
+    last_success_seconds: LastSuccessSeconds | None
+    operation: CollectionOperation | None
+    operation_count: StrictInt = Field(..., ge=0)
+    source_kind: StrictStr
+    source_url: StrictStr
+    state: Literal[
+        "collecting",
+        "queued",
+        "waiting",
+        "error",
+        "paused",
+        "complete",
+        "never",
+        "deleting",
+        "unavailable",
+    ]
+    title: StrictStr
+    waiting_count: StrictInt = Field(..., ge=0)
+
+
 class CollectionTelegramProfileIdentityMismatch(WireModel):
     model_config = ConfigDict(extra="forbid")
     checked_at: Timestamp
@@ -2633,6 +2744,27 @@ class CodexUnavailable(WireModel):
     ]
     state: Literal["unavailable"]
     version: StrictStr | None
+
+
+class CollectionDetails(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    instance_id: StrictStr
+    last_error: CollectionFailure | None
+    observed_at: Timestamp
+    operations: list[CollectionOperation]
+    revision: StrictInt = Field(..., ge=0)
+    source: CollectionSource
+    work_allowed: StrictBool
+
+
+class CollectionSnapshot(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    counts: CollectionCounts
+    instance_id: StrictStr
+    observed_at: Timestamp
+    revision: StrictInt = Field(..., ge=0)
+    sources: list[CollectionSource]
+    work_allowed: StrictBool
 
 
 class CollectionTarget(

@@ -1,0 +1,110 @@
+{
+  "started_at": "20261021T194103Z",
+  "selected_files": {
+    "browser": [
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_collection_status.ts",
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_external_telegram_media.ts",
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_telegram_post_unavailable.ts",
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_reader_readiness.ts",
+      "/Users/dabondarev/repo_personal/oko/tests/browser/test_settings_v3_http.ts"
+    ],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (1.79s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/repo_personal/oko/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.7936
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (5.11s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/repo_personal/oko/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 5.1085
+        }
+      ],
+      "failures": []
+    },
+    "browser": {
+      "status": "PASS (20.25s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/Users/dabondarev/repo_personal/oko/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-reporter=tap",
+            "--test-concurrency=4",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_collection_status.ts",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_external_telegram_media.ts",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_telegram_post_unavailable.ts",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_reader_readiness.ts",
+            "/Users/dabondarev/repo_personal/oko/tests/browser/test_settings_v3_http.ts"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 19.7788
+        }
+      ],
+      "failures": [],
+      "passed_scenarios": 8,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "api/openapi.yaml",
+      "frontend/src/api/generated/index.ts",
+      "frontend/src/api/generated/revision.ts",
+      "frontend/src/api/generated/sdk.gen.ts",
+      "frontend/src/api/generated/types.gen.ts",
+      "oko/reader/generated/models.py",
+      "oko/reader/generated/openapi.json",
+      "oko/reader/generated/operations.py",
+      "oko/reader/generated/revision.py",
+      "package.json",
+      "scripts/check",
+      "scripts/check-report",
+      "tests/development/test_check_report.py",
+      "tests/development/test_check_runner.py",
+      "tests/support/telegram.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "exit_code": 0,
+  "duration_seconds": 27.77,
+  "log": "/Users/dabondarev/repo_personal/oko/.scratch/check-runs/20261021T194103Z-4b0dcdb4/output.log"
+}

@@ -57,6 +57,8 @@ def error_response(status: int, value: wire.ErrorEnvelope) -> JSONResponse:
 def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Callable[[], float], journal: Journal) -> None:
     from oko.reader import settings_v3, commands_v3, processors_v3, diagnostics_v3, reading_v3, connections_v3
     from oko.reader import telegram_v3
+    from oko.reader import collection_v3
+    collection_v3.register(app, runtime)
     telegram_v3.register(app, runtime)
     connections_v3.register(app, runtime)
     material_reader = reading_v3.register(app, runtime)

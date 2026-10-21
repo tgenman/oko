@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 import httpx
+from oko.collection import request_observation as observation
 from oko.collection.contracts import Material, Publication, Image, SourceError, SourceDeleted, DiscoveryResult, FetchResult, FetchResources, FetchRequirements, SourceObservation
 
 
@@ -175,32 +176,38 @@ class RSSSource:
         self.initial_history: dict[str, Any] | None = None
         self.description: str | None = None
 
-    async def download(self, url: str, limit: int = 4_000_000) -> tuple[bytes, str, str]:
+    async def download(self, url: str, limit: int = 4_000_000, *, purpose: str = 'feed') -> tuple[bytes, str, str]:
         try:
-            async with httpx.AsyncClient(transport=self.transport, timeout=20, follow_redirects=True, max_redirects=5,
-                                        trust_env=False, headers={'User-Agent': 'Oko/0.1 local reader'}) as client:
-                async with client.stream('GET', normalized(url)) as response:
-                    if response.status_code in (401, 403):
-                        raise SourceError('Требуется авторизация')
-                    if response.status_code == 429:
-                        try:
-                            delay = max(1., min(float(response.headers.get('retry-after', '60')), 86400.))
-                        except ValueError:
-                            delay = 60.
-                        raise SourceError('Ограничение частоты', delay)
-                    if response.status_code in (404, 410):
-                        raise SourceDeleted()
-                    if response.status_code >= 400:
-                        raise SourceError('Источник недоступен')
-                    data = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        data.extend(chunk)
-                        if len(data) > limit:
-                            raise SourceError('Превышен размер материала')
-                    return bytes(data), str(response.url), response.headers.get('content-type', '').split(';')[0]
-        except httpx.HTTPError:
+            with observation.request(url, purpose=purpose):
+                return await self._download(url, limit, purpose)
+        except httpx.HTTPError as error:
             record_caught('rss.download')
-            raise SourceError('Источник недоступен') from None
+            raise SourceError('Источник недоступен') from error
+
+    async def _download(self, url: str, limit: int, purpose: str) -> tuple[bytes, str, str]:
+        async with httpx.AsyncClient(transport=self.transport, timeout=20, follow_redirects=True, max_redirects=5,
+                                    trust_env=False, headers={'User-Agent': 'Oko/0.1 local reader'}) as client:
+            async with client.stream('GET', normalized(url)) as response:
+                if response.status_code not in (404, 410) or purpose != 'publication':
+                    observation.response_failure(response, purpose=purpose, original_url=url)
+                if response.status_code in (401, 403):
+                    raise SourceError('Требуется авторизация')
+                if response.status_code == 429:
+                    try:
+                        delay = max(1., min(float(response.headers.get('retry-after', '60')), 86400.))
+                    except ValueError:
+                        delay = 60.
+                    raise SourceError('Ограничение частоты', delay)
+                if response.status_code in (404, 410):
+                    raise SourceDeleted()
+                if response.status_code >= 400:
+                    raise SourceError('Источник недоступен')
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > limit:
+                        raise SourceError('Превышен размер материала')
+                return bytes(data), str(response.url), response.headers.get('content-type', '').split(';')[0]
 
     async def read_entries(self) -> list[Entry]:
         raw, url, _ = await self.download(self.url)
@@ -262,6 +269,7 @@ class RSSSource:
                     self.description = feed_description(raw)
                 chosen = walk.accept(batch, raw, final)
             except (SourceError, ValueError, httpx.InvalidURL) as error:
+                record_caught('rss.history')
                 walk.fail(error.label if isinstance(error, SourceError) else 'Недопустимый адрес источника')
                 chosen = []
         self.gap = ' · '.join(walk.warnings) or None
@@ -295,7 +303,7 @@ class RSSSource:
         urls = fallback.images
         base = publication.url
         try:
-            raw, base, _ = await self.download(publication.url)
+            raw, base, _ = await self.download(publication.url, purpose='publication')
             article = Article()
             article.feed(raw.decode('utf-8', errors='replace'))
             if article.article and article.text:
@@ -316,7 +324,7 @@ class RSSSource:
             full, reason = False, 'Не все изображения сохранены (лимит 30)'
         for position, url in enumerate(unique_urls[:30]):
             try:
-                raw, _, mime = await self.download(urljoin(base, url), 10_000_000)
+                raw, _, mime = await self.download(urljoin(base, url), 10_000_000, purpose='attachment')
                 signatures = {'image/png': b'\x89PNG\r\n\x1a\n', 'image/jpeg': b'\xff\xd8\xff', 'image/gif': b'GIF8', 'image/webp': b'RIFF'}
                 if mime not in signatures or not raw.startswith(signatures[mime]):
                     raise SourceError('Неподдерживаемое изображение')
