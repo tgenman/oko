@@ -12242,6 +12242,160 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+  /api/v3/settings/telegram-http:
+    get:
+      summary: Telegram HTTP request limit
+      operationId: telegram_http_settings
+      description: Read the global Telegram HTTP requests per second limit and its origin. All operations require
+        bearer authorization, allowed Host and, when present, matching Origin. Structural input errors are
+        422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response
+        leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain
+        allowed. Unknown query keys and duplicate scalar query parameters return 422.
+      tags:
+      - settings
+      parameters: []
+      responses:
+        '200':
+          description: Read effective settings and explicit overrides. Scope is oko/folder/feed; oko requires
+            owner global, folder/feed require an existing resource. Feed metadata exists only in the feed
+            snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectiveTelegramHttpRps'
+              example:
+                value: 2
+                origin:
+                  scope: default
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack
+            traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
   /api/v3/reading/check:
     post:
       summary: Check persisted reading entity versions in one batch
@@ -14861,6 +15015,13 @@ components:
           - type: integer
             minimum: 1
             maximum: 1440
+          - type: 'null'
+        telegram_http_rps:
+          description: Global Oko setting only; requests per second for Telegram HTML and each media origin. Null resets to 2. Forced waits are preserved.
+          anyOf:
+          - type: number
+            minimum: 0.1
+            maximum: 10
           - type: 'null'
       required: []
       additionalProperties: false
@@ -21732,6 +21893,30 @@ components:
       additionalProperties: false
       examples:
       - value: 15
+        origin:
+          scope: default
+    EffectiveTelegramHttpRps:
+      type: object
+      properties:
+        value:
+          type: number
+          minimum: 0.1
+          maximum: 10
+        origin:
+          oneOf:
+          - $ref: '#/components/schemas/DefaultSettingOrigin'
+          - $ref: '#/components/schemas/OkoSettingOrigin'
+          discriminator:
+            propertyName: scope
+            mapping:
+              default: '#/components/schemas/DefaultSettingOrigin'
+              oko: '#/components/schemas/OkoSettingOrigin'
+      required:
+      - value
+      - origin
+      additionalProperties: false
+      examples:
+      - value: 2
         origin:
           scope: default
     ReadingEntityVersion:

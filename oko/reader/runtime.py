@@ -132,7 +132,8 @@ class Runtime:
         self._telegram_http = TelegramHTTP(rss_transport, clock, wall_clock,
             lambda group: self.require_store().telegram_http_state(group),
             self._save_telegram_http_wait,
-            lambda: self._live() and not self._cancelling, lambda: self._epoch)
+            lambda: self._live() and not self._cancelling, lambda: self._epoch,
+            lambda: float(self.require_store().subscriptions.telegram_http_settings()['value']))
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport, telegram_client,
                                    self._youtube_captions, self._youtube_history, self._telegram_http)
         self._sources = self._collection.sources
@@ -649,7 +650,7 @@ class Runtime:
                 previous = current.subscriptions.effective(scope, owner)
                 result = current.subscriptions.update_settings(scope, owner, body)
                 self._collection_interval = current.subscriptions.feed_refresh_minutes() * 60
-                if body.model_fields_set - {'feed_refresh_minutes'} and result != previous:
+                if body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'} and result != previous:
                     current.settings_changed(scope, owner)
                     affected = None if scope == 'oko' else {f['id'] for f in current.subscriptions.feeds(owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
                     await self._cancel(affected)

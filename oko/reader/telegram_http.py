@@ -15,12 +15,12 @@ class TelegramHTTP(httpx.AsyncBaseTransport):
     def __init__(self, transport: httpx.AsyncBaseTransport | None, clock: Callable[[], float],
                  wall_clock: Callable[[], float], read: Callable[[str], dict[str, Any]],
                  write: Callable[[str, float | None, int], Awaitable[float]], admitted: Callable[[], bool],
-                 generation: Callable[[], int]) -> None:
+                 generation: Callable[[], int], rate: Callable[[], float]) -> None:
         self._transport = transport or PublicTransport()
         self._clock, self._wall = clock, wall_clock
         self._read, self._write, self._admitted = read, write, admitted
-        self._generation = generation
-        self._next: dict[str, float] = {}
+        self._generation, self._rate = generation, rate
+        self._last: dict[str, float] = {}
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         group = 'html' if request.url.host in ('t.me', 'telegram.me') else str(request.url.copy_with(path='/', query=None, fragment=None))
@@ -31,9 +31,9 @@ class TelegramHTTP(httpx.AsyncBaseTransport):
             delay = float(state.get('until', 0)) - self._wall()
             if delay > 0:
                 raise SourceDeferred('Telegram ограничил запросы; ожидаем разрешённого срока', delay, code='source_unavailable')
-            spacing = self._next.get(group, 0) - self._clock()
+            spacing = self._last.get(group, float('-inf')) + 1/self._rate() - self._clock()
             if spacing <= 0:
-                self._next[group] = self._clock() + .5
+                self._last[group] = self._clock()
                 break
             await asyncio.sleep(min(spacing, .5))
         generation = self._generation()

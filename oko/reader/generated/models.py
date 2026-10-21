@@ -1003,6 +1003,16 @@ class PromptTheses(RootModel[StrictStr]):
     root: StrictStr = Field(..., max_length=20000)
 
 
+class TelegramHttpRps(RootModel[StrictFloat]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictFloat = Field(
+        ...,
+        description="Global Oko setting only; requests per second for Telegram HTML and each media origin. Null resets to 2. Forced waits are preserved.",
+        ge=0.1,
+        le=10.0,
+    )
+
+
 class SettingsPatch(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_refresh_minutes: FeedRefreshMinutes | None | MISSING = Field(
@@ -1013,6 +1023,10 @@ class SettingsPatch(WireModel):
     processor: ProcessorSelection | None | MISSING = MISSING
     prompt_filters: PromptFilters | None | MISSING = MISSING
     prompt_theses: PromptTheses | None | MISSING = MISSING
+    telegram_http_rps: TelegramHttpRps | None | MISSING = Field(
+        default=MISSING,
+        description="Global Oko setting only; requests per second for Telegram HTML and each media origin. Null resets to 2. Forced waits are preserved.",
+    )
     theses: StrictBool | None | MISSING = MISSING
 
 
@@ -1705,6 +1719,12 @@ class EffectivePromptTheses(WireModel):
     model_config = ConfigDict(extra="forbid")
     origin: SettingOrigin
     value: StrictStr = Field(..., max_length=20000)
+
+
+class EffectiveTelegramHttpRps(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    origin: DefaultSettingOrigin | OkoSettingOrigin = Field(..., discriminator="scope")
+    value: StrictFloat = Field(..., ge=0.1, le=10.0)
 
 
 class EffectiveTheses(WireModel):

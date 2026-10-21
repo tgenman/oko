@@ -1115,6 +1115,15 @@ export type EffectiveSettingsValues = {
     theses: EffectiveTheses;
 };
 
+export type EffectiveTelegramHttpRps = {
+    origin: ({
+        scope: 'default';
+    } & DefaultSettingOrigin) | ({
+        scope: 'oko';
+    } & OkoSettingOrigin);
+    value: number;
+};
+
 export type EffectiveTheses = {
     origin: SettingOrigin;
     value: boolean;
@@ -2531,6 +2540,10 @@ export type SettingsPatch = {
     processor?: ProcessorSelection | null;
     prompt_filters?: string | null;
     prompt_theses?: string | null;
+    /**
+     * Global Oko setting only; requests per second for Telegram HTML and each media origin. Null resets to 2. Forced waits are preserved.
+     */
+    telegram_http_rps?: number | null;
     theses?: boolean | null;
 };
 
@@ -5581,6 +5594,43 @@ export type FeedRefreshSettingsResponses = {
 };
 
 export type FeedRefreshSettingsResponse = FeedRefreshSettingsResponses[keyof FeedRefreshSettingsResponses];
+
+export type TelegramHttpSettingsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v3/settings/telegram-http';
+};
+
+export type TelegramHttpSettingsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type TelegramHttpSettingsError = TelegramHttpSettingsErrors[keyof TelegramHttpSettingsErrors];
+
+export type TelegramHttpSettingsResponses = {
+    /**
+     * Read effective settings and explicit overrides. Scope is oko/folder/feed; oko requires owner global, folder/feed require an existing resource. Feed metadata exists only in the feed snapshot.
+     */
+    200: EffectiveTelegramHttpRps;
+};
+
+export type TelegramHttpSettingsResponse = TelegramHttpSettingsResponses[keyof TelegramHttpSettingsResponses];
 
 export type EffectiveSettingsData = {
     body?: never;

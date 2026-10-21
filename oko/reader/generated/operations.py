@@ -49,6 +49,7 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('POST', '/api/v3/reading/check'): models.ReadingCheckResponse,
     ('GET', '/api/v3/reading/materials/{item}'): models.ReadingCheckResponse,
     ('GET', '/api/v3/settings/feed-refresh'): models.EffectiveFeedRefreshMinutes,
+    ('GET', '/api/v3/settings/telegram-http'): models.EffectiveTelegramHttpRps,
     ('GET', '/api/v3/settings/{scope}/{owner}'): models.EffectiveSettingsSnapshot,
     ('PATCH', '/api/v3/settings/{scope}/{owner}'): models.EffectiveSettingsSnapshot,
     ('GET', '/api/v3/status'): models.RuntimeStatus,
