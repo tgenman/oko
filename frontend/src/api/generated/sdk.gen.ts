@@ -69,11 +69,15 @@ export const collect = <ThrowOnError extends boolean = true>(options?: Options<C
 
 /**
  * Collection progress and request diagnostics
+ *
+ * Read current collection attempts independently of AI processing and read synchronization. Original diagnostics are sanitized and loaded only for the selected source; reading never retries collection.
  */
 export const collectionStatus = <ThrowOnError extends boolean = true>(options?: Options<CollectionStatusData, ThrowOnError>) => (options?.client ?? client).get<CollectionStatusResponses, CollectionStatusErrors, ThrowOnError>({ url: '/api/v3/collection-status', ...options });
 
 /**
  * Collection progress and request diagnostics
+ *
+ * Read current collection attempts independently of AI processing and read synchronization. Original diagnostics are sanitized and loaded only for the selected source; reading never retries collection.
  */
 export const collectionSourceStatus = <ThrowOnError extends boolean = true>(options: Options<CollectionSourceStatusData, ThrowOnError>) => (options.client ?? client).get<CollectionSourceStatusResponses, CollectionSourceStatusErrors, ThrowOnError>({ url: '/api/v3/collection-status/{feed_id}', ...options });
 

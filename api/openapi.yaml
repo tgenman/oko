@@ -10,6 +10,9 @@ paths:
   /api/v3/collection-status:
     get:
       summary: Collection progress and request diagnostics
+      description: Read current collection attempts independently of AI processing and
+        read synchronization. Original diagnostics are sanitized and loaded only for
+        the selected source; reading never retries collection.
       operationId: collection_status
       parameters: []
       responses:
@@ -191,6 +194,9 @@ paths:
   /api/v3/collection-status/{feed_id}:
     get:
       summary: Collection progress and request diagnostics
+      description: Read current collection attempts independently of AI processing and
+        read synchronization. Original diagnostics are sanitized and loaded only for
+        the selected source; reading never retries collection.
       operationId: collection_source_status
       parameters:
       - name: feed_id

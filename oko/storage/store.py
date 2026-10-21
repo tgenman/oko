@@ -619,7 +619,6 @@ class Store:
             selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})))"
             params = (*feeds, *feeds)
         with self.db:
-            self.collection_status.interrupted(feeds)
             self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
             self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
 

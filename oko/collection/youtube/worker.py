@@ -99,6 +99,13 @@ def main() -> None:
             result = dict(error=True, blocked=True, retry_after=0, **safe_details(error, proxy))
         else:
             result = dict(error=True, **safe_details(error, proxy))
+    # Signed caption locations remain private to the worker, including the
+    # request observation channel. Keep method/status and explain redaction.
+    for request in capture.requests:
+        if request['redacted']:
+            request['url'] = '[url]'
+            request['original_url'] = None
+            request['message'] = re.sub(r'https?://[^\s\"\'<>]+', '[url]', request['message'])
     result.update(observation.worker_details(capture))
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
 

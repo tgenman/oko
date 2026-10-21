@@ -65,11 +65,13 @@ def test_collection_wait_keeps_error_across_power_restart_and_resolves_on_succes
         assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
         paused = client.get('/api/v3/collection-status').json()['sources'][0]
         assert paused['state'] == 'paused'
-        assert client.get('/api/v3/collection-status/demo').json()['last_error']['message'] == 'temporary source failure'
+        value=client.get('/api/v3/collection-status/demo').json()
+        assert (value['last_error'] or value['operations'][0]['last_error'])['message'] == 'temporary source failure'
     clock.now += 100
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/collection-status').json()['sources'][0]['state'] == 'paused'
-        assert client.get('/api/v3/collection-status/demo').json()['last_error']['message'] == 'temporary source failure'
+        value=client.get('/api/v3/collection-status/demo').json()
+        assert (value['last_error'] or value['operations'][0]['last_error'])['message'] == 'temporary source failure'
         assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
         wait_for(client, lambda: all(s['state']=='complete' for s in client.get('/api/v3/collection-status').json()['sources']))
         details = client.get('/api/v3/collection-status/demo').json()
@@ -104,3 +106,35 @@ def test_collection_cancelled_download_freezes_attempt_and_start_has_new_identit
         second = client.get('/api/v3/collection-status').json()['sources'][0]['operation']
         assert second['attempt_id'] != first['attempt_id']
         assert second['elapsed_seconds'] == 0
+
+
+def test_bare_session_secret_never_enters_collection_diagnostics(tmp_path):
+    from oko.collection.contracts import SourceError
+    secret = 'opaque-reader-session-value'
+
+    class FailedSource(DemoSource):
+        async def discover(self, cursor):
+            raise SourceError('transport failed ' + secret, delay=60)
+
+    with TestClient(create_app(tmp_path, token=secret, source=FailedSource(),api_only=True), headers={'Authorization':'Bearer '+secret}) as client:
+        wait_for(client, lambda: any(s['state']=='waiting' for s in client.get('/api/v3/collection-status').json()['sources']))
+        details = client.get('/api/v3/collection-status/demo')
+        assert secret not in details.text
+        assert '[session]' in details.text
+    assert secret.encode() not in (tmp_path/'state.sqlite').read_bytes()
+
+
+def test_confirmed_publication_removal_does_not_keep_collection_unfinished(tmp_path):
+    from oko.collection.contracts import SourceDeleted
+
+    class RemovedSource(DemoSource):
+        async def fetch(self, publication, resources):
+            raise SourceDeleted()
+
+    with TestClient(create_app(tmp_path,token='test',source=RemovedSource(),api_only=True),headers=HEADERS) as client:
+        wait_for(client,lambda: len(client.get('/api/v3/cards').json()) == 3)
+        def complete():
+            value = client.get('/api/v3/collection-status').json()
+            return value if all(s['state']=='complete' for s in value['sources']) else None
+        state = wait_for(client,complete)
+        assert state['counts']['error'] == 0

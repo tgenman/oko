@@ -126,7 +126,7 @@ test('offline state keeps last problems without a false zero and distinguishes a
     await r.page.locator('#status-close').click();
     await expect(r.page.locator('#status-panel')).toBeHidden();
     await r.page.evaluate(()=>readerTransport.replies.get('/api/v3/status')!.body!.stopped=true);
-    await expect(r.page.locator('#progress')).toHaveText('Oko stopped');
+    await expect(r.page.locator('#collection-progress')).toContainText('Око остановлено');
     await r.page.locator('#status-toggle').click();
     await expect(r.page.locator('#status-panel')).toContainText('Oko stopped');
     await expect(r.page.locator('.status-action')).toBeDisabled();

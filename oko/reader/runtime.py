@@ -41,7 +41,7 @@ from oko.collection.youtube.history import HistoryClient
 from oko.subscriptions.history import InitialHistory
 from oko.subscriptions.telegram import TelegramConflict
 from oko.collection.youtube.access import CaptionsBlocked, CaptionsDeferred, proxy_url
-from oko.diagnostics import Journal, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught
+from oko.diagnostics import Journal, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught, exception_details
 
 T = TypeVar('T')
 
@@ -58,6 +58,15 @@ class ActionError(Exception):
 class StatusSnapshot:
     state: dict[str, Any]
     bindings: dict[str, dict[str, Any]]
+
+
+@dataclass
+class _CollectionAttempt:
+    job: Job
+    feed: str
+    started: float
+    capture: Capture
+    saved: dict[str, Any]
 
 
 class _ExternalCheck:
@@ -118,6 +127,7 @@ class Runtime:
         self._wall_clock = wall_clock
         self._collection_instance = secrets.token_hex(16)
         self._collection_revision = 0
+        self._collection_active: dict[int, _CollectionAttempt] = {}
         self._captions_active = False
         self._codex_client = codex_client or LocalCodex()
         self._codex_status = codex_status()
@@ -199,6 +209,10 @@ class Runtime:
             # Invalidate before waiting: even an adapter suppressing cancellation may
             # not publish its old generation when another tab is still alive.
             if self._store:
+                for identity, attempt in list(self._collection_active.items()):
+                    if feeds is None or attempt.feed in feeds:
+                        self._store.collection_status.interrupt(attempt.job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started))
+                        del self._collection_active[identity]
                 self._store.interrupted(feeds)
             ai_task = self._ai
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
@@ -312,10 +326,12 @@ class Runtime:
             binding = current.subscriptions.telegram.binding(feed['id']) if feed['kind']=='telegram' else None
             feed['collection_access'] = 'Веб' if binding and binding['kind']=='web' else 'Личный аккаунт' if binding and binding.get('role')=='personal' else 'Аккаунт для сбора' if binding and binding.get('role')=='collection' else feed.get('transport', feed['kind'])
         sources = current.collection_status.snapshot(feeds, self._live(),
-            'Око выключено' if not self.enabled else 'Ожидание присутствия читателя' if not self._admitted() else 'Работа приостановлена')
+            'Око выключено' if not self.enabled else 'Ожидание присутствия читателя' if not self._admitted() else 'Работа приостановлена',
+            {identity: dict(generation=attempt.job.generation, elapsed_seconds=max(0.,self._clock()-attempt.started),stage=attempt.capture.stage)
+             for identity, attempt in self._collection_active.items()})
         self._collection_revision += 1
         return dict(instance_id=self._collection_instance, revision=self._collection_revision,
-                    observed_at=self._wall_clock(), work_allowed=self._live(), sources=sources)
+                    observed_at=self._wall_clock(), work_allowed=self._live(), sources=self._clean_collection(sources))
 
     def status(self) -> dict[str, Any]:
         return self.status_snapshot().state
@@ -1082,6 +1098,30 @@ class Runtime:
             if job:
                 self._store.db.execute("UPDATE jobs SET problem_code=? WHERE id=? AND generation=? AND status='pending'", (job.kind+':FloodWaitError', job.id, job.generation))
 
+    def _clean_collection(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return self.diagnostics.clean(value) if self.diagnostics else value
+        if isinstance(value, list):
+            return [self._clean_collection(item) for item in value]
+        if isinstance(value, dict):
+            result = {key: self._clean_collection(item) for key, item in value.items()}
+            if 'url' in value and result['url'] != value['url']:
+                result['redacted'] = True
+            return result
+        return value
+
+    def _finish_collection(self, job: Job, current: Store, error: BaseException | None = None) -> None:
+        attempt = self._collection_active.get(job.id)
+        if not attempt or attempt.job.generation != job.generation:
+            return
+        del self._collection_active[job.id]
+        capture = attempt.capture
+        details = capture.error or (exception_details(error) if error else None)
+        if isinstance(error, SourceError) and error.remote_type:
+            details = dict(error_type=error.remote_type, message=error.remote_message, traceback=error.remote_traceback, origin='worker')
+        observation = self._clean_collection(dict(error=details, requests=capture.requests, request_count=capture.request_count))
+        current.collection_status.finish(job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started), observation)
+
     async def _execute(self, job: Job) -> None:
         capture = Capture()
         with capture.scope():
@@ -1094,7 +1134,6 @@ class Runtime:
         feed = ''
         staging: DownloadStage | None = None
         collection_error: BaseException | None = None
-        cancelled = False
         try:
             async with self._actions:
                 current = self._store
@@ -1105,7 +1144,8 @@ class Runtime:
                     self._delete(job, current)
                     return
                 feed = (job.item or 'demo') if job.kind in ('discover', 'read') else current.item_feed(job.item)
-                current.collection_status.start(job, feed, capture)
+                if job.kind in ('discover','fetch'):
+                    self._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,current.collection_status.start(job,feed))
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 source = self._sources.get(feed)
                 staging = current.download_stage(job,lambda:self._store is current and self._live() and current.valid(job)) if job.kind == 'fetch' and source and source.fetch_requirements.staging else None
@@ -1140,6 +1180,7 @@ class Runtime:
                             delay = outcome.continuation
                             current.enqueue_discovery(feed, self._clock() + delay if delay else 0)
                         current.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
+                        self._finish_collection(job, current, collection_error)
             elif publication:
                 fetched = await source.fetch(publication, resources)
                 material = fetched.material
@@ -1156,10 +1197,12 @@ class Runtime:
                             current.youtube.defer(job, self._clock(), current.youtube.ready_at() - self._wall_clock(), 'Получение субтитров приостановлено: YouTube ограничил запросы', blocked=True)
                         current.read_sync.sync()
                         current.feed_status(feed, error=None, gap=fetched.observation.gap, changes=fetched.observation.changes)
+                        self._finish_collection(job, current, collection_error)
         except CaptionsDeferred:
-            pass
+            async with self._actions:
+                if current and self._store is current and not self.stopped:
+                    self._finish_collection(job,current)
         except asyncio.CancelledError:
-            cancelled = True
             raise
         except Exception as error:
             collection_error = error
@@ -1169,10 +1212,12 @@ class Runtime:
                     if isinstance(error, SourceSkipped) and job.kind == 'fetch':
                         collection_error = None
                         current.viewed(job.item)
+                        self._finish_collection(job,current)
                         return
                     if isinstance(error, SourceDeleted) and job.kind == 'fetch':
                         collection_error = None
                         current.source_removed(job)
+                        self._finish_collection(job,current)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
                     if isinstance(error, SourceError):
@@ -1187,15 +1232,18 @@ class Runtime:
                         code = 'material-save-failed'
                     else:
                         code = job.kind + ':' + type(error).__name__
+                    label = self.diagnostics.clean(label) if self.diagnostics else label
                     current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,terminal=isinstance(error, SourceError) and not error.retryable)
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):
                         current.feed_status(feed, error=label, gap=None)
+                    self._finish_collection(job, current, error)
 
         finally:
-            if current and self._store is current and not self.stopped and job.kind in ('discover','fetch'):
-                current.collection_status.finish(job, feed, collection_error, capture, cancelled=cancelled)
+            attempt = self._collection_active.get(job.id)
+            if attempt and attempt.job.generation == job.generation:
+                del self._collection_active[job.id]
             if staging:
                 shutil.rmtree(staging.path,ignore_errors=True)
 

@@ -49,7 +49,7 @@ test('tabs recover missed reading changes and reconcile a local viewed action', 
   await page.locator('#cards button').first().click();
   await expect(page.locator('#text')).toContainText('Открылась библиотека');
   await page.route('**/api/v3/reading/check',route=>route.abort('failed'));
-  await expect(page.locator('#progress')).toContainText('No connection');
+  await expect(page.locator('#collection-progress')).toContainText('Нет связи');
   const cards=await api('cards');
   await api('materials/'+cards[0].id+'/viewed','POST');
   const remaining=catalog.feeds.find(feed=>feed.id===cards[1].feed_id)!;

@@ -40,6 +40,9 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         if row is None:
             from oko.reader.reading_v3 import missing
             raise missing(wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(feed_id))))
-        return wire.CollectionDetails.model_validate(dict(**meta, source=source(row), operations=row['operations'], last_error=row['last_error']))
+        last_error = row['last_error']
+        if last_error and any(op['last_error'] and op['last_error']['attempt_id']==last_error['attempt_id'] for op in row['operations']):
+            last_error = None
+        return wire.CollectionDetails.model_validate(dict(**meta, source=source(row), operations=row['operations'], last_error=last_error))
 
     app.include_router(router)

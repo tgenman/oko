@@ -282,7 +282,7 @@ test('removed cards and connection loss keep loaded text, reload drops it',async
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards',{body:[]}));
     await expect(r.page.locator('#cards button')).toHaveCount(0);await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));
-    await expect(r.page.locator('#progress')).toContainText('No connection');await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await expect(r.page.locator('#collection-progress')).toContainText('Нет связи');await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.reload();await expect(r.page.locator('#material')).toBeHidden();
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
@@ -356,9 +356,9 @@ test('reconnect resumes missing media for unchanged text without replacing loade
   const r=await reader();try{
     const url='/api/v3/materials/A/images/one.png';await r.start([material('A',{images:[url]})]);
     await r.page.evaluate(url=>readerTransport.held.set(url,true),url);await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));await expect(r.page.locator('#progress')).toContainText('No connection');
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));await expect(r.page.locator('#collection-progress')).toContainText('Нет связи');
     await r.page.evaluate(({url,png})=>{readerTransport.release(url,'stale bytes');readerTransport.replies.set(url,{base64:png,mime:'image/png'});readerTransport.replies.set('/api/v3/status',{body:{stopped:false,ready_sources:1,total_sources:1}});},{url,png});
-    await expect(r.page.locator('#progress')).not.toContainText('No connection');await expect(r.page.locator('#text')).toHaveText('Текст A');await expect(r.page.locator('#images img')).toHaveCount(1);assert.equal(await r.page.evaluate(()=>browserResources.created.length),1);
+    await expect(r.page.locator('#collection-progress')).not.toContainText('Нет связи');await expect(r.page.locator('#text')).toHaveText('Текст A');await expect(r.page.locator('#images img')).toHaveCount(1);assert.equal(await r.page.evaluate(()=>browserResources.created.length),1);
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
 });

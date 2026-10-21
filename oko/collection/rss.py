@@ -188,7 +188,7 @@ class RSSSource:
         async with httpx.AsyncClient(transport=self.transport, timeout=20, follow_redirects=True, max_redirects=5,
                                     trust_env=False, headers={'User-Agent': 'Oko/0.1 local reader'}) as client:
             async with client.stream('GET', normalized(url)) as response:
-                if response.status_code not in (404, 410):
+                if response.status_code not in (404, 410) or purpose != 'publication':
                     observation.response_failure(response, purpose=purpose, original_url=url)
                 if response.status_code in (401, 403):
                     raise SourceError('Требуется авторизация')
