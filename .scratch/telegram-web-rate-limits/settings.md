@@ -25,3 +25,8 @@ HTTP с временным Store и MockTransport: default, ошибки вво�
 Playwright: сохранение, проверка чисел, сброс, закрытие/открытие, поздний ответ
 и новый черновик, отказ записи и Discard Change, desktop/mobile screenshots.
 Фактические результаты фиксируются отдельно.
+
+## Результат
+
+Реализовано в `5c07a3a`, исправлено по ревью в `f61c09a`.
+[Фактическая проверка](../../docs/verification/telegram-http-settings.md).
