@@ -1,0 +1,293 @@
+{
+  "started_at": "20261021T131947Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.48s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-retro-134-check/.venv/bin/python",
+            "/private/tmp/oko-retro-134-check/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "tooling-types": {
+      "status": "PASS (1.05s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-retro-134-check/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "syntax": {
+      "status": "PASS (0.51s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/private/tmp/oko-retro-134-check/scripts/check-ts.cts",
+            "/private/tmp/oko-retro-134-check/frontend/docs/initializer.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/errors.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/client/client.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/client/index.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/client/types.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/client/utils.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/client.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/auth.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/bodySerializer.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/params.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/pathSerializer.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/queryKeySerializer.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/serverSentEvents.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/types.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/core/utils.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/index.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/media.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/revision.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/sdk.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/generated/types.gen.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/reader.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/api/transport.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/browser-auth.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/browser-platform.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/main.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reader-session.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/completion.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/coordination.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/feed-actions.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/folder-actions.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/folder-menu.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/list.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/markdown-links.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/markdown.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/news-actions.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/opened.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/position.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/resources.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/store.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/title.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/reading/tree.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/renderer.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/service-text.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/connections.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/editor.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/feed-details.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/history.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/menus.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/models.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/operations.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/owner.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/telegram.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/settings/youtube.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/shell.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/status/actions.ts",
+            "/private/tmp/oko-retro-134-check/frontend/src/status/debug.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/status/panel.tsx",
+            "/private/tmp/oko-retro-134-check/frontend/src/status/recovery.ts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "lint": {
+      "status": "PASS (0.58s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/private/tmp/oko-retro-134-check/scripts/lint-js.cts"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "browser-types": {
+      "status": "PASS (1.64s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/tmp/oko-retro-134-check/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "tool-tests": {
+      "status": "FAIL (35.39s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-retro-134-check/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/development/test_check_runner.py",
+            "tests/api/test_governance.py",
+            "tests/development/test_check_snapshot.py",
+            "tests/development/test_api_generation.py",
+            "tests/development/test_browser_host.py",
+            "tests/development/test_check_report.py"
+          ],
+          "exit_code": 1
+        },
+        {
+          "command": [
+            "/private/tmp/oko-retro-134-check/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/development/test_task_changes.py",
+            "tests/development/test_github_issues.py",
+            "tests/development/test_hooks.py",
+            "tests/api/test_strict_generation.py",
+            "tests/development/test_build_speed.py",
+            "tests/development/test_frontend_builder.py",
+            "tests/development/test_update_checkout.py",
+            "tests/development/test_process_logs.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [
+        "tests/development/test_browser_host.py::test_browser_host_releases_live_scenarios[eof]",
+        "tests/development/test_browser_host.py::test_browser_host_releases_live_scenarios[terminate]",
+        "tests/development/test_browser_host.py::test_browser_host_releases_live_scenarios[startup-failure]",
+        "tests/development/test_browser_host.py::test_browser_host_shutdown_does_not_wait_for_unfinished_request"
+      ],
+      "workers": {
+        "tool-tests-1": {
+          "status": "FAIL (35.39s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-retro-134-check/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "tests/development/test_check_runner.py",
+                "tests/api/test_governance.py",
+                "tests/development/test_check_snapshot.py",
+                "tests/development/test_api_generation.py",
+                "tests/development/test_browser_host.py",
+                "tests/development/test_check_report.py"
+              ],
+              "exit_code": 1
+            }
+          ],
+          "failures": [
+            "tests/development/test_browser_host.py::test_browser_host_releases_live_scenarios[eof]",
+            "tests/development/test_browser_host.py::test_browser_host_releases_live_scenarios[terminate]",
+            "tests/development/test_browser_host.py::test_browser_host_releases_live_scenarios[startup-failure]",
+            "tests/development/test_browser_host.py::test_browser_host_shutdown_does_not_wait_for_unfinished_request"
+          ]
+        },
+        "tool-tests-2": {
+          "status": "PASS (55.43s)",
+          "commands": [
+            {
+              "command": [
+                "/private/tmp/oko-retro-134-check/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "tests/development/test_task_changes.py",
+                "tests/development/test_github_issues.py",
+                "tests/development/test_hooks.py",
+                "tests/api/test_strict_generation.py",
+                "tests/development/test_build_speed.py",
+                "tests/development/test_frontend_builder.py",
+                "tests/development/test_update_checkout.py",
+                "tests/development/test_process_logs.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        }
+      },
+      "checkout_changes": []
+    },
+    "diff": {
+      "status": "PASS (0.24s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "entrypoint": {
+      "status": "PASS (0.58s)",
+      "commands": [
+        {
+          "command": [
+            "/private/tmp/oko-retro-134-check/.venv/bin/python",
+            "-m",
+            "oko",
+            "--help"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 1,
+  "duration_seconds": 60.88,
+  "log": "/private/tmp/oko-retro-134-check/.scratch/check-runs/20261021T131947Z-6a935153/output.log"
+}

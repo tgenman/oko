@@ -21,7 +21,7 @@ jobs:
           OKO_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: |
           node --import tsx scripts/generate-api.mts check --fresh
-          ./scripts/check contracts build syntax lint types diff entrypoint
+          ./scripts/check contracts build syntax lint types browser-types diff entrypoint
       - uses: actions/upload-artifact@v4
         with:
           name: checked-frontend

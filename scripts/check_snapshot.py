@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 from task_changes import (TaskError, blob_entry, capture, checkout_tree, content,
-                          git, index_entries, make_index, read_file)
+                          git, index_entries, make_index, read_file, reuse_dependencies)
 
 
 def run(root, arguments, report_dir, base):
@@ -46,11 +46,7 @@ def run(root, arguments, report_dir, base):
         checkout_tree(root, head, tree, target)
     env = dict(os.environ)
     env.pop('GIT_INDEX_FILE', None)
-    # Reuse installed dependencies only, never application data or built assets.
-    for name in ('node_modules', '.venv'):
-        dependency = root / name
-        if dependency.is_dir() and not (target / name).exists():
-            (target / name).symlink_to(dependency.resolve(), target_is_directory=True)
+    reuse_dependencies(root, target)
     for key in ('OKO_NODE', 'OKO_PYTHON', 'OKO_BROWSER_EXECUTABLE'):
         if env.get(key):
             executable = shutil.which(env[key])

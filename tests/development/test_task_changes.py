@@ -246,6 +246,11 @@ def test_checkout_materializes_prepared_tree_with_original_git_base(tmp_path):
     snapshot = tmp_path / 'snapshot'
     assert run(root, 'snapshot', snapshot).returncode == 0
     (root / 'source.txt').write_text('user first\nsecond\nthird\nfourth\ntask fifth\n\n')
+    for name in ('.venv', 'node_modules'):
+        (root / name).mkdir()
+        (root / name / 'installed').write_text(name)
+    (root / 'data').mkdir()
+    (root / 'data' / 'private').write_text('private')
     (root / 'old.txt').rename(root / 'renamed.txt')
     (root / 'binary').write_bytes(b'\x00\xfftask')
     (root / 'script').write_text('#!/bin/sh\nexit 0\n')
@@ -268,11 +273,28 @@ def test_checkout_materializes_prepared_tree_with_original_git_base(tmp_path):
     assert (output / 'script').stat().st_mode & 0o111
     assert (output / 'link').is_symlink() and os.readlink(output / 'link') == 'source.txt'
     assert git(output, 'remote') == ''
+    for name in ('.venv', 'node_modules'):
+        assert (output / name).is_symlink()
+        assert (output / name / 'installed').read_text() == name
+    assert not (output / 'data').exists()
     assert subprocess.run(['git', 'diff', '--cached', '--check'], cwd=output).returncode == 0
     assert git(root, 'status', '--porcelain') == before
     assert git(root, 'rev-parse', 'HEAD') == base
     result = run(root, 'checkout', prepared, '--output', output)
     assert result.returncode == 1 and 'already exists' in result.stderr
+
+
+def test_dependency_reuse_preserves_captured_paths_and_ignores_missing_installs(tmp_path):
+    import runpy
+    reuse = runpy.run_path(str(CLI))['reuse_dependencies']
+    root, target = tmp_path / 'source', tmp_path / 'target'
+    root.mkdir()
+    target.mkdir()
+    (root / '.venv').mkdir()
+    (target / '.venv').symlink_to('missing-captured-target')
+    reuse(root, target)
+    assert os.readlink(target / '.venv') == 'missing-captured-target'
+    assert not (target / 'node_modules').exists()
 
 
 @pytest.mark.parametrize('drift', ['index', 'payload'])
