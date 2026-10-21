@@ -1,0 +1,131 @@
+{
+  "started_at": "20261021T101746Z",
+  "selected_files": {
+    "browser": [],
+    "python-tests": [
+      "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_http_limits.py",
+      "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_reload.py",
+      "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_telegraph.py"
+    ],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.46s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "/private/tmp/oko-rate-check-4/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": []
+    },
+    "python-tests": {
+      "status": "PASS (22.33s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_telegraph.py"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_http_limits.py"
+          ],
+          "exit_code": 0
+        },
+        {
+          "command": [
+            "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_reload.py"
+          ],
+          "exit_code": 0
+        }
+      ],
+      "failures": [],
+      "workers": {
+        "python-tests-1": {
+          "status": "PASS (22.33s)",
+          "commands": [
+            {
+              "command": [
+                "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_telegraph.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        },
+        "python-tests-2": {
+          "status": "PASS (13.07s)",
+          "commands": [
+            {
+              "command": [
+                "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_http_limits.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        },
+        "python-tests-3": {
+          "status": "PASS (21.18s)",
+          "commands": [
+            {
+              "command": [
+                "/Users/dabondarev/repo_personal/oko/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "/private/tmp/oko-rate-check-4/tests/reader/test_telegram_reload.py"
+              ],
+              "exit_code": 0
+            }
+          ],
+          "failures": []
+        }
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "<comparison unavailable>"
+    ],
+    "base": null
+  },
+  "exit_code": 0,
+  "duration_seconds": 23.1,
+  "log": "/private/tmp/oko-rate-check-4/.scratch/check-runs/20261021T101746Z-3d2eeac7/output.log"
+}

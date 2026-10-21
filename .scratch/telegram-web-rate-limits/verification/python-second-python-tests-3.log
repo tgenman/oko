@@ -1,0 +1,97 @@
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q /private/tmp/oko-rate-check-2/tests/reader/test_telegram_web.py /private/tmp/oko-rate-check-2/tests/collection/test_source_revisions.py /private/tmp/oko-rate-check-2/tests/reader/test_reading_versions.py /private/tmp/oko-rate-check-2/tests/processing/test_codex_bridge.py /private/tmp/oko-rate-check-2/tests/reader/test_telegram_lanes.py /private/tmp/oko-rate-check-2/tests/reader/test_debug.py /private/tmp/oko-rate-check-2/tests/reader/test_subscriptions.py /private/tmp/oko-rate-check-2/tests/development/test_test_environment.py /private/tmp/oko-rate-check-2/tests/collection/test_youtube_proxy.py /private/tmp/oko-rate-check-2/tests/collection/test_youtube_theses_freshness.py /private/tmp/oko-rate-check-2/tests/reviews/test_processing_coordination.py /private/tmp/oko-rate-check-2/tests/reader/test_external_checks.py /private/tmp/oko-rate-check-2/tests/lifecycle/test_runtime_actions.py /private/tmp/oko-rate-check-2/tests/reader/test_existing_history.py /private/tmp/oko-rate-check-2/tests/reader/test_reading_cost.py /private/tmp/oko-rate-check-2/tests/collection/test_source_results.py /private/tmp/oko-rate-check-2/tests/processing/test_codex_catalog.py /private/tmp/oko-rate-check-2/tests/reader/test_sql_acceptance.py /private/tmp/oko-rate-check-2/tests/reader/test_remove_aggregates.py /private/tmp/oko-rate-check-2/tests/development/test_update_working_oko.py /private/tmp/oko-rate-check-2/tests/collection/test_telegram_contracts.py /private/tmp/oko-rate-check-2/tests/api/test_telegram_contract.py /private/tmp/oko-rate-check-2/tests/reader/test_frontend_build.py
+........................................................................ [ 45%]
+...................................F.................................... [ 90%]
+................                                                         [100%]
+=================================== FAILURES ===================================
+_ test_late_external_reply_is_rejected_even_after_oko_is_enabled_again[telegram_web] _
+
+tmp_path = PosixPath('/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/pytest-of-dabondarev/pytest-1951/test_late_external_reply_is_re5')
+kind = 'telegram_web'
+
+    @pytest.mark.parametrize('kind', [
+        'rss', 'llamacpp', 'codex_check', 'codex_catalog', 'codex_save',
+        'telegram_web', 'telegram_profile', 'telegram_connect',
+    ])
+    def test_late_external_reply_is_rejected_even_after_oko_is_enabled_again(tmp_path, kind):
+        held = HeldReply()
+    
+        class Codex(CodexService):
+            async def check(self):
+                if kind == 'codex_check':
+                    await held.wait()
+                return await super().check()
+    
+            async def catalog(self):
+                if kind in ('codex_catalog', 'codex_save'):
+                    await held.wait()
+                return await super().catalog()
+    
+        class Client(Telegram):
+            async def identity(self, account):
+                if kind == 'telegram_profile':
+                    await held.wait()
+                return 123
+    
+            async def info(self, account, peer):
+                if kind == 'telegram_connect':
+                    await held.wait()
+                return await super().info(account, peer)
+    
+        async def response(request):
+            await held.wait()
+            if kind == 'llamacpp':
+                return httpx.Response(200, json={'data': [{'id': 'fixture'}]} if request.url.path == '/v1/models' else {})
+            return httpx.Response(200, text=page([(11, 'Late post')]) if kind == 'telegram_web' else RSS)
+    
+        transport = httpx.MockTransport(response)
+        with TestClient(create_app(tmp_path, token='test', api_only=True, codex_client=Codex(),
+                                   telegram_client=Client(), rss_transport=transport, ai_transport=transport), headers=HEADERS) as client:
+            if kind == 'llamacpp':
+                assert client.put('/api/v3/processors/llamacpp', json={
+                    'endpoint': 'http://127.0.0.1:8080', 'model': 'fixture',
+                }).status_code == 200
+            if kind == 'telegram_connect':
+                assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref': 'fixture'}).status_code == 200
+            choices = {name: {'model': 'synthetic', 'reasoning_effort': 'low', 'fast': False} for name in ('filter', 'theses')}
+            method, path, body = {
+                'rss': ('POST', '/api/v3/feeds/verify', {'url': 'https://synthetic.test/rss'}),
+                'llamacpp': ('POST', '/api/v3/processors/llamacpp/check', None),
+                'codex_check': ('POST', '/api/v3/processors/codex/check', None),
+                'codex_catalog': ('GET', '/api/v3/processors/codex/models', None),
+                'codex_save': ('PUT', '/api/v3/processors/codex', choices),
+                'telegram_web': ('POST', '/api/v3/telegram/connect', {'source_locator': '@fixture', 'folder': 'News', 'access': {'kind': 'web'}}),
+                'telegram_profile': ('PUT', '/api/v3/telegram/profiles/personal', {'configuration_ref': 'fixture'}),
+                'telegram_connect': ('POST', '/api/v3/telegram/connect', {'source_locator': '@fixture', 'folder': 'News', 'access': {'kind': 'client', 'profile': 'personal'}}),
+            }[kind]
+            held.enabled = True
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pending = pool.submit(client.request, method, path, **({'json': body} if body is not None else {}))
+                try:
+                    assert held.started.wait(2)
+                    before_codex = client.get('/api/v3/processors/codex').json()
+                    before_profiles = client.get('/api/v3/telegram/profiles').json()
+                    assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+                    assert held.cancelled.wait(2)
+                    # _live() alone is insufficient: an old reply cannot become
+                    # eligible again when the user starts Oko before it arrives.
+                    assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
+                finally:
+                    held.release.set()
+                result = pending.result(timeout=3)
+                # Preserve the pre-refactor statuses and subject-specific codes;
+                # the strict client also validates the now-complete Codex schema.
+>               assert result.status_code == (400 if kind == 'rss' else 503), result.text
+E               AssertionError: {"code":"internal_error","command_id":"0521a744f5d3bf9d6af9a4e7ab7a3c04","details":null,"diagnostic_id":"94884680895d0618c30f1525475f28df","message":"Ошибка Око; подробности в диагностике"}
+E               assert 500 == 503
+E                +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests/reader/test_external_checks.py:110: AssertionError
+=============================== warnings summary ===============================
+../../../Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/reader/test_external_checks.py::test_late_external_reply_is_rejected_even_after_oko_is_enabled_again[telegram_web]
+1 failed, 159 passed, 1 warning in 103.53s (0:01:43)

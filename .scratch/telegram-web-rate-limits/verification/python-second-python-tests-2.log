@@ -1,0 +1,70 @@
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q /private/tmp/oko-rate-check-2/tests/reader/test_telegram_bindings.py /private/tmp/oko-rate-check-2/tests/reader/test_telegram_telegraph.py /private/tmp/oko-rate-check-2/tests/reader/test_status_problems.py /private/tmp/oko-rate-check-2/tests/collection/test_rss.py /private/tmp/oko-rate-check-2/tests/reader/test_v3_reading.py /private/tmp/oko-rate-check-2/tests/reader/test_youtube_history.py /private/tmp/oko-rate-check-2/tests/api/test_v3_schema.py /private/tmp/oko-rate-check-2/tests/reader/test_telegram_http_limits.py /private/tmp/oko-rate-check-2/tests/reader/test_feed_details.py /private/tmp/oko-rate-check-2/tests/reader/test_folder_completion.py /private/tmp/oko-rate-check-2/tests/reader/test_material_read_cost.py /private/tmp/oko-rate-check-2/tests/reader/test_folder_management.py /private/tmp/oko-rate-check-2/tests/reader/test_deletion.py /private/tmp/oko-rate-check-2/tests/lifecycle/test_persistent_reader.py /private/tmp/oko-rate-check-2/tests/processing/test_theses_recovery.py /private/tmp/oko-rate-check-2/tests/collection/test_youtube_history_worker.py /private/tmp/oko-rate-check-2/tests/reader/test_feed_url.py /private/tmp/oko-rate-check-2/tests/api/test_contract.py /private/tmp/oko-rate-check-2/tests/reader/test_http_contracts.py /private/tmp/oko-rate-check-2/tests/processing/test_codex_execution.py /private/tmp/oko-rate-check-2/tests/reader/test_reader.py /private/tmp/oko-rate-check-2/tests/api/test_v3_lexical.py /private/tmp/oko-rate-check-2/tests/development/test_fixture_contracts.py
+............................F........................................... [ 43%]
+........................................................................ [ 87%]
+....................                                                     [100%]
+=================================== FAILURES ===================================
+____ test_retained_theses_and_provenance_come_from_the_same_committed_bytes ____
+
+tmp_path = PosixPath('/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/pytest-of-dabondarev/pytest-1954/test_retained_theses_and_prove0')
+
+    def test_retained_theses_and_provenance_come_from_the_same_committed_bytes(tmp_path):
+        import asyncio
+        import threading
+        from tests.support.codex import CodexService
+        from tests.support.reader import wait_for
+        class HoldingCodex(CodexService):
+            hold=False
+            async def catalog(self):
+                models=await super().catalog()
+                models[0]['fast_supported']=True
+                return models
+            async def complete(self,prompt,schema,directory,choice):
+                while self.hold:
+                    await asyncio.sleep(.005)
+                return await super().complete(prompt,schema,directory,choice)
+        codex=HoldingCodex()
+        fail=[False]
+        moved=threading.Event()
+        missing=[False]
+        def fault(point):
+            if fail[0] and point=='after_theses_move':
+                moved.set()
+                raise OSError('synthetic uncommitted theses')
+        def response(request):
+            if request.url.host=='api.telegra.ph':
+                return httpx.Response(503) if missing[0] else httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Saved article']}]}})
+            return httpx.Response(200,text=page([(11,'https://telegra.ph/Article')]))
+        with TestClient(create_app(tmp_path,token='test',api_only=True,codex_client=codex,fault=fault,
+                rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+            config={kind:dict(model='synthetic',reasoning_effort='low',fast=False) for kind in ('filter','theses')}
+            assert client.put('/api/v3/processors/codex',json=config).status_code==200
+            client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':'','processor':'codex'})
+            created=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web')).json()
+            client.patch('/api/v3/feeds/'+created['feed_id'],json={'public_ai':True})
+            identity=settled(client)[0]['id']
+            path='/api/v3/materials/'+identity
+            accepted=wait_for(client,lambda: client.get(path).json()['theses']['result'])
+            config['theses']['fast']=True
+            assert client.put('/api/v3/processors/codex',json=config).status_code==200
+            codex.hold=True
+            assert client.post(path+'/regenerate').status_code==200
+            missing[0]=True
+            assert client.post(path+'/retry').status_code==200
+            wait_for(client,lambda: [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')])
+            fail[0]=True
+            codex.hold=False
+            assert moved.wait(3)
+            current=client.get(path).json()['theses']['result']
+>           assert current==accepted
+E           AssertionError: assert None == {'points': [{'references': [{'material_id': 'd4031d2dae5d9dcd1c67dd4a223a3dda', 'source_url': 'https://t.me/fixture/11...даляет содержимое.'}], 'provenance': {'fast': False, 'kind': 'codex', 'model': 'synthetic', 'reasoning_effort': 'low'}}
+
+tests/reader/test_telegram_telegraph.py:368: AssertionError
+=============================== warnings summary ===============================
+../../../Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/reader/test_telegram_telegraph.py::test_retained_theses_and_provenance_come_from_the_same_committed_bytes
+1 failed, 163 passed, 1 warning in 77.68s (0:01:17)

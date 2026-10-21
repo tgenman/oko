@@ -1,0 +1,1385 @@
+Tool tests: selected
+/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+
+RUN contracts
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python /private/tmp/oko-rate-check/scripts/check_test_contracts.py
+
+RUN tooling-types
+$ /Users/dabondarev/.local/bin/node --import tsx /private/tmp/oko-rate-check/scripts/check-types.mts tsconfig.tooling.json
+
+RUN syntax
+$ /Users/dabondarev/.local/bin/node --require tsx/cjs /private/tmp/oko-rate-check/scripts/check-ts.cts /private/tmp/oko-rate-check/frontend/docs/initializer.ts /private/tmp/oko-rate-check/frontend/src/api/errors.ts /private/tmp/oko-rate-check/frontend/src/api/generated/client/client.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/client/index.ts /private/tmp/oko-rate-check/frontend/src/api/generated/client/types.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/client/utils.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/client.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/auth.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/bodySerializer.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/params.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/pathSerializer.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/queryKeySerializer.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/serverSentEvents.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/types.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/core/utils.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/index.ts /private/tmp/oko-rate-check/frontend/src/api/generated/media.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/revision.ts /private/tmp/oko-rate-check/frontend/src/api/generated/sdk.gen.ts /private/tmp/oko-rate-check/frontend/src/api/generated/types.gen.ts /private/tmp/oko-rate-check/frontend/src/api/reader.ts /private/tmp/oko-rate-check/frontend/src/api/transport.ts /private/tmp/oko-rate-check/frontend/src/browser-auth.ts /private/tmp/oko-rate-check/frontend/src/browser-platform.ts /private/tmp/oko-rate-check/frontend/src/main.tsx /private/tmp/oko-rate-check/frontend/src/reader-session.ts /private/tmp/oko-rate-check/frontend/src/reading/completion.ts /private/tmp/oko-rate-check/frontend/src/reading/coordination.ts /private/tmp/oko-rate-check/frontend/src/reading/feed-actions.tsx /private/tmp/oko-rate-check/frontend/src/reading/folder-actions.tsx /private/tmp/oko-rate-check/frontend/src/reading/folder-menu.tsx /private/tmp/oko-rate-check/frontend/src/reading/list.tsx /private/tmp/oko-rate-check/frontend/src/reading/news-actions.tsx /private/tmp/oko-rate-check/frontend/src/reading/opened.tsx /private/tmp/oko-rate-check/frontend/src/reading/position.ts /private/tmp/oko-rate-check/frontend/src/reading/resources.ts /private/tmp/oko-rate-check/frontend/src/reading/store.ts /private/tmp/oko-rate-check/frontend/src/reading/title.ts /private/tmp/oko-rate-check/frontend/src/reading/tree.tsx /private/tmp/oko-rate-check/frontend/src/renderer.tsx /private/tmp/oko-rate-check/frontend/src/service-text.ts /private/tmp/oko-rate-check/frontend/src/settings/connections.tsx /private/tmp/oko-rate-check/frontend/src/settings/editor.tsx /private/tmp/oko-rate-check/frontend/src/settings/feed-details.tsx /private/tmp/oko-rate-check/frontend/src/settings/history.ts /private/tmp/oko-rate-check/frontend/src/settings/menus.tsx /private/tmp/oko-rate-check/frontend/src/settings/models.tsx /private/tmp/oko-rate-check/frontend/src/settings/operations.ts /private/tmp/oko-rate-check/frontend/src/settings/owner.ts /private/tmp/oko-rate-check/frontend/src/settings/telegram.tsx /private/tmp/oko-rate-check/frontend/src/settings/youtube.tsx /private/tmp/oko-rate-check/frontend/src/shell.tsx /private/tmp/oko-rate-check/frontend/src/status/actions.ts /private/tmp/oko-rate-check/frontend/src/status/debug.tsx /private/tmp/oko-rate-check/frontend/src/status/panel.tsx /private/tmp/oko-rate-check/frontend/src/status/recovery.ts
+
+RUN lint
+$ /Users/dabondarev/.local/bin/node --require tsx/cjs /private/tmp/oko-rate-check/scripts/lint-js.cts
+
+RUN types
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m mypy oko tests/support/codex.py tests/support/app.py
+Success: no issues found in 83 source files
+
+RUN browser-types
+$ /Users/dabondarev/.local/bin/node --import tsx /private/tmp/oko-rate-check/scripts/check-types.mts tsconfig.browser-tests.json
+
+RUN build
+$ /Users/dabondarev/.local/bin/node --import tsx /private/tmp/oko-rate-check/scripts/build-frontend.mts
+/Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/datamodel_code_generator/format.py:542: FutureWarning: Black/isort will become optional. Declare the corresponding extras; see --help.
+  warn_deprecated("dependency.external-formatters-optional", stacklevel=2)
+Python API library is current
+[90m@hey-api/openapi-ts v0.97.3[39m
+
+[90m[Job 1] [39m⏳ [36mGenerating from 1 input:[39m
+[90m[Job 1] [39m[36m  [1] [39m/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-sdk-l0HFEc/openapi.json
+[90m[Job 1] [39m[32m✅ Done![39m Your output is in [96m/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-sdk-l0HFEc/library[39m [90m(4 files in 215ms)[39m
+TypeScript API library is current
+Type check cache hit: tsconfig.tooling.json
+vite v8.3.4 building client environment for production...
+transforming...
+✓ 69 modules transformed.
+rendering chunks...
+computing gzip size...
+oko/frontend_build/.stage-34568/assets/state-attention-C1qE0fi2.svg    0.16 kB │ gzip:   0.15 kB
+oko/frontend_build/.stage-34568/assets/state-check-nlAsfDAU.svg        0.18 kB │ gzip:   0.15 kB
+oko/frontend_build/.stage-34568/index.html                             0.50 kB │ gzip:   0.31 kB
+oko/frontend_build/.stage-34568/assets/style-C7cM3cDM.css             32.72 kB │ gzip:   7.35 kB
+oko/frontend_build/.stage-34568/assets/transport-nd3yj7Bx.js           0.09 kB │ gzip:   0.09 kB
+oko/frontend_build/.stage-34568/assets/transport-B7eGaHcY.js          32.02 kB │ gzip:  10.93 kB
+oko/frontend_build/.stage-34568/assets/reader-CPlJKt88.js            393.68 kB │ gzip: 117.06 kB
+
+✓ built in 102ms
+$ /Users/dabondarev/.local/bin/node --import tsx /private/tmp/oko-rate-check/scripts/build-frontend.mts --check
+
+RUN http
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q tests/reader/test_web_assets.py tests/reader/test_frontend_delivery.py tests/reader/test_frontend_build.py tests/reader/test_http_contracts.py
+.........                                                                [100%]
+=============================== warnings summary ===============================
+../../../Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+9 passed, 1 warning in 1.97s
+
+RUN browser (parallel)
+
+RUN python-tests-1 (parallel)
+
+RUN python-tests-2 (parallel)
+
+RUN tool-tests-1 (parallel)
+
+RUN tool-tests-2 (parallel)
+$ /Users/dabondarev/.local/bin/node --require tsx/cjs --require /private/tmp/oko-rate-check/scripts/register-browser-typescript.cts --enable-source-maps --test --test-reporter=tap --test-concurrency=4 /private/tmp/oko-rate-check/tests/browser/test_browser_context.ts /private/tmp/oko-rate-check/tests/browser/test_codex_settings.ts /private/tmp/oko-rate-check/tests/browser/test_codex_settings_http.ts /private/tmp/oko-rate-check/tests/browser/test_completion.ts /private/tmp/oko-rate-check/tests/browser/test_connection_folders.ts /private/tmp/oko-rate-check/tests/browser/test_connections_v3_http.ts /private/tmp/oko-rate-check/tests/browser/test_context_refresh.ts /private/tmp/oko-rate-check/tests/browser/test_contracts.ts /private/tmp/oko-rate-check/tests/browser/test_create_folder_move.ts /private/tmp/oko-rate-check/tests/browser/test_existing_history.ts /private/tmp/oko-rate-check/tests/browser/test_feed_context_menu.ts /private/tmp/oko-rate-check/tests/browser/test_feed_debug.ts /private/tmp/oko-rate-check/tests/browser/test_feed_details.ts /private/tmp/oko-rate-check/tests/browser/test_feed_refresh_interval.ts /private/tmp/oko-rate-check/tests/browser/test_feed_tree.ts /private/tmp/oko-rate-check/tests/browser/test_folder_actions.ts /private/tmp/oko-rate-check/tests/browser/test_folder_context_menu.ts /private/tmp/oko-rate-check/tests/browser/test_history_outcomes.ts /private/tmp/oko-rate-check/tests/browser/test_history_pause.ts /private/tmp/oko-rate-check/tests/browser/test_http_isolation.ts /private/tmp/oko-rate-check/tests/browser/test_independent_sessions.ts /private/tmp/oko-rate-check/tests/browser/test_initial_history.ts /private/tmp/oko-rate-check/tests/browser/test_material_list.ts /private/tmp/oko-rate-check/tests/browser/test_news_context_menu.ts /private/tmp/oko-rate-check/tests/browser/test_news_titles.ts /private/tmp/oko-rate-check/tests/browser/test_opened_material.ts /private/tmp/oko-rate-check/tests/browser/test_persistent_reader.ts /private/tmp/oko-rate-check/tests/browser/test_power.ts /private/tmp/oko-rate-check/tests/browser/test_reader_appearance.ts /private/tmp/oko-rate-check/tests/browser/test_reader_http.ts /private/tmp/oko-rate-check/tests/browser/test_reader_refresh.ts /private/tmp/oko-rate-check/tests/browser/test_reading_tree.ts /private/tmp/oko-rate-check/tests/browser/test_reading_v3_http.ts /private/tmp/oko-rate-check/tests/browser/test_reading_versions_http.ts /private/tmp/oko-rate-check/tests/browser/test_rss_pagination.ts /private/tmp/oko-rate-check/tests/browser/test_separate_menus.ts /private/tmp/oko-rate-check/tests/browser/test_settings_navigation.ts /private/tmp/oko-rate-check/tests/browser/test_settings_v3_http.ts /private/tmp/oko-rate-check/tests/browser/test_status_panel.ts /private/tmp/oko-rate-check/tests/browser/test_status_v3_http.ts /private/tmp/oko-rate-check/tests/browser/test_telegram_connection.ts /private/tmp/oko-rate-check/tests/browser/test_telegram_v3_http.ts /private/tmp/oko-rate-check/tests/browser/test_transport.ts /private/tmp/oko-rate-check/tests/browser/test_ui_lifecycle.ts /private/tmp/oko-rate-check/tests/browser/test_youtube_history.ts /private/tmp/oko-rate-check/tests/browser/test_youtube_history_http.ts /private/tmp/oko-rate-check/tests/browser/test_youtube_settings.ts
+TAP version 13
+# Subtest: shared Chromium isolates storage and closing one scenario leaves another usable
+ok 1 - shared Chromium isolates storage and closing one scenario leaves another usable
+  ---
+  duration_ms: 2218.083042
+  type: 'test'
+  ...
+# Subtest: Codex has two explicit choices; Fast starts off and unsupported effort is preserved visibly
+ok 2 - Codex has two explicit choices; Fast starts off and unsupported effort is preserved visibly
+  ---
+  duration_ms: 3307.236584
+  type: 'test'
+  ...
+# Subtest: late catalog and save replies keep new drafts across closing settings
+ok 3 - late catalog and save replies keep new drafts across closing settings
+  ---
+  duration_ms: 2116.404375
+  type: 'test'
+  ...
+# Subtest: ready material displays old model and offers explicit recreation
+ok 4 - ready material displays old model and offers explicit recreation
+  ---
+  duration_ms: 1552.2955
+  type: 'test'
+  ...
+# Subtest: catalog refresh before initial config response never replaces saved choices with defaults
+ok 5 - catalog refresh before initial config response never replaces saved choices with defaults
+  ---
+  duration_ms: 1101.742041
+  type: 'test'
+  ...
+# Subtest: llama.cpp keeps connection drafts and concurrent save does not suppress availability results
+ok 6 - llama.cpp keeps connection drafts and concurrent save does not suppress availability results
+  ---
+  duration_ms: 1956.364542
+  type: 'test'
+  ...
+# Subtest: llama.cpp distinguishes newer unsaved input and ignores a check from a previous screen
+ok 7 - llama.cpp distinguishes newer unsaved input and ignores a check from a previous screen
+  ---
+  duration_ms: 1334.19275
+  type: 'test'
+  ...
+# Subtest: Codex catalog error preserves configured choices and refresh recovers without replacement
+ok 8 - Codex catalog error preserves configured choices and refresh recovers without replacement
+  ---
+  duration_ms: 1357.999833
+  type: 'test'
+  ...
+# Subtest: production HTTP saves choices, reads provenance and recreates material from the browser
+ok 9 - production HTTP saves choices, reads provenance and recreates material from the browser
+  ---
+  duration_ms: 3570.078834
+  type: 'test'
+  ...
+# Models screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/34684/react-models-desktop.png
+# Subtest: model screens save connection and independent Codex choices through production HTTP
+ok 10 - model screens save connection and independent Codex choices through production HTTP
+  ---
+  duration_ms: 2327.222125
+  type: 'test'
+  ...
+# Subtest: folder completion conflict replaces the captured token without replay
+ok 11 - folder completion conflict replaces the captured token without replay
+  ---
+  duration_ms: 3364.984375
+  type: 'test'
+  ...
+# Subtest: folder completion 200 preserves new material after the captured items were accepted
+ok 12 - folder completion 200 preserves new material after the captured items were accepted
+  ---
+  duration_ms: 2750.583959
+  type: 'test'
+  ...
+# Subtest: folder completion 503 preserves new material after the captured items were accepted
+ok 13 - folder completion 503 preserves new material after the captured items were accepted
+  ---
+  duration_ms: 2658.067583
+  type: 'test'
+  ...
+# Subtest: folder notification reconciles removed cards without closing a newer publication
+ok 14 - folder notification reconciles removed cards without closing a newer publication
+  ---
+  duration_ms: 1921.441208
+  type: 'test'
+  ...
+# Subtest: feed completion conflict replaces the captured token without replay
+ok 15 - feed completion conflict replaces the captured token without replay
+  ---
+  duration_ms: 1395.131708
+  type: 'test'
+  ...
+# Subtest: feed completion 200 preserves new material after the captured items were accepted
+ok 16 - feed completion 200 preserves new material after the captured items were accepted
+  ---
+  duration_ms: 2058.905792
+  type: 'test'
+  ...
+# Subtest: feed completion 503 preserves new material after the captured items were accepted
+ok 17 - feed completion 503 preserves new material after the captured items were accepted
+  ---
+  duration_ms: 2327.906583
+  type: 'test'
+  ...
+# Subtest: feed notification reconciles removed cards without closing a newer publication
+ok 18 - feed notification reconciles removed cards without closing a newer publication
+  ---
+  duration_ms: 1081.954833
+  type: 'test'
+  ...
+# Subtest: unknown folder completion cannot reuse its old token and remains visible in Status
+ok 19 - unknown folder completion cannot reuse its old token and remains visible in Status
+  ---
+  duration_ms: 1541.665792
+  type: 'test'
+  ...
+# Subtest: folder late failure cannot replace a newer confirmation that is still loading
+ok 20 - folder late failure cannot replace a newer confirmation that is still loading
+  ---
+  duration_ms: 2550.682417
+  type: 'test'
+  ...
+# Subtest: feed late failure cannot replace a newer confirmation that is still loading
+ok 21 - feed late failure cannot replace a newer confirmation that is still loading
+  ---
+  duration_ms: 2706.748542
+  type: 'test'
+  ...
+# Folder screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/34937/telegram-no-phantom-folder.png
+# Subtest: connection folder choices contain only existing folders (0)
+ok 22 - connection folder choices contain only existing folders (0)
+  ---
+  duration_ms: 5403.452625
+  type: 'test'
+  ...
+# Subtest: connection folder choices contain only existing folders (1)
+ok 23 - connection folder choices contain only existing folders (1)
+  ---
+  duration_ms: 1604.131958
+  type: 'test'
+  ...
+# Subtest: single RSS connection sends an exact history count and displays the persisted v3 state
+ok 24 - single RSS connection sends an exact history count and displays the persisted v3 state
+  ---
+  duration_ms: 6433.212959
+  type: 'test'
+  ...
+# Subtest: feed and folder Refresh submit their scope and history has no manual pause
+ok 25 - feed and folder Refresh submit their scope and history has no manual pause
+  ---
+  duration_ms: 2582.833458
+  type: 'test'
+  ...
+# Subtest: fixture contracts reject missing ids, invalid counts and incomplete history
+ok 26 - fixture contracts reject missing ids, invalid counts and incomplete history
+  ---
+  duration_ms: 101.3
+  type: 'test'
+  ...
+# Subtest: new destination dialog creates and moves a feed, validates and cancels without changing reading
+ok 27 - new destination dialog creates and moves a feed, validates and cancels without changing reading
+  ---
+  duration_ms: 2859.462917
+  type: 'test'
+  ...
+# Subtest: late create-and-move reconciles data without closing a newer dialog
+ok 28 - late create-and-move reconciles data without closing a newer dialog
+  ---
+  duration_ms: 2287.605292
+  type: 'test'
+  ...
+# Subtest: reopening the same feed during creation becomes usable when the pending command settles
+ok 29 - reopening the same feed during creation becomes usable when the pending command settles
+  ---
+  duration_ms: 1495.703709
+  type: 'test'
+  ...
+# Subtest: server name conflict keeps the draft and a lost response cannot repeat creation
+ok 30 - server name conflict keeps the draft and a lost response cannot repeat creation
+  ---
+  duration_ms: 1503.641958
+  type: 'test'
+  ...
+# Subtest: legacy feed shows only known history settings and saving does not change its boundary
+ok 31 - legacy feed shows only known history settings and saving does not change its boundary
+  ---
+  duration_ms: 4209.492667
+  type: 'test'
+  ...
+# Subtest: legacy settings show the actual frozen boundary instead of mutable days
+ok 32 - legacy settings show the actual frozen boundary instead of mutable days
+  ---
+  duration_ms: 956.457541
+  type: 'test'
+  ...
+# Subtest: feed context menu supports settings, nested folder move, read all and confirmed local deletion
+ok 33 - feed context menu supports settings, nested folder move, read all and confirmed local deletion
+  ---
+  duration_ms: 5073.624625
+  type: 'test'
+  ...
+# Subtest: late feed completion cannot close a newer dialog or clear a sibling material
+ok 34 - late feed completion cannot close a newer dialog or clear a sibling material
+  ---
+  duration_ms: 1335.968334
+  type: 'test'
+  ...
+# Subtest: late completion response preserves a new publication opened in the same feed
+ok 35 - late completion response preserves a new publication opened in the same feed
+  ---
+  duration_ms: 2507.127083
+  type: 'test'
+  ...
+# Subtest: unknown feed completion disables the old confirmation and reopening requires a fresh preview
+ok 36 - unknown feed completion disables the old confirmation and reopening requires a fresh preview
+  ---
+  duration_ms: 1283.814791
+  type: 'test'
+  ...
+# Subtest: add URL uses one form and automatically shows YouTube connection
+ok 37 - add URL uses one form and automatically shows YouTube connection
+  ---
+  duration_ms: 2321.6505
+  type: 'test'
+  ...
+# Subtest: debug toggle shows server traceback and caught browser errors are sent while closed
+ok 38 - debug toggle shows server traceback and caught browser errors are sent while closed
+  ---
+  duration_ms: 1495.1365
+  type: 'test'
+  ...
+# Subtest: changing URL rejects late verification, errors retry and duplicate opens existing settings
+ok 39 - changing URL rejects late verification, errors retry and duplicate opens existing settings
+  ---
+  duration_ms: 1020.599792
+  type: 'test'
+  ...
+# Subtest: offline browser errors group, retain material scroll, and retry the same delivery
+ok 40 - offline browser errors group, retain material scroll, and retry the same delivery
+  ---
+  duration_ms: 2980.15425
+  type: 'test'
+  ...
+# Subtest: browser pending diagnostics mask quoted passwords and Basic credentials
+ok 41 - browser pending diagnostics mask quoted passwords and Basic credentials
+  ---
+  duration_ms: 1002.984792
+  type: 'test'
+  ...
+# Subtest: switch works with keyboard and clearing history rejects a late journal response
+ok 42 - switch works with keyboard and clearing history rejects a late journal response
+  ---
+  duration_ms: 2778.60525
+  type: 'test'
+  ...
+# Subtest: adding a feed selects existing folders or keeps a new folder draft across tabs and reopening
+ok 43 - adding a feed selects existing folders or keeps a new folder draft across tabs and reopening
+  ---
+  duration_ms: 1790.244
+  type: 'test'
+  ...
+# Journal screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/37015/react-journal-desktop.png
+# Subtest: journal polling updates a group without losing its disclosure or keyboard focus
+ok 44 - journal polling updates a group without losing its disclosure or keyboard focus
+  ---
+  duration_ms: 1032.649708
+  type: 'test'
+  ...
+# Subtest: variant B saves title and folder, copies readonly link and preserves other settings
+ok 45 - variant B saves title and folder, copies readonly link and preserves other settings
+  ---
+  duration_ms: 3637.338375
+  type: 'test'
+  ...
+# Subtest: late feed save preserves selection and new drafts; duplicate submit stays blocked
+ok 46 - late feed save preserves selection and new drafts; duplicate submit stays blocked
+  ---
+  duration_ms: 1244.062333
+  type: 'test'
+  ...
+# Subtest: copy and metadata responses belong to their opening; activity never resets a draft
+ok 47 - copy and metadata responses belong to their opening; activity never resets a draft
+  ---
+  duration_ms: 2153.848875
+  type: 'test'
+  ...
+# Subtest: additional links copy exact bytes; missing and failed activity never becomes zero
+ok 48 - additional links copy exact bytes; missing and failed activity never becomes zero
+  ---
+  duration_ms: 2434.24275
+  type: 'test'
+  ...
+# Subtest: initial settings failure keeps catalogue fields available and can be retried
+ok 49 - initial settings failure keeps catalogue fields available and can be retried
+  ---
+  duration_ms: 1444.639416
+  type: 'test'
+  ...
+# Subtest: late first settings snapshot preserves the mounted title field and focus
+ok 50 - late first settings snapshot preserves the mounted title field and focus
+  ---
+  duration_ms: 1233.568875
+  type: 'test'
+  ...
+# Subtest: Oko feed refresh interval saves explicitly, validates minutes and resets to 15
+ok 51 - Oko feed refresh interval saves explicitly, validates minutes and resets to 15
+  ---
+  duration_ms: 3616.930083
+  type: 'test'
+  ...
+# Subtest: delayed interval save keeps newer input after navigation
+ok 52 - delayed interval save keeps newer input after navigation
+  ---
+  duration_ms: 1229.330125
+  type: 'test'
+  ...
+# Subtest: a failed interval draft can be discarded with compatible command context
+ok 53 - a failed interval draft can be discarded with compatible command context
+  ---
+  duration_ms: 1136.032334
+  type: 'test'
+  ...
+# Screenshots: /var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-feed-tree-0WPvjN
+# Subtest: feed settings independently expand folders and return to the selected object after catalog refresh
+ok 54 - feed settings independently expand folders and return to the selected object after catalog refresh
+  ---
+  duration_ms: 3005.051333
+  type: 'test'
+  ...
+# Subtest: reading tree has separate trailing disclosure controls and usable two-line titles at minimum width
+ok 55 - reading tree has separate trailing disclosure controls and usable two-line titles at minimum width
+  ---
+  duration_ms: 2309.626667
+  type: 'test'
+  ...
+# Subtest: empty feed settings offer addition and catalog refresh reveals newly imported sources
+ok 56 - empty feed settings offer addition and catalog refresh reveals newly imported sources
+  ---
+  duration_ms: 959.373208
+  type: 'test'
+  ...
+# Subtest: folder completion conflict keeps material and requires the refreshed token
+ok 57 - folder completion conflict keeps material and requires the refreshed token
+  ---
+  duration_ms: 3013.332667
+  type: 'test'
+  ...
+# Subtest: late folder completion preserves another folder material and confirmation dialog
+ok 58 - late folder completion preserves another folder material and confirmation dialog
+  ---
+  duration_ms: 2516.292875
+  type: 'test'
+  ...
+# Subtest: reopening a folder confirmation cannot duplicate its pending completion
+ok 59 - reopening a folder confirmation cannot duplicate its pending completion
+  ---
+  duration_ms: 1138.282375
+  type: 'test'
+  ...
+# Subtest: folder menu A preserves selection and supports settings, rename, read all and empty-only deletion
+ok 60 - folder menu A preserves selection and supports settings, rename, read all and empty-only deletion
+  ---
+  duration_ms: 4646.302208
+  type: 'test'
+  ...
+# Subtest: folder deletion rechecks an empty folder when a feed arrives before confirmation
+ok 61 - folder deletion rechecks an empty folder when a feed arrives before confirmation
+  ---
+  duration_ms: 1034.37025
+  type: 'test'
+  ...
+# Subtest: late folder rename reconciles its write without closing a newer folder dialog
+ok 62 - late folder rename reconciles its write without closing a newer folder dialog
+  ---
+  duration_ms: 1417.585292
+  type: 'test'
+  ...
+# Subtest: folder completion by context menu includes hidden zero-count items and ignores a late preview
+ok 63 - folder completion by context menu includes hidden zero-count items and ignores a late preview
+  ---
+  duration_ms: 2820.861208
+  type: 'test'
+  ...
+# Subtest: initial history shows partial, retry and unavailable outcomes with errors
+ok 64 - initial history shows partial, retry and unavailable outcomes with errors
+  ---
+  duration_ms: 2359.834625
+  type: 'test'
+  ...
+# Subtest: count selection does not announce shortfall before metadata scan completes
+ok 65 - count selection does not announce shortfall before metadata scan completes
+  ---
+  duration_ms: 971.380084
+  type: 'test'
+  ...
+# Subtest: unfinished history shows progress without offering a manual pause
+ok 66 - unfinished history shows progress without offering a manual pause
+  ---
+  duration_ms: 2166.800542
+  type: 'test'
+  ...
+# Subtest: HTTP scenarios isolate storage, settings, authentication and journals while overlapping
+ok 67 - HTTP scenarios isolate storage, settings, authentication and journals while overlapping
+  ---
+  duration_ms: 2939.245167
+  type: 'test'
+  ...
+# Subtest: aborting one HTTP scenario closes its server and pages without stopping its neighbour
+ok 68 - aborting one HTTP scenario closes its server and pages without stopping its neighbour
+  ---
+  duration_ms: 1100.3065
+  type: 'test'
+  ...
+# Subtest: abort during HTTP setup rejects and leaves the next scenario usable
+ok 69 - abort during HTTP setup rejects and leaves the next scenario usable
+  ---
+  duration_ms: 972.426791
+  type: 'test'
+  ...
+# Subtest: neutral web and independent HTTP sessions coexist and close independently
+ok 70 - neutral web and independent HTTP sessions coexist and close independently # SKIP Временно отключён по просьбе пользователя 2026-10-15; повторная проверка coexistence/BFCache отложена.
+  ---
+  duration_ms: 0.387625
+  type: 'test'
+  ...
+# Subtest: independent SDK accepts compatible versions and rejects another major before mutation
+ok 71 - independent SDK accepts compatible versions and rejects another major before mutation
+  ---
+  duration_ms: 2518.313125
+  type: 'test'
+  ...
+# Subtest: RSS connection selects count or inclusive date and displays saved history progress
+ok 72 - RSS connection selects count or inclusive date and displays saved history progress
+  ---
+  duration_ms: 2537.427917
+  type: 'test'
+  ...
+# Subtest: Telegram connection sends default count and can switch to date with user timezone
+ok 73 - Telegram connection sends default count and can switch to date with user timezone
+  ---
+  duration_ms: 983.716916
+  type: 'test'
+  ...
+# Subtest: finite history warning and unknown date are visible in settings and material
+ok 74 - finite history warning and unknown date are visible in settings and material
+  ---
+  duration_ms: 1063.490042
+  type: 'test'
+  ...
+# Subtest: compact rows show titles without post excerpts and current area with actions in menu
+ok 75 - compact rows show titles without post excerpts and current area with actions in menu
+  ---
+  duration_ms: 2478.033167
+  type: 'test'
+  ...
+# Subtest: keyboard focus does not open content and viewing focuses next without opening it
+ok 76 - keyboard focus does not open content and viewing focuses next without opening it
+  ---
+  duration_ms: 1107.236917
+  type: 'test'
+  ...
+# Subtest: date groups, saved sorting and displayed hidden card count use current rows
+ok 77 - date groups, saved sorting and displayed hidden card count use current rows
+  ---
+  duration_ms: 1113.257917
+  type: 'test'
+  ...
+# Subtest: opened YouTube material preserves description separately from captions
+ok 78 - opened YouTube material preserves description separately from captions
+  ---
+  duration_ms: 994.292959
+  type: 'test'
+  ...
+# Subtest: current video description and previous captions remain available independently
+ok 79 - current video description and previous captions remain available independently
+  ---
+  duration_ms: 903.977875
+  type: 'test'
+  ...
+# Subtest: polling preserves row focus and anchored scroll, and returning restores area position
+ok 80 - polling preserves row focus and anchored scroll, and returning restores area position
+  ---
+  duration_ms: 2516.2325
+  type: 'test'
+  ...
+# Subtest: previews are reused during polling and late media cannot repopulate another area
+ok 81 - previews are reused during polling and late media cannot repopulate another area
+  ---
+  duration_ms: 2031.71175
+  type: 'test'
+  ...
+# Subtest: failed refresh keeps rows and retry updates current area, late failed selection is ignored
+ok 82 - failed refresh keeps rows and retry updates current area, late failed selection is ignored
+  ---
+  duration_ms: 2199.74375
+  type: 'test'
+  ...
+# Subtest: list width supports pointer and keyboard, persists, and shrinks to available space
+ok 83 - list width supports pointer and keyboard, persists, and shrinks to available space
+  ---
+  duration_ms: 923.760333
+  type: 'test'
+  ...
+# Subtest: incomplete materials and unavailable previews keep usable rows and diagnostic errors
+ok 84 - incomplete materials and unavailable previews keep usable rows and diagnostic errors
+  ---
+  duration_ms: 751.93325
+  type: 'test'
+  ...
+# Subtest: news titles show link labels without Markdown destinations
+ok 85 - news titles show link labels without Markdown destinations
+  ---
+  duration_ms: 1044.485208
+  type: 'test'
+  ...
+# Subtest: news menu uses original links and marks only above/below in the displayed order
+ok 86 - news menu uses original links and marks only above/below in the displayed order
+  ---
+  duration_ms: 3056.853542
+  type: 'test'
+  ...
+# Subtest: range confirmation captures IDs before new arrivals and preserves target
+ok 87 - range confirmation captures IDs before new arrivals and preserves target
+  ---
+  duration_ms: 1513.42
+  type: 'test'
+  ...
+# Subtest: stop a range during a held request prevents remaining commands and late UI changes
+ok 88 - stop a range during a held request prevents remaining commands and late UI changes
+  ---
+  duration_ms: 1107.026
+  type: 'test'
+  ...
+# Subtest: range failure stops remaining writes and never retries the failed publication
+ok 89 - range failure stops remaining writes and never retries the failed publication
+  ---
+  duration_ms: 1048.856791
+  type: 'test'
+  ...
+# Subtest: new menu becomes available after a cancelled request fails late
+ok 90 - new menu becomes available after a cancelled request fails late
+  ---
+  duration_ms: 1093.877833
+  type: 'test'
+  ...
+# Subtest: above follows current sorting, visible hidden rows and feed selection
+ok 91 - above follows current sorting, visible hidden rows and feed selection
+  ---
+  duration_ms: 1883.5675
+  type: 'test'
+  ...
+# Subtest: news context menu reloads a full copy without marking it viewed
+not ok 92 - news context menu reloads a full copy without marking it viewed
+  ---
+  duration_ms: 5920.548166
+  type: 'test'
+  location: '/private/tmp/oko-rate-check/tests/browser/test_news_context_menu.ts:78:5'
+  failureType: 'testCodeFailure'
+  error: |-
+    locator.click: Timeout 5000ms exceeded.
+    Call log:
+    [2m  - waiting for getByRole('menuitem', { name: 'Reload Publication', exact: true })[22m
+    
+  code: 'ERR_TEST_FAILURE'
+  name: 'TimeoutError'
+  stack: |-
+    TestContext.<anonymous> (/private/tmp/oko-rate-check/tests/browser/test_news_context_menu.ts:92:77)
+  ...
+# Subtest: long news heading keeps its full text and list omits post excerpt
+ok 93 - long news heading keeps its full text and list omits post excerpt
+  ---
+  duration_ms: 2742.828667
+  type: 'test'
+  ...
+# Subtest: switch clears old material immediately and ignores late opening errors
+ok 94 - switch clears old material immediately and ignores late opening errors
+  ---
+  duration_ms: 3249.279
+  type: 'test'
+  ...
+# Subtest: late success of an old opening cannot replace the selected card
+ok 95 - late success of an old opening cannot replace the selected card
+  ---
+  duration_ms: 1228.460625
+  type: 'test'
+  ...
+# Subtest: previous version and media delivered after switching never reach the new card
+ok 96 - previous version and media delivered after switching never reach the new card
+  ---
+  duration_ms: 995.641333
+  type: 'test'
+  ...
+# Subtest: viewing retains loaded media and playback, rejects late media and switching releases URLs
+ok 97 - viewing retains loaded media and playback, rejects late media and switching releases URLs
+  ---
+  duration_ms: 1310.089333
+  type: 'test'
+  ...
+# Subtest: viewing a publication in another tab closes its pending opening but preserves unrelated folder
+ok 98 - viewing a publication in another tab closes its pending opening but preserves unrelated folder
+  ---
+  duration_ms: 1254.239042
+  type: 'test'
+  ...
+# Subtest: stop rejects a delayed material response
+ok 99 - stop rejects a delayed material response
+  ---
+  duration_ms: 1983.343833
+  type: 'test'
+  ...
+# Subtest: connection loss rejects a delayed material response
+ok 100 - connection loss rejects a delayed material response
+  ---
+  duration_ms: 2143.860542
+  type: 'test'
+  ...
+# Subtest: title opens original in a new tab and resets for other cards
+ok 101 - title opens original in a new tab and resets for other cards
+  ---
+  duration_ms: 1005.5765
+  type: 'test'
+  ...
+# Subtest: background processing updates keep long material visible and preserve scroll while waiting
+ok 102 - background processing updates keep long material visible and preserve scroll while waiting
+  ---
+  duration_ms: 1758.193167
+  type: 'test'
+  ...
+# Subtest: new text waits for a button, keeps its paragraph and never mixes summaries across revisions
+ok 103 - new text waits for a button, keeps its paragraph and never mixes summaries across revisions
+  ---
+  duration_ms: 2336.064
+  type: 'test'
+  ...
+# Subtest: summary and media append independently without replacing a playing video
+ok 104 - summary and media append independently without replacing a playing video
+  ---
+  duration_ms: 1742.137292
+  type: 'test'
+  ...
+# Subtest: removed cards and connection loss keep loaded text, reload drops it
+ok 105 - removed cards and connection loss keep loaded text, reload drops it
+  ---
+  duration_ms: 2912.906292
+  type: 'test'
+  ...
+# Subtest: version replacement preserves neighbour reading position
+ok 106 - version replacement preserves neighbour reading position
+  ---
+  duration_ms: 2289.276833
+  type: 'test'
+  ...
+# Subtest: version replacement preserves relative reading position
+ok 107 - version replacement preserves relative reading position
+  ---
+  duration_ms: 2052.153792
+  type: 'test'
+  ...
+# Subtest: version replacement preserves filtered reading position
+ok 108 - version replacement preserves filtered reading position
+  ---
+  duration_ms: 2116.285917
+  type: 'test'
+  ...
+# Subtest: automatic fallback after removing the selected feed keeps the loaded material
+ok 109 - automatic fallback after removing the selected feed keeps the loaded material
+  ---
+  duration_ms: 2066.66375
+  type: 'test'
+  ...
+# Subtest: storage replacement rejects old media replies and stages the replacement before loading its assets
+ok 110 - storage replacement rejects old media replies and stages the replacement before loading its assets
+  ---
+  duration_ms: 1777.258667
+  type: 'test'
+  ...
+# Subtest: reconnect resumes missing media for unchanged text without replacing loaded content
+ok 111 - reconnect resumes missing media for unchanged text without replacing loaded content
+  ---
+  duration_ms: 2850.324208
+  type: 'test'
+  ...
+# Subtest: remembered browser reopens without token and survives a reader restart
+ok 112 - remembered browser reopens without token and survives a reader restart
+  ---
+  duration_ms: 4137.769916
+  type: 'test'
+  ...
+# Subtest: power is shared across tabs, preserves reading and blocks external actions in open settings
+ok 113 - power is shared across tabs, preserves reading and blocks external actions in open settings
+  ---
+  duration_ms: 2232.97575
+  type: 'test'
+  ...
+# Subtest: disabled power blocks an already open add form and survives browser reload
+ok 114 - disabled power blocks an already open add form and survives browser reload
+  ---
+  duration_ms: 2119.190208
+  type: 'test'
+  ...
+# Header screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39023/reader-header-wide.png
+# Header screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39023/reader-header-panel.png
+# Subtest: reader header keeps every action beside Oko and progress below on desktop
+ok 115 - reader header keeps every action beside Oko and progress below on desktop
+  ---
+  duration_ms: 3725.281584
+  type: 'test'
+  ...
+# Cards screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39023/reader-cards.png
+# Subtest: reader card appearance preserves the compact layout, metadata and real previews
+ok 116 - reader card appearance preserves the compact layout, metadata and real previews
+  ---
+  duration_ms: 849.124167
+  type: 'test'
+  ...
+# Subtest: production HTTP reader keeps folder/feed membership, previews, theses and viewed actions
+ok 117 - production HTTP reader keeps folder/feed membership, previews, theses and viewed actions
+  ---
+  duration_ms: 4382.630375
+  type: 'test'
+  ...
+# Subtest: feed selection finishes while an older refresh is still in flight
+ok 118 - feed selection finishes while an older refresh is still in flight
+  ---
+  duration_ms: 3940.074375
+  type: 'test'
+  ...
+# Subtest: reading tree selects a feed and collapses folders without changing reading
+ok 119 - reading tree selects a feed and collapses folders without changing reading
+  ---
+  duration_ms: 2303.710333
+  type: 'test'
+  ...
+# Subtest: tree keeps current choice across moves and deletion and rejects late cards
+ok 120 - tree keeps current choice across moves and deletion and rejects late cards
+  ---
+  duration_ms: 5072.207292
+  type: 'test'
+  ...
+# Subtest: width, focus, source warning and settings help remain separate from selection
+ok 121 - width, focus, source warning and settings help remain separate from selection
+  ---
+  duration_ms: 2388.607959
+  type: 'test'
+  ...
+# Subtest: tree uses publication counts, alphabetical feeds and compact local icons
+ok 122 - tree uses publication counts, alphabetical feeds and compact local icons
+  ---
+  duration_ms: 3001.68825
+  type: 'test'
+  ...
+# Subtest: unavailable local storage does not block reading or resizing
+ok 123 - unavailable local storage does not block reading or resizing
+  ---
+  duration_ms: 719.950417
+  type: 'test'
+  ...
+# Subtest: refresh keeps tree scroll and pointer resizing uses saved width
+ok 124 - refresh keeps tree scroll and pointer resizing uses saved width
+  ---
+  duration_ms: 2883.38425
+  type: 'test'
+  ...
+# Subtest: Telegram avatar is small, reused across polling and replaced by icon when removed
+ok 125 - Telegram avatar is small, reused across polling and replaced by icon when removed
+  ---
+  duration_ms: 4088.350083
+  type: 'test'
+  ...
+# Subtest: completed feeds toggle persists and keeps a selected completed feed until selection changes
+ok 126 - completed feeds toggle persists and keeps a selected completed feed until selection changes
+  ---
+  duration_ms: 3666.476959
+  type: 'test'
+  ...
+# Reading screenshots: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39234/reading-v3-desktop.png /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39234/reading-v3-mobile.png
+# Subtest: v3 reading uses real media and reconciles a lost viewed response without replay
+ok 127 - v3 reading uses real media and reconciles a lost viewed response without replay
+  ---
+  duration_ms: 3139.649417
+  type: 'test'
+  ...
+# Subtest: unconfirmed commands for two materials remain separate and do not replay
+ok 128 - unconfirmed commands for two materials remain separate and do not replay
+  ---
+  duration_ms: 2133.427125
+  type: 'test'
+  ...
+# Completed feeds screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39234/read-feeds-toggle-a.png
+# Subtest: real HTTP completed feed stays selected, then hides and can be shown without changing reading
+ok 129 - real HTTP completed feed stays selected, then hides and can be shown without changing reading
+  ---
+  duration_ms: 1116.675833
+  type: 'test'
+  ...
+# Subtest: unchanged reading checks transmit versions and opening bypasses the poll
+ok 130 - unchanged reading checks transmit versions and opening bypasses the poll
+  ---
+  duration_ms: 7063.90825
+  type: 'test'
+  ...
+# Subtest: tabs recover missed reading changes and reconcile a local viewed action
+ok 131 - tabs recover missed reading changes and reconcile a local viewed action
+  ---
+  duration_ms: 3364.816834
+  type: 'test'
+  ...
+# Subtest: viewed in another tab deletes server content while the loaded tab retains its text and media until reload
+ok 132 - viewed in another tab deletes server content while the loaded tab retains its text and media until reload
+  ---
+  duration_ms: 2391.540708
+  type: 'test'
+  ...
+# Subtest: RSS settings show the shortage reason and can request count or inclusive date history
+ok 133 - RSS settings show the shortage reason and can request count or inclusive date history
+  ---
+  duration_ms: 2134.626084
+  type: 'test'
+  ...
+# Subtest: three menus keep reading position and addition tabs, Escape restores opening focus
+ok 134 - three menus keep reading position and addition tabs, Escape restores opening focus
+  ---
+  duration_ms: 2160.452792
+  type: 'test'
+  ...
+# Subtest: object and global drafts are independent, field save preserves other unsaved changes and close never saves
+ok 135 - object and global drafts are independent, field save preserves other unsaved changes and close never saves
+  ---
+  duration_ms: 1977.799083
+  type: 'test'
+  ...
+# Subtest: new Telegram source draft survives opening profile settings without a reconnection form
+ok 136 - new Telegram source draft survives opening profile settings without a reconnection form
+  ---
+  duration_ms: 928.544208
+  type: 'test'
+  ...
+# Subtest: late subscription and settings responses cannot replace newer object selection; pending save retains later edits
+ok 137 - late subscription and settings responses cannot replace newer object selection; pending save retains later edits
+  ---
+  duration_ms: 1359.879667
+  type: 'test'
+  ...
+# Subtest: feed inherited fields show their owner and resetting only one override preserves other drafts
+ok 138 - feed inherited fields show their owner and resetting only one override preserves other drafts
+  ---
+  duration_ms: 1145.314834
+  type: 'test'
+  ...
+# Subtest: late failed save cannot replace messages after closing and reopening the same editor
+ok 139 - late failed save cannot replace messages after closing and reopening the same editor
+  ---
+  duration_ms: 1399.213958
+  type: 'test'
+  ...
+# Subtest: field save completes after leaving a model check; stale checks cannot report into another page or reopened menu
+ok 140 - field save completes after leaving a model check; stale checks cannot report into another page or reopened menu
+  ---
+  duration_ms: 1566.598708
+  type: 'test'
+  ...
+# Subtest: RSS addition reconciles after closing and reopening but cannot navigate the new menu
+ok 141 - RSS addition reconciles after closing and reopening but cannot navigate the new menu
+  ---
+  duration_ms: 1172.615708
+  type: 'test'
+  ...
+# Subtest: late profile catalog cannot overwrite a newer profile choice
+ok 142 - late profile catalog cannot overwrite a newer profile choice
+  ---
+  duration_ms: 768.106667
+  type: 'test'
+  ...
+# Subtest: a saved feed updates reading even when navigation cancels its catalog refresh
+ok 143 - a saved feed updates reading even when navigation cancels its catalog refresh
+  ---
+  duration_ms: 3410.81975
+  type: 'test'
+  ...
+# RSS screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39669/react-rss-desktop.png
+# Subtest: a completed RSS addition preserves changes typed after submission
+ok 144 - a completed RSS addition preserves changes typed after submission
+  ---
+  duration_ms: 2306.41175
+  type: 'test'
+  ...
+# Subtest: confirmed feed removal wins over stale catalogue snapshots without deleting siblings
+ok 145 - confirmed feed removal wins over stale catalogue snapshots without deleting siblings
+  ---
+  duration_ms: 1292.451334
+  type: 'test'
+  ...
+# Subtest: compact settings navigate to reading and persist only explicitly through HTTP
+ok 146 - compact settings navigate to reading and persist only explicitly through HTTP
+  ---
+  duration_ms: 1945.429334
+  type: 'test'
+  ...
+# Subtest: folder field resets preserve other overrides and new drafts
+ok 147 - folder field resets preserve other overrides and new drafts
+  ---
+  duration_ms: 1472.8445
+  type: 'test'
+  ...
+# Subtest: prompts, empty filtering save via HTTP without saving adjacent drafts
+ok 148 - prompts, empty filtering save via HTTP without saving adjacent drafts
+  ---
+  duration_ms: 1241.715959
+  type: 'test'
+  ...
+# Settings desktop screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39780/settings-v3-desktop.png
+# Subtest: lost v3 settings response is reconciled without replay and keeps a newer draft
+ok 149 - lost v3 settings response is reconciled without replay and keeps a newer draft
+  ---
+  duration_ms: 3042.418583
+  type: 'test'
+  ...
+# Subtest: late status-target opening cannot navigate a reopened settings menu
+ok 150 - late status-target opening cannot navigate a reopened settings menu
+  ---
+  duration_ms: 4787.270125
+  type: 'test'
+  ...
+# Subtest: status-target continuation respects a newer page in the same menu
+ok 151 - status-target continuation respects a newer page in the same menu
+  ---
+  duration_ms: 2898.288875
+  type: 'test'
+  ...
+# Status panel screenshot: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/artifacts/browser/39833/status-panel-desktop.png
+# Subtest: missing model opens the selected panel without moving reading and navigates to Codex
+ok 152 - missing model opens the selected panel without moving reading and navigates to Codex
+  ---
+  duration_ms: 3521.328125
+  type: 'test'
+  ...
+# Subtest: late failed settings write is visible once in the panel and explicit draft discard completes it
+ok 153 - late failed settings write is visible once in the panel and explicit draft discard completes it
+  ---
+  duration_ms: 1842.655375
+  type: 'test'
+  ...
+# Subtest: offline state keeps last problems without a false zero and distinguishes a confirmed stop
+ok 154 - offline state keeps last problems without a false zero and distinguishes a confirmed stop
+  ---
+  duration_ms: 4320.817333
+  type: 'test'
+  ...
+# Subtest: expanded completion stays in place until collapsed and new problems do not replace focus
+ok 155 - expanded completion stays in place until collapsed and new problems do not replace focus
+  ---
+  duration_ms: 2979.067417
+  type: 'test'
+  ...
+# Subtest: panel reorders only on reopening and remains a nonmodal desktop sidebar
+ok 156 - panel reorders only on reopening and remains a nonmodal desktop sidebar
+  ---
+  duration_ms: 3169.853291
+  type: 'test'
+  ...
+# Subtest: discarding a failed processor draft restores its saved values
+ok 157 - discarding a failed processor draft restores its saved values
+  ---
+  duration_ms: 1450.290625
+  type: 'test'
+  ...
+# Subtest: adding an affected object preserves keyboard focus in expanded details
+ok 158 - adding an affected object preserves keyboard focus in expanded details
+  ---
+  duration_ms: 3246.272042
+  type: 'test'
+  ...
+# Subtest: viewing in another tab removes expanded and stale problem references
+ok 159 - viewing in another tab removes expanded and stale problem references
+  ---
+  duration_ms: 4154.905417
+  type: 'test'
+  ...
+# Subtest: domain status opens the real processor form and retains an expanded finished problem
+ok 160 - domain status opens the real processor form and retains an expanded finished problem
+  ---
+  duration_ms: 4322.779542
+  type: 'test'
+  ...
+# Subtest: confirmed command failure is retained until its actual draft is discarded
+ok 161 - confirmed command failure is retained until its actual draft is discarded
+  ---
+  duration_ms: 1498.242
+  type: 'test'
+  ...
+# Subtest: lost command response stays unknown until receipt reconciliation and is never replayed
+ok 162 - lost command response stays unknown until receipt reconciliation and is never replayed
+  ---
+  duration_ms: 2505.149542
+  type: 'test'
+  ...
+# Subtest: typed profile recovery selects the exact role and historical reconnect has no executable control
+ok 163 - typed profile recovery selects the exact role and historical reconnect has no executable control
+  ---
+  duration_ms: 3266.748792
+  type: 'test'
+  ...
+# Subtest: a status reply started before YouTube save cannot overwrite the saved connection
+ok 164 - a status reply started before YouTube save cannot overwrite the saved connection
+  ---
+  duration_ms: 4435.105041
+  type: 'test'
+  ...
+# Subtest: Telegram defaults to web without account or read controls and sends exact history
+ok 165 - Telegram defaults to web without account or read controls and sends exact history
+  ---
+  duration_ms: 3322.830625
+  type: 'test'
+  ...
+# Subtest: Telegram client requires verified selected role; duplicate popup describes all typed owners
+ok 166 - Telegram client requires verified selected role; duplicate popup describes all typed owners
+  ---
+  duration_ms: 865.202125
+  type: 'test'
+  ...
+# Subtest: late Telegram connect failure cannot replace the new form context
+ok 167 - late Telegram connect failure cannot replace the new form context
+  ---
+  duration_ms: 1617.126208
+  type: 'test'
+  ...
+# Subtest: successful Telegram connect clears only the submitted draft after its menu closes
+ok 168 - successful Telegram connect clears only the submitted draft after its menu closes
+  ---
+  duration_ms: 1468.2845
+  type: 'test'
+  ...
+# Subtest: legacy Telegram feed shows the saved alias and profile mapping without a reconnection form
+ok 169 - legacy Telegram feed shows the saved alias and profile mapping without a reconnection form
+  ---
+  duration_ms: 1085.128083
+  type: 'test'
+  ...
+# Subtest: real HTTP Telegram web, profiles, duplicate, local removal and fresh re-add
+ok 170 - real HTTP Telegram web, profiles, duplicate, local removal and fresh re-add
+  ---
+  duration_ms: 7989.58575
+  type: 'test'
+  ...
+# Subtest: cached-page restoration reloads the reader after its close event
+ok 171 - cached-page restoration reloads the reader after its close event
+  ---
+  duration_ms: 2341.953708
+  type: 'test'
+  ...
+# Subtest: generated SDK preserves binary media and its diagnostic HTTP failures
+ok 172 - generated SDK preserves binary media and its diagnostic HTTP failures
+  ---
+  duration_ms: 753.44775
+  type: 'test'
+  ...
+# Subtest: reader transport shares authorization and preserves JSON, media and closing request rules
+ok 173 - reader transport shares authorization and preserves JSON, media and closing request rules
+  ---
+  duration_ms: 1012.270833
+  type: 'test'
+  ...
+# Subtest: transport preserves error detail and diagnostic identity without retrying failed requests
+ok 174 - transport preserves error detail and diagnostic identity without retrying failed requests
+  ---
+  duration_ms: 1088.774708
+  type: 'test'
+  ...
+# Subtest: reader shows malformed responses and failed diagnostics retry only the original occurrence
+ok 175 - reader shows malformed responses and failed diagnostics retry only the original occurrence
+  ---
+  duration_ms: 1171.645417
+  type: 'test'
+  ...
+# Subtest: reader closing sends an authorized keepalive and releases displayed media
+ok 176 - reader closing sends an authorized keepalive and releases displayed media # SKIP Временно отключён по просьбе пользователя 2026-10-15; проверка closing/keepalive отложена.
+  ---
+  duration_ms: 0.124834
+  type: 'test'
+  ...
+# Subtest: a completed field write reconciles after Back without discarding a newer draft
+ok 177 - a completed field write reconciles after Back without discarding a newer draft
+  ---
+  duration_ms: 3031.818709
+  type: 'test'
+  ...
+# Subtest: Back restores the current field and section links after a saved editor rerenders
+ok 178 - Back restores the current field and section links after a saved editor rerenders
+  ---
+  duration_ms: 1146.787166
+  type: 'test'
+  ...
+# Subtest: Back leaves Telegram profiles and rejects delayed profile state from the previous section
+ok 179 - Back leaves Telegram profiles and rejects delayed profile state from the previous section
+  ---
+  duration_ms: 1119.324208
+  type: 'test'
+  ...
+# Subtest: returning to Codex retries a catalog load interrupted by section navigation
+ok 180 - returning to Codex retries a catalog load interrupted by section navigation
+  ---
+  duration_ms: 1252.346125
+  type: 'test'
+  ...
+# Subtest: late settings replies do not overwrite a newer draft or reopen a closed form
+ok 181 - late settings replies do not overwrite a newer draft or reopen a closed form
+  ---
+  duration_ms: 1370.129959
+  type: 'test'
+  ...
+# Subtest: YouTube settings start N history and waiting resumes manually without changing other feed
+ok 182 - YouTube settings start N history and waiting resumes manually without changing other feed
+  ---
+  duration_ms: 3294.64025
+  type: 'test'
+  ...
+# Subtest: YouTube date selection explains that RSS does not provide the full archive
+ok 183 - YouTube date selection explains that RSS does not provide the full archive
+  ---
+  duration_ms: 961.693167
+  type: 'test'
+  ...
+# Subtest: late history start preserves selection and input in another feed
+ok 184 - late history start preserves selection and input in another feed
+  ---
+  duration_ms: 1251.576792
+  type: 'test'
+  ...
+# Subtest: reopened first history gets progress and resume after a late response
+ok 185 - reopened first history gets progress and resume after a late response
+  ---
+  duration_ms: 1876.162875
+  type: 'test'
+  ...
+# Subtest: saved history count retains exact decimal text when reopening settings
+ok 186 - saved history count retains exact decimal text when reopening settings
+  ---
+  duration_ms: 1154.379333
+  type: 'test'
+  ...
+# Subtest: real HTTP settings load three YouTube materials and keep viewed IDs on a second selection
+ok 187 - real HTTP settings load three YouTube materials and keep viewed IDs on a second selection
+  ---
+  duration_ms: 4841.934917
+  type: 'test'
+  ...
+# Subtest: real HTTP settings save proxy, preserve secrets and show the shared YouTube pause
+ok 188 - real HTTP settings save proxy, preserve secrets and show the shared YouTube pause
+  ---
+  duration_ms: 6737.999042
+  type: 'test'
+  ...
+# Subtest: YouTube connection errors preserve input and late loads cannot replace a reopened draft
+ok 189 - YouTube connection errors preserve input and late loads cannot replace a reopened draft
+  ---
+  duration_ms: 2316.945791
+  type: 'test'
+  ...
+1..189
+# tests 189
+# suites 0
+# pass 186
+# fail 1
+# cancelled 0
+# skipped 2
+# todo 0
+# duration_ms 130595.79825
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q /private/tmp/oko-rate-check/tests/collection/test_telegram.py /private/tmp/oko-rate-check/tests/reader/test_v3_settings.py /private/tmp/oko-rate-check/tests/collection/test_source_revisions.py /private/tmp/oko-rate-check/tests/collection/test_youtube.py /private/tmp/oko-rate-check/tests/reader/test_reading_versions.py /private/tmp/oko-rate-check/tests/reader/test_context_refresh.py /private/tmp/oko-rate-check/tests/processing/test_codex.py /private/tmp/oko-rate-check/tests/reader/test_initial_history.py /private/tmp/oko-rate-check/tests/reader/test_telegram_lanes.py /private/tmp/oko-rate-check/tests/processing/test_theses.py /private/tmp/oko-rate-check/tests/reader/test_debug.py /private/tmp/oko-rate-check/tests/development/test_docker_release.py /private/tmp/oko-rate-check/tests/reader/test_youtube_access.py /private/tmp/oko-rate-check/tests/lifecycle/test_power.py /private/tmp/oko-rate-check/tests/reader/test_v3_problems.py /private/tmp/oko-rate-check/tests/collection/test_youtube_proxy.py /private/tmp/oko-rate-check/tests/lifecycle/test_independent_lifetime.py /private/tmp/oko-rate-check/tests/reader/test_v3_connections.py /private/tmp/oko-rate-check/tests/reader/test_folder_completion.py /private/tmp/oko-rate-check/tests/reader/test_material_read_cost.py /private/tmp/oko-rate-check/tests/reader/test_telegram_http_limits.py /private/tmp/oko-rate-check/tests/reader/test_history_pause.py /private/tmp/oko-rate-check/tests/reader/test_folder_management.py /private/tmp/oko-rate-check/tests/lifecycle/test_runtime_actions.py /private/tmp/oko-rate-check/tests/reader/test_deletion.py /private/tmp/oko-rate-check/tests/reader/test_aggregate_upgrade_youtube.py /private/tmp/oko-rate-check/tests/reader/test_existing_history.py /private/tmp/oko-rate-check/tests/reader/test_history_dispatch.py /private/tmp/oko-rate-check/tests/reader/test_v3_telegram.py /private/tmp/oko-rate-check/tests/reader/test_telegram_reload.py /private/tmp/oko-rate-check/tests/reader/test_telegram_avatars.py /private/tmp/oko-rate-check/tests/collection/test_source_results.py /private/tmp/oko-rate-check/tests/processing/test_codex_catalog.py /private/tmp/oko-rate-check/tests/reader/test_telegram_envelope.py /private/tmp/oko-rate-check/tests/reader/test_codex_errors.py /private/tmp/oko-rate-check/tests/api/test_contract.py /private/tmp/oko-rate-check/tests/reader/test_remove_aggregates.py /private/tmp/oko-rate-check/tests/development/test_update_working_oko.py /private/tmp/oko-rate-check/tests/processing/test_llamacpp.py /private/tmp/oko-rate-check/tests/collection/test_telegram_html_fixtures.py /private/tmp/oko-rate-check/tests/reader/test_reader.py /private/tmp/oko-rate-check/tests/lifecycle/test_lifecycle.py /private/tmp/oko-rate-check/tests/reader/test_v3_cutover.py /private/tmp/oko-rate-check/tests/development/test_fixture_contracts.py
+..........F............................................................. [ 20%]
+........................................................................ [ 41%]
+........................................................................ [ 62%]
+...............................................F........................ [ 82%]
+............................................................             [100%]
+=================================== FAILURES ===================================
+_________ test_new_album_part_updates_existing_material_and_member_ids _________
+
+tmp_path = PosixPath('/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/pytest-of-dabondarev/pytest-1940/test_new_album_part_updates_ex0')
+
+    def test_new_album_part_updates_existing_material_and_member_ids(tmp_path: Path):
+        class Growing(Telegram):
+            rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777, media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
+            async def page(self, account, peer, after, since):
+                return dict(messages=self.rows, more=False)
+            async def messages(self, account, peer, ids):
+                return self.rows
+        tg = Growing()
+        with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
+            presence(client, 'test')
+            connect(client)
+            original = settled(client)[0]
+            tg.rows = tg.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=dict(kind='video', mime='video/mp4', extension='mp4'))]
+            client.post('/api/v3/collect')
+            for _ in range(150):
+                material = client.get('/api/v3/materials/' + original['id']).json()
+                if not material['content'].get('loading') and len(material['content'].get('attachments', [])) == 2:
+                    break
+                time.sleep(.02)
+            assert len(client.get('/api/v3/cards').json()) == 1
+>           assert [int(identity) for identity in material['source']['message_ids']] == [11, 12]
+E           assert [11] == [11, 12]
+E             
+E             Right contains one more item: 12
+E             Use -v to get more diff
+
+tests/collection/test_telegram.py:367: AssertionError
+___________ test_failed_local_fetch_preparation_does_not_stop_reader ___________
+
+tmp_path = PosixPath('/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/pytest-of-dabondarev/pytest-1940/test_failed_local_fetch_prepar0')
+
+    def test_failed_local_fetch_preparation_does_not_stop_reader(tmp_path: Path):
+        from tests.support.telegram import settled
+        class Client(Telegram):
+            rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777,
+                         media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
+            async def page(self, account, peer, after, since):
+                return dict(messages=self.rows, more=False)
+            async def messages(self, account, peer, ids):
+                return self.rows
+        source = Client()
+        with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
+            client.patch('/api/v3/settings/oko/global', json={'theses': False})
+            presence(client, 'a')
+            connect(client)
+            card = settled(client)[0]
+            # External loss of a stored file must not turn a preparation failure into
+            # an unhandled task exception which closes the whole reader.
+            next((tmp_path / 'content' / card['id']).glob('*/media-11.jpg')).unlink()
+            source.rows = source.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=None)]
+            client.post('/api/v3/collect')
+            for _ in range(100):
+                state = client.get('/api/v3/status').json()
+                if any(p['code']=='material_read_failed' for p in state['problems']['current']) or state['runtime_state']=='stopped':
+                    break
+                time.sleep(.01)
+            assert state['runtime_state']=='running'
+>           assert any(p['code']=='material_read_failed' for p in state['problems']['current'])
+E           assert False
+E            +  where False = any(<generator object test_failed_local_fetch_preparation_does_not_stop_reader.<locals>.<genexpr> at 0x10da7cad0>)
+
+tests/lifecycle/test_runtime_actions.py:139: AssertionError
+=============================== warnings summary ===============================
+../../../Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/collection/test_telegram.py::test_new_album_part_updates_existing_material_and_member_ids
+FAILED tests/lifecycle/test_runtime_actions.py::test_failed_local_fetch_preparation_does_not_stop_reader
+2 failed, 346 passed, 1 warning in 190.46s (0:03:10)
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q /private/tmp/oko-rate-check/tests/reader/test_telegram_bindings.py /private/tmp/oko-rate-check/tests/reader/test_telegram_web.py /private/tmp/oko-rate-check/tests/reader/test_rss_pagination.py /private/tmp/oko-rate-check/tests/reader/test_telegram_telegraph.py /private/tmp/oko-rate-check/tests/reader/test_telegram_read_sync.py /private/tmp/oko-rate-check/tests/reader/test_status_problems.py /private/tmp/oko-rate-check/tests/processing/test_codex_bridge.py /private/tmp/oko-rate-check/tests/collection/test_rss.py /private/tmp/oko-rate-check/tests/reader/test_v3_reading.py /private/tmp/oko-rate-check/tests/reviews/test_filters.py /private/tmp/oko-rate-check/tests/reader/test_telegram_history.py /private/tmp/oko-rate-check/tests/reader/test_youtube_history.py /private/tmp/oko-rate-check/tests/reader/test_subscriptions.py /private/tmp/oko-rate-check/tests/api/test_v3_schema.py /private/tmp/oko-rate-check/tests/development/test_test_environment.py /private/tmp/oko-rate-check/tests/reader/test_material_list_data.py /private/tmp/oko-rate-check/tests/reader/test_feed_details.py /private/tmp/oko-rate-check/tests/collection/test_youtube_theses_freshness.py /private/tmp/oko-rate-check/tests/reader/test_background_cost.py /private/tmp/oko-rate-check/tests/reader/test_actions_cost.py /private/tmp/oko-rate-check/tests/reviews/test_processing_coordination.py /private/tmp/oko-rate-check/tests/collection/test_telegram_topics.py /private/tmp/oko-rate-check/tests/reader/test_external_checks.py /private/tmp/oko-rate-check/tests/reader/test_codex_settings.py /private/tmp/oko-rate-check/tests/reader/test_feed_refresh_interval.py /private/tmp/oko-rate-check/tests/lifecycle/test_process.py /private/tmp/oko-rate-check/tests/lifecycle/test_persistent_reader.py /private/tmp/oko-rate-check/tests/reader/test_reading_cost.py /private/tmp/oko-rate-check/tests/processing/test_theses_recovery.py /private/tmp/oko-rate-check/tests/reader/test_feed_completion.py /private/tmp/oko-rate-check/tests/collection/test_youtube_history_worker.py /private/tmp/oko-rate-check/tests/reader/test_history_outcomes.py /private/tmp/oko-rate-check/tests/reader/test_feed_url.py /private/tmp/oko-rate-check/tests/reader/test_navigation.py /private/tmp/oko-rate-check/tests/reader/test_sql_acceptance.py /private/tmp/oko-rate-check/tests/reader/test_sql_recovery_acceptance.py /private/tmp/oko-rate-check/tests/reader/test_create_folder_move.py /private/tmp/oko-rate-check/tests/processing/test_codex_execution.py /private/tmp/oko-rate-check/tests/reader/test_news_titles.py /private/tmp/oko-rate-check/tests/collection/test_telegram_contracts.py /private/tmp/oko-rate-check/tests/processing/test_processing_permission_wait.py /private/tmp/oko-rate-check/tests/api/test_v3_lexical.py /private/tmp/oko-rate-check/tests/api/test_telegram_contract.py /private/tmp/oko-rate-check/tests/reader/test_security.py
+..............................................................FF
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q tests/development/test_check_runner.py tests/api/test_governance.py tests/development/test_check_snapshot.py tests/development/test_frontend_builder.py tests/development/test_browser_host.py tests/development/test_process_logs.py
+..................................................................       [100%]
+66 passed in 89.30s (0:01:29)
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q tests/development/test_task_changes.py tests/development/test_github_issues.py tests/development/test_hooks.py tests/api/test_strict_generation.py tests/development/test_build_speed.py tests/development/test_api_generation.py tests/development/test_update_checkout.py tests/development/test_check_report.py
+.....................................................................    [100%]
+69 passed in 83.86s (0:01:23)
+
+RUN diff
+$ git diff --check
+$ git diff --cached --check
+
+RUN entrypoint
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m oko --help
+usage: __main__.py [-h] [--data DATA] [--telegram-env TELEGRAM_ENV] [--demo]
+                   [--no-browser] [--api-only] [--persistent]
+                   [--host {127.0.0.1,0.0.0.0}] [--public-url PUBLIC_URL]
+                   [--codex-url CODEX_URL]
+                   [--codex-token-file CODEX_TOKEN_FILE]
+                   [--initially-disabled] [--port PORT] [--lease LEASE]
+                   [--grace GRACE]
+
+Око — локальный читатель
+
+options:
+  -h, --help            show this help message and exit
+  --data DATA
+  --telegram-env TELEGRAM_ENV
+                        Путь к существующей .env с авторизацией Telegram
+  --demo                Подключить синтетический тестовый источник
+  --no-browser
+  --api-only            API без веб-интерфейса, работа до явной остановки
+  --persistent          Постоянный веб-экземпляр с запоминаемым входом
+  --host {127.0.0.1,0.0.0.0}
+  --public-url PUBLIC_URL
+                        Внешний локальный origin читателя, например http://oko
+  --codex-url CODEX_URL
+                        Адрес установленного процесса Codex на Mac
+  --codex-token-file CODEX_TOKEN_FILE
+  --initially-disabled  Остановить работу при первом создании хранилища
+  --port PORT
+  --lease LEASE         Срок клиентской сессии, секунд
+  --grace GRACE         Ожидание переподключения, секунд
+
+Check summary
+PASS contracts (0.77s)
+PASS tooling-types (1.66s)
+PASS syntax (0.56s)
+PASS lint (0.61s)
+PASS types (2.22s)
+PASS browser-types (1.43s)
+PASS build (9.29s)
+PASS http (2.30s)
+FAIL browser (130.88s)
+PASS diff (0.40s)
+FAIL python-tests (191.10s)
+PASS entrypoint (0.75s)
+PASS tool-tests (89.57s)
+  browser: news context menu reloads a full copy without marking it viewed
+  python-tests: tests/collection/test_telegram.py::test_new_album_part_updates_existing_material_and_member_ids
+  python-tests: tests/lifecycle/test_runtime_actions.py::test_failed_local_fetch_preparation_does_not_stop_reader
+Total 369.48s
+Report: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/report.json

@@ -1,0 +1,40 @@
+$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q /private/tmp/oko-rate-check-2/tests/reader/test_v3_settings.py /private/tmp/oko-rate-check-2/tests/reader/test_rss_pagination.py /private/tmp/oko-rate-check-2/tests/reader/test_telegram_read_sync.py /private/tmp/oko-rate-check-2/tests/processing/test_codex.py /private/tmp/oko-rate-check-2/tests/processing/test_theses.py /private/tmp/oko-rate-check-2/tests/reader/test_telegram_history.py /private/tmp/oko-rate-check-2/tests/reader/test_youtube_access.py /private/tmp/oko-rate-check-2/tests/reader/test_v3_problems.py /private/tmp/oko-rate-check-2/tests/lifecycle/test_independent_lifetime.py /private/tmp/oko-rate-check-2/tests/reader/test_background_cost.py /private/tmp/oko-rate-check-2/tests/reader/test_history_pause.py /private/tmp/oko-rate-check-2/tests/reader/test_codex_settings.py /private/tmp/oko-rate-check-2/tests/reader/test_feed_refresh_interval.py /private/tmp/oko-rate-check-2/tests/reader/test_aggregate_upgrade_youtube.py /private/tmp/oko-rate-check-2/tests/reader/test_v3_telegram.py /private/tmp/oko-rate-check-2/tests/reader/test_telegram_avatars.py /private/tmp/oko-rate-check-2/tests/reader/test_navigation.py /private/tmp/oko-rate-check-2/tests/reader/test_codex_errors.py /private/tmp/oko-rate-check-2/tests/reader/test_frontend_delivery.py /private/tmp/oko-rate-check-2/tests/processing/test_llamacpp.py /private/tmp/oko-rate-check-2/tests/processing/test_processing_permission_wait.py /private/tmp/oko-rate-check-2/tests/lifecycle/test_lifecycle.py /private/tmp/oko-rate-check-2/tests/reader/test_security.py
+........................................................................ [ 40%]
+...................F.................................................... [ 80%]
+....................................                                     [100%]
+=================================== FAILURES ===================================
+_________ test_count_skips_service_actions_but_keeps_empty_media_posts _________
+
+tmp_path = PosixPath('/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/pytest-of-dabondarev/pytest-1953/test_count_skips_service_actio0')
+
+    def test_count_skips_service_actions_but_keeps_empty_media_posts(tmp_path):
+        class ServiceArchive(Archive):
+            def __init__(self):
+                self.rows = [dict(id=n, date=1759350000+n, text='', group=None, media=None, service=n in (4,5)) for n in range(1,7)]
+                self.rows[2]['text'] = 'ordinary post'
+                self.rows[5]['media'] = dict(kind='unsupported', mime='application/octet-stream', extension='bin')
+                self.acks = []
+            async def read_window(self, account, peer, after, until, **scope):
+                return dict(ids=[m['id'] for m in self.rows if after < m['id'] <= until], more=False)
+            async def acknowledge(self, account, peer, max_id, **scope):
+                self.acks.append(max_id)
+        with TestClient(create_app(tmp_path, token='test', telegram_client=ServiceArchive()), headers=HEADERS) as client:
+            presence(client, 'reader')
+            feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=2))))
+            for _ in range(200):
+                history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
+                if history['state'] == 'complete': break
+                time.sleep(.02)
+>           assert history['progress']['loaded'] == 2
+E           assert 1 == 2
+
+tests/reader/test_telegram_history.py:205: AssertionError
+=============================== warnings summary ===============================
+../../../Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/dabondarev/repo_personal/oko/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/reader/test_telegram_history.py::test_count_skips_service_actions_but_keeps_empty_media_posts
+1 failed, 179 passed, 1 warning in 124.56s (0:02:04)

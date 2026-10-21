@@ -1,0 +1,20 @@
+
+Check summary
+PASS contracts (0.77s)
+PASS tooling-types (1.66s)
+PASS syntax (0.56s)
+PASS lint (0.61s)
+PASS types (2.22s)
+PASS browser-types (1.43s)
+PASS build (9.29s)
+PASS http (2.30s)
+FAIL browser (130.88s)
+PASS diff (0.40s)
+FAIL python-tests (191.10s)
+PASS entrypoint (0.75s)
+PASS tool-tests (89.57s)
+  browser: news context menu reloads a full copy without marking it viewed
+  python-tests: tests/collection/test_telegram.py::test_new_album_part_updates_existing_material_and_member_ids
+  python-tests: tests/lifecycle/test_runtime_actions.py::test_failed_local_fetch_preparation_does_not_stop_reader
+Total 369.48s
+Report: /private/tmp/oko-rate-check/.scratch/check-runs/20261021T100001Z-c3b6be87/report.json

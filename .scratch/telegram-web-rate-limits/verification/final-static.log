@@ -1,0 +1,10 @@
+
+Check summary
+PASS tooling-types (1.10s)
+PASS build (10.50s)
+PASS types (2.77s)
+PASS browser-types (1.84s)
+PASS syntax (0.71s)
+PASS lint (0.72s)
+Total 17.71s
+Report: /private/tmp/oko-rate-check-4/.scratch/check-runs/20261021T101741Z-4473553c/report.json
