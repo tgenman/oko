@@ -22,3 +22,6 @@ oko/frontend_build/
 
 # Local Codex diagnostics can contain account identifiers.
 /error.log
+
+# Local backups are never published.
+/backups/

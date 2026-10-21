@@ -21,9 +21,9 @@
     "vite": "8.3.4"
   },
   "dependencies": {
+    "markdown-it": "15.0.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "markdown-it": "15.0.3"
+    "react-dom": "19.3.0"
   },
   "scripts": {
     "build": "node --import tsx scripts/build-frontend.mts",
@@ -35,6 +35,8 @@
     "api:lint": "node --import tsx scripts/generate-api.mts validate",
     "api:docs": "node --import tsx scripts/generate-api.mts docs",
     "typecheck:browser": "tsc -p tsconfig.browser-tests.json",
-    "typecheck:tooling": "tsc -p tsconfig.tooling.json"
+    "typecheck:tooling": "tsc -p tsconfig.tooling.json",
+    "prototype:telegram-attachment": "node frontend/src/reading/telegram-attachment.prototype.mjs",
+    "prototype:telegram-reply": "node frontend/src/reading/telegram-reply.prototype.mjs"
   }
 }

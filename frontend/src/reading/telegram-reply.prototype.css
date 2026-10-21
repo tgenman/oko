@@ -1,0 +1,31 @@
+/* THROWAWAY. Real reader shell; only the reply-context arrangement varies. */
+#reader-shell main>article{padding-bottom:175px}
+.tr-material{max-width:760px;margin:0 auto;color:#242927}
+.tr-material h1{font-size:28px;line-height:1.3;letter-spacing:-.4px;margin:12px 0 16px}
+.tr-material h1 a{color:inherit;text-decoration:none}
+.tr-date{font-size:13px;color:#7b817d;margin-bottom:28px}
+.tr-body{font-size:16px;line-height:1.8}.tr-body p{margin:0 0 22px}
+.tr-material a{color:#007aff;overflow-wrap:anywhere;text-underline-offset:3px}
+.tr-reply-preview{background:#edf4fb;border-left:3px solid #3285d4;border-radius:5px;margin:0 0 26px;padding:12px 16px}
+.tr-reply-card{display:block;text-decoration:none;line-height:1.6}
+.tr-reply-card strong{display:flex;align-items:center;justify-content:space-between;font-size:14px;margin-bottom:3px}
+.tr-reply-card strong span{font-weight:400;opacity:.65}
+.tr-reply-snippet{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:#414b55;font-size:14px}
+.tr-reply-preview.expanded .tr-reply-snippet{display:block}
+.tr-expand{display:block;border:0;background:transparent;color:#57758e;font-size:12px;padding:0;margin:8px 0 0;text-decoration:underline;text-underline-offset:3px}
+.tr-reply-disclosure{background:transparent;border-radius:0;border-bottom:1px solid #e3e7e8;padding:0 0 16px;margin:0 0 26px;color:#6c777f;font-size:14px}
+.tr-reply-disclosure summary{width:fit-content;cursor:pointer}.tr-reply-disclosure summary strong{color:#3977ad;font-weight:500}
+.tr-disclosure-content{padding:14px 0 0 18px;line-height:1.7}.tr-disclosure-content p{color:#424b52;margin:0 0 10px}
+.tr-context{display:flex;gap:14px;border-top:1px solid #e0e5e4;padding-top:22px;margin:30px 0 0;color:#727b78;font-size:14px;line-height:1.7}
+.tr-context-mark{font-size:24px;line-height:1.4}.tr-context-label{font-size:12px;margin:0 0 3px}.tr-context a{font-weight:500;text-decoration:none}.tr-context blockquote{margin:10px 0 0;color:#65716c}
+.tr-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;border-top:1px solid #e5e5ea;padding-top:20px;margin-top:32px;font-size:13px}
+.tr-switcher{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:100;max-width:calc(100vw - 24px);width:max-content;min-width:340px;padding:8px 14px 10px;background:#263c32;color:white;border-radius:16px;box-shadow:0 6px 24px #0003;text-align:center}
+.tr-switcher-controls{display:flex;align-items:center;justify-content:center;gap:16px}.tr-switcher-controls button{border:0;background:transparent;color:white;font-size:23px;padding:2px 12px}.tr-switcher small{display:block;font-size:10px;opacity:.75;max-width:550px;line-height:1.5}
+.tr-switcher .tr-state{padding:4px 0 0;margin:0;background:transparent;color:#c9d7cf;font-size:10px}.tr-state summary{width:fit-content;margin:0 auto}.tr-state pre{max-width:600px;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;color:#fff;font-size:11px;line-height:1.5}
+#reading-nav{padding:18px}#reading-nav h2,#material-list>h2{font-size:15px}.tr-folder{background:#e8eddf;padding:10px;border-radius:8px}.tr-folder span{float:right}
+.tr-list-card{padding:18px;border-bottom:1px solid #e3e6e0}.tr-list-card.selected{background:#eaf0e2}.tr-list-card h3{font-size:14px;line-height:1.5;margin:8px 0}.tr-list-card small,.tr-list-card>span{font-size:11px;color:#75816c}
+@media(max-width:800px){html,body,#reader-shell{min-width:0!important;width:100%!important;overflow-x:hidden}#reader-shell main{display:block;min-width:0;width:100%}#reading-nav,#material-list,#sidebar-resize,#list-resize{display:none!important}#reader-shell main>article{min-width:0;width:100%;box-sizing:border-box;padding:24px 20px 180px!important}.tr-material h1{font-size:24px}.tr-switcher{box-sizing:border-box;width:calc(100% - 24px);min-width:0;bottom:12px}.tr-switcher-controls{gap:0}.tr-switcher strong{font-size:12px}.tr-switcher small{max-width:330px}.tr-state pre{max-width:100%;max-height:180px}}
+/* The reader's ID-scoped surface rules must not recolor the demo title/switcher. */
+#material .tr-material h1 a{color:inherit;text-decoration:none}
+#material details.tr-reply-disclosure{background:transparent;border:0;border-bottom:1px solid #e3e7e8;border-radius:0;padding:0 0 16px}
+#material .tr-switcher details.tr-state{background:transparent;border:0;border-radius:0;padding:4px 0 0;color:#c9d7cf}
