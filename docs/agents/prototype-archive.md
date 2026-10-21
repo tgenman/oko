@@ -69,3 +69,16 @@ Primary-source ветка: `codex/feed-settings-prototype-20261019` (локал�
 `frontend/src/settings/feed-settings-prototype.{tsx,css,md}`.
 Спецификация: `.scratch/feed-settings/spec.md`.
 Архив сохраняет все три варианта; рабочий редактор использует только B.
+
+## Открытый материал — 21 октября 2026
+
+Выбран A: актуальный текст открыт без callout; прежние версии — отдельные
+свёрнутые блоки ниже. Ссылки прототипа были заданы JSX; рабочая реализация
+использует Markdown-парсер и нормализацию переносов внутри ссылок.
+
+Primary-source ветка: `codex/opened-material-prototype-20261021` (локальная).
+Коммит: `be49c37401bb15871379f34d32fbcb297a303e47`.
+Исходники: `frontend/src/reading/opened.prototype.{tsx,css,mjs}`.
+В архиве сохранены A/B/C, переключатель и команда запуска.
+Спецификация: `.scratch/opened-material/spec.md`; задача: [#67](https://github.com/tgenman/oko/issues/67).
+Публикация архивной ветки не выполнена: автоматическая проверка отклонила push.

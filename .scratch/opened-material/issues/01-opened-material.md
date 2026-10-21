@@ -1,6 +1,7 @@
 # Открытый материал: основной текст, история A и Markdown-ссылки
 
-Status: claimed
+Status: done
+GitHub: https://github.com/tgenman/oko/issues/67
 Blocked by: Нет
 
 ## Решение пользователя
