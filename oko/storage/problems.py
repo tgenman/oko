@@ -1,5 +1,7 @@
 """Current reader obstacles; identity and recovery are independent of message text."""
 import json
+from oko.collection.contracts import SourceManifest
+from oko.collection.external_media import external_only
 from oko.storage.reading import reading_snapshot
 from dataclasses import dataclass
 import uuid
@@ -142,6 +144,8 @@ class Problems:
                 continue
             header = self.header(row['id'])
             if header.get('full', True) or (youtube['paused'] and feeds.get(row['feed_id'], {}).get('kind') == 'youtube'):
+                continue
+            if header.get('external_only'):
                 continue
             cause = header.get('captions')
             waiting = self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running') AND problem_code IS NULL", (row['id'],)).fetchone()
@@ -347,8 +351,10 @@ class Problems:
             with path.open() as source:
                 value = json.loads(source.readline())
             value = value if isinstance(value, dict) else {}
+            manifest = SourceManifest.model_validate_json(json.dumps(value['source_manifest'])) if value.get('source_manifest') else None
+            value['external_only'] = external_only(manifest)
             # Only diagnostic fields are retained, not descriptions or payloads.
-            value = {field: value[field] for field in ('title', 'full', 'captions', 'reason') if field in value}
+            value = {field: value[field] for field in ('title', 'full', 'captions', 'reason', 'external_only') if field in value}
             self._headers[identity] = (revision, value)
             return value
         except (OSError, ValueError):

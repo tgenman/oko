@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
-from oko.collection.contracts import Publication, Source, SourceError
+from oko.collection.contracts import Publication, Source, SourceError, ExternalMedia
 
 Adapter = Literal['web', 'client']
 Profile = Literal['personal', 'collection']
@@ -41,6 +41,7 @@ class ExpectedMedia:
     mime: str | None = None
     size: int | None = None
     reason: str | None = None
+    external: ExternalMedia | None = None
 
 
 @dataclass(frozen=True)

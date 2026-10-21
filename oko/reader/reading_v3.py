@@ -20,8 +20,8 @@ def media_url(value: str) -> wire.MediaUrl:
     return wire.MediaUrl(value)
 
 
-def completeness(full: bool, reason: str) -> wire.ContentCompleteness:
-    return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='legacy', message=reason))
+def completeness(full: bool, reason: str, external_only: bool = False) -> wire.ContentCompleteness:
+    return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='external_attachment' if external_only else 'legacy', message=reason))
 
 
 def provenance(value: facts.UnknownProvenance | facts.CodexProvenance | facts.LocalProvenance | None) -> wire.Provenance:
@@ -134,7 +134,9 @@ def card(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed, share
     if not isinstance(value.version, str) or not isinstance(value.full, bool) or not isinstance(value.reason, str):
         raise ValueError('Saved material lacks revision or completeness')
     return wire.ReadingCard(wire.AvailableReadingCard(**shared, availability='available',
-        loading=value.loading is True, completeness=completeness(value.full, value.reason),
+        external_attachments=[wire.ExternalAttachment(**a.model_dump()) for a in value.external_attachments],
+        external_attachment_kinds=list(dict.fromkeys(a.kind for a in value.external_attachments)),
+        loading=value.loading is True, completeness=completeness(value.full, value.reason, value.external_only),
         revision_id=wire.RevisionId(value.version), version=current.versions.number(value.id), changed=value.changed is True,
         source_deleted=value.source_deleted is True,
         images=[media_url(url) for url in value.images] if isinstance(value.images, list) else [],
@@ -242,7 +244,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
                 display_text=value.display_text if isinstance(value.display_text, str) else value.text,
                 description=value.description if isinstance(value.description, str) else '',
                 reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
-                images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
+                external_attachments=projected.external_attachments, images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
                 loading=projected.loading, changed=projected.changed, source_deleted=projected.source_deleted,
                 revision_id=projected.revision_id, version=projected.version, previous_versions=projected.previous_versions)
             return wire.ReadableMaterial(wire.AvailableReadableMaterial(**shared, availability='available', content=content))
@@ -258,7 +260,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
         value = facts.Version.model_validate(raw)
         revision = current.versions.fingerprint(current.versions.path(item, n).parent)
         return wire.PublicationVersion(number=n, revision_id=wire.RevisionId(revision), title=value.title, text=value.text, reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
-            completeness=completeness(value.full, value.reason), images=[media_url(url) for url in value.images], attachments=attachments(value.attachments))
+            external_attachments=[wire.ExternalAttachment(**a.model_dump()) for a in value.external_attachments], completeness=completeness(value.full, value.reason, value.external_only), images=[media_url(url) for url in value.images], attachments=attachments(value.attachments))
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:
         identity(item)

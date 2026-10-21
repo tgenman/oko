@@ -126,6 +126,7 @@ export type AvailablePublicationContent = {
      * Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.
      */
     display_text: string;
+    external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
     loading: boolean;
     previous_versions: Array<PreviousVersionReference>;
@@ -160,6 +161,8 @@ export type AvailableReadingCard = {
     availability: 'available';
     changed: boolean;
     completeness: ContentCompleteness;
+    external_attachment_kinds?: Array<'audio' | 'video' | 'image' | 'document' | 'unsupported'>;
+    external_attachments?: Array<ExternalAttachment>;
     feed_id: FeedId;
     feed_title: string;
     filter: FilterState;
@@ -855,6 +858,7 @@ export type CommandYoutubeConfigure = {
 export type CompactReadingCard = {
     availability: 'pending' | 'available';
     changed: boolean;
+    external_attachment_kinds?: Array<'audio' | 'video' | 'image' | 'document' | 'unsupported'>;
     feed_id: FeedId;
     filter_state: 'disabled' | 'queued' | 'running' | 'ready' | 'waiting' | 'cancelled';
     hidden: boolean;
@@ -1217,6 +1221,17 @@ export type ExistingTelegramFeed = {
 
 export type ExplicitLifetimePolicy = {
     kind: 'explicit';
+};
+
+export type ExternalAttachment = {
+    author: string | null;
+    duration: string | null;
+    kind: 'audio' | 'video' | 'image' | 'document' | 'unsupported';
+    poster_url: MediaUrl | null;
+    reason: 'public_preview_unavailable';
+    restriction: 'size_limit' | null;
+    source_url: SourceUrl;
+    title: string | null;
 };
 
 export type FailedReadingResource = {
@@ -1624,7 +1639,7 @@ export type Importance = 'normal' | 'elevated' | 'high';
 
 export type IncompleteContent = {
     message: string;
-    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'legacy';
+    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'legacy' | 'external_attachment';
     state: 'incomplete';
 };
 
@@ -2124,6 +2139,7 @@ export type PublicationTheses = {
 export type PublicationVersion = {
     attachments: Array<Attachment>;
     completeness: ContentCompleteness;
+    external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
     number: number;
     reply_preview: ReplyPreview | null;
@@ -2255,6 +2271,7 @@ export type ReadingListTarget = AllCollectionTarget | FeedCollectionTarget | Fol
 
 export type ReadingMediaData = {
     attachments: Array<Attachment>;
+    external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
     previous_versions: Array<PreviousVersionReference>;
     revision_id: RevisionId | null;

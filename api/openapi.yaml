@@ -15952,6 +15952,41 @@ components:
         retry_at: null
         strikes: 0
         reason: null
+    ExternalAttachment:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [audio, video, image, document, unsupported]
+        source_url:
+          $ref: '#/components/schemas/SourceUrl'
+        reason:
+          type: string
+          const: public_preview_unavailable
+        restriction:
+          type: [string, 'null']
+          enum: [size_limit, null]
+        title:
+          type: [string, 'null']
+        author:
+          type: [string, 'null']
+        duration:
+          type: [string, 'null']
+        poster_url:
+          anyOf:
+          - $ref: '#/components/schemas/MediaUrl'
+          - type: 'null'
+      required: [kind, source_url, reason, restriction, title, author, duration, poster_url]
+      examples:
+      - kind: audio
+        source_url: https://t.me/example/1
+        reason: public_preview_unavailable
+        restriction: null
+        title: null
+        author: null
+        duration: null
+        poster_url: null
     Attachment:
       type: object
       properties:
@@ -16541,6 +16576,7 @@ components:
           - captions_unavailable
           - source_unavailable
           - legacy
+          - external_attachment
         message:
           type: string
       required:
@@ -16602,6 +16638,11 @@ components:
     PublicationVersion:
       type: object
       properties:
+        external_attachments:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/ExternalAttachment'
         reply_preview:
           anyOf:
           - $ref: '#/components/schemas/ReplyPreview'
@@ -16664,6 +16705,11 @@ components:
     AvailablePublicationContent:
       type: object
       properties:
+        external_attachments:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/ExternalAttachment'
         reply_preview:
           anyOf:
           - $ref: '#/components/schemas/ReplyPreview'
@@ -21214,6 +21260,18 @@ components:
     AvailableReadingCard:
       type: object
       properties:
+        external_attachments:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/ExternalAttachment'
+        external_attachment_kinds:
+          type: array
+          default: []
+          uniqueItems: true
+          items:
+            type: string
+            enum: [audio, video, image, document, unsupported]
         id:
           $ref: '#/components/schemas/MaterialId'
         title:
@@ -22268,6 +22326,13 @@ components:
       type: object
       additionalProperties: false
       properties:
+        external_attachment_kinds:
+          type: array
+          default: []
+          uniqueItems: true
+          items:
+            type: string
+            enum: [audio, video, image, document, unsupported]
         id:
           $ref: '#/components/schemas/MaterialId'
         feed_id:
@@ -22552,6 +22617,11 @@ components:
       type: object
       additionalProperties: false
       properties:
+        external_attachments:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/ExternalAttachment'
         revision_id:
           anyOf:
           - $ref: '#/components/schemas/RevisionId'

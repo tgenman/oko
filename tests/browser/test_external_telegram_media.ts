@@ -1,0 +1,35 @@
+import {test} from 'node:test';
+import {expect} from 'playwright/test';
+import {productionReader} from './http-reader';
+import {artifactPath} from './artifacts';
+
+test('external Telegram media show typed badges and cards without false download errors',{timeout:25000},async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ await page.goto(origin+'/#token='+token);
+ await api('v3/telegram/connect','POST',{source_locator:'@externalmedia',folder:'News'});
+ const video=page.locator('[data-card]').filter({hasText:'External video post'});
+ await expect(video.locator('[aria-label="Видео доступно в Telegram"]')).toBeVisible();
+ await video.click();
+ await expect(page.locator('#external-attachments')).toContainText('Видео слишком большое для веб-просмотра');
+ await expect(page.locator('#external-attachments')).toContainText('0:58');
+ await expect(page.locator('#external-attachments img')).toBeVisible();
+ await expect(page.locator('#images img')).toHaveCount(0);
+ await expect(page.locator('#external-attachments a')).toHaveAttribute('href','https://t.me/externalmedia/12');
+ await expect(page.locator('#retry')).toBeHidden();
+ await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await page.screenshot({path:artifactPath('external-video-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ await page.locator('#external-attachments').screenshot({path:artifactPath('external-video-mobile.png')});
+ await page.setViewportSize({width:1280,height:900});
+ const audio=page.locator('[data-card]').filter({hasText:'External audio post'});
+ await expect(audio.locator('[aria-label="Аудио доступно в Telegram"]')).toBeVisible();
+ await audio.click();
+ await expect(page.locator('#external-attachments')).toContainText('A recorded lesson');
+ await expect(page.locator('#external-attachments')).toContainText('Fixture author');
+ await expect(page.locator('#external-attachments a')).toHaveText('Слушать в Telegram ↗');
+ await expect(page.locator('#external-attachments')).not.toContainText('слишком большое');
+ await expect(page.locator('#retry')).toBeHidden();
+ await expect.poll(async()=>{const status=await api('v3/status');return status.problems.count;}).toBe(0);
+ await page.screenshot({path:artifactPath('external-audio-desktop.png')});
+});

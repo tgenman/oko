@@ -1,3 +1,4 @@
+from oko.collection.external_media import saved_external, external_only
 from oko.storage import material_read
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
@@ -207,6 +208,8 @@ class Store:
                     WHERE i.feed_id=? AND i.viewed=0 AND j.status!='running'""", (feed,)).fetchall():
                 material = self.material(row['id'])
                 unavailable = self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone()
+                if material and material.get('external_only') and not row['error'] and not unavailable:
+                    continue
                 if row['members'] != '[]' and material and material['full']:
                     continue
                 if row['error'] or unavailable or not material or not material['full']:
@@ -262,7 +265,7 @@ class Store:
                     history_items.append(row['id'])
                 if row and row['viewed'] and namespace=='telegram-web':
                     self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(sorted(set(json.loads(row['members'])) | set(p.members))),row['id']))
-                if row and not row['viewed'] and (not envelope or self._needs_collection(row['id'])) and not self.db.execute("SELECT 1 FROM source_deleted WHERE item=?", (row['id'],)).fetchone():
+                if row and not row['viewed'] and (not envelope or self._needs_collection(row['id'], p.teaser)) and not self.db.execute("SELECT 1 FROM source_deleted WHERE item=?", (row['id'],)).fetchone():
                     members = sorted(set(json.loads(row['members'])) | set(p.members))
                     if members != json.loads(row['members']):
                         self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
@@ -322,9 +325,20 @@ class Store:
             self.db.execute('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                             ('telegram-http:'+group, json.dumps(state)))
 
-    def _needs_collection(self, item: str) -> bool:
+    def _needs_collection(self, item: str, observed: Material | None = None) -> bool:
         material = self.material(item)
-        return not material or not material['full']
+        if not material or not material['full'] and not material.get('external_only'):
+            return True
+        if material['full']:
+            return False
+        if not self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status='done' AND error IS NULL", (item,)).fetchone():
+            return True
+        if not observed or not observed.source_manifest:
+            return False
+        header, _ = self.original(item)
+        previous = SourceManifest.model_validate_json(json.dumps(header['source_manifest']))
+        current = observed.source_manifest
+        return previous.post!=current.post or {r.key:r.external for r in previous.resources if r.status=='external'}!={r.key:r.external for r in current.resources if r.status=='external'}
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM items WHERE id=? AND viewed=0',(item,)).fetchone() is not None
@@ -434,7 +448,7 @@ class Store:
         if not self.valid(job) or not self._has_unviewed(item):
             return
         previous = self.material(item)
-        if material.members and previous and previous['full'] and (not material.full or material.collection_error):
+        if material.members and previous and previous['full'] and (not material.full or material.collection_error) and not (external_only(material.source_manifest) and not material.collection_error):
             error = material.collection_error or SourceError(material.reason or 'Повторная загрузка не завершена',
                 retryable=not bool(material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources)))
             if error.retryable and material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources):
@@ -633,6 +647,7 @@ class Store:
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            base.update(saved_external(header, f'/api/v3/materials/{item}'))
             base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'))
             return base
         except (OSError, ValueError, KeyError):

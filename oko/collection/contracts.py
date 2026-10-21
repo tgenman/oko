@@ -38,6 +38,19 @@ class StagedPayload:
     sha256: str
 
 
+class ExternalMedia(BaseModel):
+    """Source-confirmed media that this access method cannot download."""
+    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
+    kind: Literal['audio', 'video', 'image', 'document', 'unsupported']
+    source_url: str
+    reason: Literal['public_preview_unavailable'] = 'public_preview_unavailable'
+    restriction: Literal['size_limit'] | None = None
+    title: str | None = None
+    author: str | None = None
+    duration: str | None = None
+    poster_key: str | None = None
+
+
 class ResourceManifest(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
     key: str
@@ -46,9 +59,10 @@ class ResourceManifest(BaseModel):
     name: str = Field(pattern=r'^(?:media|image)-[0-9]+\.[a-z0-9]+$')
     kind: str
     mime: str
-    status: Literal['missing', 'loaded', 'unsupported'] = 'missing'
+    status: Literal['missing', 'loaded', 'unsupported', 'external'] = 'missing'
     reason: str = ''
     sha256: str | None = None
+    external: ExternalMedia | None = None
 
 
 class ArticleManifest(BaseModel):

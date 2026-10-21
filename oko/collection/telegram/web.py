@@ -10,14 +10,14 @@ import hashlib
 import base64
 from datetime import datetime
 import re
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 import httpx
 
-from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, DownloadStage, Attachment, SourceManifest, ResourceManifest, ReplyPreview
+from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, DownloadStage, Attachment, SourceManifest, ResourceManifest, ExternalMedia, ReplyPreview
 from oko.collection.telegram.contracts import TelegramPublication, ExpectedMedia
 from oko.collection.telegram.media import Downloader
 
@@ -58,7 +58,7 @@ def readable(node: Tag) -> str:
 def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMedia, ...]:
     result: list[ExpectedMedia] = []
     indices: dict[int, int] = {}
-    def add(node: Tag, kind: str, url: str | None, extension: str, mime: str, reason: str = '') -> None:
+    def add(node: Tag, kind: Literal['photo', 'video', 'audio', 'document', 'unsupported'], url: str | None, extension: str, mime: str, reason: str = '') -> None:
         member = message
         anchor = node if 'grouped_media_wrap' in node.get_attribute_list('class') else node.find_parent(class_='grouped_media_wrap')
         if anchor:
@@ -67,16 +67,29 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
                 member = int(match[1])
         index = indices.get(member,0)
         indices[member] = index+1
-        key = 'telegram-web:'+str(member)+':'+str(index)+':'+kind
+        key_kind = 'document' if 'tgme_widget_message_document_wrap' in node.get_attribute_list('class') else kind
+        key = 'telegram-web:'+str(member)+':'+str(index)+':'+key_kind
         name = 'media-'+str(int(hashlib.sha256(key.encode()).hexdigest()[:16],16))+'.'+extension
+        external = None
+        if not url and kind in ('photo','video','audio','document'):
+            label = node.select_one('.message_media_not_supported_label')
+            duration = node.select_one('.message_video_duration')
+            media_title = node.select_one('.tgme_widget_message_document_title')
+            author = node.select_one('.tgme_widget_message_document_extra')
+            external = ExternalMedia(kind='image' if kind=='photo' else kind,
+                source_url=f'https://t.me/{username}/{member}',
+                restriction='size_limit' if label and label.get_text(' ',strip=True)=='Media is too big' else None,
+                title=media_title.get_text(' ',strip=True) if media_title else None,
+                author=author.get_text(' ',strip=True) if author else None,
+                duration=duration.get_text(' ',strip=True) if duration else None)
         if kind == 'photo':
-            result.append(ExpectedMedia(key,'photo',url,name,mime,reason=reason or None))
+            result.append(ExpectedMedia(key,'photo',url,name,mime,reason=reason or None,external=external))
         elif kind == 'video':
-            result.append(ExpectedMedia(key,'video',url,name,mime,reason=reason or None))
+            result.append(ExpectedMedia(key,'video',url,name,mime,reason=reason or None,external=external))
         elif kind == 'audio':
-            result.append(ExpectedMedia(key,'audio',url,name,mime,reason=reason or None))
+            result.append(ExpectedMedia(key,'audio',url,name,mime,reason=reason or None,external=external))
         elif kind == 'document':
-            result.append(ExpectedMedia(key,'document',url,name,mime,reason=reason or None))
+            result.append(ExpectedMedia(key,'document',url,name,mime,reason=reason or None,external=external))
         else:
             result.append(ExpectedMedia(key,'unsupported',None,name,mime,reason=reason or 'Неподдерживаемое вложение'))
     def background(node: Tag) -> str | None:
@@ -100,6 +113,9 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
             cover = background(poster) if poster else str(video.get('poster','')) if video else ''
             if cover:
                 add(node,'photo',cover,'jpg','image/jpeg')
+                if result[-2].external:
+                    from dataclasses import replace
+                    result[-2] = replace(result[-2], external=result[-2].external.model_copy(update={'poster_key':result[-1].id}))
         elif node.name == 'audio':
             source = node.get('src')
             if not source:
@@ -111,7 +127,7 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
                 continue
             link = node if node.has_attr('download') and node.has_attr('href') else node.select_one('a[download][href]')
             href = str(link.get('href')) if link else None
-            add(node,'document',href,'bin','application/octet-stream','Файл документа не предоставлен публичным предпросмотром' if not href else '')
+            add(node,'audio' if node.select_one('.tgme_widget_message_document_icon.audio') else 'document',href,'bin','application/octet-stream','Файл документа не предоставлен публичным предпросмотром' if not href else '')
         elif any(kind in classes for kind in ('tgme_widget_message_photo_wrap','link_preview_image','link_preview_right_image')):
             url = background(node)
             add(node,'photo',url,'jpg','image/jpeg','Фото не предоставлено публичным предпросмотром' if not url else '')
@@ -206,8 +222,8 @@ def parse_page(data: bytes, username: str) -> WebPage:
         edited = bool(meta and re.match(r'^edited\b',meta.get_text(' ',strip=True)))
         resources = tuple(ResourceManifest(key=m.id,origin='telegram:'+username+'/'+str(message),order=i,
             name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
-            mime=m.mime or 'application/octet-stream',status='missing' if m.url else 'unsupported',reason=m.reason or '') for i,m in enumerate(media))
-        manifest = SourceManifest(source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.kind) for m in media]),resources=resources)
+            mime=m.mime or 'application/octet-stream',status='external' if m.external else 'missing' if m.url else 'unsupported',reason=m.reason or '',external=m.external) for i,m in enumerate(media))
+        manifest = SourceManifest(source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
         teaser = Material(own_title or ('Ответ на сообщение' if reply_preview else body.split('\n')[0] or 'Telegram · медиа'),body,False,
                           'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
         posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published,teaser,members),body,media))
@@ -331,6 +347,6 @@ class WebTelegram:
         previous_manifest = publication.teaser.source_manifest if publication.teaser else None
         if previous_manifest and previous_manifest.post!=manifest.post:
             reasons.extend(warnings)
-        return Material(teaser.title,post.text,not reasons,'; '.join(dict.fromkeys([*reasons,*warnings])),
+        return Material(teaser.title,post.text,not reasons and not any(r.status=='external' for r in collected.resources),'; '.join(dict.fromkeys([*reasons,*warnings])),
                         members=post.publication.members,attachments=collected.attachments,
                         description=teaser.description,source_manifest=manifest,collection_error=collected.error,reply_preview=teaser.reply_preview)

@@ -1,3 +1,4 @@
+from oko.collection.external_media import saved_external, external_only
 """Immutable content versions; SQLite selects only a durably published directory."""
 from oko.storage import material_read
 from oko.storage.reading import reading_value
@@ -170,7 +171,7 @@ class Versions:
                 if done and result.is_file():
                     self._write(stage / result.name, result.read_bytes())
         accepted_full = bool(progress_only and json.loads(self.path(item).read_text().split('\n\n', 1)[0]).get('full'))
-        if accepted_full and not material.full:
+        if accepted_full and not material.full and not (external_only(material.source_manifest) and not material.collection_error):
             shutil.rmtree(stage)
             raise SourceError(material.reason or 'Повторная загрузка материала не завершена')
         # Include orphan directories from an interrupted write; never overwrite
@@ -256,7 +257,7 @@ class Versions:
             raw, text = path.read_text().split('\n\n', 1)
             header = json.loads(raw)
             base = f'/api/v3/materials/{item}/versions/{number}'
-            return dict(title=header['title'], text=text, full=header['full'], reason=header['reason'], reply_preview=header.get('reply_preview'),
+            return dict(**saved_external(header, base), title=header['title'], text=text, full=header['full'], reason=header['reason'], reply_preview=header.get('reply_preview'),
                         images=[base + '/images/' + p.name for p in sorted(path.parent.glob('image-*'))],
                         attachments=[dict(url=base+'/media/'+a['name'], kind=a['kind'], mime=a['mime']) for a in header['attachments']])
         except (OSError, ValueError, KeyError):

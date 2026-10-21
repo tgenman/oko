@@ -227,7 +227,20 @@ class UnknownProvenance(WireModel):
     model_config = ConfigDict(extra='forbid')
     model: None = Field(..., title='Model')
 
+class ExternalAttachment(WireModel):
+    kind: Literal["audio", "video", "image", "document", "unsupported"]
+    source_url: str
+    reason: Literal["public_preview_unavailable"]
+    restriction: Literal["size_limit"] | None = None
+    title: str | None = None
+    author: str | None = None
+    duration: str | None = None
+    poster_url: str | None = None
+
+
 class Version(WireModel):
+    external_attachments: list[ExternalAttachment] = Field(default_factory=list)
+    external_only: bool = False
     reply_preview: ReplyPreview | None = None
     model_config = ConfigDict(extra='forbid')
     attachments: list[Attachment] = Field(..., title='Attachments')
@@ -369,6 +382,8 @@ class Summary(WireModel):
     points: list[Point] = Field(..., title='Points')
 
 class Card(WireModel):
+    external_attachments: list[ExternalAttachment] = Field(default_factory=list)
+    external_only: bool = False
     model_config = ConfigDict(extra='forbid')
     ai: AI | None | MISSING = MISSING
     attachments: list[Attachment] | MISSING = Field(default=MISSING, title='Attachments')
@@ -439,6 +454,8 @@ class FeedVerification(WireModel):
     verification: StrictStr
 
 class Material(WireModel):
+    external_attachments: list[ExternalAttachment] = Field(default_factory=list)
+    external_only: bool = False
     reply_preview: ReplyPreview | None = None
     model_config = ConfigDict(extra='forbid')
     ai: AI | None | MISSING = MISSING
