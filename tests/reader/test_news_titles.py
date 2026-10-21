@@ -38,11 +38,17 @@ def test_full_telegram_heading_in_list_and_opened_material(tmp_path, access, leg
             assert response.status_code == 200, response.text
         card = settled(client)[0]
         identity = card['id']
-    path = next((tmp_path / 'content' / identity).glob('*/original.md'))
+        version = client.get('/api/v3/materials/' + identity).json()['content']['version']
+    path = tmp_path / 'content' / identity / str(version) / 'original.md'
     header, text = path.read_text().split('\n\n', 1)
     metadata = json.loads(header)
     if legacy:
         metadata['title'] = FIRST_LINE[:160]
+        # Historical web copies predate structured reply extraction. Keep the
+        # fixture's format consistent with its truncated legacy heading.
+        metadata.pop('reply_preview', None)
+        if 'source_manifest' in metadata:
+            metadata['source_manifest']['post'].pop('reply_preview', None)
         path.write_text(json.dumps(metadata) + '\n\n' + text)
     else:
         assert metadata['title'] == FIRST_LINE
