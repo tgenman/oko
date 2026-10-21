@@ -72,8 +72,8 @@ browser-types, build, http, browser, diff, python-tests, entrypoint, tool-tests.
 - Браузер: 207 passed, 2 штатно skipped; дополнительно 4 сценария задержки чтения
   passed. Всего 211 прошедших браузерных проверок.
 - Инструменты и процесс разработки: 136 passed (67 + 69), 0 failed.
-- После этого прогона код приложения не менялся; изменения документации и
-  ожидания готовности в двух тестах CI описаны ниже.
+- After this full run, collection code stayed unchanged. Documentation, CI readiness
+  waits and the later coordination integration from main are described below.
 
 ## Независимое ревью
 
@@ -111,8 +111,8 @@ CI коммита `1c80a3d` (run 39661807097) прошёл build/static, Python 
 `./scripts/check browser --files tests/browser/test_external_telegram_media.ts tests/browser/test_telegram_post_unavailable.ts --compact --in-place`:
 PASS, 8.53 с; 4 browser-сценария, tooling-types и browser-types прошли.
 Машинный результат: [checks/ci-race-browser-repeat.json](checks/ci-race-browser-repeat.json).
-Приложение после успешного полного прогона не менялось; полный локальный набор
-повторно не запускался из-за изменения только ожиданий в этих двух тестах.
+This CI readiness fix changed tests only; the full local suite was not repeated.
+The separate integration from main and its targeted checks are recorded below.
 
 ## Интеграция с параллельно обновившимся main
 
