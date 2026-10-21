@@ -31,6 +31,8 @@ class WebPage:
     avatar_url: str | None = None
 
 
+MEDIA_WIDGETS = '.tgme_widget_message_video_player, .tgme_widget_message_photo_wrap, video, audio, .tgme_widget_message_sticker, .tgme_widget_message_tgsticker, .tgme_widget_message_document_wrap, .link_preview_image, .link_preview_right_image, iframe'
+
 def text(node: Tag | NavigableString) -> str:
     """Render data as text/links; external markup is never executable DOM."""
     if isinstance(node, NavigableString):
@@ -95,8 +97,7 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
     def background(node: Tag) -> str | None:
         match = re.search(r"url\(\s*['\"]?([^'\")]+)",str(node.get('style','')))
         return match[1] if match else None
-    selector = '.tgme_widget_message_video_player, .tgme_widget_message_photo_wrap, video, audio, .tgme_widget_message_sticker, .tgme_widget_message_tgsticker, .tgme_widget_message_document_wrap, .link_preview_image, .link_preview_right_image, iframe'
-    for node in wrapper.select(selector):
+    for node in wrapper.select(MEDIA_WIDGETS):
         classes = node.get_attribute_list('class')
         if node.name == 'video' and node.find_parent(class_='tgme_widget_message_video_player'):
             continue
@@ -213,8 +214,12 @@ def parse_page(data: bytes, username: str) -> WebPage:
             published = None
         if published is None:
             raise SourceError('Telegram не предоставил дату публикации')
-        media = media_blocks(wrapper,username,message)
-        if not media and not body and reply_preview is None:
+        post_web_unavailable = bool('text_not_supported_wrap' in wrapper.get('class', [])
+            and wrapper.select_one('.message_media_not_supported .message_media_view_in_telegram')
+            and not body and reply_preview is None
+            and not wrapper.select_one(MEDIA_WIDGETS))
+        media = () if post_web_unavailable else media_blocks(wrapper,username,message)
+        if not post_web_unavailable and not media and not body and reply_preview is None:
             media = (ExpectedMedia('telegram-web:'+str(message)+':unknown','unsupported',None,'media-'+str(message)+'.bin',reason='Предпросмотр не предоставил содержимое публикации'),)
         preview = wrapper.select_one('.tgme_widget_message_link_preview')
         preview_text = readable(preview) if preview else ''
@@ -223,8 +228,8 @@ def parse_page(data: bytes, username: str) -> WebPage:
         resources = tuple(ResourceManifest(key=m.id,origin='telegram:'+username+'/'+str(message),order=i,
             name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
             mime=m.mime or 'application/octet-stream',status='external' if m.external else 'missing' if m.url else 'unsupported',reason=m.reason or '',external=m.external) for i,m in enumerate(media))
-        manifest = SourceManifest(source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
-        teaser = Material(own_title or ('Ответ на сообщение' if reply_preview else body.split('\n')[0] or 'Telegram · медиа'),body,False,
+        manifest = SourceManifest(post_web_unavailable=post_web_unavailable,source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
+        teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or ('Ответ на сообщение' if reply_preview else body.split('\n')[0] or 'Telegram · медиа'),body,False,
                           'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
         posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published,teaser,members),body,media))
     more = history.select_one('a.js-messages_more[href*="before="]')
@@ -324,6 +329,7 @@ class WebTelegram:
         page,_ = await load(self.username,before,self.transport)
         await self.metadata(page)
         upper = progress.get('catchup_upper') or max((max(p.publication.members) for p in page.posts),default=after)
+        self.observed = tuple(p.publication for p in page.posts if max(p.publication.members)<=after)
         posts = [p for p in page.posts if after<max(p.publication.members)<=upper]
         reached = not page.next_before or any(min(p.publication.members)<=after for p in page.posts)
         if reached:
@@ -347,6 +353,6 @@ class WebTelegram:
         previous_manifest = publication.teaser.source_manifest if publication.teaser else None
         if previous_manifest and previous_manifest.post!=manifest.post:
             reasons.extend(warnings)
-        return Material(teaser.title,post.text,not reasons and not any(r.status=='external' for r in collected.resources),'; '.join(dict.fromkeys([*reasons,*warnings])),
+        return Material(teaser.title,post.text,not manifest.post_web_unavailable and not reasons and not any(r.status=='external' for r in collected.resources),'; '.join(dict.fromkeys([*reasons,*warnings])),
                         members=post.publication.members,attachments=collected.attachments,
                         description=teaser.description,source_manifest=manifest,collection_error=collected.error,reply_preview=teaser.reply_preview)

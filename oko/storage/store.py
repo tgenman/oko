@@ -1,4 +1,4 @@
-from oko.collection.external_media import saved_external, external_only
+from oko.collection.external_media import saved_external, expected_incomplete
 from oko.storage import material_read
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
@@ -208,7 +208,7 @@ class Store:
                     WHERE i.feed_id=? AND i.viewed=0 AND j.status!='running'""", (feed,)).fetchall():
                 material = self.material(row['id'])
                 unavailable = self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone()
-                if material and material.get('external_only') and not row['error'] and not unavailable:
+                if material and (material.get('external_only') or material.get('post_web_unavailable') and not material.get('reason')) and not row['error'] and not unavailable:
                     continue
                 if row['members'] != '[]' and material and material['full']:
                     continue
@@ -237,6 +237,8 @@ class Store:
             history_ids = set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_ids', selection.get('history_enroll', [])))
             for p in publications:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
+                if p.observed_only and not self.db.execute('SELECT 1 FROM items WHERE id=?', (item,)).fetchone():
+                    continue
                 source_id = p.id if feed == 'demo' else feed + ':' + p.id
                 existing = self.db.execute('SELECT id,source_id,url FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if envelope and p.members and not existing:
@@ -327,10 +329,10 @@ class Store:
 
     def _needs_collection(self, item: str, observed: Material | None = None) -> bool:
         material = self.material(item)
-        if not material or not material['full'] and not material.get('external_only'):
+        if not material or not material['full'] and not (material.get('external_only') or material.get('post_web_unavailable') and not material.get('reason')):
             return True
         if material['full']:
-            return False
+            return bool(observed and observed.source_manifest and observed.source_manifest.post_web_unavailable and not material.get('post_web_unavailable'))
         if not self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status='done' AND error IS NULL", (item,)).fetchone():
             return True
         if not observed or not observed.source_manifest:
@@ -338,7 +340,7 @@ class Store:
         header, _ = self.original(item)
         previous = SourceManifest.model_validate_json(json.dumps(header['source_manifest']))
         current = observed.source_manifest
-        return previous.post!=current.post or {r.key:r.external for r in previous.resources if r.status=='external'}!={r.key:r.external for r in current.resources if r.status=='external'}
+        return previous.post_web_unavailable!=current.post_web_unavailable or (not current.post_web_unavailable and previous.post!=current.post) or {r.key:r.external for r in previous.resources if r.status=='external'}!={r.key:r.external for r in current.resources if r.status=='external'}
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM items WHERE id=? AND viewed=0',(item,)).fetchone() is not None
@@ -448,7 +450,20 @@ class Store:
         if not self.valid(job) or not self._has_unviewed(item):
             return
         previous = self.material(item)
-        if material.members and previous and previous['full'] and (not material.full or material.collection_error) and not (external_only(material.source_manifest) and not material.collection_error):
+        if material.source_manifest and material.source_manifest.post_web_unavailable and previous and (previous['text'].strip() or previous['attachments'] or previous['images']):
+            header, _ = self.original(item)
+            names = [a['name'] for a in header.get('attachments', [])]
+            manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else material.source_manifest
+            names.extend(r.name for r in manifest.resources if r.status == 'loaded')
+            if any(not (self.path(item).parent / name).is_file() for name in names):
+                with self.db:
+                    self._finish_fetch(job, replace(material, collection_error=SourceError('Локальный файл вложения недоступен', code='media-unavailable')), self.clock() if now is None else now)
+                return
+            retained = self.publication(item)
+            if retained and retained.teaser:
+                material = replace(retained.teaser, full=False, members=material.members,
+                    source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
+        if material.members and previous and previous['full'] and (not material.full or material.collection_error) and not (expected_incomplete(material.source_manifest) and not material.collection_error):
             error = material.collection_error or SourceError(material.reason or 'Повторная загрузка не завершена',
                 retryable=not bool(material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources)))
             if error.retryable and material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources):

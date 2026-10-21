@@ -1,4 +1,5 @@
 """Telegram source and cancellable worker for Oko-owned Telethon client."""
+from dataclasses import replace
 from oko.diagnostics import record_caught
 from oko.subscriptions.history import InitialHistory
 import asyncio
@@ -295,7 +296,13 @@ class TelegramSource:
             if previous.selection.since is None or type(after) is not int or after<0:
                 raise SourceError('Несовместимый курсор Telegram',code='telegram-cursor-incompatible')
         legacy = json.dumps(previous.progress_state()) if previous else None
+        if isinstance(self.client, WebTelegram):
+            self.client.observed = ()
         publications, raw = await self._discover(legacy)
+        if isinstance(self.client, WebTelegram):
+            # Reobserve only the already-fetched public window. Store admits
+            # these updates only for known publications, never as extra history.
+            publications.extend(replace(p, observed_only=True) for p in self.client.observed)
         if isinstance(self.client, WebTelegram):
             self.identity_info = self.client.identity_info
         envelope = HistoryEnvelope.from_progress(json.loads(raw), adapter=self.adapter)

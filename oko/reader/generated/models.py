@@ -489,6 +489,7 @@ class IncompleteContent(WireModel):
         "source_unavailable",
         "legacy",
         "external_attachment",
+        "post_web_unavailable",
     ]
     state: Literal["incomplete"]
 
@@ -1607,6 +1608,10 @@ class CompactReadingCard(WireModel):
     hidden: StrictBool
     id: MaterialId
     loading: StrictBool
+    post_web_unavailable: StrictBool = Field(
+        default=False,
+        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
+    )
     preview_url: MediaUrl | None
     published_at: Timestamp | None
     revision_id: RevisionId | None
@@ -2075,6 +2080,10 @@ class PublicationVersion(WireModel):
     )
     images: list[MediaUrl]
     number: StrictInt = Field(..., ge=1, le=9007199254740991)
+    post_web_unavailable: StrictBool = Field(
+        default=False,
+        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
+    )
     reply_preview: ReplyPreview | None
     revision_id: RevisionId
     text: StrictStr
@@ -2103,6 +2112,10 @@ class ReadingMediaData(WireModel):
         default=[], validate_default=True
     )
     images: list[MediaUrl]
+    post_web_unavailable: StrictBool = Field(
+        default=False,
+        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
+    )
     previous_versions: list[PreviousVersionReference]
     revision_id: RevisionId | None
 
@@ -2122,6 +2135,10 @@ class ReadingTextContent(WireModel):
         ..., description="Source description stored separately from publication text."
     )
     loading: StrictBool
+    post_web_unavailable: StrictBool = Field(
+        default=False,
+        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
+    )
     reply_preview: ReplyPreview | None
     revision_id: RevisionId
     source_deleted: StrictBool
@@ -2555,6 +2572,10 @@ class AvailablePublicationContent(WireModel):
     )
     images: list[MediaUrl]
     loading: StrictBool
+    post_web_unavailable: StrictBool = Field(
+        default=False,
+        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
+    )
     previous_versions: list[PreviousVersionReference]
     reply_preview: ReplyPreview | None
     revision_id: RevisionId
@@ -3769,6 +3790,10 @@ class AvailableReadingCard(WireModel):
     importance: Importance
     loading: StrictBool
     originals: StrictBool
+    post_web_unavailable: StrictBool = Field(
+        default=False,
+        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
+    )
     previous_versions: list[PreviousVersionReference]
     published_at: Timestamp | None
     revision_id: RevisionId

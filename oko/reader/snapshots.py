@@ -241,6 +241,7 @@ class ExternalAttachment(WireModel):
 class Version(WireModel):
     external_attachments: list[ExternalAttachment] = Field(default_factory=list)
     external_only: bool = False
+    post_web_unavailable: bool = False
     reply_preview: ReplyPreview | None = None
     model_config = ConfigDict(extra='forbid')
     attachments: list[Attachment] = Field(..., title='Attachments')
@@ -384,6 +385,7 @@ class Summary(WireModel):
 class Card(WireModel):
     external_attachments: list[ExternalAttachment] = Field(default_factory=list)
     external_only: bool = False
+    post_web_unavailable: bool = False
     model_config = ConfigDict(extra='forbid')
     ai: AI | None | MISSING = MISSING
     attachments: list[Attachment] | MISSING = Field(default=MISSING, title='Attachments')
@@ -456,6 +458,7 @@ class FeedVerification(WireModel):
 class Material(WireModel):
     external_attachments: list[ExternalAttachment] = Field(default_factory=list)
     external_only: bool = False
+    post_web_unavailable: bool = False
     reply_preview: ReplyPreview | None = None
     model_config = ConfigDict(extra='forbid')
     ai: AI | None | MISSING = MISSING

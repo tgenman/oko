@@ -15,6 +15,7 @@ class Publication:
     teaser: 'Material | None' = None
     members: tuple[int, ...] = ()
     published_known: bool = True
+    observed_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ class ArticleManifest(BaseModel):
 
 
 class SourceManifest(BaseModel):
+    post_web_unavailable: bool = False
     source_url: str | None = None
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
     post: dict[str, JsonValue]

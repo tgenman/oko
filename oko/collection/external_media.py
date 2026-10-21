@@ -11,6 +11,11 @@ def external_only(manifest: SourceManifest | None) -> bool:
         and all(not a.reason for a in manifest.articles))
 
 
+def expected_incomplete(manifest: SourceManifest | None) -> bool:
+    """A confirmed access restriction alone does not require another download."""
+    return bool(manifest and (manifest.post_web_unavailable and all(r.status=='loaded' and not r.reason or r.status=='external' and r.external for r in manifest.resources) and all(not a.reason for a in manifest.articles) or external_only(manifest)))
+
+
 def saved_external(header: dict[str, Any], base: str) -> dict[str, Any]:
     manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None
     resources = {r.key:r for r in manifest.resources} if manifest else {}
@@ -22,4 +27,4 @@ def saved_external(header: dict[str, Any], base: str) -> dict[str, Any]:
         poster = resources.get(media.poster_key or '')
         attachments.append(dict(media.model_dump(exclude={'poster_key'}),
             poster_url=base+'/media/'+poster.name if poster and poster.status=='loaded' else None))
-    return dict(external_attachments=attachments,external_only=external_only(manifest))
+    return dict(external_attachments=attachments,external_only=external_only(manifest),post_web_unavailable=bool(manifest and manifest.post_web_unavailable))
