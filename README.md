@@ -24,7 +24,16 @@ Codex на macOS: Око предпочитает непосредственно
 
 На этом Mac **Око.app** открывает установленный рабочий выпуск в Docker по `http://localhost:8765`; процесс Codex работает отдельно на Mac. Нужен запущенный Docker Desktop. Терминал не открывается; повторный запуск открывает действующий экземпляр. Данные находятся в `~/Library/Application Support/Oko/data/`, вне checkout. Закрытие вкладок не останавливает сервер; кнопка Stop выключает сбор и обработку, сохраняя чтение. Установка, обновление и полная остановка — в [инструкции рабочего выпуска](docs/development/docker.md).
 
-Исходник запуска — `scripts/launch.applescript`. Пересобрать приложение после изменения исходника: `osacompile -o Око.app scripts/launch.applescript`. Launcher выбирает текущий установленный выпуск по его manifest и не запускает код из рабочего checkout; журналы находятся в `~/Library/Application Support/Oko/logs/`. Команды Python ниже предназначены для отдельного запуска из checkout с собственными данными.
+Исходник запуска — `scripts/launch.applescript`. Пересобрать приложение после изменения исходника и применить иконку 👁️:
+
+```sh
+osacompile -o Око.app scripts/launch.applescript
+cp scripts/oko.icns Око.app/Contents/Resources/applet.icns
+/usr/libexec/PlistBuddy -c 'Delete :CFBundleIconName' Око.app/Contents/Info.plist
+codesign --force --sign - Око.app
+```
+
+Launcher выбирает текущий установленный выпуск по его manifest и не запускает код из рабочего checkout; журналы находятся в `~/Library/Application Support/Oko/logs/`. Команды Python ниже предназначены для отдельного запуска из checkout с собственными данными.
 
 Python 3.11–3.14 и uv 0.11.28 (CLI устанавливается отдельно от `.venv`):
 
