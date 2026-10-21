@@ -1,3 +1,4 @@
+from oko.collection.external_media import saved_external
 from oko.storage import material_read
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
@@ -633,6 +634,7 @@ class Store:
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+            base.update(saved_external(header, f'/api/v3/materials/{item}'))
             base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'))
             return base
         except (OSError, ValueError, KeyError):

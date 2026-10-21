@@ -6,3 +6,17 @@ def page(posts, more=None):
         for identity,text in posts)+'</div>'
 
 
+
+AUDIO = '<a class="tgme_widget_message_document_wrap" href="https://t.me/fixture/11"><div class="tgme_widget_message_document_icon audio"></div><div class="tgme_widget_message_document_title">A recorded lesson</div><div class="tgme_widget_message_document_extra">Fixture author</div></a>'
+
+VIDEO = '<a class="tgme_widget_message_video_player not_supported" href="https://t.me/fixture/11"><i class="tgme_widget_message_video_thumb" style="background-image:url(\'https://cdn.example/poster.jpg\')"></i><time class="message_video_duration">0:58</time><div class="message_media_not_supported_label">Media is too big</div></a>'
+
+
+def external_page(posts, before=0):
+    """Media widgets are siblings of own text in Telegram's public HTML."""
+    from bs4 import BeautifulSoup
+    document=BeautifulSoup(page([(identity,text) for identity,text in posts if not before or identity<before]),'html.parser')
+    for text in document.select('.tgme_widget_message_text'):
+        for media in reversed(text.select('.tgme_widget_message_video_player, .tgme_widget_message_document_wrap')):
+            text.insert_after(media.extract())
+    return str(document)

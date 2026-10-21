@@ -187,6 +187,14 @@ class Downloader:
             name = old.name if old else resource.name
             resource = resource.model_copy(update={'name':name})
             retained = old_attachments.get(name)
+            if media.external and not media.url:
+                if retained and old and old.status=='loaded':
+                    attachments.append(retained)
+                    resource = resource.model_copy(update={'status':'loaded','sha256':old.sha256,'external':None,'reason':''})
+                else:
+                    resource = resource.model_copy(update={'status':'external','external':media.external})
+                resources.append(resource)
+                continue
             try:
                 if not media.url:
                     raise SourceError(media.reason or 'Вложение недоступно',code='media-unsupported',retryable=False)

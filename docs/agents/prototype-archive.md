@@ -82,3 +82,16 @@ Primary-source ветка: `codex/opened-material-prototype-20261021` (лока�
 В архиве сохранены A/B/C, переключатель и команда запуска.
 Спецификация: `.scratch/opened-material/spec.md`; задача: [#67](https://github.com/tgenman/oko/issues/67).
 Публикация архивной ветки не выполнена: автоматическая проверка отклонила push.
+
+## Внешние вложения Telegram — 21 октября 2026
+
+Выбраны карточки B для аудио и видео, значок A на превью с различением типа.
+Для явно ограниченного размером веб-видео заголовок: «Видео слишком большое для веб-просмотра».
+
+Primary-source ветка: `codex/telegram-external-prototype-20261021` (локальная).
+Коммит: `8f76c1ea65ecc7dea92925b34c335d105f76175b`.
+Исходники: `frontend/src/reading/telegram-attachment.prototype.{tsx,css,mjs}`,
+`frontend/src/reading/telegram-video.prototype.{tsx,css,json}`.
+В архивном дереве сохранены все варианты и команда `npm run prototype:telegram-attachment`.
+Спецификация и снимки: `.scratch/telegram-attachment-prototype/`; задача: [#74](https://github.com/tgenman/oko/issues/74).
+Production использует отдельную реализацию; dev entry и команда прототипа удалены.

@@ -1,5 +1,6 @@
 """Selective, versioned reading over the same Runtime and Store owners."""
 from collections.abc import Callable
+from oko.collection.external_media import saved_external
 import sqlite3
 import json
 from typing import Any
@@ -63,6 +64,7 @@ class VersionedReading:
             changed=bool(store.versions.previous(identity)),revision_id=store.content_version(identity),
             loading=bool(store.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",(identity,reader_now(store.clock()))).fetchone()),
             preview_url=f'/api/v3/materials/{identity}/images/{image.name}' if image else f"/api/v3/materials/{identity}/media/{attachment['name']}" if attachment else None)
+        result['external_attachment_kinds'] = list(dict.fromkeys(a['kind'] for a in saved_external(header,f'/api/v3/materials/{identity}')['external_attachments']))
         return result
 
     def text(self, identity: str) -> dict[str, Any]:
@@ -92,7 +94,7 @@ class VersionedReading:
         full=header.get('full',True) and (not header.get('members') or set(header['members'])==set(json.loads(row['members'])))
         from oko.reader.reading_v3 import completeness
         return dict(data,availability='available',content=dict(availability='available',text=text,description=header.get('description',''),reply_preview=header.get('reply_preview'),
-            completeness=completeness(full,header.get('reason','')).model_dump(mode='json'),loading=loading,
+            completeness=completeness(full,header.get('reason',''),saved_external(header,f'/api/v3/materials/{identity}')['external_only']).model_dump(mode='json'),loading=loading,
             changed=bool(store.versions.previous(identity)),source_deleted=store.versions.deleted(identity),
             revision_id=store.content_version(identity),version=store.versions.number(identity)))
 
@@ -103,7 +105,7 @@ class VersionedReading:
             return dict(revision_id=None,images=[],attachments=[],previous_versions=[])
         path=store.path(identity)
         header,_=store.original(identity)
-        return dict(revision_id=store.content_version(identity),
+        return dict(external_attachments=saved_external(header,f'/api/v3/materials/{identity}')['external_attachments'],revision_id=store.content_version(identity),
             images=[f'/api/v3/materials/{identity}/images/{p.name}' for p in sorted(path.parent.glob('image-*'))],
             attachments=[dict(url=f"/api/v3/materials/{identity}/media/{a['name']}",kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])],
             previous_versions=[dict(number=v['number'],revision_id=v['version'],url=v['url']) for v in store.versions.previous(identity)])

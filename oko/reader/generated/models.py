@@ -488,6 +488,7 @@ class IncompleteContent(WireModel):
         "captions_unavailable",
         "source_unavailable",
         "legacy",
+        "external_attachment",
     ]
     state: Literal["incomplete"]
 
@@ -1596,6 +1597,9 @@ class CompactReadingCard(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: Literal["pending", "available"]
     changed: StrictBool
+    external_attachment_kinds: list[
+        Literal["audio", "video", "image", "document", "unsupported"]
+    ] = []
     feed_id: FeedId
     filter_state: Literal[
         "disabled", "queued", "running", "ready", "waiting", "cancelled"
@@ -1738,6 +1742,18 @@ class EffectiveTheses(WireModel):
     model_config = ConfigDict(extra="forbid")
     origin: SettingOrigin
     value: StrictBool
+
+
+class ExternalAttachment(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    author: StrictStr | None
+    duration: StrictStr | None
+    kind: Literal["audio", "video", "image", "document", "unsupported"]
+    poster_url: MediaUrl | None
+    reason: Literal["public_preview_unavailable"]
+    restriction: Literal["size_limit"] | None
+    source_url: SourceUrl
+    title: StrictStr | None
 
 
 class FailedReadingResource(WireModel):
@@ -2054,6 +2070,9 @@ class PublicationVersion(WireModel):
     model_config = ConfigDict(extra="forbid")
     attachments: list[Attachment]
     completeness: ContentCompleteness
+    external_attachments: list[ExternalAttachment] = Field(
+        default=[], validate_default=True
+    )
     images: list[MediaUrl]
     number: StrictInt = Field(..., ge=1, le=9007199254740991)
     reply_preview: ReplyPreview | None
@@ -2080,6 +2099,9 @@ class ReadingListTarget(
 class ReadingMediaData(WireModel):
     model_config = ConfigDict(extra="forbid")
     attachments: list[Attachment]
+    external_attachments: list[ExternalAttachment] = Field(
+        default=[], validate_default=True
+    )
     images: list[MediaUrl]
     previous_versions: list[PreviousVersionReference]
     revision_id: RevisionId | None
@@ -2527,6 +2549,9 @@ class AvailablePublicationContent(WireModel):
     display_text: StrictStr = Field(
         ...,
         description="Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.",
+    )
+    external_attachments: list[ExternalAttachment] = Field(
+        default=[], validate_default=True
     )
     images: list[MediaUrl]
     loading: StrictBool
@@ -3729,6 +3754,12 @@ class AvailableReadingCard(WireModel):
     availability: Literal["available"]
     changed: StrictBool
     completeness: ContentCompleteness
+    external_attachment_kinds: list[
+        Literal["audio", "video", "image", "document", "unsupported"]
+    ] = []
+    external_attachments: list[ExternalAttachment] = Field(
+        default=[], validate_default=True
+    )
     feed_id: FeedId
     feed_title: StrictStr
     filter: FilterState

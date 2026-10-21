@@ -36,7 +36,6 @@
     "api:docs": "node --import tsx scripts/generate-api.mts docs",
     "typecheck:browser": "tsc -p tsconfig.browser-tests.json",
     "typecheck:tooling": "tsc -p tsconfig.tooling.json",
-    "prototype:telegram-attachment": "node frontend/src/reading/telegram-attachment.prototype.mjs",
     "prototype:telegram-reply": "node frontend/src/reading/telegram-reply.prototype.mjs"
   }
 }

@@ -15,7 +15,7 @@ from tests.support.models import model_transport
 from tests.support.codex import CodexService
 from tests.support.youtube import PNG, History, NoCaptions
 from tests.support.telegram import Telegram
-from tests.support.telegram_web import page
+from tests.support.telegram_web import page, external_page, AUDIO, VIDEO
 
 
 class BrowserTelegram(Telegram):
@@ -36,6 +36,10 @@ class BrowserTelegram(Telegram):
 
 
 def response(request):
+    if request.url.host == 'cdn.example':
+        return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+    if request.url.host == 't.me' and '/externalmedia' in request.url.path:
+        return httpx.Response(200,text=external_page([(11,'External audio post'+AUDIO),(12,'External video post'+VIDEO)],before=int(request.url.params.get('before','0'))).replace('fixture','externalmedia'))
     if request.url.host == 't.me':
         return httpx.Response(200, text=page([(11, 'Веб-публикация без аккаунта <a href="https://telegra.ph/Fixture">Статья</a>')]))
     if request.url.host == 'api.telegra.ph':

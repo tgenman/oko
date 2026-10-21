@@ -1,3 +1,4 @@
+from oko.collection.external_media import saved_external
 """Immutable content versions; SQLite selects only a durably published directory."""
 from oko.storage import material_read
 from oko.storage.reading import reading_value
@@ -256,7 +257,7 @@ class Versions:
             raw, text = path.read_text().split('\n\n', 1)
             header = json.loads(raw)
             base = f'/api/v3/materials/{item}/versions/{number}'
-            return dict(title=header['title'], text=text, full=header['full'], reason=header['reason'], reply_preview=header.get('reply_preview'),
+            return dict(**saved_external(header, base), title=header['title'], text=text, full=header['full'], reason=header['reason'], reply_preview=header.get('reply_preview'),
                         images=[base + '/images/' + p.name for p in sorted(path.parent.glob('image-*'))],
                         attachments=[dict(url=base+'/media/'+a['name'], kind=a['kind'], mime=a['mime']) for a in header['attachments']])
         except (OSError, ValueError, KeyError):
