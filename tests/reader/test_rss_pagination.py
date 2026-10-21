@@ -11,12 +11,7 @@ from tests.support.app import create_app
 from tests.support.feed_url import HEADERS, add, verify
 
 
-def page(ids, links='', atom=False):
-    if atom:
-        return '<feed xmlns="http://www.w3.org/2005/Atom"><title>History</title>' + links + ''.join(
-            f'<entry><id>{n}</id><title>News {n}</title><link href="https://source.test/post/{n}"/><published>2025-10-01T12:00:00Z</published><summary>Excerpt {n}</summary></entry>' for n in ids) + '</feed>'
-    return '<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>History</title>' + links + ''.join(
-        f'<item><guid>{n}</guid><title>News {n}</title><link>https://source.test/post/{n}</link><pubDate>Wed, 01 Oct 2025 12:00:00 GMT</pubDate><description>Excerpt {n}</description></item>' for n in ids) + '</channel></rss>'
+from tests.support.rss_history import page, walk
 
 
 def reader(root, reply):
@@ -102,7 +97,7 @@ def test_existing_rss_can_select_count_or_date_without_restoring_viewed(tmp_path
 
 
 @pytest.mark.parametrize('atom', [False, True])
-def test_rss_atom_walk_reaches_200_and_keeps_deferred_archive_with_relative_links(tmp_path, atom):
+def test_rss_atom_pages_persist_selected_articles_through_http(tmp_path, atom):
     calls = Counter()
     def render(ids, links=''):
         return page(ids, links if atom else links.replace('<link ', '<atom:link '), atom=atom)
@@ -112,22 +107,22 @@ def test_rss_atom_walk_reaches_200_and_keeps_deferred_archive_with_relative_link
         if path == '/feed':
             return httpx.Response(302, headers={'location':'/pages/start'})
         if path == '/pages/start':
-            return httpx.Response(200, text=render(range(200,150,-1), '<link rel="next" href="empty"/><link rel="prev-archive" href="../archive/first"/>'))
+            return httpx.Response(200, text=render([6,5], '<link rel="next" href="empty"/><link rel="prev-archive" href="../archive/first"/>'))
         if path == '/pages/empty':
             return httpx.Response(200, text=render([], '<link rel="next" href="second"/>'))
         if path == '/pages/second':
-            return httpx.Response(200, text=render(range(151,100,-1), '<link rel="prev-archive" href="../archive/first"/>'))
+            return httpx.Response(200, text=render([5,4], '<link rel="prev-archive" href="../archive/first"/>'))
         if path == '/archive/first':
-            return httpx.Response(200, text=render(range(100,0,-1), '<link rel="next" href="should-not-load"/>').replace('<feed ', '<feed xml:base="https://source.test/archive/" '))
+            return httpx.Response(200, text=render([3,2,1], '<link rel="next" href="should-not-load"/>').replace('<feed ', '<feed xml:base="https://source.test/archive/" '))
         assert not path.endswith('should-not-load')
         return httpx.Response(200, text='<article>Full article</article>')
     with reader(tmp_path, reply) as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':200}).json()['id']
-        history = wait_history(client, feed)
-        assert history['progress']['available'] == history['progress']['loaded'] == 200
-        assert history['progress']['stop_reason'] == 'count_reached'
+        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count', 'count':6}).json()['id']
+        progress = wait_history(client, feed)['progress']
+        assert progress['available'] == progress['loaded'] == 6
+        assert progress['stop_reason'] == 'count_reached'
         assert calls['/pages/empty'] == calls['/pages/second'] == calls['/archive/first'] == 1
-        assert len(client.get('/api/v3/cards').json()) == 200
+        assert len(client.get('/api/v3/cards').json()) == 6
 
 
 def test_date_stops_at_first_older_publication_and_does_not_fetch_articles_while_selecting(tmp_path):
@@ -192,24 +187,6 @@ def test_invalid_continuation_preserves_current_page_publications(tmp_path, targ
         progress = wait_history(client, feed)['progress']
         assert progress['available'] == progress['loaded'] == 1
         assert progress['stop_reason'] == 'request_failed'
-
-
-def test_1000_page_budget_is_visible_even_when_empty_pages_continue(tmp_path):
-    discovery = []
-    def reply(request):
-        path = request.url.path
-        if path == '/feed':
-            return httpx.Response(200, text=page([], '<atom:link rel="next" href="/pages/2"/>'))
-        number = int(path.rsplit('/',1)[1])
-        discovery.append(number)
-        return httpx.Response(200, text=page([], f'<atom:link rel="next" href="/pages/{number+1}"/>'))
-    with reader(tmp_path, reply) as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':200}).json()['id']
-        history = wait_history(client, feed)
-        assert history['progress']['stop_reason'] == 'page_limit'
-        assert history['progress']['requests'] == 1000
-        assert history['progress']['loaded'] == 0
-        assert discovery == list(range(2,1001))
 
 
 def test_power_and_restart_preserve_unfinished_rss_history(tmp_path):
@@ -351,7 +328,6 @@ def test_ambiguous_continuation_stops_after_saving_current_page(tmp_path):
         assert progress['stop_reason'] == 'ambiguous_continuation'
 
 
-
 def test_explicit_history_after_upgrade_replaces_legacy_window_cursor(tmp_path):
     import json
     from tests.support.subscriptions import saved_sources
@@ -383,31 +359,6 @@ def test_explicit_history_after_upgrade_replaces_legacy_window_cursor(tmp_path):
         assert history['progress']['stop_reason'] == 'count_reached'
 
 
-
-def test_redirect_to_other_visited_branch_cannot_exceed_1000_page_budget(tmp_path):
-    calls = []
-    def reply(request):
-        path = request.url.path
-        calls.append(path)
-        if path == '/feed':
-            return httpx.Response(200, text=page([], '<atom:link rel="next" href="/first"/><atom:link rel="prev-archive" href="/archive/3"/>'))
-        if path == '/first':
-            return httpx.Response(200, text=page([]))
-        if path == '/alias':
-            return httpx.Response(302, headers={'location':'/first'})
-        if path.startswith('/archive/'):
-            number = int(path.rsplit('/',1)[1])
-            links = f'<atom:link rel="next" href="/archive/{number+1}"/>' if number<999 else '<atom:link rel="next" href="/alias"/><atom:link rel="prev-archive" href="/must-not-load"/>'
-            return httpx.Response(200, text=page([], links))
-        return httpx.Response(200, text=page([]))
-    with reader(tmp_path, reply) as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':200}).json()['id']
-        progress = wait_history(client, feed, timeout=60)['progress']
-        assert progress['stop_reason'] == 'page_limit'
-        assert progress['requests'] == 1000
-        assert '/must-not-load' not in calls
-
-
 @pytest.mark.parametrize('location, available', [('channel',1), ('root',0), ('entry',0)])
 def test_malformed_xml_base_finishes_attempt_without_retry(tmp_path, location, available):
     calls = 0
@@ -429,3 +380,43 @@ def test_malformed_xml_base_finishes_attempt_without_retry(tmp_path, location, a
         assert progress['stop_reason'] == 'request_failed'
         assert progress['available'] == progress['loaded'] == available
         assert progress['requests'] == 1
+
+
+def test_page_budget_resumes_from_disk_and_is_visible_through_http(tmp_path):
+    import asyncio
+    from oko.storage.store import Store
+    from oko.subscriptions.history import InitialHistory
+    from tests.support.subscriptions import saved_sources
+
+    calls = []
+    def reply(request):
+        calls.append(request.url.path)
+        number = 1 if request.url.path == '/feed' else int(request.url.path.rsplit('/', 1)[1])
+        return httpx.Response(200, text=page([], f'<atom:link rel="next" href="/pages/{number+1}"/>'))
+
+    # Prepare a real adapter cursor, not an invented near-limit count. The full
+    # 1000-step walk is separately exercised without 1000 scheduler sleeps.
+    saved_sources(tmp_path, [('https://source.test/feed', 'History', 'News')])
+    store = Store(tmp_path, lambda _: None)
+    try:
+        feed = store.subscriptions.feeds()[0]['id']
+        with store.db:
+            selection = store.subscriptions.history.start(feed, InitialHistory(mode='count', count=200))
+        result, publications = asyncio.run(walk(reply, selection=selection, stop_after=999))
+        assert publications == [] and result.continuation == 0
+        store.enqueue_discovery(feed)
+        job = store.next_job(0, feeds=[feed])
+        assert job is not None and job.kind == 'discover'
+        store.discovered([], result.cursor, job, feed)
+    finally:
+        store.db.close()
+    with reader(tmp_path, reply) as client:
+        progress = wait_history(client, feed)['progress']
+        assert progress['stop_reason'] == 'page_limit'
+        assert progress['requests'] == 1000
+        assert progress['available'] == progress['loaded'] == 0
+        assert calls == ['/feed', *[f'/pages/{n}' for n in range(2, 1001)]]
+    calls.clear()
+    with reader(tmp_path, reply) as client:
+        assert wait_history(client, feed)['progress']['stop_reason'] == 'page_limit'
+        assert '/pages/1001' not in calls

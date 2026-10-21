@@ -43,7 +43,7 @@ for(const perFeed of [26,100])for(const active of [false,true]){
     await r.page.evaluate(phase=>{window.readingBenchmark.phase=phase;},phase);
     for(const id of ids){
       await r.page.locator(`[data-card="${id}"]`).click();
-      await expect.poll(()=>r.page.evaluate(()=>window.readingBenchmark.samples.length)).toBe(++expected);
+      await r.page.waitForFunction(expected=>window.readingBenchmark.samples.length===expected,++expected,{polling:'raf'});
     }
     work.push((await r.api('status')).work);
   }
