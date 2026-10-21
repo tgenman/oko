@@ -1,6 +1,6 @@
 # Окно состояния обновления источников и исходная диагностика
 
-Status: claimed
+Status: done
 Blocked by: Нет
 GitHub: https://github.com/tgenman/oko/issues/78
 
@@ -265,3 +265,14 @@ instance_id отменяет применение ответов прежнег�
 ответов, Stop/Start и мобильного вида. Сборка, типы и актуальность generated
 контракта обязательны. Личные подписки и Telegram-аккаунт не нужны.
 Фактические результаты будущей реализации записать отдельно от этой спецификации.
+
+
+## Реализация и проверка
+
+Реализовано в ветке `codex/source-collection-status`, PR https://github.com/tgenman/oko/pull/80.
+Код: `27164ed` и `1c80a3d`. Независимые Standards/Spec reviews после исправлений
+без оставшихся замечаний. Полный `./scripts/check all --compact --in-place`: PASS,
+320.40 с; 721 Python-тест, 211 браузерных проверок (ещё 2 штатно skipped),
+136 инструментальных тестов. Отчёт: `.scratch/source-collection-status/verification.md`.
+
+Рабочая установка не перезапускалась; слияние PR в main остаётся следующим шагом.
