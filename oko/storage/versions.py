@@ -1,4 +1,4 @@
-from oko.collection.external_media import saved_external, external_only
+from oko.collection.external_media import saved_external, expected_incomplete
 """Immutable content versions; SQLite selects only a durably published directory."""
 from oko.storage import material_read
 from oko.storage.reading import reading_value
@@ -98,7 +98,7 @@ class Versions:
     @staticmethod
     def source_progress(previous: Path, current: Path) -> bool | None:
         old_raw,old_text = (previous/'original.md').read_text().split('\n\n',1)
-        new_raw,_ = (current/'original.md').read_text().split('\n\n',1)
+        new_raw,new_text = (current/'original.md').read_text().split('\n\n',1)
         old_header,new_header = json.loads(old_raw),json.loads(new_raw)
         if 'source_manifest' not in new_header:
             return None
@@ -111,6 +111,11 @@ class Versions:
             common = {p.name for p in previous.iterdir() if p.name.startswith(('media-','image-'))} & {p.name for p in current.iterdir()}
             return all(Versions.file_digest(previous/name)==Versions.file_digest(current/name) for name in common)
         old = SourceManifest.model_validate_json(json.dumps(old_header['source_manifest']))
+        if new.post_web_unavailable and not old_text and not new_text and not new.resources and all(r.status=='unsupported' and r.kind=='file' for r in old.resources):
+            # Replacing an old unknown placeholder with an explicit access
+            # restriction changes our knowledge, not the publication's content.
+            if {k:v for k,v in old.post.items() if k!='resources'}=={k:v for k,v in new.post.items() if k!='resources'}:
+                return True
         if old.post!=new.post:
             return False
         resources = {resource.key:resource for resource in old.resources}
@@ -171,7 +176,7 @@ class Versions:
                 if done and result.is_file():
                     self._write(stage / result.name, result.read_bytes())
         accepted_full = bool(progress_only and json.loads(self.path(item).read_text().split('\n\n', 1)[0]).get('full'))
-        if accepted_full and not material.full and not (external_only(material.source_manifest) and not material.collection_error):
+        if accepted_full and not material.full and not (expected_incomplete(material.source_manifest) and not material.collection_error):
             shutil.rmtree(stage)
             raise SourceError(material.reason or 'Повторная загрузка материала не завершена')
         # Include orphan directories from an interrupted write; never overwrite

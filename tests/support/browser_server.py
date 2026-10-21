@@ -15,7 +15,7 @@ from tests.support.models import model_transport
 from tests.support.codex import CodexService
 from tests.support.youtube import PNG, History, NoCaptions
 from tests.support.telegram import Telegram
-from tests.support.telegram_web import page, external_page, AUDIO, VIDEO
+from tests.support.telegram_web import page, external_page, AUDIO, VIDEO, mark_post_unavailable
 
 
 class BrowserTelegram(Telegram):
@@ -38,8 +38,15 @@ class BrowserTelegram(Telegram):
 def response(request):
     if request.url.host == 'cdn.example':
         return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
-    if request.url.host == 't.me' and '/externalmedia' in request.url.path:
-        return httpx.Response(200,text=external_page([(11,'External audio post'+AUDIO),(12,'External video post'+VIDEO)],before=int(request.url.params.get('before','0'))).replace('fixture','externalmedia'))
+    if request.url.host == 't.me' and any('/'+name in request.url.path for name in ('externalmedia','postunavailable')):
+        username = 'postunavailable' if '/postunavailable' in request.url.path else 'externalmedia'
+        posts = [(11,'External audio post'+AUDIO),(12,'External video post'+VIDEO)]
+        if username == 'postunavailable':
+            posts.append((13,''))
+        html = external_page(posts,before=int(request.url.params.get('before','0')))
+        if username == 'postunavailable':
+            html = mark_post_unavailable(html,'fixture/13')
+        return httpx.Response(200,text=html.replace('fixture',username))
     if request.url.host == 't.me':
         return httpx.Response(200, text=page([(11, 'Веб-публикация без аккаунта <a href="https://telegra.ph/Fixture">Статья</a>')]))
     if request.url.host == 'api.telegra.ph':

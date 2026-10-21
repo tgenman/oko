@@ -20,3 +20,13 @@ def external_page(posts, before=0):
         for media in reversed(text.select('.tgme_widget_message_video_player, .tgme_widget_message_document_wrap')):
             text.insert_after(media.extract())
     return str(document)
+
+
+def mark_post_unavailable(html, identity):
+    from bs4 import BeautifulSoup
+    document = BeautifulSoup(html, 'html.parser')
+    wrapper = document.select_one('[data-post="'+identity+'"]')
+    if wrapper:
+        wrapper['class'].append('text_not_supported_wrap')
+        wrapper.append(BeautifulSoup('<div class="message_media_not_supported"><div class="message_media_not_supported_label">Please open Telegram to view this post</div><a class="message_media_view_in_telegram" href="https://t.me/'+identity+'">VIEW IN TELEGRAM</a></div>', 'html.parser'))
+    return str(document)

@@ -5,7 +5,7 @@ import type {Navigation,Version,CompletionConflict} from './scenario-data';
 // HTTP scenarios exercise the canonical responses without this adapter.
 export function installReadingFixtures() {
   const origin=(value:FixtureMaterial['provenance']):unknown=>!value||!('processor' in value)?{kind:'unknown',reason:'legacy'}:value.processor==='codex'&&'reasoning_effort' in value?{kind:'codex',model:value.model,reasoning_effort:value.reasoning_effort,fast:value.fast}:{kind:'local',processor_id:'llamacpp',model:value.model?{state:'known',name:value.model}:{state:'unknown'}};
-  const incomplete=(value:{full?:boolean;reason?:string})=>value.full===false?{state:'incomplete',reason:'legacy',message:value.reason||''}:{state:'complete'};
+  const incomplete=(value:{full?:boolean;reason?:string;post_web_unavailable?:boolean})=>value.full===false?{state:'incomplete',reason:value.post_web_unavailable?'post_web_unavailable':'legacy',message:value.reason||''}:{state:'complete'};
   const attempt=(status:string|undefined,error?:string|null)=>({state:error?'waiting':({done:'ready',pending:'queued',off:'disabled'}[status||'off']||status),...(error?{reason:'processor_unavailable',retry_at:null}:{})});
   function reading(value:FixtureMaterial, opened:boolean) {
     const filter=value.filter,theses=value.theses;
@@ -13,7 +13,7 @@ export function installReadingFixtures() {
       source:value.captions?{kind:'youtube',feed_id:value.feed_id,source_url:value.url,captions:value.captions}:{kind:'rss',feed_id:value.feed_id,source_url:value.url},
       filter:{attempt:attempt(filter?.status,filter?.error),diagnostic_message:filter?.error||null,result:filter?.status==='done'?{hidden:filter.hidden,restored:filter.restored,reason:filter.reason,removed:filter.removed,provenance:{kind:'unknown',reason:'legacy'}}:null},
       theses:{attempt:attempt(value.ai?.status||(theses?'done':'off'),value.ai?.error),diagnostic_message:value.ai?.error||null,result:theses?{points:theses.points.map(p=>({text:p.text,references:p.sources.map(r=>({material_id:r.id,source_url:r.url}))})),provenance:origin(value.provenance)}:null}};
-    const content=value.complete?{availability:'available',loading:!!value.loading,completeness:incomplete(value),revision_id:value.version||'1',version:1,changed:!!value.changed,source_deleted:!!value.source_deleted,images:value.images||[],attachments:value.attachments||[],previous_versions:(value.previous||[]).map(v=>({number:v.number||Number(v.url.split('/').at(-1)),revision_id:v.version||'1',url:v.url})),...(opened?{text:value.text,display_text:value.display_text??value.text,description:value.description||'',reply_preview:value.reply_preview||null}:{})}:{availability:'pending',loading:value.loading!==false};
+    const content=value.complete?{availability:'available',post_web_unavailable:!!value.post_web_unavailable,loading:!!value.loading,completeness:incomplete(value),revision_id:value.version||'1',version:1,changed:!!value.changed,source_deleted:!!value.source_deleted,images:value.images||[],attachments:value.attachments||[],previous_versions:(value.previous||[]).map(v=>({number:v.number||Number(v.url.split('/').at(-1)),revision_id:v.version||'1',url:v.url})),...(opened?{text:value.text,display_text:value.display_text??value.text,description:value.description||'',reply_preview:value.reply_preview||null}:{})}:{availability:'pending',loading:value.loading!==false};
     return opened?{...common,availability:content.availability,content}:{...common,...content};
   }
   window.readingFixtureReply=(url,method,body,status)=>{

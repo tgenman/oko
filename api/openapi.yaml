@@ -16577,6 +16577,7 @@ components:
           - source_unavailable
           - legacy
           - external_attachment
+          - post_web_unavailable
         message:
           type: string
       required:
@@ -16638,6 +16639,10 @@ components:
     PublicationVersion:
       type: object
       properties:
+        post_web_unavailable:
+          type: boolean
+          default: false
+          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
         external_attachments:
           type: array
           default: []
@@ -16705,6 +16710,10 @@ components:
     AvailablePublicationContent:
       type: object
       properties:
+        post_web_unavailable:
+          type: boolean
+          default: false
+          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
         external_attachments:
           type: array
           default: []
@@ -21260,6 +21269,10 @@ components:
     AvailableReadingCard:
       type: object
       properties:
+        post_web_unavailable:
+          type: boolean
+          default: false
+          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
         external_attachments:
           type: array
           default: []
@@ -22326,6 +22339,10 @@ components:
       type: object
       additionalProperties: false
       properties:
+        post_web_unavailable:
+          type: boolean
+          default: false
+          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
         external_attachment_kinds:
           type: array
           default: []
@@ -22510,6 +22527,10 @@ components:
     ReadingTextContent:
       type: object
       properties:
+        post_web_unavailable:
+          type: boolean
+          default: false
+          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
         reply_preview:
           anyOf:
           - $ref: '#/components/schemas/ReplyPreview'
@@ -22617,6 +22638,10 @@ components:
       type: object
       additionalProperties: false
       properties:
+        post_web_unavailable:
+          type: boolean
+          default: false
+          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
         external_attachments:
           type: array
           default: []

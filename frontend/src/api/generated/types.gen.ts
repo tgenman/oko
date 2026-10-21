@@ -129,6 +129,10 @@ export type AvailablePublicationContent = {
     external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
     loading: boolean;
+    /**
+     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
+     */
+    post_web_unavailable?: boolean;
     previous_versions: Array<PreviousVersionReference>;
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
@@ -172,6 +176,10 @@ export type AvailableReadingCard = {
     importance: Importance;
     loading: boolean;
     originals: boolean;
+    /**
+     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
+     */
+    post_web_unavailable?: boolean;
     previous_versions: Array<PreviousVersionReference>;
     published_at: Timestamp | null;
     revision_id: RevisionId;
@@ -864,6 +872,10 @@ export type CompactReadingCard = {
     hidden: boolean;
     id: MaterialId;
     loading: boolean;
+    /**
+     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
+     */
+    post_web_unavailable?: boolean;
     preview_url: MediaUrl | null;
     published_at: Timestamp | null;
     revision_id: RevisionId | null;
@@ -1639,7 +1651,7 @@ export type Importance = 'normal' | 'elevated' | 'high';
 
 export type IncompleteContent = {
     message: string;
-    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'legacy' | 'external_attachment';
+    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'legacy' | 'external_attachment' | 'post_web_unavailable';
     state: 'incomplete';
 };
 
@@ -2142,6 +2154,10 @@ export type PublicationVersion = {
     external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
     number: number;
+    /**
+     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
+     */
+    post_web_unavailable?: boolean;
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
     text: string;
@@ -2273,6 +2289,10 @@ export type ReadingMediaData = {
     attachments: Array<Attachment>;
     external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
+    /**
+     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
+     */
+    post_web_unavailable?: boolean;
     previous_versions: Array<PreviousVersionReference>;
     revision_id: RevisionId | null;
 };
@@ -2297,6 +2317,10 @@ export type ReadingTextContent = {
      */
     description: string;
     loading: boolean;
+    /**
+     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
+     */
+    post_web_unavailable?: boolean;
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
     source_deleted: boolean;
