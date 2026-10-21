@@ -437,6 +437,8 @@ class Store:
         if material.members and previous and previous['full'] and (not material.full or material.collection_error):
             error = material.collection_error or SourceError(material.reason or 'Повторная загрузка не завершена',
                 retryable=not bool(material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources)))
+            if error.retryable and material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources):
+                error = SourceError(material.reason or error.label, retryable=False)
             with self.db:
                 self._finish_fetch(job, replace(material, collection_error=error), self.clock() if now is None else now)
             return

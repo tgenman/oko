@@ -183,3 +183,32 @@ def test_late_429_after_power_off_cannot_pause_new_work(tmp_path):
         assert client.put('/api/v3/power',json={'enabled':True}).status_code == 200
         assert client.post('/api/v3/telegram/connect',json={'source_locator':'@secondchannel','folder':'Inbox'}).status_code == 200
         assert len(calls) >= 2
+
+
+def test_overlapping_429_responses_cannot_shorten_shared_pause(tmp_path):
+    import asyncio
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    entered, release = threading.Event(), threading.Event()
+    calls, wall = [], [1800000000.]
+    async def response(request):
+        calls.append(str(request.url))
+        if len(calls) >= 2:
+            entered.set()
+        while not release.is_set():
+            await asyncio.sleep(.01)
+        return httpx.Response(429,headers={'Retry-After':'1800' if request.url.path.endswith('firstchannel') else '1'})
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response),wall_clock=lambda:wall[0]),headers=HEADERS) as client:
+        with ThreadPoolExecutor() as pool:
+            futures=[pool.submit(client.post,'/api/v3/telegram/connect',json={'source_locator':'@'+name,'folder':'Inbox'}) for name in ('firstchannel','secondchannel')]
+            try:
+                assert entered.wait(3)
+            finally:
+                release.set()
+            assert all(f.result(timeout=3).status_code==503 for f in futures)
+        wall[0] += 121
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@thirdchannel','folder':'Inbox'})
+        assert len(calls)==2
+        wall[0] += 1680
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@thirdchannel','folder':'Inbox'})
+        assert len(calls)==3

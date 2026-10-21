@@ -461,7 +461,6 @@ class TelegramSource:
                 continue
             if media['kind'] == 'unsupported':
                 reasons.append('Тип вложения пока не поддерживается')
-                collection_error = SourceError('Тип вложения пока не поддерживается', code='media-unsupported', retryable=False)
                 continue
             try:
                 name = f"media-{msg['id']}.{media['extension']}"
@@ -483,7 +482,8 @@ class TelegramSource:
         attachments.extend(a for a in teaser.attachments if a.name not in names and (a.name in failed_names or any(a.name.startswith(prefix) for prefix in expected_names if prefix.endswith('.'))))
         if any(msg['group'] and time.time()-msg['date'] < 5 for msg in rows):
             reasons.append('Альбом ещё публикуется; повторите загрузку')
-            collection_error = SourceError('Альбом ещё публикуется', 5)
+            if collection_error is None or collection_error.retryable:
+                collection_error = SourceError('Альбом ещё публикуется', 5)
         by_name = {attachment.name:attachment for attachment in attachments}
         resources: list[ResourceManifest] = []
         for msg in rows:

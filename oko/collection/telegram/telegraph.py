@@ -136,7 +136,7 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
             resources.extend(resource.model_copy(update={'order':offset+index}) for index,resource in enumerate(collected.resources))
             attachments.extend(collected.attachments)
             reasons.extend(collected.reasons)
-            if collected.error and (retry is None or collected.error.retryable):
+            if collected.error and (retry is None or not collected.error.retryable):
                 retry = collected.error
             article = ArticleManifest(url=url,title=result['title'],text=body,resource_keys=tuple(resource.key for resource in collected.resources))
             known = old_articles.get(url)

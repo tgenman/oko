@@ -1,6 +1,8 @@
 """Telegram full copies stay local until an explicit reload."""
 import time
 
+import pytest
+
 from tests.support.app import create_app
 from tests.support.telegram import Telegram, connect, settled
 from tests.support.v3 import TestClient
@@ -116,7 +118,7 @@ def test_permanent_media_failure_wins_over_temporary_failure_in_same_reload(tmp_
         broken = False
         downloads = 0
         async def messages(self, account, peer, ids):
-            return [dict(id=i,date=time.time()-60,text='Album',group=100,media=dict(kind='image',extension='jpg',mime='image/jpeg')) for i in (11,12)]
+            return [dict(id=i,date=time.time()-(1 if self.broken else 60),text='Album',group=100,media=dict(kind='image',extension='jpg',mime='image/jpeg')) for i in (11,12)]
         async def page(self, account, peer, after, since):
             return dict(messages=await self.messages(account,peer,[]),more=False)
         async def download(self, account, peer, id):
@@ -140,3 +142,34 @@ def test_permanent_media_failure_wins_over_temporary_failure_in_same_reload(tmp_
         assert telegram.downloads == 4
         assert client.get('/api/v3/materials/'+item).json()['content']['completeness']['state'] == 'complete'
         assert any('permanently missing' in p['message'] for p in client.get('/api/v3/status').json()['problems']['current'])
+
+
+@pytest.mark.parametrize('article', [False, True])
+def test_web_reload_stops_on_permanent_error_even_with_transient_media_error(tmp_path, article):
+    import httpx
+    from tests.support.telegram_web import page
+    broken, advance, requests = [False], [0.], []
+    def photo(name):
+        return '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+name+'.jpg\')"></a>'
+    def response(request):
+        if request.url.host == 'api.telegra.ph':
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'img','attrs':{'src':'https://cdn.example/flaky.jpg'}}]}})
+        if request.url.host == 'cdn.example':
+            requests.append(request.url.path)
+            return httpx.Response((404 if request.url.path=='/gone.jpg' else 503) if broken[0] else 200,content=b'old')
+        return httpx.Response(200,text=page([(11,('Edited' if broken[0] else 'Original')+photo('gone')+(' https://telegra.ph/Article' if article else photo('flaky')))]))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response),clock=lambda:time.monotonic()+advance[0]),headers=HEADERS) as client:
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
+        item=settled(client,timeout=8)[0]['id']
+        broken[0]=True
+        client.post('/api/v3/materials/'+item+'/retry')
+        deadline=time.monotonic()+5
+        while len(requests)<4 and time.monotonic()<deadline:
+            time.sleep(.02)
+        assert len(requests)==4
+        time.sleep(.1)
+        advance[0]=65
+        time.sleep(1)
+        assert len(requests)==4
+        assert 'Original' in client.get('/api/v3/materials/'+item).json()['content']['text']
+        assert client.get('/api/v3/status').json()['problems']['current']

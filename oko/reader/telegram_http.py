@@ -14,7 +14,7 @@ from oko.collection.telegram.media import PublicTransport
 class TelegramHTTP(httpx.AsyncBaseTransport):
     def __init__(self, transport: httpx.AsyncBaseTransport | None, clock: Callable[[], float],
                  wall_clock: Callable[[], float], read: Callable[[str], dict[str, Any]],
-                 write: Callable[[str, dict[str, Any], int], Awaitable[None]], admitted: Callable[[], bool],
+                 write: Callable[[str, float | None, int], Awaitable[float]], admitted: Callable[[], bool],
                  generation: Callable[[], int]) -> None:
         self._transport = transport or PublicTransport()
         self._clock, self._wall = clock, wall_clock
@@ -40,22 +40,19 @@ class TelegramHTTP(httpx.AsyncBaseTransport):
         response = await self._transport.handle_async_request(request)
         if not self._admitted() or generation != self._generation():
             await response.aclose()
-            raise asyncio.CancelledError
+            raise SourceDeferred('Запрос Telegram прерван', code='source_unavailable')
         if response.status_code != 429:
             return response
-        state = self._read(group)
-        strikes = min(int(state.get('strikes', 0)) + 1, 7)
-        delay = min(60 * 2 ** (strikes - 1), 3600)
+        server_delay = None
         value = response.headers.get('retry-after', '')
         try:
-            server_delay = float(int(value)) if value.isdecimal() else parsedate_to_datetime(value).timestamp() - self._wall()
-            if math.isfinite(server_delay):
-                delay = max(delay, server_delay)
+            parsed = float(int(value)) if value.isdecimal() else parsedate_to_datetime(value).timestamp() - self._wall()
+            if math.isfinite(parsed):
+                server_delay = parsed
         except (ValueError, TypeError, OverflowError):
             pass
-        until = max(float(state.get('until', 0)), self._wall() + delay)
         try:
-            await self._write(group, dict(until=until, strikes=strikes), generation)
+            until = await self._write(group, server_delay, generation)
         finally:
             await response.aclose()
         raise SourceDeferred('Telegram ограничил запросы; загрузка будет повторена после паузы', until-self._wall(), code='source_unavailable')

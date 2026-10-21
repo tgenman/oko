@@ -20,7 +20,7 @@ import httpx
 
 from oko.collection.rss import RSSSource, feed_title, normalized
 from oko.collection.sources import Sources, SourceSettings, TelegramAccess
-from oko.collection.contracts import FetchResources, SourceError, SourceDeleted, SourceSkipped, DownloadStage
+from oko.collection.contracts import FetchResources, SourceError, SourceDeleted, SourceSkipped, SourceDeferred, DownloadStage
 from oko.collection.contracts import Source
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
@@ -165,11 +165,17 @@ class Runtime:
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
 
-    async def _save_telegram_http_wait(self, group: str, state: dict[str, Any], generation: int) -> None:
+    async def _save_telegram_http_wait(self, group: str, server_delay: float | None, generation: int) -> float:
         async with self._actions:
             if not self._live() or self._cancelling or generation != self._epoch:
-                raise asyncio.CancelledError
-            self.require_store().telegram_http_wait(group, state)
+                raise SourceDeferred('Запрос Telegram прерван', code='source_unavailable')
+            current = self.require_store()
+            state = current.telegram_http_state(group)
+            strikes = min(int(state.get('strikes', 0)) + 1, 7)
+            delay = max(float(min(60 * 2 ** (strikes - 1), 3600)), server_delay or 0)
+            until = max(float(state.get('until', 0)), self._wall_clock() + delay)
+            current.telegram_http_wait(group, dict(until=until, strikes=strikes))
+            return until
 
     def _live(self) -> bool:
         return not self.stopped and self.enabled and self._admitted()
