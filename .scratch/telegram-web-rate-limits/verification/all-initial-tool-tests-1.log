@@ -1,3 +1,0 @@
-$ /Users/dabondarev/repo_personal/oko/.venv/bin/python -m pytest -q tests/development/test_check_runner.py tests/api/test_governance.py tests/development/test_check_snapshot.py tests/development/test_frontend_builder.py tests/development/test_browser_host.py tests/development/test_process_logs.py
-..................................................................       [100%]
-66 passed in 89.30s (0:01:29)

@@ -1,8 +1,0 @@
-
-Check summary
-PASS contracts (0.50s)
-PASS tooling-types (1.30s)
-PASS build (11.25s)
-PASS python-tests (127.51s)
-Total 140.91s
-Report: /private/tmp/oko-rate-check-3/.scratch/check-runs/20261021T101339Z-21f255da/report.json
