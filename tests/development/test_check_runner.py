@@ -233,7 +233,8 @@ def test_failed_http_module_check_fails_ui(tmp_path):
     assert 'FAIL http' in result.stdout
 
 
-def test_browser_file_selection_only_runs_requested_file(tmp_path):
+def test_browser_file_selection_only_runs_requested_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(os, 'cpu_count', lambda: 4)
     env = runtimes(tmp_path)
     record = tmp_path / 'commands'
     env['RECORD'] = str(record)
@@ -744,7 +745,7 @@ def test_explicit_tools_are_not_duplicated_and_build_precedes_parallel_groups(tm
     assert last_build < first_test
 
 
-@pytest.mark.parametrize('sets, workers', [(['python'], 4), (['python', 'tools'], 2)])
+@pytest.mark.parametrize('sets, workers', [(['python'], 4), (['python', 'tools'], 4)])
 def test_python_shards_cover_each_selected_file_once_and_report_failure(tmp_path, sets, workers):
     import ast
     import json
@@ -897,3 +898,19 @@ def test_worker_killed_without_report_keeps_measured_elapsed(tmp_path):
     assert suite['status'].startswith('FAIL')
     assert suite['duration_seconds']>=.15
     assert all(seconds>=.15 for seconds in suite['worker_durations'].values())
+
+
+@pytest.mark.parametrize('cpus, override, expected', [(None, None, 4), (4, None, 4), (12, None, 8), (12, 2, 2), (4, 8, 8)])
+def test_browser_worker_budget_respects_host_and_explicit_override(tmp_path, monkeypatch, cpus, override, expected):
+    monkeypatch.setattr(os, 'cpu_count', lambda: cpus)
+    env = runtimes(tmp_path)
+    record = tmp_path / 'commands'
+    env['RECORD'] = str(record)
+    runtime = Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)', "from pathlib import Path\nwith Path(os.environ['RECORD']).open('a') as output: output.write(repr(sys.argv) + '\\n')\nsys.exit(0)"))
+    result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'browser',
+                                  *(['--browser-workers', str(override)] if override else []),
+                                  '--files', 'tests/browser/test_material_list.ts'],
+                                 env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f'--test-concurrency={expected}' in record.read_text()
