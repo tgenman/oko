@@ -29,6 +29,10 @@ class Filters:
         row = material_read.item(store.db, item)
         if not row or row['viewed'] or not row['complete'] or not store.path(item).is_file():
             return None
+        header, own_text = store.original(item)
+        reply = header.get('reply_preview')
+        if reply is not None and not own_text.strip() and not reply.get('text', '').strip():
+            return None
         settings = store.subscriptions.effective('feed', row['feed_id'], details=legacy)
         # Retired public metadata must not invalidate already accepted results.
         # This null field was part of the persisted processing signature.
@@ -121,7 +125,7 @@ class Filters:
             return None
         settings = store.subscriptions.effective('feed', material['feed_id'])
         values = settings['effective']
-        request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text']),), settings_version=store.settings_version(material['feed_id']), prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
+        request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text'], reply_preview=material.get('reply_preview')),), settings_version=store.settings_version(material['feed_id']), prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, settings['feed']['public_ai']
 
     def save(self, job: 'Job', signature: str, result: FilterResult) -> None:

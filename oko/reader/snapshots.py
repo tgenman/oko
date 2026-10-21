@@ -4,6 +4,7 @@ These describe persisted/domain facts (including historical optional fields),
 not HTTP requests or responses. Only generated v3 models cross the HTTP boundary.
 """
 from __future__ import annotations
+from oko.collection.contracts import ReplyPreview
 from typing import Annotated, Any, Literal
 from pydantic import BeforeValidator, ConfigDict, Field, RootModel, StrictBool, StrictFloat, StrictInt, StrictStr
 from pydantic.experimental.missing_sentinel import MISSING
@@ -227,6 +228,7 @@ class UnknownProvenance(WireModel):
     model: None = Field(..., title='Model')
 
 class Version(WireModel):
+    reply_preview: ReplyPreview | None = None
     model_config = ConfigDict(extra='forbid')
     attachments: list[Attachment] = Field(..., title='Attachments')
     full: StrictBool = Field(..., title='Full')
@@ -437,6 +439,7 @@ class FeedVerification(WireModel):
     verification: StrictStr
 
 class Material(WireModel):
+    reply_preview: ReplyPreview | None = None
     model_config = ConfigDict(extra='forbid')
     ai: AI | None | MISSING = MISSING
     attachments: list[Attachment] | MISSING = Field(default=MISSING, title='Attachments')

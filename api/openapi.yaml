@@ -9678,6 +9678,7 @@ paths:
                 $ref: '#/components/schemas/PublicationVersion'
               example:
                 number: 1
+                reply_preview: null
                 revision_id: example
                 title: example
                 text: example
@@ -12587,6 +12588,7 @@ paths:
                     availability: available
                     content:
                       availability: available
+                      reply_preview: null
                       text: example
                       revision_id: example
                       version: 1
@@ -16581,9 +16583,29 @@ components:
       - number: 1
         revision_id: example
         url: /api/v3/materials/example/images/image.png
+    ReplyPreview:
+      type: object
+      properties:
+        author:
+          type: [string, 'null']
+        text:
+          type: string
+        source_url:
+          type: [string, 'null']
+          pattern: '^https?://[^\s]+$'
+      required: [author, text, source_url]
+      additionalProperties: false
+      examples:
+      - author: Example author
+        text: Saved excerpt…
+        source_url: https://t.me/example/1
     PublicationVersion:
       type: object
       properties:
+        reply_preview:
+          anyOf:
+          - $ref: '#/components/schemas/ReplyPreview'
+          - type: 'null'
         number:
           type: integer
           minimum: 1
@@ -16605,6 +16627,7 @@ components:
         completeness:
           $ref: '#/components/schemas/ContentCompleteness'
       required:
+      - reply_preview
       - number
       - revision_id
       - title
@@ -16615,6 +16638,7 @@ components:
       additionalProperties: false
       examples:
       - number: 1
+        reply_preview: null
         revision_id: example
         title: example
         text: example
@@ -16640,6 +16664,10 @@ components:
     AvailablePublicationContent:
       type: object
       properties:
+        reply_preview:
+          anyOf:
+          - $ref: '#/components/schemas/ReplyPreview'
+          - type: 'null'
         availability:
           type: string
           const: available
@@ -16680,6 +16708,7 @@ components:
           description: Server-produced publication text after accepted filtering;
             clients do not reapply business filtering rules.
       required:
+      - reply_preview
       - availability
       - text
       - images
@@ -16696,6 +16725,7 @@ components:
       additionalProperties: false
       examples:
       - availability: available
+        reply_preview: null
         text: example
         images: []
         attachments: []
@@ -16958,6 +16988,7 @@ components:
         availability: available
         content:
           availability: available
+          reply_preview: null
           text: example
           images: []
           attachments: []
@@ -22414,6 +22445,10 @@ components:
     ReadingTextContent:
       type: object
       properties:
+        reply_preview:
+          anyOf:
+          - $ref: '#/components/schemas/ReplyPreview'
+          - type: 'null'
         availability:
           type: string
           const: available
@@ -22439,6 +22474,7 @@ components:
           type: string
           description: Source description stored separately from publication text.
       required:
+      - reply_preview
       - availability
       - text
       - revision_id
@@ -22451,6 +22487,7 @@ components:
       additionalProperties: false
       examples:
       - availability: available
+        reply_preview: null
         text: example
         revision_id: example
         version: 1
@@ -22598,6 +22635,7 @@ components:
         availability: available
         content:
           availability: available
+          reply_preview: null
           text: example
           revision_id: example
           version: 1
@@ -22689,6 +22727,7 @@ components:
         availability: available
         content:
           availability: available
+          reply_preview: null
           text: example
           revision_id: example
           version: 1
@@ -22937,6 +22976,7 @@ components:
           availability: available
           content:
             availability: available
+            reply_preview: null
             text: example
             revision_id: example
             version: 1

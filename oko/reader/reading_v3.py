@@ -229,7 +229,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             owner = feeds(value.feed_id)[value.feed_id]
             from oko.reader.composition import snippet
             data = value.model_dump(exclude_unset=True)
-            for key in ('text', 'description', 'display_text'):
+            for key in ('text', 'description', 'display_text', 'reply_preview'):
                 data.pop(key, None)
             data.update(feed_title=owner.root.title, folder_id=owner.root.folder_id.root, importance=owner.root.importance.root,
                         snippet=snippet(value.description if isinstance(value.description, str) and value.description else value.display_text if isinstance(value.display_text, str) else value.text), published_known=value.published_known is not False)
@@ -241,6 +241,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             content = wire.AvailablePublicationContent(availability='available', text=value.text,
                 display_text=value.display_text if isinstance(value.display_text, str) else value.text,
                 description=value.description if isinstance(value.description, str) else '',
+                reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
                 images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
                 loading=projected.loading, changed=projected.changed, source_deleted=projected.source_deleted,
                 revision_id=projected.revision_id, version=projected.version, previous_versions=projected.previous_versions)
@@ -256,7 +257,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             raise ApiError(404, wire.ErrorEnvelope(wire.VersionUnavailableError(code='version_unavailable', message='Версия недоступна', details=wire.VersionUnavailableErrorDetails(material_id=identity(item), number=n), command_id=None, diagnostic_id=None)))
         value = facts.Version.model_validate(raw)
         revision = current.versions.fingerprint(current.versions.path(item, n).parent)
-        return wire.PublicationVersion(number=n, revision_id=wire.RevisionId(revision), title=value.title, text=value.text,
+        return wire.PublicationVersion(number=n, revision_id=wire.RevisionId(revision), title=value.title, text=value.text, reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
             completeness=completeness(value.full, value.reason), images=[media_url(url) for url in value.images], attachments=attachments(value.attachments))
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:

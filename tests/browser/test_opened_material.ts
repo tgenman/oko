@@ -395,3 +395,65 @@ test('current publication text is first-class and previous versions start collap
   assert.deepEqual(r.errors,[]);
  }finally{await r.close();}
 });
+
+test('reply context is a compact separate card with safe navigation and local expansion', async () => {
+  const r=await reader();
+  const excerpt='Цитируемый фрагмент другого автора. '.repeat(20)+'Последние слова фрагмента.';
+  try {
+    await r.start([material('A',{reply_preview:{author:'Другой автор',text:excerpt,source_url:'https://t.me/fixture/10'}}),material('B')]);
+    await r.page.locator('#cards').getByRole('button',{name:/^A/}).click();
+    const card=r.page.locator('#material .reply-preview');
+    await expect(card).toBeVisible();
+    await expect(r.page.locator('#text')).toHaveText('Текст A');
+    const link=card.locator('a');
+    assert.equal(await link.getAttribute('href'),'https://t.me/fixture/10');
+    assert.equal(await link.getAttribute('target'),'_blank');
+    assert.equal(await link.getAttribute('rel'),'noopener noreferrer');
+    assert.equal(await card.locator('.reply-preview-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'2');
+    const requests=await r.page.evaluate(()=>readerTransport.requests.length);
+    await card.getByRole('button',{name:'Весь фрагмент'}).focus();
+    await r.page.keyboard.press('Enter');
+    await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
+    assert.equal(await card.locator('.reply-preview-text').textContent(),excerpt);
+    assert.equal(await r.page.evaluate(()=>readerTransport.requests.length),requests);
+    await r.page.screenshot({path:artifactPath('telegram-reply-desktop.png')});
+    await r.page.setViewportSize({width:1120,height:900});
+    await r.page.screenshot({path:artifactPath('telegram-reply-narrow.png')});
+    assert.equal(await card.evaluate(e=>e.scrollWidth<=e.clientWidth),true);
+    await r.page.setViewportSize({width:1280,height:900});
+    await r.page.locator('#cards').getByRole('button',{name:/^B/}).click();
+    await expect(r.page.locator('#text')).toHaveText('Текст B');
+    await expect(card).toHaveCount(0);
+    await r.page.locator('#cards').getByRole('button',{name:/^A/}).click();
+    await expect(card.getByRole('button',{name:'Весь фрагмент'})).toHaveAttribute('aria-expanded','false');
+    assert.deepEqual(r.errors,[]);
+  } finally {await r.close();}
+});
+
+test('reply context stays with its revision and historical previews use their own source',async()=>{
+  const r=await reader();try{
+    const old=material('A',{version:'old',reply_preview:{author:null,text:'Старый фрагмент '.repeat(18),source_url:null},previous:[{number:1,url:'/api/v3/materials/A/versions/1'}]});
+    await r.start([old]);await r.page.locator('[data-card="A"]').click();
+    const card=r.page.locator('#reply-preview');
+    await expect(card).toBeVisible();
+    await expect(card.locator('strong')).toHaveText('Ответ на сообщение');
+    await expect(card.locator('a')).toHaveCount(0);
+    await card.getByRole('button',{name:'Весь фрагмент'}).click();
+    const summarized={...old,theses:{points:[{text:'Новые тезисы той же версии',sources:[]}]}};
+    await r.page.evaluate(value=>readerTransport.replies.set('/api/v3/materials/A',{body:value}),summarized);
+    await expect(r.page.locator('#theses')).toHaveText('Новые тезисы той же версии');
+    await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
+    const fresh={...summarized,version:'new',reply_preview:{author:'Другой автор',text:'Новый контекст',source_url:'https://t.me/fixture/20'}};
+    await r.page.evaluate(value=>readerTransport.replies.set('/api/v3/materials/A',{body:value}),fresh);
+    await expect(r.page.locator('#material-update-button')).toBeVisible();
+    await expect(card).toContainText('Старый фрагмент');
+    await r.page.locator('#material-update-button').click();
+    await expect(card).toContainText('Новый контекст');
+    await expect(card.getByRole('button',{name:'Весь фрагмент'})).toHaveAttribute('aria-expanded','false');
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/A/versions/1',{body:{title:'История',text:'Старый собственный текст',full:true,images:[],attachments:[],reply_preview:{author:'Исторический автор',text:'Исторический фрагмент',source_url:'https://t.me/fixture/5'}}}));
+    await r.page.locator('#versions summary').click();
+    await expect(r.page.locator('#reply-version-1')).toContainText('Исторический фрагмент');
+    assert.equal(await r.page.locator('#reply-version-1 a').getAttribute('href'),'https://t.me/fixture/5');
+    assert.deepEqual(r.errors,[]);
+  }finally{await r.close();}
+});

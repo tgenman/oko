@@ -200,7 +200,7 @@ async function reader() {
         t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});
         const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', processor: 'codex'};
         t.replies.set('/api/v3/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
-        t.replies.set('/api/v3/cards', {body: materials.map(({text, description, display_text, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
+        t.replies.set('/api/v3/cards', {body: materials.map(({text, description, display_text, reply_preview, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
         for (const material of materials) {
           const {snippet, feed_title, ...opened} = material;
           t.replies.set('/api/v3/materials/' + material.id, {body: opened});

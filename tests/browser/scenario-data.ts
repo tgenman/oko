@@ -644,6 +644,7 @@ export type Material = {
     /**
      * Description
      */
+    reply_preview?: import('../../frontend/src/api/generated/types.gen').ReplyPreview | null;
     description?: string;
     /**
      * Display Text

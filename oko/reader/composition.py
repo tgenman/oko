@@ -50,11 +50,16 @@ def snippet(text: str) -> str:
     return ' '.join(''.join(parser.parts).split())[:500]
 
 
-def _reading_heading(material: dict[str, Any] | None, feed: dict[str, Any]) -> dict[str, Any] | None:
-    # Older Telegram copies retain the full first line in their saved text.
-    # Project it for reading without rewriting source versions or processing state.
-    if material and feed['kind'] == 'telegram' and feed.get('transport') != 'rss' and material['text']:
-        material['title'] = material['text'].split('\n')[0] or material['title']
+def telegram_title(header: dict[str, Any], text: str) -> str:
+    # Structured web copies already derive the title from own text. Keep the
+    # full-first-line reading compatibility for older and account copies.
+    structured = 'reply_preview' in header.get('source_manifest', {}).get('post', {})
+    return str(header['title']) if structured or not text else text.split('\n')[0] or str(header['title'])
+
+
+def _reading_heading(material: dict[str, Any] | None, feed: dict[str, Any], header: dict[str, Any]) -> dict[str, Any] | None:
+    if material and material['complete'] and feed['kind'] == 'telegram' and feed.get('transport') != 'rss':
+        material['title'] = telegram_title(header, material['text'])
     return material
 
 
@@ -76,11 +81,12 @@ class ReadingComposition:
                                       + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
         cards = []
         for row in rows:
-            material = _reading_heading(self._store.saved_publication(row), feeds[row['feed_id']])
+            material = _reading_heading(self._store.saved_publication(row), feeds[row['feed_id']], self._store.original(row['id'])[0] if row['complete'] else {})
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):
                 owner = feeds[row['feed_id']]
                 text = material.pop('text')
                 description = material.pop('description', '')
+                material.pop('reply_preview', None)
                 preview = description or text
                 filtered = material.get('filter', {})
                 if not description and filtered.get('status') == 'done' and not filtered['restored']:
@@ -141,7 +147,7 @@ class ReadingComposition:
         if material:
             owners = self._store.subscriptions.feeds(material['feed_id'])
             if owners:
-                return _reading_heading(material, owners[0])
+                return _reading_heading(material, owners[0], self._store.original(identity)[0] if material['complete'] else {})
         return material
 
     def members(self, identity: str) -> list[str]:
