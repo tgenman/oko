@@ -1,0 +1,25 @@
+{
+  "release": "ad56948e228056adb9df66b3d9665bd1ee1cd01b",
+  "runtime_state": "running",
+  "work_allowed": true,
+  "problem_codes": [
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "source_unavailable",
+    "command_failed",
+    "legacy_problem"
+  ],
+  "cards": 124,
+  "available": 124,
+  "status_ms": 43.5,
+  "cards_ms": 127.26
+}

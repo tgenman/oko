@@ -1,0 +1,31 @@
+{
+  "release": "4c13bffe63f8bd6cfc585bb765bd01c3ae034391",
+  "api_version": "3.0.0",
+  "runtime_state": "running",
+  "cards": 124,
+  "unauthenticated_status": 403,
+  "opened_parts": [
+    "material",
+    "filter",
+    "theses",
+    "media"
+  ],
+  "unchanged_parts": [
+    "material",
+    "filter",
+    "theses",
+    "media"
+  ],
+  "browser_open_ms": [
+    131.4,
+    83.5,
+    98.8,
+    84.2,
+    83.6
+  ],
+  "retained_after_disconnect": true,
+  "retained_scroll": true,
+  "recovered": true,
+  "reload_cleared_material": true,
+  "page_errors": []
+}
