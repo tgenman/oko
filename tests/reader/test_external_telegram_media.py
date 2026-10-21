@@ -152,3 +152,54 @@ def test_reassessment_closes_only_the_recovered_material_problem(tmp_path):
         assert target['id'] not in affected, str(problems)
         assert other['id'] in affected
         assert problems['recent']
+
+
+def test_new_external_attachment_after_complete_text_is_not_a_failure(tmp_path):
+    external=[False]
+    def response(request):
+        return httpx.Response(200,text=page([(11,'Same own text'+(AUDIO if external[0] else ''))],before=int(request.url.params.get('before','0'))))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        url='/api/v3/materials/'+settled(client)[0]['id']
+        assert client.get(url).json()['content']['completeness']['state']=='complete'
+        external[0]=True
+        client.post(url+'/retry');settled(client)
+        content=client.get(url).json()['content']
+        assert content['external_attachments'][0]['kind']=='audio'
+        assert client.get('/api/v3/status').json()['problems']['count']==0
+
+
+def test_unchanged_external_only_post_is_not_refetched_on_collect(tmp_path):
+    fetches=[]
+    def response(request):
+        if request.url.params.get('before'):fetches.append(str(request.url))
+        return httpx.Response(200,text=page([(11,'Same own text'+AUDIO)],before=int(request.url.params.get('before','0'))))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'));settled(client)
+        # The first fetch establishes the saved external-only state.
+        baseline=len(fetches)
+        client.post('/api/v3/collect')
+        import time
+        for _ in range(150):
+            state=client.get('/api/v3/status').json()
+            if state['ready_sources']==state['total_sources'] and not any(w['phase']=='collecting' for w in state['work']):break
+            time.sleep(.02)
+        assert len(fetches)==baseline
+        assert state['problems']['count']==0
+
+
+def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
+    restricted=[False]
+    def response(request):
+        if request.url.host=='cdn.example':return httpx.Response(200,content=b'local-video',headers={'content-type':'video/mp4'})
+        video=VIDEO if restricted[0] else '<a class="tgme_widget_message_video_player"><video src="https://cdn.example/video.mp4"></video></a>'
+        return httpx.Response(200,text=page([(11,'Own text'+video)],before=int(request.url.params.get('before','0'))))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        url='/api/v3/materials/'+settled(client)[0]['id']
+        attachment=client.get(url).json()['content']['attachments'][0]
+        filename=attachment['url'].rsplit('/',1)[-1]
+        for path in tmp_path.rglob(filename):path.unlink()
+        restricted[0]=True
+        client.post(url+'/retry');settled(client)
+        assert client.get('/api/v3/status').json()['problems']['count']>0

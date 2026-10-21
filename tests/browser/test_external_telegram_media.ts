@@ -20,7 +20,7 @@ test('external Telegram media show typed badges and cards without false download
  await expect(page.locator('#status-toggle')).toHaveText('Status');
  await page.screenshot({path:artifactPath('external-video-desktop.png')});
  await page.setViewportSize({width:390,height:844});
- await page.screenshot({path:artifactPath('external-video-mobile.png')});
+ await page.locator('#external-attachments').screenshot({path:artifactPath('external-video-mobile.png')});
  await page.setViewportSize({width:1280,height:900});
  const audio=page.locator('[data-card]').filter({hasText:'External audio post'});
  await expect(audio.locator('[aria-label="Аудио доступно в Telegram"]')).toBeVisible();
@@ -30,5 +30,6 @@ test('external Telegram media show typed badges and cards without false download
  await expect(page.locator('#external-attachments a')).toHaveText('Слушать в Telegram ↗');
  await expect(page.locator('#external-attachments')).not.toContainText('слишком большое');
  await expect(page.locator('#retry')).toBeHidden();
+ await expect.poll(async()=>{const status=await api('v3/status');return status.problems.count;}).toBe(0);
  await page.screenshot({path:artifactPath('external-audio-desktop.png')});
 });
