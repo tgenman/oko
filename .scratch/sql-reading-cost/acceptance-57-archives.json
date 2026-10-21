@@ -1,0 +1,55 @@
+{
+  "unviewed": {
+    "rows": 100,
+    "vm": 410,
+    "vm_precision": 1,
+    "plan": [
+      "SCAN items USING COVERING INDEX items_unviewed_order"
+    ]
+  },
+  "history_point": {
+    "rows": 1,
+    "vm": 19,
+    "vm_precision": 1,
+    "plan": [
+      "SEARCH history_members USING INDEX history_members_item (item=?)"
+    ]
+  },
+  "job_point": {
+    "rows": 1,
+    "vm": 27,
+    "vm_precision": 1,
+    "plan": [
+      "SEARCH jobs USING INDEX jobs_item (item=?)"
+    ]
+  },
+  "pending": {
+    "rows": 1,
+    "vm": 48,
+    "vm_precision": 1,
+    "plan": [
+      "SEARCH jobs USING COVERING INDEX jobs_pending_next (next<?)",
+      "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+    ]
+  },
+  "receipts_indexed": {
+    "rows": 1500,
+    "vm": 87000,
+    "vm_precision": 100,
+    "plan": [
+      "SCAN r",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH reader_action_results USING COVERING INDEX reader_action_identity_sequence (identity=?)"
+    ]
+  },
+  "receipts_without_index": {
+    "rows": 1500,
+    "vm": 18081000,
+    "vm_precision": 100,
+    "plan": [
+      "SCAN r",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH reader_action_results"
+    ]
+  }
+}
