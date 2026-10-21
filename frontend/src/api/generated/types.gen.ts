@@ -129,6 +129,7 @@ export type AvailablePublicationContent = {
     images: Array<MediaUrl>;
     loading: boolean;
     previous_versions: Array<PreviousVersionReference>;
+    reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
     source_deleted: boolean;
     text: string;
@@ -2125,6 +2126,7 @@ export type PublicationVersion = {
     completeness: ContentCompleteness;
     images: Array<MediaUrl>;
     number: number;
+    reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
     text: string;
     title: string;
@@ -2278,6 +2280,7 @@ export type ReadingTextContent = {
      */
     description: string;
     loading: boolean;
+    reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
     source_deleted: boolean;
     /**
@@ -2388,6 +2391,12 @@ export type RenameFolderRequest = {
      * Trimmed before saving. Must be unique among current folder titles (case-sensitive).
      */
     title: string;
+};
+
+export type ReplyPreview = {
+    author: string | null;
+    source_url: string | null;
+    text: string;
 };
 
 export type RequestInvalidError = {

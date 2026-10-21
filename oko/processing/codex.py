@@ -423,7 +423,7 @@ class Codex:
         return dict(result, local=False)
 
     async def generate(self, request: ProcessingRequest, directory: Path) -> Theses | FilterResult:
-        if sum(len(s.text) + len(s.title) for s in request.sources) > 150_000:
+        if sum(len(s.text) + len(s.title) + (len(s.reply_preview.model_dump_json()) if s.reply_preview else 0) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
         if request.codex_choice is None:
             raise ProcessingError('Выберите и сохраните модель Codex для каждого действия', code='codex-choice')

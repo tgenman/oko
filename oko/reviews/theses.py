@@ -27,6 +27,13 @@ class PublicationTheses:
         row = material_read.item(self.store.db, item)
         if not row or row['viewed'] or not row['complete'] or not self.store.path(item).is_file():
             return None
+        try:
+            header, own_text = self.store.original(item)
+        except (OSError, ValueError):
+            return None
+        reply = header.get('reply_preview')
+        if reply is not None and not own_text.strip() and not reply.get('text', '').strip():
+            return None
         filtered = self.store.filters.read(item)
         if filtered['status'] not in ('off', 'done') or filtered['hidden']:
             return None
@@ -112,7 +119,7 @@ class PublicationTheses:
         if settings['feed']['kind'] == 'youtube':
             text = material['text']
             version = hashlib.sha256(text.encode()).hexdigest()
-        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text),), settings_version=self.store.settings_version(material['feed_id']), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text, reply_preview=material.get('reply_preview')),), settings_version=self.store.settings_version(material['feed_id']), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, settings['feed']['public_ai']
 
     def retry(self, item: str) -> bool:

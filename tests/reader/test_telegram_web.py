@@ -340,8 +340,10 @@ def test_html_quotes_poll_voice_sticker_and_unavailable_document_are_preserved(t
                     headers={'Authorization':'Bearer test'}) as client:
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
-        assert all(text in material['content']['text'] for text in ('Original','Paragraph','Quoted text','Forwarded source','Choose?','50% Yes','report.pdf','12 KB'))
-        assert 'https://t.me/fixture/1' in material['content']['text'] and 'https://t.me/source' in material['content']['text']
+        assert all(text in material['content']['text'] for text in ('Original','Paragraph','Forwarded source','Choose?','50% Yes','report.pdf','12 KB'))
+        assert material['content']['reply_preview'] == dict(author='Reply author', text='Quoted text', source_url='https://t.me/fixture/1')
+        assert 'Quoted text' not in material['content']['text']
+        assert 'https://t.me/source' in material['content']['text']
         assert (material['content']['completeness']['state']=='complete') is False
         assert 'Видео не предоставлено' in material['content']['completeness'].get('message','') and 'Файл документа не предоставлен' in material['content']['completeness'].get('message','')
         assert sorted(a['kind'] for a in material['content']['attachments'])==['audio','image','image']

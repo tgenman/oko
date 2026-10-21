@@ -9,7 +9,7 @@ from pydantic import TypeAdapter
 from oko.reader.generated import models as wire
 from oko.reader import projection_v3 as project, snapshots as facts
 from oko.reader.api_v3 import ApiError, invalid, no_query
-from oko.reader.composition import snippet
+from oko.reader.composition import snippet, telegram_title
 from oko.reader.runtime import Runtime
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage import material_read
@@ -50,8 +50,8 @@ class VersionedReading:
                     preview=preview.replace(fragment,'')
         settings=store.subscriptions.effective('feed',row['feed_id'])
         title=header['title']
-        if settings['feed']['kind']=='telegram' and settings['feed'].get('transport')!='rss' and text:
-            title=text.split('\n',1)[0] or title
+        if settings['feed']['kind']=='telegram' and settings['feed'].get('transport')!='rss':
+            title=telegram_title(header,text)
         folder=store.path(identity).parent
         image=next(iter(sorted(folder.glob('image-*'))),None)
         attachment=next((a for a in header.get('attachments',[]) if a['kind']=='image'),None)
@@ -84,14 +84,14 @@ class VersionedReading:
         job=material_read.jobs(store.db,identity).get('fetch')
         loading=bool(job and (job['status']=='running' or job['status']=='pending' and (not row['complete'] or job['next']<=reader_now(store.clock()))))
         title=header.get('title','Материал загружается')
-        if feed['kind']=='telegram' and feed['transport']!='rss' and text:title=text.split('\n')[0] or title
+        if feed['kind']=='telegram' and feed['transport']!='rss' and row['complete']:title=telegram_title(header,text)
         data=dict(id=identity,title=title,feed_id=row['feed_id'],published_at=project.timestamp(row['published']).root if row['published_known'] else None,
             source_url=row['url'],source_position=row['source_order'],source=source,originals=settings['effective']['originals']['value'])
         if not row['complete']:
             return dict(data,availability='pending',content=dict(availability='pending',loading=loading))
         full=header.get('full',True) and (not header.get('members') or set(header['members'])==set(json.loads(row['members'])))
         from oko.reader.reading_v3 import completeness
-        return dict(data,availability='available',content=dict(availability='available',text=text,description=header.get('description',''),
+        return dict(data,availability='available',content=dict(availability='available',text=text,description=header.get('description',''),reply_preview=header.get('reply_preview'),
             completeness=completeness(full,header.get('reason','')).model_dump(mode='json'),loading=loading,
             changed=bool(store.versions.previous(identity)),source_deleted=store.versions.deleted(identity),
             revision_id=store.content_version(identity),version=store.versions.number(identity)))

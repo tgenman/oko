@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 import httpx
 
-from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, DownloadStage, Attachment, SourceManifest, ResourceManifest
+from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, DownloadStage, Attachment, SourceManifest, ResourceManifest, ReplyPreview
 from oko.collection.telegram.contracts import TelegramPublication, ExpectedMedia
 from oko.collection.telegram.media import Downloader
 
@@ -147,8 +147,39 @@ def parse_page(data: bytes, username: str) -> WebPage:
                 raise SourceError('Неподтверждённый состав альбома Telegram')
             anchors.append(int(match[1]))
         members = tuple(sorted(set(anchors or [message])))
+        reply_preview = None
+        reply = wrapper.select_one('.tgme_widget_message_reply')
+        if reply is not None:
+            def plain(node: Tag | NavigableString) -> str:
+                if isinstance(node, NavigableString):
+                    return str(node)
+                if node.name in ('script', 'style', 'iframe'):
+                    return ''
+                if node.name == 'img':
+                    return str(node.get('alt', ''))
+                if node.name == 'br':
+                    return ' '
+                content = ''.join(plain(child) for child in node.children if isinstance(child, (Tag, NavigableString)))
+                return ' '+content+' ' if node.name in ('div', 'p', 'li') else content
+            def clean(node: Tag | None) -> str:
+                return ' '.join(plain(node).split()) if node is not None else ''
+            author = clean(reply.select_one('.tgme_widget_message_author_name'))
+            fragment = clean(reply.select_one('.js-message_reply_text, .tgme_widget_message_text'))
+            safe = None
+            try:
+                reply_address = urljoin(f'https://t.me/{username}/{message}', str(reply.get('href', ''))) if reply.get('href') else None
+                parsed = urlsplit(reply_address) if reply_address else None
+                if parsed and parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.username and not parsed.password and re.fullmatch(r'https?://[^\s]+', reply_address or ''):
+                    safe = reply_address
+            except ValueError:
+                pass  # Malformed source addresses do not discard the saved excerpt.
+
+            reply_preview = ReplyPreview(author=author or None, text=fragment, source_url=safe)
+            reply.decompose()
+        own_text = [readable(node) for node in wrapper.select('.tgme_widget_message_text')]
+        own_title = next((line.strip() for part in own_text for line in part.splitlines() if line.strip()), '')
         paragraphs = []
-        for quote in wrapper.select('.tgme_widget_message_forwarded_from, .tgme_widget_message_reply'):
+        for quote in wrapper.select('.tgme_widget_message_forwarded_from'):
             paragraphs.append('> '+readable(quote))
         for paragraph in wrapper.select('.tgme_widget_message_text'):
             if paragraph.find_parent(class_='tgme_widget_message_reply') is None:
@@ -167,7 +198,7 @@ def parse_page(data: bytes, username: str) -> WebPage:
         if published is None:
             raise SourceError('Telegram не предоставил дату публикации')
         media = media_blocks(wrapper,username,message)
-        if not media and not body:
+        if not media and not body and reply_preview is None:
             media = (ExpectedMedia('telegram-web:'+str(message)+':unknown','unsupported',None,'media-'+str(message)+'.bin',reason='Предпросмотр не предоставил содержимое публикации'),)
         preview = wrapper.select_one('.tgme_widget_message_link_preview')
         preview_text = readable(preview) if preview else ''
@@ -176,9 +207,9 @@ def parse_page(data: bytes, username: str) -> WebPage:
         resources = tuple(ResourceManifest(key=m.id,origin='telegram:'+username+'/'+str(message),order=i,
             name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
             mime=m.mime or 'application/octet-stream',status='missing' if m.url else 'unsupported',reason=m.reason or '') for i,m in enumerate(media))
-        manifest = SourceManifest(source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.kind) for m in media]),resources=resources)
-        teaser = Material(body.split('\n')[0] or 'Telegram · медиа',body,False,
-                          'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest)
+        manifest = SourceManifest(source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.kind) for m in media]),resources=resources)
+        teaser = Material(own_title or ('Ответ на сообщение' if reply_preview else body.split('\n')[0] or 'Telegram · медиа'),body,False,
+                          'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
         posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published,teaser,members),body,media))
     more = history.select_one('a.js-messages_more[href*="before="]')
     next_before = None
@@ -302,4 +333,4 @@ class WebTelegram:
             reasons.extend(warnings)
         return Material(teaser.title,post.text,not reasons,'; '.join(dict.fromkeys([*reasons,*warnings])),
                         members=post.publication.members,attachments=collected.attachments,
-                        description=teaser.description,source_manifest=manifest,collection_error=collected.error)
+                        description=teaser.description,source_manifest=manifest,collection_error=collected.error,reply_preview=teaser.reply_preview)

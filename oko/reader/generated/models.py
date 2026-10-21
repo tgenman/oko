@@ -908,6 +908,13 @@ class RenameFolderRequest(WireModel):
     )
 
 
+class ReplyPreview(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    author: StrictStr | None
+    source_url: StrictStr | None = Field(..., pattern="^https?://[^\\s]+$")
+    text: StrictStr
+
+
 class RequestInvalidErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     violations: list[FieldViolation] = Field(..., min_length=1)
@@ -2049,6 +2056,7 @@ class PublicationVersion(WireModel):
     completeness: ContentCompleteness
     images: list[MediaUrl]
     number: StrictInt = Field(..., ge=1, le=9007199254740991)
+    reply_preview: ReplyPreview | None
     revision_id: RevisionId
     text: StrictStr
     title: StrictStr
@@ -2092,6 +2100,7 @@ class ReadingTextContent(WireModel):
         ..., description="Source description stored separately from publication text."
     )
     loading: StrictBool
+    reply_preview: ReplyPreview | None
     revision_id: RevisionId
     source_deleted: StrictBool
     text: StrictStr = Field(
@@ -2522,6 +2531,7 @@ class AvailablePublicationContent(WireModel):
     images: list[MediaUrl]
     loading: StrictBool
     previous_versions: list[PreviousVersionReference]
+    reply_preview: ReplyPreview | None
     revision_id: RevisionId
     source_deleted: StrictBool
     text: StrictStr
@@ -4259,6 +4269,7 @@ class ReadingEntityMaterial(
                     "completeness": {"state": "complete"},
                     "description": "example",
                     "loading": False,
+                    "reply_preview": None,
                     "revision_id": "example",
                     "source_deleted": False,
                     "text": "example",

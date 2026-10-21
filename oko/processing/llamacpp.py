@@ -100,7 +100,7 @@ class LlamaCpp:
                         mode='Локальная модель' if local else 'Удалённая или непроверенная обработка: требуется разрешение публичного AI')
 
     async def generate(self, request: ProcessingRequest) -> Theses | FilterResult:
-        if sum(len(s.text) + len(s.title) for s in request.sources) > 150_000:
+        if sum(len(s.text) + len(s.title) + (len(s.reply_preview.model_dump_json()) if s.reply_preview else 0) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
         body = dict(model=self.config.model, stream=False, response_format={'type': 'json_object', 'schema': result_type(request).model_json_schema()},
                     temperature=0, max_tokens=4096, cache_prompt=False, reasoning_effort='none', messages=[

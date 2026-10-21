@@ -76,6 +76,13 @@ class Attachment:
     mime: str
 
 
+class ReplyPreview(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
+    author: str | None = None
+    text: str
+    source_url: str | None = None
+
+
 @dataclass(frozen=True)
 class Material:
     title: str
@@ -89,6 +96,7 @@ class Material:
     collection_error: 'SourceError | None' = None
     description: str = ''
     source_manifest: SourceManifest | None = None
+    reply_preview: ReplyPreview | None = None
 
 
 @dataclass(frozen=True)

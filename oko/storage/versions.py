@@ -132,6 +132,8 @@ class Versions:
         stage.mkdir()
         header = dict(title=material.title, full=material.full, reason=material.reason, members=list(material.members), captions=material.captions,
                       attachments=[dict(name=a.name, kind=a.kind, mime=a.mime) for a in material.attachments])
+        if material.reply_preview is not None:
+            header['reply_preview'] = material.reply_preview.model_dump(mode='json')
         if material.description:
             header['description'] = material.description
         if material.source_manifest:
@@ -254,7 +256,7 @@ class Versions:
             raw, text = path.read_text().split('\n\n', 1)
             header = json.loads(raw)
             base = f'/api/v3/materials/{item}/versions/{number}'
-            return dict(title=header['title'], text=text, full=header['full'], reason=header['reason'],
+            return dict(title=header['title'], text=text, full=header['full'], reason=header['reason'], reply_preview=header.get('reply_preview'),
                         images=[base + '/images/' + p.name for p in sorted(path.parent.glob('image-*'))],
                         attachments=[dict(url=base+'/media/'+a['name'], kind=a['kind'], mime=a['mime']) for a in header['attachments']])
         except (OSError, ValueError, KeyError):

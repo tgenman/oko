@@ -23,7 +23,7 @@ from oko.collection.telegram.read_sync import ReadSync
 from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
-from oko.collection.contracts import SourceError, SourceDeleted, Attachment, Image, Material, Publication, DownloadStage, StagedPayload, SourceManifest
+from oko.collection.contracts import ReplyPreview, SourceError, SourceDeleted, Attachment, Image, Material, Publication, DownloadStage, StagedPayload, SourceManifest
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
@@ -422,7 +422,7 @@ class Store:
     def publication(self, item: str, staging: DownloadStage | None = None) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         fallback = self.material(item) if row else None
-        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', []) if (self.path(item).parent / Path(url).name).is_file()), captions=fallback.get('captions'), description=fallback.get('description', ''), attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []) if (self.path(item).parent / Path(a['url']).name).is_file())) if fallback else None
+        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', []) if (self.path(item).parent / Path(url).name).is_file()), captions=fallback.get('captions'), description=fallback.get('description', ''), reply_preview=ReplyPreview.model_validate(fallback['reply_preview']) if fallback.get('reply_preview') else None, attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []) if (self.path(item).parent / Path(a['url']).name).is_file())) if fallback else None
         if teaser and fallback:
             header = json.loads(self.path(item).read_text().split('\n\n',1)[0]) if self.path(item).is_file() else {}
             manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if 'source_manifest' in header else None
@@ -633,7 +633,7 @@ class Store:
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
-            base.update(text=text, description=header.get('description', ''))
+            base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'))
             return base
         except (OSError, ValueError, KeyError):
             record_caught('store.material')
