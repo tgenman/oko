@@ -1,4 +1,5 @@
 """Whole-post web restrictions through the real reader HTTP interface."""
+from tests.support.telegram import configure_fast_web
 import httpx
 
 from tests.support.app import create_app
@@ -22,6 +23,7 @@ def test_whole_post_restriction_is_saved_separately_without_errors_or_ai(tmp_pat
     options = dict(codex_client=codex, token='test', api_only=True, rss_transport=httpx.MockTransport(response))
     headers = {'Authorization':'Bearer test'}
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
+        configure_fast_web(client)
         configure_codex(client)
         client.patch('/api/v3/settings/oko/global', json=dict(theses=True, prompt_filters='Filter the post'))
         result = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
@@ -46,6 +48,7 @@ def test_whole_post_restriction_is_saved_separately_without_errors_or_ai(tmp_pat
         client.post('/api/v3/collect'); settled(client)
         assert len(fetches) == baseline
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
+        configure_fast_web(client)
         material = client.get(url).json()
         assert material['content']['post_web_unavailable'] is True
         assert client.get('/api/v3/status').json()['problems']['count'] == 0
@@ -67,6 +70,7 @@ def test_whole_post_marker_does_not_override_other_cases(tmp_path, text, media, 
             return httpx.Response(200, content=b'poster', headers={'content-type':'image/jpeg'})
         return httpx.Response(200, text=unavailable_page(int(request.url.params.get('before', '0')), text, media, restricted))
     with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         content = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()['content']
         assert content['post_web_unavailable'] is False
@@ -82,6 +86,7 @@ def test_previous_local_text_is_kept_when_whole_post_becomes_restricted(tmp_path
     def response(request):
         return httpx.Response(200, text=unavailable_page(int(request.url.params.get('before', '0')), '' if restricted[0] else 'Saved own text', restricted=restricted[0]))
     with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         url = '/api/v3/materials/'+settled(client)[0]['id']
         assert client.get(url).json()['content']['text'] == 'Saved own text'
@@ -99,6 +104,7 @@ def test_later_content_is_collected_and_previous_version_keeps_post_restriction(
     def response(request):
         return httpx.Response(200, text=unavailable_page(int(request.url.params.get('before', '0')), text[0], restricted=not text[0]))
     with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         url = '/api/v3/materials/'+settled(client)[0]['id']
         text[0] = 'Now provided by Telegram'
@@ -123,6 +129,7 @@ def test_unknown_unsupported_post_is_reclassified_only_after_source_confirmation
     def response(request):
         return httpx.Response(200, text=unavailable_page(int(request.url.params.get('before', '0')), restricted=confirmed[0]))
     with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         url = '/api/v3/materials/'+settled(client)[0]['id']
         assert client.get(url).json()['content']['post_web_unavailable'] is False
@@ -143,6 +150,7 @@ def test_whole_post_restriction_keeps_local_video_but_does_not_hide_lost_file(tm
         media = '' if restricted[0] else '<a class="tgme_widget_message_video_player"><video src="https://cdn.example/video.mp4"></video></a>'
         return httpx.Response(200,text=unavailable_page(int(request.url.params.get('before','0')),media=media,restricted=restricted[0]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
         video=client.get(url).json()['content']['attachments'][0]
@@ -166,6 +174,7 @@ def test_restricted_post_does_not_hide_neighbour_failure_or_block_explicit_viewe
         html = external_page([(11,''),(12,'Broken file<audio src="https://cdn.example/audio.ogg"></audio>')],before=int(request.url.params.get('before','0')))
         return httpx.Response(200,text=mark_post_unavailable(html,'fixture/11'))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         cards=settled(client,2)
         post=next(c for c in cards if c['post_web_unavailable'])

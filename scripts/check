@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -94,6 +95,11 @@ def descendants(pid):
 
 def execute(command, env, report=None, **output):
     record = None
+    timing_path = None
+    started = time.monotonic()
+    if report and report.current and command[1:4] == ['-m', 'pytest', '-q']:
+        timing_path = report.directory / ('pytest-' + uuid4().hex + '.xml')
+        command = [*command[:4], '--rootdir=' + str(ROOT), '--junitxml=' + str(timing_path), '-o', 'junit_family=xunit1', *command[4:]]
     if report and report.current:
         record = dict(command=[str(part) for part in command], exit_code=None)
         report.data['suites'][report.current]['commands'].append(record)
@@ -171,6 +177,20 @@ def execute(command, env, report=None, **output):
             process.wait()
         finally:
             finish_output()
+            if record is not None:
+                record['duration_seconds'] = round(time.monotonic() - started, 4)
+            if timing_path and timing_path.is_file():
+                suite = report.data['suites'][report.current]
+                try:
+                    durations = [dict(file=case.get('file', ''), name=case.get('name', ''),
+                                      classname=case.get('classname', ''), seconds=float(case.get('time', '0')))
+                                 for case in ET.parse(timing_path).iter('testcase')]
+                    suite.setdefault('test_durations', []).extend(durations)
+                    files = suite.setdefault('file_durations', {})
+                    for case in durations:
+                        files[case['file']] = round(files.get(case['file'], 0) + case['seconds'], 4)
+                except (OSError, ValueError, ET.ParseError) as error:
+                    suite['timing_error'] = str(error)
 
 
 def syntax_commands(node, paths):
@@ -214,6 +234,34 @@ TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/
                'package.json', 'package-lock.json', 'pyproject.toml', 'uv.lock',
                'tsconfig.json', 'tsconfig.browser-tests.json', 'tsconfig.tooling.json',
                'vite.config.mts', 'eslint.config.ts', '.gitignore', 'tests/process_server.py')
+
+
+API_TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development/test_frontend_builder.py',
+                  'tests/development/test_build_speed.py', 'tests/development/test_hooks.py',
+                  'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_FAMILIES = (
+    (('api/', 'frontend/src/api/generated/', 'oko/reader/generated/'), API_TOOL_TESTS),
+    (('scripts/check-report',), ('tests/development/test_check_report.py',)),
+    (('tests/support/telegram_web.py', 'tests/support/telegram.py', 'tests/support/browser_server.py'), ('tests/development/test_browser_host.py',)),
+    (('tests/support/build_tools.py',), ('tests/development/test_frontend_builder.py', 'tests/development/test_build_speed.py', 'tests/api/test_governance.py')),
+    (('tests/support/processes.py',), ('tests/development/test_process_logs.py',)),
+)
+
+
+def tool_test_selection(paths):
+    selected = set()
+    for path in paths:
+        if path in TOOL_TESTS:
+            selected.add(path)
+            continue
+        matched = False
+        for patterns, tests in TOOL_FAMILIES:
+            if any(path.startswith(pattern) if pattern.endswith('/') else path == pattern for pattern in patterns):
+                selected.update(tests)
+                matched = True
+        if not matched:
+            return list(TOOL_TESTS)  # Unknown tooling dependencies fail closed.
+    return [name for name in TOOL_TESTS if name in selected]
 
 
 def tool_changes(root, base=None):
@@ -279,12 +327,14 @@ def parallel_tests(names, commands, environment, report, results, match=None):
     names = jobs
     baseline = checkout_state(report.directory)
     children = {}
+    worker_started, worker_ended = {}, {}
     completed = {}
     interrupted = False
     try:
         for name in names:
             report.output(f'\nRUN {name} (parallel)\n')
             result_file = report.directory / (name + '-result.json')
+            launched = time.monotonic()
             pid = os.fork()
             if pid == 0:
                 os.setsid()
@@ -317,11 +367,13 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                         result_file.write_text(json.dumps({'report': str(child_report.directory / 'report.json')}))
                 os._exit(code if 0 <= code <= 255 else 1)
             children[pid] = (name, result_file)
+            worker_started[pid] = launched
         while len(completed) < len(children):
             for pid in children.keys() - completed.keys():
                 ended, status = os.waitpid(pid, os.WNOHANG)
                 if ended:
                     completed[pid] = status
+                    worker_ended[pid] = time.monotonic()
             if len(completed) < len(children):
                 time.sleep(.02)
     except KeyboardInterrupt:
@@ -346,6 +398,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                 ended, status = os.waitpid(pid, os.WNOHANG)
                 if ended:
                     completed[pid] = status
+                    worker_ended[pid] = time.monotonic()
                     pending.remove(pid)
             if pending:
                 time.sleep(.02)
@@ -361,16 +414,17 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                 pass
         for pid in pending:
             _, completed[pid] = os.waitpid(pid, 0)
+            worker_ended[pid] = time.monotonic()
         job_results = {}
         job_seconds = {}
         for pid, (name, result_file) in children.items():
             owner = owners[name]
             report.current = owner
+            job_seconds[name] = round(worker_ended.get(pid, time.monotonic()) - worker_started[pid], 4)
             if result_file.exists():
                 child = json.loads(Path(json.loads(result_file.read_text())['report']).read_text())
                 report.output(Path(child['log']).read_text())
                 data = child['suites'][name]
-                job_seconds[name] = child['duration_seconds']
                 if name == owner:
                     report.data['suites'][owner] = data
                 else:
@@ -378,6 +432,10 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                     aggregate['commands'].extend(data['commands'])
                     aggregate['failures'] = list(dict.fromkeys([*aggregate['failures'], *data['failures']]))
                     aggregate.setdefault('workers', {})[name] = data
+                    aggregate.setdefault('test_durations', []).extend(data.get('test_durations', []))
+                    files = aggregate.setdefault('file_durations', {})
+                    for filename, seconds in data.get('file_durations', {}).items():
+                        files[filename] = round(files.get(filename, 0) + seconds, 4)
                 job_results[name] = data['status']
                 if completed.get(pid) != 0 and job_results[name].startswith('PASS'):
                     job_results[name] = 'FAIL (worker exited abnormally)'
@@ -386,9 +444,12 @@ def parallel_tests(names, commands, environment, report, results, match=None):
         for owner in original_names:
             report.data['suites'][owner]['failures'] = list(dict.fromkeys(report.data['suites'][owner]['failures']))
             statuses = [status for name, status in job_results.items() if owners[name] == owner]
-            results[owner] = (statuses[0] if len(statuses) == 1 else
-                              f"PASS ({max(job_seconds[name] for name in job_seconds if owners[name] == owner):.2f}s)" if all(value.startswith('PASS') for value in statuses)
-                              else next(value for value in statuses if not value.startswith('PASS')))
+            durations = {name:seconds for name, seconds in job_seconds.items() if owners[name] == owner}
+            elapsed = max(durations.values(), default=0)
+            report.data['suites'][owner].update(duration_seconds=elapsed, worker_durations=durations,
+                worker_results={name:status for name,status in job_results.items() if owners[name] == owner})
+            outcome = 'PASS' if all(value.startswith('PASS') for value in statuses) else 'INTERRUPTED' if interrupted else 'FAIL'
+            results[owner] = 'INTERRUPTED' if interrupted else f'{outcome} ({elapsed:.2f}s)'
         after = checkout_state(report.directory)
         changed = sorted(name for name in baseline.keys() | after.keys() if baseline.get(name) != after.get(name))
         for name in original_names:
@@ -481,12 +542,14 @@ def main():
         except (TaskError, OSError, ValueError) as error:
             print(str(error), file=sys.stderr)
             return 1
+    if tools_required and not args.files and ('all' in args.sets or args.if_changed):
+        selected_files['tool-tests'] = tool_test_selection(tool_inputs)
     report = Report(args.report_dir.resolve(), names, selected_files)
     report.compact = args.compact
     if os.environ.get('OKO_CHECK_SNAPSHOT'):
         report.data['snapshot'] = json.loads(os.environ['OKO_CHECK_SNAPSHOT'])
     report.data['browser_name_pattern'] = args.match
-    report.data['tool_selection'] = dict(required=tools_required, inputs=tool_inputs, base=args.base)
+    report.data['tool_selection'] = dict(required=tools_required, inputs=tool_inputs, base=args.base, tests=selected_files['tool-tests'] or (list(TOOL_TESTS) if 'tool-tests' in names else []))
     if ('all' in args.sets and not args.files) or args.if_changed:
         report.output('Tool tests: ' + ('selected' if tools_required else 'unchanged; not selected') + '\n')
     results = dict.fromkeys(names, 'NOT RUN')

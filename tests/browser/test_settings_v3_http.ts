@@ -33,8 +33,15 @@ test('lost v3 settings response is reconciled without replay and keeps a newer d
   const screenshot=artifactPath('settings-v3-desktop.png');
   await page.screenshot({path:screenshot,fullPage:true});
   console.log('Settings desktop screenshot: '+screenshot);
+  // Consume the changed server status while observations are still offline.
+  // Recovery must also retry after a confirmed *unchanged* status frame.
+  for(let i=0;i<2;i++)await page.waitForResponse(async response=>{
+    if(!response.url().endsWith('/api/v3/reading/check'))return false;
+    const frame=await response.json();return frame.resources?.some((r:{kind:string;state:string})=>r.kind==='status'&&r.state==='unchanged');
+  });
   online=true;
   await expect(page.locator('#status-panel')).not.toContainText('Action outcome unknown',{timeout:8000});
+  await expect(page.locator('#status-toggle')).toHaveText('Status');
   expect(sent).toBe(1);
   const response=await page.request.get(origin+'/api/v3/settings/oko/global',{headers:{Authorization:'Bearer '+token}});
   expect((await response.json()).effective.prompt_theses.value).toBe('Сохранённый текст');

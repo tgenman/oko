@@ -113,3 +113,21 @@ PASS, 8.53 с; 4 browser-сценария, tooling-types и browser-types про
 Машинный результат: [checks/ci-race-browser-repeat.json](checks/ci-race-browser-repeat.json).
 Приложение после успешного полного прогона не менялось; полный локальный набор
 повторно не запускался из-за изменения только ожиданий в этих двух тестах.
+
+## Интеграция с параллельно обновившимся main
+
+В main вошёл `f213a76` (#79). Ветка задачи согласована с ним; разрешены три
+пересечения: coordination и два Telegram browser-сценария.
+Сохранены `onCollectionPoll`, отдельная сводка сбора и main-правило сверки
+receipts при каждом подтверждённом статусе, включая unchanged. В Telegram-тестах
+использован общий `openReader()` из main вместо отдельного ожидания #collect.
+Работающий экземпляр не перезапускался. Серверный код реализации не менялся.
+
+Повторное Standards/Spec ревью разрешений против обоих родителей — без замечаний.
+Проверены пять браузерных файлов: collection status, external Telegram media,
+Telegram post unavailable, reader readiness и settings v3 HTTP.
+`./scripts/check browser --files … --compact --in-place`: PASS, 27.77 с;
+базовая типизация инструментов/браузера и все выбранные сценарии прошли.
+Машинный результат: [checks/main-integration.json](checks/main-integration.json).
+Полный локальный прогон выше относится к явно указанному дереву до интеграции;
+успешный целевой прогон относится к разрешённым пересечениям.

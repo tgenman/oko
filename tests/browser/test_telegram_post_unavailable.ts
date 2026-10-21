@@ -4,10 +4,9 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
 test('whole Telegram post uses link card C separately from audio and large video',{timeout:30000},async t=>{
- const {page,api,origin,token}=await productionReader(t);
- await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
- await page.goto(origin+'/#token='+token);
- await expect(page.locator('#collect')).toBeEnabled();
+ const {page,api,openReader}=await productionReader(t);
+ await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
+ await openReader();
  await api('v3/telegram/connect','POST',{source_locator:'@postunavailable',folder:'News'});
  const post=page.locator('[data-card]').filter({hasText:'Пост доступен только в Telegram'});
  await expect(post.locator('[aria-label="Пост недоступен для веб-просмотра"]')).toBeVisible();

@@ -1,4 +1,5 @@
 """Public web collection through the reader, without any Telegram configuration."""
+from tests.support.telegram import configure_fast_web
 from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
 import time
 
@@ -20,6 +21,7 @@ def test_web_connect_collects_text_and_links_without_client_or_read_sync(tmp_pat
         return httpx.Response(200,text=page([(11,'Hello<br>World <a href="https://example.org/article?a=1&amp;b=2">article</a>')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         connected = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         assert connected.status_code == 200, connected.text
         cards = settled(client)
@@ -49,6 +51,7 @@ def test_web_catchup_keeps_old_frontier_and_resumes_remaining_pages_after_restar
     options = dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
     headers = {'Authorization':'Bearer test'}
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',
                     initial_history={'mode':'count','count':'1'}))
         old = settled(client)[0]['id']
@@ -58,6 +61,7 @@ def test_web_catchup_keeps_old_frontier_and_resumes_remaining_pages_after_restar
         assert held.wait(3)
     phase[0] = 2
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
+        configure_fast_web(client)
         cards = settled(client,5)
         assert {m for c in cards for m in [int(identity) for identity in c['source']['message_ids']]} == {2,3,4,5,6}
         assert len({c['id'] for c in cards}) == 5
@@ -85,6 +89,7 @@ def test_recorded_album_anchors_are_one_web_publication(tmp_path):
         return httpx.Response(200,content=data)
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@durov',folder='Inbox'))
         assert result.status_code == 200, result.text
         cards = settled(client,19,timeout=30)
@@ -107,6 +112,7 @@ def test_web_media_is_downloaded_locally_with_no_reader_credentials(tmp_path):
         return httpx.Response(200,text=page([(11,'Photo'+photo)]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         assert (material['content']['completeness']['state']=='complete') is True
@@ -128,6 +134,7 @@ def test_media_completion_is_not_author_edit_but_changed_known_bytes_are(tmp_pat
         return httpx.Response(200,text=page([(11,'Photo'+photo)]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         deadline = time.monotonic()+2
         failed = None
@@ -172,6 +179,7 @@ def test_media_redirect_cannot_reach_a_local_service(tmp_path):
         return httpx.Response(200,text=page([(11,'Photo<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/start\')"></a>')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         assert (material['content']['completeness']['state']=='complete') is False
@@ -194,6 +202,7 @@ def test_stream_without_length_stops_at_200_mib_without_automatic_retry(tmp_path
         return httpx.Response(200,text=page([(11,'Video<video src="https://cdn.example/large"></video>')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         deadline = time.monotonic()+5
         material = None
@@ -233,6 +242,7 @@ def test_dns_private_answer_is_rejected_before_connecting(tmp_path,monkeypatch):
             return httpx.Response(200,text=page([(11,'Photo<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://private.example/photo\')"></a>')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=FixtureTransport()),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         assert (material['content']['completeness']['state']=='complete') is False and 'Небезопасный адрес' in material['content']['completeness'].get('message','')
@@ -252,6 +262,7 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
         return httpx.Response(200,text=page([(11,('Photo https://telegra.ph/Article ' if telegraph else 'Photo')+'<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo\')"></a>')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         original = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         phase[0] = 1
@@ -290,6 +301,7 @@ def test_album_first_part_deletion_and_new_url_keep_one_card_and_tombstone(tmp_p
         return httpx.Response(200,text=page([(first,'Album caption'+anchors)]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',initial_history={'mode':'count','count':'1'}))
         original = settled(client)[0]
         assert [int(identity) for identity in original['source']['message_ids']] == [11,12]
@@ -316,6 +328,7 @@ def test_web_date_boundary_is_inclusive_without_enrolling_earlier_post(tmp_path)
         return httpx.Response(200,text=text)
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',
                     initial_history={'mode':'date','date':'2026-10-15','timezone':'UTC'}))
         assert result.status_code == 200, result.text
@@ -338,6 +351,7 @@ def test_html_quotes_poll_voice_sticker_and_unavailable_document_are_preserved(t
         return httpx.Response(200,text=page([(11,'Original<br>Paragraph'+markup)]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         assert all(text in material['content']['text'] for text in ('Original','Paragraph','Forwarded source','Choose?','50% Yes','report.pdf','12 KB'))
@@ -364,6 +378,7 @@ def test_store_rejects_unowned_staged_file_from_source(tmp_path):
                 StagedPayload(foreign,foreign.stat().st_size,hashlib.sha256(foreign.read_bytes()).hexdigest()),'file','application/octet-stream'),)))
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=BadSource()),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
             if 'Ошибка сбора' in [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]:
@@ -386,6 +401,7 @@ def test_retry_and_save_do_not_read_all_retained_media_into_ram(tmp_path,monkeyp
         return httpx.Response(200,text=page([(11,'Photo<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo\')"></a>')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         identity = settled(client)[0]['id']
         read_bytes = Path.read_bytes
@@ -415,6 +431,7 @@ def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync
     with TestClient(create_app(tmp_path,token='test',api_only=True,
             rss_transport=httpx.MockTransport(lambda r:httpx.Response(200,text=page([(11,'Public')])))),
             headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
         connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web'))
         assert connected.status_code==200,connected.text
         card=settled(client)[0]
