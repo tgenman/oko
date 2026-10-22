@@ -63,3 +63,7 @@
 Целевой набор templates/projections/HTTP representatives/batch ownership — 37 PASS за 18,94 с; regression import/filter после исправления — 1 PASS за 4,53 с. Staged diff, tooling/browser types и все остальные обязательные наборы финального runner — PASS. Независимый reviewer проверил scope, публикацию и очистку seed, изоляцию групп и перенос матриц; замечание filtered import закрыто, остаточных замечаний нет. Отдельно проверил heartbeat filter и сохранность guards от content rereads.
 
 Сырые report.json/output.log/JUnit/latency JSON и PNG сохранены в `.scratch/test-initializations/evidence/` вне индекса. Финальный исходный отчёт: `/tmp/oko-init-full-complete/20261022T193757Z-f7873976/report.json`.
+
+## Исправление tools CI перед слиянием
+
+PR #88: tools job упал в новой batch regression, запускавшей browser wrapper, хотя Chromium устанавливается только browser job. Группировка вынесена в browser-free scripts/browser-batches.cts; tools regression использует этот же batch owner и настоящий Node test child без Chromium. При явно несуществующем OKO_BROWSER_EXECUTABLE regression PASS5,37 с. Настоящие HTTP/context/abort/suite process cleanup отдельно PASS (browser10,76 с), tooling/browser types PASS. Независимое ревью без замечаний. Полный локальный173,90 с относится к предшествующему коду с тем же алгоритмом; после выделения seam повторены затронутые границы.
