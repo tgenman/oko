@@ -1,5 +1,6 @@
 // Own Chromium for one node --test command. Scenarios still own fresh contexts.
 import {chromium} from 'playwright';
+import {browserLaunchOptions} from './browser-launch.mts';
 import {spawn,execFileSync,type ChildProcess} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 
@@ -32,10 +33,9 @@ async function main() {
   const interrupt=()=>forward('SIGINT'),terminate=()=>forward('SIGTERM');
   process.on('SIGINT',interrupt);process.on('SIGTERM',terminate);
   try {
-    const browser = await chromium.launchServer({headless:true,host:'127.0.0.1',
+    const browser = await chromium.launchServer({...browserLaunchOptions(),host:'127.0.0.1',
       handleSIGINT:false,handleSIGTERM:false,
-      args:['--host-resolver-rules=MAP oko 127.0.0.1','--no-proxy-server'],
-      executablePath:process.env.OKO_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+      args:['--host-resolver-rules=MAP oko 127.0.0.1','--no-proxy-server']});
     try {
       if(stopped){process.exitCode=stopped==='SIGINT'?130:143;return;}
       child = spawn(process.execPath,process.argv.slice(2),{

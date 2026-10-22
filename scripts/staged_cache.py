@@ -24,7 +24,7 @@ def key():
         if file.is_file() and '__pycache__' not in file.parts and file.suffix != '.pyc':
             add(str(file.relative_to(root)).encode())
             add(file.read_bytes())
-    for name in ('eslint.config.ts', '.githooks/pre-commit', 'package.json', 'package-lock.json',
+    for name in ('eslint.config.ts', 'package.json', 'package-lock.json',
                  'node_modules/.package-lock.json'):
         file = root / name
         add(name.encode())
