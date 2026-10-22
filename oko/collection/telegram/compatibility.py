@@ -28,12 +28,22 @@ def source_error(error: AdapterException) -> SourceError:
                        retryable=error.issue.kind.value in ('temporary', 'source_wait'))
 
 
-def material(value: PublicationContent) -> Material:
+def material(value: PublicationContent, previous: Material | None = None) -> Material:
     extra = value.content['extra']['telegram']
     manifest = SourceManifest.model_validate_json(json.dumps(extra['manifest']))
+    if manifest.preview_error and previous and previous.source_manifest and previous.source_manifest.preview_fragment:
+        manifest = manifest.model_copy(update={'preview_fragment': previous.source_manifest.preview_fragment})
     reply = manifest.post.get('reply_preview')
-    return Material(value.metadata.title, str(manifest.post['text']), False,
-                    'Вложения ещё не загружены' if value.media else '',
+    title, text = value.metadata.title, str(manifest.post['text'])
+    reason = 'Вложения ещё не загружены' if value.media else ''
+    if manifest.post_web_unavailable and text.strip():
+        preview = manifest.preview_fragment or ''
+        headline = next((line.strip(' \t\r\u2063\u200b\ufeff') for line in preview.splitlines() if any(char.isalnum() for char in line)), '')
+        title = (headline if len(headline) <= 140 else headline[:140].rstrip()+'…') or 'Фрагмент предпросмотра Telegram недоступен'
+        text = '\n\n'.join(part for part in (text, preview) if part)
+        reason = ('Сохранён фрагмент предпросмотра; полная публикация недоступна для веб-просмотра'
+                  if preview else 'Фрагмент предпросмотра недоступен; откройте пост в Telegram')
+    return Material(title, text, False, reason,
                     members=tuple(extra['members']), description=extra['description'],
                     source_manifest=manifest,
                     reply_preview=ReplyPreview.model_validate(reply) if reply else None)
@@ -70,14 +80,16 @@ class _Downloads(Downloader):
         except BaseException as error:
             target.unlink(missing_ok=True)
             if isinstance(error, AdapterException):
-                raise source_error(error) from error
+                raise source_error(error)
             raise
 
 
 class TelegramWebSource(TelegramSource):
     """Use the external API while keeping old storage/HTTP presentation working."""
     def _api(self) -> TelegramWebAdapter:
-        return TelegramWebAdapter(self.http_transport)
+        if not hasattr(self, '_publication_adapter'):
+            self._publication_adapter = TelegramWebAdapter(self.http_transport)
+        return self._publication_adapter
 
     async def discover(self, cursor: str | None) -> DiscoveryResult:
         # Existing in-progress cursors and date selection finish on their old
@@ -126,7 +138,7 @@ class TelegramWebSource(TelegramSource):
                 self.gap = '; '.join(warnings) or None
                 complete = not page.has_more
         except AdapterException as error:
-            raise source_error(error) from error
+            raise source_error(error)
         was_complete = previous.selection.scan_complete if previous else False
         enrolled = tuple(p.id for p in result) if not was_complete else ()
         selection = HistorySelection(since=0, enrolled_ids=enrolled,
@@ -143,28 +155,32 @@ class TelegramWebSource(TelegramSource):
         try:
             value = await api.fetch(reference(publication.url))
         except AdapterException as error:
-            raise source_error(error) from error
+            raise source_error(error)
         if value.needs_fetch:
             raise SourceError('Не удалось разобрать публикацию Telegram', code='malformed_publication', retryable=False)
-        teaser = material(value)
+        teaser = material(value, publication.teaser)
         manifest = teaser.source_manifest
         assert manifest
+        if manifest.post_web_unavailable and str(manifest.post['text']).strip():
+            return FetchResult(await enrich(teaser, publication.teaser, stage, self.http_transport), self.observation())
         by_key = {item.key: item for item in value.media}
         expected = tuple(ExpectedMedia(r.key, 'photo' if r.kind=='image' else
             'document' if r.kind=='file' else cast(Literal['photo', 'video', 'audio', 'document', 'unsupported'], r.kind), by_key[r.key].locator if r.key in by_key else None,
             r.name, r.mime, reason=r.reason, external=r.external) for r in manifest.resources)
         collected = await _Downloads(api, value).collect(expected, manifest.resources, publication.teaser, stage)
-        manifest = manifest.model_copy(update={'resources': collected.resources})
+        partial = bool(collected.error and collected.error.code == 'media-unavailable'
+                       and (teaser.text.strip() or collected.attachments))
+        manifest = manifest.model_copy(update={'resources': collected.resources, 'download_partial': partial})
         reasons = list(collected.reasons)
         warnings = [r.reason for r in collected.resources if r.reason]
         old = publication.teaser.source_manifest if publication.teaser else None
         if old and old.post != manifest.post:
             reasons.extend(warnings)
         result = Material(teaser.title, teaser.text,
-            not manifest.post_web_unavailable and not reasons and not any(r.status=='external' for r in collected.resources),
+            not partial and not manifest.post_web_unavailable and not reasons and not any(r.status=='external' for r in collected.resources),
             '; '.join(dict.fromkeys([*reasons, *warnings])), members=teaser.members,
             attachments=collected.attachments, description=teaser.description,
-            source_manifest=manifest, collection_error=collected.error, reply_preview=teaser.reply_preview)
+            source_manifest=manifest, collection_error=None if partial else collected.error, reply_preview=teaser.reply_preview)
         if stage and not stage.admitted():
             raise asyncio.CancelledError
         return FetchResult(await enrich(result, publication.teaser, stage, self.http_transport), self.observation())

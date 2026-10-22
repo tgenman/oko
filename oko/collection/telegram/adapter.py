@@ -17,7 +17,7 @@ from oko.collection.adapters import (
 from oko.collection.contracts import SourceDeleted, SourceDeferred, SourceError
 from oko.collection.telegram.contracts import TelegramPublication
 from oko.collection.telegram.media import Downloader
-from oko.collection.telegram.web import load
+from oko.collection.telegram.web import load, WebPage
 
 
 def reference(url: str) -> ExternalReference:
@@ -95,7 +95,7 @@ def content(post: TelegramPublication) -> PublicationContent:
         datetime.fromtimestamp(publication.published, timezone.utc) if publication.published_known else None),
         dict(blocks=blocks, extra=dict(telegram=dict(members=list(publication.members),
             description=teaser.description, manifest=teaser.source_manifest.model_dump(mode='json')))),
-        tuple(media), needs_fetch=False, issues=tuple(issues))
+        tuple(media), needs_fetch=bool(teaser.source_manifest.post_web_unavailable and post.text.strip()), issues=tuple(issues))
 
 
 def resource_identity(locator: str) -> str:
@@ -108,6 +108,7 @@ def resource_identity(locator: str) -> str:
 class TelegramWebAdapter:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.transport = transport
+        self._head: tuple[str, int, WebPage] | None = None
 
     async def resolve_feed(self, url: str) -> FeedMetadata:
         name = username(reference(url))
@@ -119,6 +120,7 @@ class TelegramWebAdapter:
             raise AdapterException(AdapterIssue('source_identity_unavailable',
                 'Telegram не предоставил пригодных идентификаторов публикаций', AdapterErrorKind.permanent))
         upper = max((max(p.publication.members) for p in page.posts), default=0)
+        self._head = (name, upper, page)
         return FeedMetadata(reference('https://t.me/s/'+name), page.title, page.description,
                             encode(upper, upper) if upper else '')
 
@@ -130,7 +132,10 @@ class TelegramWebAdapter:
         issues: list[AdapterIssue] = []
         while True:
             try:
-                page, _ = await load(name, before, self.transport, partial=True)
+                if self._head and self._head[:2] == (name, upper) and before == upper+1:
+                    page = self._head[2]
+                else:
+                    page, _ = await load(name, before, self.transport, partial=True)
             except SourceError as error:
                 raise failure(error) from error
             issues.extend(issue for issue in page.issues if issue not in issues)
@@ -193,7 +198,19 @@ class TelegramWebAdapter:
         post = next((p for p in page.posts if identity in p.publication.members or int(p.publication.id) == identity), None)
         if post is None:
             raise failure(SourceDeleted(), publication)
-        return content(post)
+        value = content(post)
+        if value.needs_fetch and post.publication.teaser:
+            from oko.collection.telegram.preview import fragment
+            try:
+                preview, preview_error = await fragment(name, post.publication.id, self.transport, None)
+            except SourceError as source_error:
+                raise failure(source_error, publication) from source_error
+            manifest = value.content['extra']['telegram']['manifest']
+            manifest.update(preview_fragment=preview, preview_error=preview_error)
+            if preview:
+                value.content['blocks'].append(dict(type='text', role='body', text=preview))
+            value = replace(value, needs_fetch=False)
+        return value
 
     async def download_media(self, publication: ExternalReference, media: MediaReference,
                              output: BinaryIO) -> MediaReference:
