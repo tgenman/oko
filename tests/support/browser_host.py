@@ -68,7 +68,11 @@ def main():
             command = json.loads(line)
             key = command['id']
             try:
-                if command['op'] == 'start':
+                if command['op'] == 'prepare':
+                    from tests.support.performance_seed import seed
+                    seed(Path(command['data']), command['per_feed'], bool(command['active']))
+                    result = {}
+                elif command['op'] == 'start':
                     scenario = Scenario(command['data'], command['token'], bool(command.get('persistent')), hostname=command.get('hostname', '127.0.0.1'),collection=bool(command.get('collection',1)),processing_delay=command.get('processing_delay',0))
                     scenarios[key] = scenario
                     result = {'origin': scenario.origin}
