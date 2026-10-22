@@ -83,7 +83,8 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
                 source_url=f'https://t.me/{username}/{member}',
                 restriction='size_limit' if label and label.get_text(' ',strip=True)=='Media is too big' else None,
                 title=media_title.get_text(' ',strip=True) if media_title else None,
-                author=author.get_text(' ',strip=True) if author else None,
+                size_label=(' '.join(author.stripped_strings) if author and kind=='document' and re.fullmatch(r'[0-9]+(?:[.,][0-9]+)?\s*(?:B|KB|MB|GB|TB|KiB|MiB|GiB)', ' '.join(author.stripped_strings), re.IGNORECASE) else None),
+                author=author.get_text(' ',strip=True) if author and kind!='document' else None,
                 duration=duration.get_text(' ',strip=True) if duration else None)
         if kind == 'photo':
             result.append(ExpectedMedia(key,'photo',url,name,mime,reason=reason or None,external=external))
@@ -202,7 +203,7 @@ def parse_page(data: bytes, username: str) -> WebPage:
         for paragraph in wrapper.select('.tgme_widget_message_text'):
             if paragraph.find_parent(class_='tgme_widget_message_reply') is None:
                 paragraphs.append(readable(paragraph))
-        for selector in ('.tgme_widget_message_poll', '.tgme_widget_message_document_wrap', '.tgme_widget_message_contact'):
+        for selector in ('.tgme_widget_message_poll', '.tgme_widget_message_contact'):
             paragraphs.extend(readable(node) for node in wrapper.select(selector))
         service = wrapper.select_one('.service_message')
         if service and not paragraphs:
@@ -230,7 +231,9 @@ def parse_page(data: bytes, username: str) -> WebPage:
             name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
             mime=m.mime or 'application/octet-stream',status='external' if m.external else 'missing' if m.url else 'unsupported',reason=m.reason or '',external=m.external) for i,m in enumerate(media))
         manifest = SourceManifest(post_web_unavailable=post_web_unavailable,source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
-        teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or ('Ответ на сообщение' if reply_preview else body.split('\n')[0] or 'Telegram · медиа'),body,False,
+        file_title = next((node.get_text(' ',strip=True) for node in wrapper.select('.tgme_widget_message_document_title') if node.get_text(' ',strip=True)), '')
+        file_fallback = file_title or ('Файл доступен в Telegram' if any(m.kind=='document' for m in media) else '')
+        teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа')),body,False,
                           'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
         posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published,teaser,members),body,media))
     more = history.select_one('a.js-messages_more[href*="before="]')

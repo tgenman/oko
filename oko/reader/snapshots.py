@@ -233,6 +233,7 @@ class ExternalAttachment(WireModel):
     reason: Literal["public_preview_unavailable"]
     restriction: Literal["size_limit"] | None = None
     title: str | None = None
+    size_label: str | None = None
     author: str | None = None
     duration: str | None = None
     poster_url: str | None = None

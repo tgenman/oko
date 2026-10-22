@@ -30,3 +30,7 @@ def mark_post_unavailable(html, identity):
         wrapper['class'].append('text_not_supported_wrap')
         wrapper.append(BeautifulSoup('<div class="message_media_not_supported"><div class="message_media_not_supported_label">Please open Telegram to view this post</div><a class="message_media_view_in_telegram" href="https://t.me/'+identity+'">VIEW IN TELEGRAM</a></div>', 'html.parser'))
     return str(document)
+
+# Structure checked against public embed lexkravetski/861 on 2026-10-22;
+# URL/identity are synthetic so tests never contact the real channel.
+DOCUMENT = '<a class="tgme_widget_message_document_wrap" href="https://t.me/fixture/13"><div class="tgme_widget_message_document_icon accent_bg"></div><div class="tgme_widget_message_document"><div class="tgme_widget_message_document_title accent_color">Бесы.txt</div><div class="tgme_widget_message_document_extra">36.2 KB</div></div></a>'

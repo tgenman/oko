@@ -16400,6 +16400,8 @@ components:
           enum: [size_limit, null]
         title:
           type: [string, 'null']
+        size_label:
+          type: [string, 'null']
         author:
           type: [string, 'null']
         duration:
@@ -16408,13 +16410,14 @@ components:
           anyOf:
           - $ref: '#/components/schemas/MediaUrl'
           - type: 'null'
-      required: [kind, source_url, reason, restriction, title, author, duration, poster_url]
+      required: [kind, source_url, reason, restriction, title, size_label, author, duration, poster_url]
       examples:
       - kind: audio
         source_url: https://t.me/example/1
         reason: public_preview_unavailable
         restriction: null
         title: null
+        size_label: null
         author: null
         duration: null
         poster_url: null

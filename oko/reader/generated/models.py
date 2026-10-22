@@ -1868,6 +1868,7 @@ class ExternalAttachment(WireModel):
     poster_url: MediaUrl | None
     reason: Literal["public_preview_unavailable"]
     restriction: Literal["size_limit"] | None
+    size_label: StrictStr | None
     source_url: SourceUrl
     title: StrictStr | None
 
