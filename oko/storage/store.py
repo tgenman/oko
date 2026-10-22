@@ -211,7 +211,7 @@ class Store:
                     WHERE i.feed_id=? AND i.viewed=0 AND j.status!='running'""", (feed,)).fetchall():
                 material = self.material(row['id'])
                 unavailable = self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone()
-                if material and (material.get('external_only') or material.get('post_web_unavailable') and not material.get('reason')) and not row['error'] and not unavailable:
+                if material and not row['error'] and not unavailable and not self._needs_collection(row['id']):
                     continue
                 if row['members'] != '[]' and material and material['full']:
                     continue
@@ -333,7 +333,7 @@ class Store:
     def _needs_collection(self, item: str, observed: Material | None = None) -> bool:
         material = self.material(item)
         header, _ = self.original(item) if material and not material['full'] else ({}, '')
-        linked_partial = telegraph_partial(SourceManifest.model_validate_json(json.dumps(header['source_manifest']))) if header.get('source_manifest') else False
+        linked_partial = expected_incomplete(SourceManifest.model_validate_json(json.dumps(header['source_manifest']))) if header.get('source_manifest') else False
         if not material or not material['full'] and not (linked_partial or material.get('external_only') or material.get('post_web_unavailable') and not material.get('reason')):
             return True
         if material['full']:
@@ -468,7 +468,7 @@ class Store:
             if retained and retained.teaser:
                 material = replace(retained.teaser, full=False, members=material.members,
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
-        if previous and previous['full'] and not material.full and not material.collection_error and telegraph_partial(material.source_manifest):
+        if previous and previous['full'] and not material.full and not material.collection_error and material.source_manifest and telegraph_partial(material.source_manifest) and not material.source_manifest.download_partial:
             with self.db:
                 self.finish(job)
                 self.subscriptions.history.saved(job.item, True)

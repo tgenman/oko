@@ -23,7 +23,7 @@ def telegraph_partial(manifest: SourceManifest | None) -> bool:
 
 def expected_incomplete(manifest: SourceManifest | None) -> bool:
     """A confirmed access restriction alone does not require another download."""
-    return bool(manifest and (telegraph_partial(manifest) or manifest.post_web_unavailable and all(r.status=='loaded' and not r.reason or r.status=='external' and r.external for r in manifest.resources) and all(not a.reason for a in manifest.articles) or external_only(manifest)))
+    return bool(manifest and (manifest.download_partial or telegraph_partial(manifest) or manifest.post_web_unavailable and all(r.status=='loaded' and not r.reason or r.status=='external' and r.external for r in manifest.resources) and all(not a.reason for a in manifest.articles) or external_only(manifest)))
 
 
 def saved_external(header: dict[str, Any], base: str) -> dict[str, Any]:

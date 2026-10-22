@@ -70,6 +70,7 @@ class Versions:
                     header.pop('reason',None)
                     manifest = header['source_manifest']
                     manifest.pop('source_url',None)
+                    manifest.pop('download_partial',None)
                     for resource in manifest.get('resources',[]):
                         resource.pop('source_url',None)
                         resource.pop('reason',None)

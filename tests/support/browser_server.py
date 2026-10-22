@@ -36,6 +36,12 @@ class BrowserTelegram(Telegram):
 
 
 def response(request):
+    if request.url.host == 'broken-telegram.example':
+        from tests.support.telegram_web import BrokenMediaStream
+        return httpx.Response(200, stream=BrokenMediaStream(), headers={'content-type':'video/mp4'})
+    if request.url.host == 't.me' and '/brokenstream' in request.url.path:
+        media = '<a class="tgme_widget_message_video_player"><video src="https://broken-telegram.example/video.mp4"></video></a>'
+        return httpx.Response(200, text=page([(11, 'Текст сохранён до обрыва' + media)]).replace('fixture/', 'brokenstream/'))
     if request.url.host == 'cdn.example':
         return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
     if request.url.host == 't.me' and any('/'+name in request.url.path for name in ('externalmedia','postunavailable')):

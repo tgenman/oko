@@ -120,15 +120,20 @@ class Downloader:
                             yield response
                             return
                 raise SourceError('Слишком много перенаправлений вложения')
-        except (httpx.HTTPError,httpcore.NetworkError,httpcore.TimeoutException,TimeoutError,OSError,KeyError) as error:
+        except (httpx.HTTPError,httpcore.NetworkError,httpcore.TimeoutException,httpcore.ProtocolError,TimeoutError,OSError,KeyError) as error:
             delay,code = 60,'media-unavailable'
+            label = 'Не удалось загрузить вложение'
+            if isinstance(error, (httpcore.ProtocolError, httpx.ProtocolError)):
+                label = 'Не удалось загрузить вложение: соединение оборвано до завершения передачи'
+            elif isinstance(error, (httpcore.TimeoutException, httpx.TimeoutException, TimeoutError)):
+                label = 'Не удалось загрузить вложение: истекло время ожидания'
             if isinstance(error,httpx.HTTPStatusError):
                 if error.response.status_code == 429:
                     value = error.response.headers.get('retry-after','60')
                     delay = max(1,min(86400,int(value))) if value.isdecimal() else 60
                 elif error.response.status_code in (404,410):
                     code = 'media-not-found'
-            raise SourceError('Не удалось загрузить вложение',delay,code=code,retryable=code!='media-not-found') from error
+            raise SourceError(label,delay,code=code,retryable=code!='media-not-found') from error
 
     async def metadata(self, url: str) -> Any:
         try:
@@ -223,7 +228,7 @@ class Downloader:
                         reason += ' — доступ запрещён'
                 if retained and old:
                     attachments.append(retained)
-                    resource = resource.model_copy(update={'status':'loaded','sha256':old.sha256,'reason':error.label})
+                    resource = resource.model_copy(update={'status':'loaded','sha256':old.sha256,'reason':reason})
                 else:
                     resource = resource.model_copy(update={'status':'unsupported' if isinstance(error,MediaLimit) or error.code in terminal else 'missing','reason':reason})
                     reasons.append(error.label)

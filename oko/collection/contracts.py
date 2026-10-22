@@ -78,6 +78,7 @@ class ArticleManifest(BaseModel):
 
 
 class SourceManifest(BaseModel):
+    download_partial: bool = False
     post_web_unavailable: bool = False
     source_url: str | None = None
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)

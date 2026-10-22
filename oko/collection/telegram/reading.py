@@ -1,6 +1,7 @@
 """Project saved Telegraph articles without fetching or changing processing text."""
 import json
 import re
+from urllib.parse import urljoin
 from typing import Any
 
 from oko.collection.contracts import SourceManifest
@@ -33,9 +34,21 @@ def saved_telegraph(header: dict[str, Any], base: str) -> dict[str, Any] | None:
     if not header.get('source_manifest'):
         return None
     manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest']))
-    if not manifest.articles:
+    if not manifest.articles and not manifest.download_partial:
         return None
     post = str(manifest.post.get('text', ''))
+    if manifest.download_partial:
+        article_keys = {key for article in manifest.articles for key in article.resource_keys}
+        for failed_resource in manifest.resources:
+            if not failed_resource.reason or failed_resource.key in article_keys or failed_resource.status == 'external':
+                continue
+            member = failed_resource.key.split(':')[1] if failed_resource.key.startswith('telegram-web:') else ''
+            url = urljoin(manifest.source_url or '', member) if member else manifest.source_url
+            if url:
+                reason = failed_resource.reason
+                if failed_resource.status == 'loaded':
+                    reason += '. Сохранённая копия вложения доступна.'
+                post += '\n\n' + error_block(url, reason)
     resources = {r.key: r for r in manifest.resources}
     articles = []
     for article in manifest.articles:

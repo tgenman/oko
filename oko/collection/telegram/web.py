@@ -360,12 +360,14 @@ class WebTelegram:
         assert teaser
         assert teaser.source_manifest
         collected = await Downloader(self.transport).collect(post.media,teaser.source_manifest.resources,publication.teaser,staging)
-        manifest = teaser.source_manifest.model_copy(update={'resources':collected.resources})
+        partial = bool(collected.error and collected.error.code == 'media-unavailable'
+                       and (post.text.strip() or collected.attachments))
+        manifest = teaser.source_manifest.model_copy(update={'resources':collected.resources, 'download_partial':partial})
         warnings = [resource.reason for resource in collected.resources if resource.reason]
         reasons = list(collected.reasons)
         previous_manifest = publication.teaser.source_manifest if publication.teaser else None
         if previous_manifest and previous_manifest.post!=manifest.post:
             reasons.extend(warnings)
-        return Material(teaser.title,post.text,not manifest.post_web_unavailable and not reasons and not any(r.status=='external' for r in collected.resources),'; '.join(dict.fromkeys([*reasons,*warnings])),
+        return Material(teaser.title,post.text,not partial and not manifest.post_web_unavailable and not reasons and not any(r.status=='external' for r in collected.resources),'; '.join(dict.fromkeys([*reasons,*warnings])),
                         members=post.publication.members,attachments=collected.attachments,
-                        description=teaser.description,source_manifest=manifest,collection_error=collected.error,reply_preview=teaser.reply_preview)
+                        description=teaser.description,source_manifest=manifest,collection_error=None if partial else collected.error,reply_preview=teaser.reply_preview)

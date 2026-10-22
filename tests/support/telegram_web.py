@@ -1,4 +1,5 @@
 """Synthetic public Telegram markup for reader HTTP checks."""
+import httpx
 def page(posts, more=None):
     continuation = f'<a class="tme_messages_more js-messages_more" href="/s/fixture?before={more}">More</a>' if more else ''
     return '<div class="tgme_channel_info_header_title">Fixture</div><div class="tgme_channel_history">'+continuation+''.join(
@@ -46,3 +47,11 @@ def hidden_fallback_page(text, active=False):
     if active:
         wrapper['class'].append('media_not_supported')
     return str(document)
+
+
+class BrokenMediaStream(httpx.AsyncByteStream):
+    """A real stream failure after some bytes, as seen from Telegram's CDN."""
+    async def __aiter__(self):
+        import httpcore
+        yield b'partial-unusable-video'
+        raise httpcore.RemoteProtocolError('peer closed connection without sending complete message body')
