@@ -2,6 +2,8 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
+from oko.reader.http_schemas import SchemaRoute
+
 from fastapi import APIRouter, Depends, FastAPI, Request
 
 from oko.reader.generated import models as wire
@@ -94,7 +96,7 @@ def receipt(runtime: Runtime, identity: str) -> wire.CommandReceipt:
 
 def register(app: FastAPI, runtime: Runtime) -> None:
     from oko.reader.api_v3 import no_query
-    router = APIRouter(dependencies=[Depends(no_query)])
+    router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     @router.post('/api/v3/problems/{identity}/abandon', response_model=wire.CommandAcknowledgement)
     async def abandon(request: Request, identity: str) -> wire.CommandAcknowledgement:
         await runtime.abandon_problem(identity)

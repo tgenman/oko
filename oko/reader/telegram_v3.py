@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from typing import Literal
 
+from oko.reader.http_schemas import SchemaRoute
+
 from fastapi import APIRouter, Depends, FastAPI, Request
 
 from oko.reader.generated import models as wire
@@ -15,7 +17,7 @@ from oko.subscriptions.telegram import TelegramConflict
 
 def register(app: FastAPI, runtime: Runtime) -> None:
     from oko.reader.api_v3 import ApiError, no_query
-    router = APIRouter(dependencies=[Depends(no_query)])
+    router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
     @asynccontextmanager
     async def operation(request: Request, context: dict[str, str]) -> AsyncIterator[None]:

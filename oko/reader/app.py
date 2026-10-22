@@ -23,6 +23,7 @@ from oko.reader.runtime import Runtime, ActionError
 from oko.reader.lifetime import Lifetime
 from oko.reader.browser_auth import BrowserSessions, COOKIE, MAX_AGE
 from oko.reader import api_v3
+from oko.reader.http_schemas import SchemaRoute
 from oko.reader.generated.models import BrowserSessionRevoked
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -99,6 +100,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                 loop.set_exception_handler(previous_handler)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.router.route_class = SchemaRoute
     app.state.runtime = runtime
 
     @app.exception_handler(ActionError)
