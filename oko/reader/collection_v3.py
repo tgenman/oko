@@ -1,6 +1,8 @@
 """Read-only collection progress boundary. Diagnostics are loaded per source."""
 from collections import Counter
 from typing import Any
+from oko.reader.http_schemas import SchemaRoute
+
 from fastapi import APIRouter, Depends, FastAPI
 from oko.reader.generated import models as wire
 from oko.reader.runtime import Runtime, ActionError
@@ -18,7 +20,7 @@ def source(value: dict[str, Any]) -> dict[str, Any]:
 
 def register(app: FastAPI, runtime: Runtime) -> None:
     from oko.reader.api_v3 import no_query
-    router = APIRouter(dependencies=[Depends(no_query)])
+    router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
     def snapshot() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         value = runtime.collection_snapshot()

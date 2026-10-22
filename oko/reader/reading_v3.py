@@ -4,6 +4,8 @@ from pathlib import Path
 from collections.abc import Callable
 from typing import Literal, TypedDict
 
+from oko.reader.http_schemas import SchemaRoute
+
 from fastapi import APIRouter, Body, Depends, FastAPI, Request
 from fastapi.responses import Response
 
@@ -166,7 +168,7 @@ def preview(value: facts.CompletionPreview) -> wire.CompletionPreview:
 
 
 def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMaterial]:
-    router = APIRouter(dependencies=[Depends(no_query)])
+    router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
         saved = runtime.require_store().subscriptions

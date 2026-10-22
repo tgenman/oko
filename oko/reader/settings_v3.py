@@ -1,6 +1,8 @@
 """Settings boundary: one typed operation for all inheritance levels."""
 from typing import Literal
 
+from oko.reader.http_schemas import SchemaRoute
+
 from fastapi import APIRouter, Depends, FastAPI, Request
 
 from oko.reader.generated import models as wire
@@ -44,7 +46,7 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.E
 
 def register(app: FastAPI, runtime: Runtime) -> None:
     from oko.reader.api_v3 import no_query
-    router = APIRouter(dependencies=[Depends(no_query)])
+    router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     from oko.reader.api_v3 import ApiError
 
     def activity_for(scope: str, owner: str) -> wire.FeedActivity | None:

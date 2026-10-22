@@ -2,6 +2,8 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
+from oko.reader.http_schemas import SchemaRoute
+
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import Response
 from pydantic import ValidationError
@@ -28,7 +30,7 @@ def selection(value: wire.HistorySelection) -> InitialHistory:
 
 def register(app: FastAPI, runtime: Runtime) -> None:
     from oko.reader.api_v3 import ApiError, no_query
-    router = APIRouter(dependencies=[Depends(no_query)])
+    router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
     @router.get('/api/v3/subscriptions', response_model=wire.SubscriptionCatalog)
     async def subscriptions() -> wire.SubscriptionCatalog:

@@ -73,26 +73,25 @@ def test_web_catchup_keeps_old_frontier_and_resumes_remaining_pages_after_restar
 def test_recorded_album_anchors_are_one_web_publication(tmp_path):
     from pathlib import Path
     fixture = Path(__file__).parents[1]/'fixtures/telegram'
+    from bs4 import BeautifulSoup
+    document = BeautifulSoup((fixture/'album.html').read_bytes(), 'html.parser')
+    # Keep the recorded target album intact, without downloading unrelated posts.
+    for message in document.select('.tgme_widget_message[data-post]'):
+        if str(message['data-post']) != 'durov/373':
+            message.decompose()
+    album = str(document).encode()
+    empty = (fixture/'empty.html').read_bytes()
     async def response(request):
         if request.url.host not in ('t.me','telegram.me'):
             return httpx.Response(200,content=b'fixture-recorded-media')
         before = int(request.url.params.get('before','0'))
-        name = 'empty' if before and before<=373 else 'album'
-        data = (fixture/(name+'.html')).read_bytes()
-        if before and name=='album':
-            from bs4 import BeautifulSoup
-            document = BeautifulSoup(data,'html.parser')
-            for message in document.select('.tgme_widget_message[data-post]'):
-                if int(str(message['data-post']).split('/')[-1])>=before:
-                    message.decompose()
-            data = str(document).encode()
-        return httpx.Response(200,content=data)
+        return httpx.Response(200,content=empty if before and before<=373 else album)
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
         configure_fast_web(client)
-        result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@durov',folder='Inbox'))
+        result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@durov',folder='Inbox',initial_history={'mode':'count','count':'1'}))
         assert result.status_code == 200, result.text
-        cards = settled(client,19,timeout=30)
+        cards = settled(client,1)
         albums = [c for c in cards if 373 in [int(identity) for identity in c['source']['message_ids']]]
         assert len(albums) == 1
         assert [int(identity) for identity in albums[0]['source']['message_ids']] == list(range(373,382))

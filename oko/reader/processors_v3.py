@@ -1,4 +1,6 @@
 """Generated processor contracts backed by the existing Runtime owners."""
+from oko.reader.http_schemas import SchemaRoute
+
 from fastapi import APIRouter, Depends, FastAPI, Request
 from pydantic import ValidationError
 
@@ -12,7 +14,7 @@ from oko.reader.runtime import Runtime, ActionError
 
 def register(app: FastAPI, runtime: Runtime) -> None:
     from oko.reader.api_v3 import no_query
-    router = APIRouter(dependencies=[Depends(no_query)])
+    router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     from oko.reader.api_v3 import ApiError, invalid
     from oko.reader.commands_v3 import track
 

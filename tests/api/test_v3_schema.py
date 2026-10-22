@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @lru_cache(maxsize=1)
 def contract():
-    return yaml.safe_load(Path(os.environ.get('OKO_V3_SCHEMA', ROOT / 'api/openapi.yaml')).read_text())
+    return yaml.load(Path(os.environ.get('OKO_V3_SCHEMA', ROOT / 'api/openapi.yaml')).read_text(), Loader=getattr(yaml, 'CSafeLoader', yaml.SafeLoader))
 
 
 def accepts(name, value):
