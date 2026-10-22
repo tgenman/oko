@@ -1,0 +1,71 @@
+# Повторная подготовка тестов — 2026-10-22
+
+Запрос: сократить повторные инициализации, перенести матрицы ниже HTTP, разобраться с браузерной частью и измерить полный прогон. Рабочие настройки Око, данные, запуск и выпуск не менялись. Изменения ограничены тестами и инструментами проверки; слияние и публикация в этой задаче не выполнялись.
+
+## Результат
+
+Финальный `./scripts/check all tools --compact` — **PASS, 173,90 с (2:54)**.
+Снимок: `d644e9df48c162cc11e1a14037f739b16b54e34c`, база `df2b9fe281ca0250d759badf913981323cd8451d`.
+
+772 Python, 9 HTTP, 162 tools, 323 функциональных Node/browser и 4 performance — PASS. Два прежних пользовательских skips сохранены. Все 320 latency-кликов выполнены; p95 <200 мс сохранён без force-кликов, ослабления критериев или кеширования результатов проверок.
+
+| Набор | Финальный PASS |
+|---|---:|
+| Python, 4 процесса | 152,67 с |
+| Browser functional, 8 процессов | 97,48 с |
+| Browser performance, после functional | 34,62 с |
+| Browser вместе | 132,11 с |
+| Tools, 2 процесса | 124,54 с |
+| Весь runner | **173,90 с** |
+
+Этапы Python/browser/tools идут параллельно: их времена нельзя складывать. Теперь главный путь — Python; его преимущество над browser около 20 с.
+
+## Что изменено
+
+- Runner владеет новым TemporaryDirectory одного запуска для закрытых синтетических библиотек. Процессы публикуют готовый seed под flock и атомарным marker после успешного builder. Каждый сценарий получает обычную собственную копию SQLite/файлов и metadata; источники не открываются на запись после публикации. Failed/killed builder не публикует marker. Каталог очищается после завершения дочерних наборов; новый runner всегда получает другой каталог, прямой запуск сохраняет прежние шаблоны процесса. Открытые Store/Runtime и результаты тестов не кешируются.
+- Матрица 6 видов источников × pending/available проверяет реальные text/legacy проекции и собственный Store без HTTP/lifespan. Два HTTP-представителя сохраняют frame/status/parity. Матрица трёх внешних кодов ошибок проверяет реальную problem projection; HTTP-сценарий сохраняет fetch failure, waiting/retry_at и material recovery. Большие обработанные библиотеки, SQL/VM/file budgets, restart/cancel/late-response проверки не удалены.
+- 60 функциональных браузерных файлов регистрируются в восьми временных entrypoints вместо отдельных процессов на каждый файл. Модули, browser connection и Python import host переиспользуются внутри worker; каждый сценарий сохраняет свой context, токен, origin, Store/Runtime и cleanup. Performance остаётся отдельной командой. Сохраняются имена, фильтры, failure status и hooks.
+- Ошибка импорта одного файла не прерывает регистрацию остальных и всегда выставляет nonzero, даже если diagnostic test отфильтрован `--match`. Найдено независимым ревью; новая регрессия до исправления FAIL, после PASS.
+- В тесте локального раскрытия цитаты штатный PUT heartbeat браузерной сессии отделён от content requests. Добавлен явный авторизованный heartbeat и подтверждение его записи. Остальные запросы остаются под deep equality; каждый новый reading/check по-прежнему должен использовать материал A и доставленные known_version. Это устраняет фактически наблюдённое ложное падение, не скрывая content rereads.
+
+## Сравнение и ограничения измерения
+
+Последний прежний полный PASS на том же поведении базы: **223,80 с (3:44)**, отчёт `full-run-critical-path-20261022.md`. Финальный PASS быстрее на **49,90 с, 22,3%**. Это сравнение отдельных запусков на рабочей машине, не оценка стабильного среднего.
+
+Свежий контроль исходного кода и промежуточные полные запуски сохранены, включая падения:
+
+| Версия/попытка | Весь runner | Python | Browser | Tools | Итог |
+|---|---:|---:|---:|---:|---|
+| Исходный код, свежий контроль | 200,88 | 177,13 | 133,29 | 135,93 | FAIL: 2 Python и 1 browser |
+| Новые seeds/matrices/batches | 209,07 | 186,19 | 134,33 | 150,62 | FAIL: 4 browser |
+| Исправлена filtered import error | 179,53 | 158,49 | 106,34 | 130,14 | FAIL: heartbeat в reply-preview assertion |
+| Финальный код | **173,90** | **152,67** | **132,11** | **124,54** | **PASS** |
+
+В трёх FAIL browser functional вернул ошибку, поэтому последующий performance не запускался. Они не являются успешными полными baseline и напрямую сравнивать их browser time с финальным нельзя. Финальный включает обе команды. Между полными замерами другие тесты/benchmark этим исполнителем не запускались; рабочие процессы пользователя не останавливались.
+
+В промежуточном FAIL с четырьмя browser ошибками TAP сообщил отдельные длительности около 583–596 с при wall runner 209 с; причина расхождения не установлена. Это ещё одна причина не выдавать отдельные замеры за устойчивое среднее. Четыре файла отдельно PASS за 13,24 с; этот повтор не превращает прежний FAIL в PASS.
+
+После добавления heartbeat в тест одна попытка полного запуска была остановлена во время types (5,08 с), поскольку целевой probe обнаружил отсутствие Authorization в самом новом тестовом fetch. Исправлен только синтетический запрос; целевой сценарий затем PASS за 3,84 с, и уже после него выполнен финальный полный PASS. Прерванная попытка в сравнение скорости не включена.
+
+## Latency и визуальная проверка
+
+| Материалов | Режим | Кликов | p95 first / repeat, мс |
+|---|---|---:|---:|
+| 104 | active | 80 | 16.9 / 19.8 |
+| 104 | idle | 80 | 18.5 / 18.6 |
+| 400 | active | 80 | 27.0 / 27.7 |
+| 400 | idle | 80 | 25.5 / 30.5 |
+
+Скриншот `latency-400-active.png` финального полного прогона просмотрен: список 400 материалов, папки и открытый материал отображаются. Продуктовое представление в этой задаче не менялось.
+
+## Дополнительная проверка
+
+Целевой набор templates/projections/HTTP representatives/batch ownership — 37 PASS за 18,94 с; regression import/filter после исправления — 1 PASS за 4,53 с. Staged diff, tooling/browser types и все остальные обязательные наборы финального runner — PASS. Независимый reviewer проверил scope, публикацию и очистку seed, изоляцию групп и перенос матриц; замечание filtered import закрыто, остаточных замечаний нет. Отдельно проверил heartbeat filter и сохранность guards от content rereads.
+
+Сырые report.json/output.log/JUnit/latency JSON и PNG сохранены в `.scratch/test-initializations/evidence/` вне индекса. Финальный исходный отчёт: `/tmp/oko-init-full-complete/20261022T193757Z-f7873976/report.json`.
+
+## Исправление tools CI перед слиянием
+
+PR #88: tools job упал в новой batch regression, запускавшей browser wrapper, хотя Chromium устанавливается только browser job. Группировка вынесена в browser-free scripts/browser-batches.cts; tools regression использует этот же batch owner и настоящий Node test child без Chromium. При явно несуществующем OKO_BROWSER_EXECUTABLE regression PASS5,37 с. Настоящие HTTP/context/abort/suite process cleanup отдельно PASS (browser10,76 с), tooling/browser types PASS. Независимое ревью без замечаний. Полный локальный173,90 с относится к предшествующему коду с тем же алгоритмом; после выделения seam повторены затронутые границы.
+
+Browser CI setup: cancelled run145 downloaded25.9MB of Ubuntu packages/fonts from azure.archive.ubuntu.com from19:47:34 until cancellation19:56:06, without reaching tests. Official actions/runner-images Ubuntu2404 manifest lists installed Google Chrome. CI now checks whether system Chrome is actually launchable with the same Playwright launcher, uses existing OKO_BROWSER_EXECUTABLE for that job only, and retains install --with-deps chromium as fallback. Working Oko settings are unchanged.

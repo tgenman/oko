@@ -148,3 +148,43 @@ def test_type_receipt_rechecks_extended_config_and_source_errors(tmp_path):
     source.write_text('export const value: number = "bad";\n')
     failed = run(tmp_path, *command)
     assert failed.returncode != 0 and 'TS2322' in failed.stdout + failed.stderr
+
+
+def test_browser_batches_reuse_workers_and_preserve_failures_filters_and_hooks(tmp_path):
+    files=[]
+    for index in range(4):
+        file=tmp_path/f'test_batch_{index}.ts'
+        file.write_text("const {test,after}=require('node:test');\n"
+            +f"test('batch case {index}',()=>{{console.log('EXEC {index} '+process.pid);if({index}===1)throw Error('deliberate failure');}});\n"
+            +f"after(()=>console.log('CLEAN {index}'));\n")
+        files.append(str(file))
+    # Tools CI has no Chromium. Exercise the same batching owner directly;
+    # suite-browser process/interrupt cleanup is tested in the browser group.
+    harness="""
+const {batchTests}=require(process.argv[1]);
+const {spawnSync}=require('node:child_process');
+(async()=>{
+  const batch=await batchTests(process.argv.slice(2));
+  try {process.exitCode=spawnSync(process.execPath,batch.args,{stdio:'inherit'}).status??1;}
+  finally {await batch.close();}
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    command=('node','--require','tsx/cjs','-e',harness,'--',str(ROOT/'scripts/browser-batches.cts'),
+        '--require','tsx/cjs','--require',str(ROOT/'scripts/register-browser-typescript.cts'),
+        '--test','--test-reporter=tap','--test-concurrency=2')
+    result=run(ROOT,*command,*files)
+    assert result.returncode==1,result.stdout+result.stderr
+    import re
+    executed=re.findall(r'EXEC (\d) (\d+)',result.stdout)
+    assert {index for index,_ in executed}==set('0123'),result.stdout+result.stderr
+    assert len({pid for _,pid in executed})==2,result.stdout
+    assert set(re.findall(r'CLEAN (\d)',result.stdout))==set('0123'),result.stdout
+    assert 'deliberate failure' in result.stdout
+    filtered=run(ROOT,*command,'--test-name-pattern=batch case 3',*files)
+    assert filtered.returncode==0,filtered.stdout+filtered.stderr
+    assert [index for index,_ in re.findall(r'EXEC (\d) (\d+)',filtered.stdout)]==['3'],filtered.stdout
+
+    Path(files[0]).write_text("throw Error('load explosion');")
+    broken=run(ROOT,*command,'--test-name-pattern=batch case 3',*files)
+    assert broken.returncode!=0,broken.stdout+broken.stderr
+    assert 'EXEC 3 ' in broken.stdout,broken.stdout

@@ -475,8 +475,10 @@ test('reply context is a compact separate card with safe navigation and local ex
     assert.equal(await card.locator('.reply-preview-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'2');
     await r.page.screenshot({path:artifactPath('telegram-reply-compact-desktop.png')});
     // Local expansion must not request content; regular version polling is
-    // independent of the card and may run while the keyboard action completes.
-    const requests=await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url!=='/api/v3/reading/check'||q.method!=='POST'));
+    // independent of the card, as is renewing the browser presence lease.
+    const heartbeat=await r.api('client-sessions','POST');
+    const requests=await r.page.evaluate(()=>readerTransport.requests);
+    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url));
     const start=await r.page.evaluate(()=>readerTransport.requests.length),versions=await r.page.evaluate(()=>window.replyVersions);
     assert.deepEqual(Object.keys(versions).sort(),['filter','material','media','theses']);
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();
@@ -484,7 +486,10 @@ test('reply context is a compact separate card with safe navigation and local ex
     await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
     assert.equal(await card.locator('.reply-preview-text').textContent(),excerpt);
     await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/reading/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({storage_id:null,resources:[]})});if(!reply.ok)throw new Error('Background check failed');});
-    assert.deepEqual(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url!=='/api/v3/reading/check'||q.method!=='POST')),requests);
+    await r.page.evaluate(async({id,token})=>{const reply=await fetch('/api/v3/client-sessions/'+id,{method:'PUT',headers:{Authorization:'Bearer '+token}});if(!reply.ok)throw new Error('Heartbeat failed: '+reply.status);},{id:heartbeat.id,token:r.token});
+    const observed=await r.page.evaluate(()=>readerTransport.requests);
+    assert.ok(observed.some(q=>q.method==='PUT'&&q.url==='/api/v3/client-sessions/'+heartbeat.id));
+    assert.deepEqual(observed.filter(foreground),requests.filter(foreground));
     const checks=await r.page.evaluate(start=>readerTransport.requests.slice(start).filter(q=>q.url==='/api/v3/reading/check'&&q.method==='POST'),start);
     for(const request of checks){
       assert.ok(Array.isArray(request.body?.resources));

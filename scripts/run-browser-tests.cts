@@ -3,6 +3,7 @@ import {chromium} from 'playwright';
 import {browserLaunchOptions} from './browser-launch.mts';
 import {spawn,execFileSync,type ChildProcess} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
+import {batchTests} from './browser-batches.cts';
 
 function groupAlive(group:number) {
   return execFileSync('ps',['-axo','pgid=,stat='],{encoding:'utf8'}).trim().split('\n').some(line=>{
@@ -26,6 +27,7 @@ async function closeGroup(pid:number) {
 
 async function main() {
   let child:ChildProcess|undefined, stopped:NodeJS.Signals|undefined;
+  let batch:Awaited<ReturnType<typeof batchTests>>|undefined;
   const forward=(signal:NodeJS.Signals)=>{
     stopped=signal;
     if(child?.pid)signalGroup(child.pid,signal);
@@ -38,7 +40,9 @@ async function main() {
       args:['--host-resolver-rules=MAP oko 127.0.0.1','--no-proxy-server']});
     try {
       if(stopped){process.exitCode=stopped==='SIGINT'?130:143;return;}
-      child = spawn(process.execPath,process.argv.slice(2),{
+      batch=await batchTests(process.argv.slice(2));
+      const args=batch.args;
+      child = spawn(process.execPath,args,{
         detached:true,stdio:'inherit',env:{...process.env,OKO_TEST_BROWSER_WS:browser.wsEndpoint()},
       });
       const code = await new Promise<number>((resolve,reject)=>{
@@ -52,6 +56,7 @@ async function main() {
     }
   } finally {
     process.off('SIGINT',interrupt);process.off('SIGTERM',terminate);
+    await batch?.close();
   }
 }
 void main().catch(error=>{console.error(error);process.exitCode=1;});

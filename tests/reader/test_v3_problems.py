@@ -39,10 +39,8 @@ class Unavailable:
         raise SourceError('Saved source reason',code=self.failure_code)
 
 
-@pytest.mark.parametrize('external_code',['fetch:UnexpectedExternalException','fetch:PermissionError','fetch:OSError'])
-def test_remote_exception_does_not_expand_public_codes_and_keeps_material_recovery(tmp_path,external_code):
+def test_remote_exception_does_not_expand_public_codes_and_keeps_material_recovery(tmp_path):
     source=Unavailable()
-    source.failure_code=external_code
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         problem=wait_for(client,lambda:next((p for p in client.get('/api/v3/status').json()['problems']['current'] if p['code']=='source_unavailable'),None))
@@ -52,6 +50,21 @@ def test_remote_exception_does_not_expand_public_codes_and_keeps_material_recove
         assert 'UnexpectedExternalException' not in problem['code']
         waiting=client.get('/api/v3/status').json()['work']
         assert any(w['phase']=='waiting' and w['reason']=='retry_scheduled' and w['retry_at'] for w in waiting)
+
+
+@pytest.mark.parametrize('external_code',['fetch:UnexpectedExternalException','fetch:PermissionError','fetch:OSError'])
+def test_remote_exception_projection_keeps_domain_code_and_material_recovery(external_code):
+    from oko.reader import snapshots as facts, projection_v3 as project
+    value=facts.Problem(id='source-failure',code=external_code,state='current',
+        title='Source failed',consequence='Saved content remains',next_step='Retry',
+        reason='Saved source reason',created_at=1800000000.0,finished_at=None,
+        next_at=None,outcome=None,operation='producer:fetch',
+        objects=[facts.ProblemObject(kind='material',id='fixture-item',label='Fixture')])
+    projected=project.problem(value).model_dump(mode='json')
+    assert projected['code']=='source_unavailable'
+    assert projected['message']=='Saved source reason'
+    assert projected['affected']==[{'kind':'material','material_id':'fixture-item'}]
+    assert projected['recovery']==[{'kind':'retry_material','material_ids':['fixture-item']}]
 
 
 def test_historical_reconnect_is_preserved_without_fabricated_command(tmp_path):
