@@ -202,7 +202,7 @@ def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
                         safe = reply_address
                 except ValueError:
                     pass  # Malformed source addresses do not discard the saved excerpt.
-    
+
                 reply_preview = ReplyPreview(author=author or None, text=fragment, source_url=safe)
                 reply.decompose()
             own_text = [readable(node) for node in wrapper.select('.tgme_widget_message_text')]
