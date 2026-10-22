@@ -2,6 +2,7 @@
 import asyncio
 
 import httpx
+import pytest
 
 from tests.support.telegram_web import page
 
@@ -102,9 +103,10 @@ def test_failed_page_can_retry_same_window_without_admitting_new_posts():
     asyncio.run(scenario())
 
 
-def test_broken_record_preserves_other_posts_and_known_key_for_fetch():
+@pytest.mark.parametrize('broken_url', ['https://t.me/another/99', 'https://[bad/5'])
+def test_broken_record_preserves_other_posts_and_known_key_for_fetch(broken_url):
     from oko.collection.telegram.adapter import TelegramWebAdapter
-    bad_album = '<a class="grouped_media_wrap" href="https://t.me/another/99"></a>'
+    bad_album = '<a class="grouped_media_wrap" href="'+broken_url+'"></a>'
     html = page([(3, 'Good'), (5, 'Malformed album'+bad_album), (6, 'Other')])
     async def scenario():
         adapter = TelegramWebAdapter(httpx.MockTransport(lambda request: httpx.Response(200, text=html)))
@@ -142,4 +144,20 @@ def test_replaced_media_is_rejected_before_writing_new_bytes():
         else:
             raise AssertionError('Replacement must not be written under old identity')
         assert output.getvalue() == b''
+    asyncio.run(scenario())
+
+
+def test_no_usable_keys_is_diagnosed_instead_of_confirming_empty_source():
+    from oko.collection.adapters import AdapterException, AdapterErrorKind
+    from oko.collection.telegram.adapter import TelegramWebAdapter
+    html = page([(3, 'Unknown identity')]).replace('data-post="fixture/3"', 'data-post="bogus"')
+    async def scenario():
+        adapter = TelegramWebAdapter(httpx.MockTransport(lambda request: httpx.Response(200, text=html)))
+        try:
+            await adapter.resolve_feed('https://t.me/s/fixture')
+        except AdapterException as error:
+            assert error.issue.kind == AdapterErrorKind.permanent
+            assert error.issue.code == 'source_identity_unavailable'
+        else:
+            raise AssertionError('Malformed source must not be classified as empty')
     asyncio.run(scenario())

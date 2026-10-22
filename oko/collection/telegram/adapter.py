@@ -115,6 +115,9 @@ class TelegramWebAdapter:
             page, _ = await load(name, 0, self.transport, partial=True)
         except SourceError as error:
             raise failure(error) from error
+        if not page.posts and page.issues:
+            raise AdapterException(AdapterIssue('source_identity_unavailable',
+                'Telegram не предоставил пригодных идентификаторов публикаций', AdapterErrorKind.permanent))
         upper = max((max(p.publication.members) for p in page.posts), default=0)
         return FeedMetadata(reference('https://t.me/s/'+name), page.title, page.description,
                             encode(upper, upper) if upper else '')

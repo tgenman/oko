@@ -247,7 +247,7 @@ def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
             teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа')),body,False,
                               'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
             posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published or 0,teaser,members,published_known=published is not None),body,media))
-        except SourceError as error:
+        except (SourceError, ValueError) as error:
             if not partial:
                 raise
             identity = re.fullmatch(re.escape(username)+r'/([1-9][0-9]*)', str(wrapper.get('data-post')), re.I)
@@ -257,7 +257,7 @@ def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
                 url = f'https://t.me/{username}/{message}'
                 ref = ExternalReference(ExternalKey(Platform.telegram, url), url)
                 posts.append(TelegramPublication(Publication(str(message), url, 0, members=(message,), published_known=False), ''))
-            issues.append(AdapterIssue('malformed_publication', error.label, AdapterErrorKind.permanent, ref))
+            issues.append(AdapterIssue('malformed_publication', error.label if isinstance(error, SourceError) else 'Некорректные данные публикации Telegram', AdapterErrorKind.permanent, ref))
     more = history.select_one('a.js-messages_more[href*="before="]')
     next_before = None
     if more:
