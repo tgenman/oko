@@ -3,6 +3,9 @@ import {test} from 'node:test';
 import {artifactPath} from './artifacts';
 import {reader, material, expect} from './support.ts';
 import assert from 'node:assert/strict';
+import type {ReadingCheckResponse} from '../../frontend/src/api/generated/types.gen';
+
+declare global {interface Window {replyVersions:Record<string,string>;}}
 
 test('switch clears old material immediately and ignores late opening errors', async () => {
   const r = await reader();
@@ -401,6 +404,19 @@ test('reply context is a compact separate card with safe navigation and local ex
   const excerpt='Цитируемый фрагмент другого автора. '.repeat(20)+'Последние слова фрагмента.';
   try {
     await r.start([material('A',{reply_preview:{author:'Другой автор',text:excerpt,source_url:'https://t.me/fixture/10'}}),material('B')]);
+    await r.page.evaluate(()=>{
+      const validate=window.validateReaderReply;window.replyVersions={};
+      window.validateReaderReply=async(url,method,status,body,alias,record)=>{
+        await validate(url,method,status,body,alias,record);
+        if(url==='/api/v3/reading/materials/A'){
+          // The binding above has validated the delivered wire contract.
+          const frame=body as ReadingCheckResponse;
+          if(frame.state==='current')for(const resource of frame.resources){
+            if(resource.id==='A'&&'version'in resource&&typeof resource.version==='string')window.replyVersions[resource.kind]=resource.version;
+          }
+        }
+      };
+    });
     await r.page.locator('#cards').getByRole('button',{name:/^A/}).click();
     const card=r.page.locator('#material .reply-preview');
     await expect(card).toBeVisible();
@@ -411,12 +427,26 @@ test('reply context is a compact separate card with safe navigation and local ex
     assert.equal(await link.getAttribute('rel'),'noopener noreferrer');
     assert.equal(await card.locator('.reply-preview-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'2');
     await r.page.screenshot({path:artifactPath('telegram-reply-compact-desktop.png')});
-    const requests=await r.page.evaluate(()=>readerTransport.requests.length);
+    // Local expansion must not request content; regular version polling is
+    // independent of the card and may run while the keyboard action completes.
+    const requests=await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url!=='/api/v3/reading/check'||q.method!=='POST'));
+    const start=await r.page.evaluate(()=>readerTransport.requests.length),versions=await r.page.evaluate(()=>window.replyVersions);
+    assert.deepEqual(Object.keys(versions).sort(),['filter','material','media','theses']);
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();
     await r.page.keyboard.press('Enter');
     await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
     assert.equal(await card.locator('.reply-preview-text').textContent(),excerpt);
-    assert.equal(await r.page.evaluate(()=>readerTransport.requests.length),requests);
+    await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/reading/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({storage_id:null,resources:[]})});if(!reply.ok)throw new Error('Background check failed');});
+    assert.deepEqual(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url!=='/api/v3/reading/check'||q.method!=='POST')),requests);
+    const checks=await r.page.evaluate(start=>readerTransport.requests.slice(start).filter(q=>q.url==='/api/v3/reading/check'&&q.method==='POST'),start);
+    for(const request of checks){
+      assert.ok(Array.isArray(request.body?.resources));
+      for(const resource of request.body.resources){
+        if(['material','filter','theses','media'].includes(resource.kind)){
+          assert.equal(resource.id,'A');assert.equal(resource.known_version,versions[resource.kind]);
+        }
+      }
+    }
     await r.page.screenshot({path:artifactPath('telegram-reply-desktop.png')});
     await r.page.setViewportSize({width:1120,height:900});
     await card.getByRole('button',{name:'Свернуть'}).click();
