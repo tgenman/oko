@@ -69,6 +69,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   }
   const opened = createOpenedMaterial({
     readerApi,
+    getFeed:id=>readingCatalog.feeds.find(feed=>feed.id===id),
     acceptStorage:identity=>resources.storageId===null||resources.storageId===identity,
     fetchMedia: (path, signal) => fetchMedia(path, signal, 'no-store'),
     onViewed: id => { viewed(id, true); void refresh(); },

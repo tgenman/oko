@@ -18,3 +18,14 @@
 #material .reply-preview.expanded .reply-preview-text{display:block}
 #material .reply-preview-expand{display:block;border:0;background:transparent;color:#57758e;font-size:12px;padding:0;margin:8px 0 0;text-decoration:underline;text-underline-offset:3px}
 #material .reply-preview :is(a,button):focus-visible{outline:2px solid #3a7158;outline-offset:3px}
+
+#material #title{overflow-wrap:anywhere}
+#material-byline{display:flex;align-items:center;gap:12px;margin:0 0 28px;min-width:0}
+#material-byline .material-feed-avatar{flex:none;width:44px;height:44px;position:relative;display:block}
+#material-byline .material-feed-image img,#material-byline .material-feed-avatar>.source-icon{width:44px;height:44px;border-radius:50%;object-fit:cover;margin:0}
+#material-byline .material-feed-avatar>.source-icon{display:grid;place-items:center;background:#e9f2fd;color:#007aff;font-size:22px}
+#material-byline .material-feed-avatar:has(img)>.source-icon{display:none}
+#material-byline .source-icon svg{width:22px;height:22px}
+.material-source-details{min-width:0}
+#material-feed-title{display:block;font-size:16px;line-height:1.4;overflow-wrap:anywhere}
+#material-byline #date{margin:5px 0 0;font-size:13px}

@@ -4,6 +4,53 @@ import {artifactPath} from './artifacts';
 import {reader, material, expect} from './support.ts';
 import assert from 'node:assert/strict';
 
+test('opened publication shows variant B with avatar and wrapping long feed and publication titles', async () => {
+ const r=await reader();try {
+  const avatarUrl='/api/v3/feeds/feed/avatar/'+'a'.repeat(64);
+  const feedTitle='Луи · заметки о детстве, книгах и повседневной жизни — длинное название канала для чтения';
+  const publicationTitle='Анализирую всё подряд, особенно детство. '+ 'ОченьДлинныйЗаголовокБезПробелов'.repeat(2);
+  await r.start([material('one',{title:publicationTitle}),material('two',{feed_id:'second'})]);
+  await r.page.evaluate(({avatarUrl,feedTitle})=>{const t=readerTransport;
+   t.replies.set('/api/v3/reading-composition',{body:{count:2,folders:[{id:'f',title:'Каналы',position:0,count:2}],feeds:[{count:1,has_unviewed:true,feed:{id:'feed',title:feedTitle,folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent',legacy_since:null},avatar_url:avatarUrl}},{count:1,has_unviewed:true,feed:{id:'second',title:'Другой фид',folder_id:'f',kind:'rss',connection:'ready',identity:'https://second.test/feed',transport:'rss',importance:'normal',original_urls:['https://second.test/feed'],initial_days:1,public_ai:false,history:{state:'absent',legacy_since:null}}}]}});
+   t.replies.set(avatarUrl,{mime:'image/svg+xml',base64:'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjYjZiOGQxIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIxMCIgcj0iMjUiIGZpbGw9IiNlOGQ0YjciLz48cGF0aCBkPSJNMCA1NVEzMCAxNSA2NCA1NVY2NEgwIiBmaWxsPSIjNmU3YTc4Ii8+PHRleHQgeD0iMzIiIHk9IjQyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjgiPtCbPC90ZXh0Pjwvc3ZnPg=='});
+  },{avatarUrl,feedTitle});
+  await expect(r.page.locator('[data-feed="feed"]')).toHaveAttribute('title',feedTitle);
+  await r.page.locator('#cards button').filter({hasText:publicationTitle}).click();
+  await expect(r.page.locator('#material-feed-title')).toHaveText(feedTitle);
+  const avatar=r.page.locator('#material-byline img');
+  await expect(avatar).toHaveJSProperty('naturalWidth',64);
+  expect((await avatar.boundingBox())!.width).toBe(44);
+  await expect(r.page.locator('#date')).not.toBeEmpty();
+  const layout=await r.page.evaluate(()=>{const title=document.getElementById('title')!,byline=document.getElementById('material-byline')!,text=document.getElementById('text')!;return {titleBottom:title.getBoundingClientRect().bottom,bylineTop:byline.getBoundingClientRect().top,bylineBottom:byline.getBoundingClientRect().bottom,textTop:text.getBoundingClientRect().top,overflow:title.scrollWidth>title.clientWidth||byline.scrollWidth>byline.clientWidth};});
+  expect(layout.bylineTop).toBeGreaterThanOrEqual(layout.titleBottom);
+  expect(layout.textTop).toBeGreaterThan(layout.bylineBottom);
+  expect(layout.overflow).toBe(false);
+  await r.page.screenshot({path:artifactPath('opened-feed-identity-b.png')});
+  await r.page.locator('#cards button').filter({hasText:'two'}).click();
+  await expect(r.page.locator('#material-feed-title')).toHaveText('Другой фид');
+  await expect(avatar).toHaveCount(0);
+  await expect(r.page.locator('#material-byline .source-icon')).toBeVisible();
+  await r.page.locator('#cards button').filter({hasText:publicationTitle}).click();
+  await expect(avatar).toHaveJSProperty('naturalWidth',64);
+  await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=nav.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object'&&'avatar_url' in entry.feed)delete entry.feed.avatar_url;});
+  await expect(avatar).toHaveCount(0);
+  await expect(r.page.locator('#material-byline .source-icon')).toBeVisible();
+  await r.page.evaluate(()=>{const t=readerTransport,url='/api/v3/feeds/feed/avatar/'+'b'.repeat(64);t.replies.set(url,{mime:'image/png',base64:'bm90IGFuIGltYWdl'});const entry=t.replies.get('/api/v3/reading-composition')!.body!.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object')Object.assign(entry.feed,{avatar_url:url,title:'Канал с повреждённым аватаром'});});
+  await expect(r.page.locator('#material-feed-title')).toHaveText('Канал с повреждённым аватаром');
+  await expect(avatar).toHaveCount(0);
+  await expect(r.page.locator('#material-byline .source-icon')).toBeVisible();
+  await r.page.evaluate(avatarUrl=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=nav.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object')Object.assign(entry.feed,{avatar_url:avatarUrl,title:'Переименованный канал'});},avatarUrl);
+  await expect(avatar).toHaveJSProperty('naturalWidth',64);
+  await expect(r.page.locator('#material-feed-title')).toHaveText('Переименованный канал');
+  const retainedAvatar=await avatar.getAttribute('src');
+  await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;nav.feeds=nav.feeds.filter(entry=>'feed' in entry&&entry.feed&&typeof entry.feed==='object'&&'id' in entry.feed&&entry.feed.id!=='feed');});
+  await expect(r.page.locator('[data-feed="feed"]')).toHaveCount(0);
+  await expect(r.page.locator('#material-feed-title')).toHaveText('Переименованный канал');
+  await expect(avatar).toHaveAttribute('src',retainedAvatar!);
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});
+
 test('switch clears old material immediately and ignores late opening errors', async () => {
   const r = await reader();
   try {
