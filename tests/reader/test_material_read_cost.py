@@ -78,11 +78,9 @@ def test_open_read_budget_and_parity(tmp_path,count,processed):
         assert cost['max_file_reads']<=1,files
 
 
-@pytest.mark.parametrize('kind',['demo','rss','youtube','telegram-web','telegram-client','telegram-legacy'])
-@pytest.mark.parametrize('complete',[False,True])
-def test_split_text_parity_for_source_kinds(tmp_path,kind,complete):
-    feeds,items=library(tmp_path,[1])
-    store=Store(tmp_path,lambda _:None)
+def source_library(root, kind, complete):
+    feeds,items=library(root,[1])
+    store=Store(root,lambda _:None)
     telegram=kind.startswith('telegram')
     with store.db:
         store.db.execute('UPDATE feeds SET kind=?,transport=?,telegram_account=?,telegram_peer=? WHERE id=?',
@@ -93,17 +91,52 @@ def test_split_text_parity_for_source_kinds(tmp_path,kind,complete):
         binding={'kind':'web','username':'synthetic_channel','preview_url':'https://t.me/s/synthetic_channel'} if kind=='telegram-web' else {'kind':'client','role':'personal','account_user_id':'123','peer_id':'456'} if kind=='telegram-client' else None
         if binding:store.db.execute('INSERT INTO telegram_bindings VALUES (?,?)',(feeds[0],json.dumps(binding)))
     store.db.close()
+    return items[0]
+
+
+def assert_text_parity(actual, legacy):
+    for k,v in actual.items():
+        if k=='content':
+            for name,value in v.items():assert value==legacy[k][name]
+        else:assert v==legacy[k]
+
+
+@pytest.mark.parametrize('kind,complete',[('youtube',False),('telegram-client',True)])
+def test_split_text_http_parity(tmp_path,kind,complete):
+    item=source_library(tmp_path,kind,complete)
     with TestClient(traced_app(tmp_path),headers=HEADERS) as client:
-        legacy=client.get('/api/v3/materials/'+items[0]).json()
-        response=client.get('/api/v3/reading/materials/'+items[0])
+        legacy=client.get('/api/v3/materials/'+item).json()
+        response=client.get('/api/v3/reading/materials/'+item)
         assert response.status_code==200,response.text
         resource=next(r for r in response.json()['resources'] if r['kind']=='material')
         assert resource['state']=='changed',resource
-        actual=resource['data']
-        for k,v in actual.items():
-            if k=='content':
-                for name,value in v.items():assert value==legacy[k][name]
-            else:assert v==legacy[k]
+        assert_text_parity(resource['data'],legacy)
+
+
+@pytest.mark.parametrize('kind',['demo','rss','youtube','telegram-web','telegram-client','telegram-legacy'])
+@pytest.mark.parametrize('complete',[False,True])
+def test_split_text_projection_parity_for_source_kinds(tmp_path,kind,complete):
+    # Both real projection paths, with independent SQLite/files per case.
+    # No scheduler, HTTP/lifespan or external adapters are needed for this matrix.
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from oko.reader.reading_v3 import register
+    from oko.reader.versions_v3 import VersionedReading
+    from oko.storage.reading import reading_snapshot
+    item=source_library(tmp_path,kind,complete)
+    store=Store(tmp_path,lambda _:None)
+    try:
+        runtime=SimpleNamespace(require_store=lambda:store,
+            processing_wait=lambda item,kind:store.processing.waiting(item,kind,store.clock(),store.wall_clock()))
+        legacy=register(FastAPI(),runtime)(item).model_dump(mode='json')
+        reading=VersionedReading(runtime,None,None,None)
+        with reading_snapshot():
+            actual=reading.text(item)
+        assert_text_parity(actual,legacy)
+        assert actual['source']['kind']==('telegram' if kind.startswith('telegram') else kind)
+        assert actual['availability']==('available' if complete else 'pending')
+    finally:
+        store.db.close()
 
 
 @pytest.mark.parametrize('count',[26,100])

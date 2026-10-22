@@ -552,6 +552,8 @@ def main():
     report.data['tool_selection'] = dict(required=tools_required, inputs=tool_inputs, base=args.base, tests=selected_files['tool-tests'] or (list(TOOL_TESTS) if 'tool-tests' in names else []))
     if ('all' in args.sets and not args.files) or args.if_changed:
         report.output('Tool tests: ' + ('selected' if tools_required else 'unchanged; not selected') + '\n')
+    libraries = tempfile.TemporaryDirectory(prefix='oko-check-libraries-')
+    env['OKO_TEST_LIBRARY_DIR'] = libraries.name
     results = dict.fromkeys(names, 'NOT RUN')
     current = None
     exit_code = 1
@@ -675,6 +677,7 @@ def main():
             results[current] = 'FAIL'
         report.output(str(error) + '\n', stream=sys.stderr)
     finally:
+        libraries.cleanup()
         report.current = None
         report.compact = False
         report.output('\nCheck summary\n')
