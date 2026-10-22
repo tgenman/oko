@@ -311,9 +311,10 @@ class YouTubeTranscriptApi:
     data = tmp_path / 'data'
     kwargs = dict(token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=LocalCaptions())
     with TestClient(create_app(data, **kwargs), headers=HEADERS) as client:
-        feed = subscribe(client)
-        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
+        # Keep the real worker admitted throughout subscription setup. Default
+        # theses requests captions; changing importance can cancel that attempt.
         presence(client, 'reader')
+        subscribe(client)
         if not skipped:
             wait(client, lambda m: m['source'].get('captions') == 'error',keep_alive=True)
             assert any(g['error_type'] == 'VideoUnplayable' for g in client.get('/api/v3/diagnostics').json()['groups'])

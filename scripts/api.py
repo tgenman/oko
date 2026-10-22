@@ -51,7 +51,7 @@ def validate_examples(document: dict) -> None:
 
 
 def contract(path: Path = ROOT / 'api/openapi.yaml') -> dict:
-    document = yaml.safe_load(path.read_text())
+    document = yaml.load(path.read_text(), Loader=getattr(yaml, 'CSafeLoader', yaml.SafeLoader))
     def local_references(value):
         if isinstance(value, dict):
             for keyword in ('$ref', '$dynamicRef', '$recursiveRef'):

@@ -593,7 +593,7 @@ def main():
             'lint': [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/lint-js.cts'), *dict.fromkeys(selected_files['lint'])]],
             'tooling-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.tooling.json']],
             'browser-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.browser-tests.json']],
-            'browser': [[node, '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-reporter=tap', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *batch] for batch in browser_batches],
+            'browser': [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/run-browser-tests.cts'), '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-reporter=tap', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *batch] for batch in browser_batches],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
         if {'contracts', 'http', 'python-tests', 'tool-tests', 'types', 'entrypoint', 'staged', 'browser'} & set(names):

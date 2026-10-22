@@ -49,3 +49,13 @@ def test_public_snapshots_preserve_actual_media_album_anchors_and_page_states():
     assert not empty.has_class('js-messages_more')
     assert not unavailable.has_class('tgme_channel_history')
     assert unavailable.has_class('tgme_page_description')
+
+
+def test_recorded_album_parser_does_not_create_individual_publications_for_parts():
+    from oko.collection.telegram.web import parse_page
+    posts = parse_page((ROOT / 'album.html').read_bytes(), 'durov').posts
+    assert len(posts) == 19
+    albums = [p for p in posts if 373 in p.publication.members]
+    assert len(albums) == 1
+    assert albums[0].publication.members == tuple(range(373, 382))
+    assert not any(p.publication.members == (member,) for p in posts for member in range(374, 382))
