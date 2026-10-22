@@ -34,7 +34,7 @@ export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,
     const {catalog,sources,selection,collapsed,width,showRead}=useStore(store);
     const completed=catalog.feeds.filter(feed=>!feed.has_unviewed).length;
     const visible=catalog.feeds.filter(feed=>showRead||feed.has_unviewed||selection.kind==='feed'&&selection.id===feed.id);
-    const folders=catalog.folders.filter(folder=>showRead||visible.some(feed=>feed.folder_id===folder.id)||selection.kind==='folder'&&selection.id===folder.id);
+    const folders=catalog.folders.filter(folder=>showRead||catalog.feeds.some(feed=>feed.folder_id===folder.id&&feed.has_unviewed));
     const toggleRead=()=>{save('oko-reading-show-read',String(!showRead));store.set({...store.get(),showRead:!showRead});};
     useLayoutEffect(()=>{host('reading-nav').parentElement!.style.setProperty('--sidebar-width',width+'px');host('sidebar-resize').setAttribute('aria-valuenow',String(width));},[width]);
     useLayoutEffect(()=>{

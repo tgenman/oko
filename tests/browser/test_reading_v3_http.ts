@@ -5,6 +5,37 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 import {validate} from './contracts';
 
+test('hide read hides folders without unviewed feeds even when selected', {timeout:25000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ const catalog=await addSources(api,[["https://a.test/feed","Альфа","Новости"],["https://b.test/feed","Бета","Наука"]]);
+ const folder=catalog.folders.find(f=>f.title==='Новости')!,feed=catalog.feeds.find(f=>f.title==='Альфа')!;
+ const row=page.locator('[data-folder="'+folder.id+'"]'),toggle=page.locator('#read-feeds-toggle');
+ await page.goto(origin+'/#token='+token);
+ await row.click();
+ await expect(page.locator('#cards button')).toHaveCount(1);
+ await page.locator('#cards button').click();
+ await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await page.locator('#viewed').click();
+ await expect(row).toHaveCount(0);
+ await expect(page.locator('#list-title')).toHaveText('Новости');
+ await expect(page.locator('[data-folder]')).toHaveCount(1);
+ await toggle.click();
+ await expect(row).toBeVisible();
+ await expect(row).toHaveAttribute('aria-pressed','true');
+ await toggle.click();
+ await expect(row).toHaveCount(0);
+ await toggle.click();
+ await page.locator('[data-feed="'+feed.id+'"]').click();
+ await toggle.click();
+ await expect(row).toHaveCount(0);
+ await expect(page.locator('#list-title')).toHaveText('Альфа');
+ await page.screenshot({path:artifactPath('hide-read-folders.png')});
+ await toggle.click();
+ await expect(row).toBeVisible();
+ await expect(page.locator('[data-feed="'+feed.id+'"]')).toHaveAttribute('aria-pressed','true');
+ expect((await api('v3/subscriptions')).feeds).toHaveLength(2);
+});
+
 test('v3 reading uses real media and reconciles a lost viewed response without replay', {timeout:25000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
