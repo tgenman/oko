@@ -30,13 +30,42 @@ def article_error(post: str, url: str, message: str) -> str:
     return post + '\n\n' + error_block(url, message)
 
 
+def preview_text(text: str) -> str:
+    """Escape metadata formatting while keeping literal HTTP URLs intact."""
+    def escape(value: str) -> str:
+        return re.sub('([\\`*_{}\\[\\]()#+!<>|~])', lambda match: '\\' + match[0], value)
+    parts = []
+    end = 0
+    for match in re.finditer(r'https?://[^\s<>\[\]]+', text):
+        url = match[0]
+        while url and (url[-1] in '.,;!…' or url[-1] == ')' and url.count(')') > url.count('(')):
+            url = url[:-1]
+        parts.append(escape(text[end:match.start()]))
+        parts.append('<' + url + '>')
+        end = match.start() + len(url)
+    parts.append(escape(text[end:]))
+    return ''.join(parts)
+
+
 def saved_telegraph(header: dict[str, Any], base: str) -> dict[str, Any] | None:
     if not header.get('source_manifest'):
         return None
     manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest']))
-    if not manifest.articles and not manifest.download_partial:
+    if not manifest.articles and not manifest.download_partial and manifest.preview_fragment is None:
         return None
     post = str(manifest.post.get('text', ''))
+    if manifest.preview_fragment is not None:
+        note = 'Фрагмент предпросмотра Telegram — неполная копия. Полный текст, ссылки и вложения могут быть доступны в Telegram.'
+        if manifest.preview_fragment.endswith('…'):
+            note += ' Фрагмент обрезан.'
+        post += '\n\n> ' + note
+        if manifest.source_url:
+            post += '\n>\n> [Открыть пост в Telegram](' + manifest.source_url + ')'
+        if manifest.preview_fragment:
+            # Metadata is plain text: do not interpret it as authored Markdown.
+            post += '\n\n' + preview_text(manifest.preview_fragment)
+        if manifest.preview_error and manifest.source_url:
+            post += '\n\n' + error_block(manifest.source_url, manifest.preview_error)
     if manifest.download_partial:
         article_keys = {key for article in manifest.articles for key in article.resource_keys}
         for failed_resource in manifest.resources:

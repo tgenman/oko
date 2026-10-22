@@ -465,7 +465,12 @@ class Store:
                     self._finish_fetch(job, replace(material, collection_error=SourceError('Локальный файл вложения недоступен', code='media-unavailable')), self.clock() if now is None else now)
                 return
             retained = self.publication(item)
-            if retained and retained.teaser:
+            accept_preview = (material.source_manifest.preview_fragment is not None
+                and (manifest.preview_fragment is not None or
+                     manifest.post.get('text') == material.source_manifest.post.get('text')
+                     and not manifest.articles and all(r.status == 'unsupported' and r.sha256 is None
+                         and r.reason == 'Пост не поддерживается публичным предпросмотром' for r in manifest.resources)))
+            if retained and retained.teaser and not accept_preview:
                 material = replace(retained.teaser, full=False, members=material.members,
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
         if previous and previous['full'] and not material.full and not material.collection_error and material.source_manifest and telegraph_partial(material.source_manifest) and not material.source_manifest.download_partial:

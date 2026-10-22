@@ -33,7 +33,7 @@ class Filters:
             header, own_text = store.original(item)
         except (OSError, ValueError):
             return None
-        if header.get('source_manifest', {}).get('post_web_unavailable') and not own_text.strip():
+        if header.get('source_manifest', {}).get('preview_fragment') is not None or header.get('source_manifest', {}).get('post_web_unavailable') and not own_text.strip():
             return None
         reply = header.get('reply_preview')
         if reply is not None and not own_text.strip() and not reply.get('text', '').strip():

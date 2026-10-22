@@ -71,6 +71,8 @@ class Versions:
                     manifest = header['source_manifest']
                     manifest.pop('source_url',None)
                     manifest.pop('download_partial',None)
+                    manifest.pop('preview_fragment',None)
+                    manifest.pop('preview_error',None)
                     for resource in manifest.get('resources',[]):
                         resource.pop('source_url',None)
                         resource.pop('reason',None)
@@ -114,7 +116,7 @@ class Versions:
             common = {p.name for p in previous.iterdir() if p.name.startswith(('media-','image-'))} & {p.name for p in current.iterdir()}
             return all(Versions.file_digest(previous/name)==Versions.file_digest(current/name) for name in common)
         old = SourceManifest.model_validate_json(json.dumps(old_header['source_manifest']))
-        if (old_text == new_text and old.resources and not new.resources
+        if ((old_text == new_text or new.preview_fragment is not None) and old.resources and not new.resources
                 and not old.articles and not new.articles
                 and all(r.status == 'unsupported' and r.kind == 'file' and r.sha256 is None and r.external is None
                         and r.reason == 'Пост не поддерживается публичным предпросмотром'

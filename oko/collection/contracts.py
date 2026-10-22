@@ -78,6 +78,8 @@ class ArticleManifest(BaseModel):
 
 
 class SourceManifest(BaseModel):
+    preview_fragment: str | None = None
+    preview_error: str = ''
     download_partial: bool = False
     post_web_unavailable: bool = False
     source_url: str | None = None

@@ -49,7 +49,7 @@ def test_existing_false_error_clears_without_inventing_an_author_edit(tmp_path):
         assert client.get('/api/v3/status').json()['problems']['count'] == 0
 
 
-def test_forward_only_standalone_placeholder_keeps_its_existing_error(tmp_path):
+def test_forward_only_standalone_placeholder_saves_confirmed_restriction(tmp_path):
     def response(request):
         html = mark_post_unavailable(page([(11, '')]), 'fixture/11')
         html = html.replace('<div class="tgme_widget_message_text"></div>', '<div class="tgme_widget_message_forwarded_from">Forwarded from Original author</div>')
@@ -61,7 +61,8 @@ def test_forward_only_standalone_placeholder_keeps_its_existing_error(tmp_path):
         assert content['post_web_unavailable'] is False
         assert content['completeness']['state'] == 'incomplete'
         assert 'Forwarded from' in content['text']
-        assert client.get('/api/v3/status').json()['problems']['count'] == 1
+        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert 'Фрагмент предпросмотра' in content['linked_content']['post_text'] or 'фрагмент предпросмотра' in content['linked_content']['post_text']
 
 
 def test_removing_a_real_unsupported_iframe_is_still_an_author_edit(tmp_path):

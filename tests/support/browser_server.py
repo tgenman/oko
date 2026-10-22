@@ -36,6 +36,11 @@ class BrowserTelegram(Telegram):
 
 
 def response(request):
+    if request.url.host == 't.me' and '/previewfragment' in request.url.path:
+        from tests.support.telegram_web import forwarded_unavailable_page, preview_metadata_page
+        if request.url.path == '/previewfragment/11':
+            return httpx.Response(200, text=preview_metadata_page('Сохранённый фрагмент [это не восстановленная ссылка](https://example.test/fake)…', 'previewfragment/11'))
+        return httpx.Response(200, text=forwarded_unavailable_page().replace('fixture/', 'previewfragment/'))
     if request.url.host == 'broken-telegram.example':
         from tests.support.telegram_web import BrokenMediaStream
         return httpx.Response(200, stream=BrokenMediaStream(), headers={'content-type':'video/mp4'})

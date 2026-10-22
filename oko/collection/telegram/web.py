@@ -206,6 +206,7 @@ def parse_page(data: bytes, username: str) -> WebPage:
         paragraphs = []
         for quote in wrapper.select('.tgme_widget_message_forwarded_from'):
             paragraphs.append('> '+readable(quote))
+        forwarded_count = len(paragraphs)
         for paragraph in wrapper.select('.tgme_widget_message_text'):
             if paragraph.find_parent(class_='tgme_widget_message_reply') is None:
                 paragraphs.append(readable(paragraph))
@@ -224,10 +225,10 @@ def parse_page(data: bytes, username: str) -> WebPage:
             raise SourceError('Telegram не предоставил дату публикации')
         post_web_unavailable = bool('text_not_supported_wrap' in wrapper.get_attribute_list('class')
             and wrapper.select_one('.message_media_not_supported .message_media_view_in_telegram')
-            and not body and reply_preview is None
+            and not any(part.strip() for part in paragraphs[forwarded_count:]) and reply_preview is None
             and not wrapper.select_one(MEDIA_WIDGETS))
         media = () if post_web_unavailable else media_blocks(wrapper,username,message)
-        if not post_web_unavailable and not media and not body and reply_preview is None:
+        if not post_web_unavailable and not media and not any(part.strip() for part in paragraphs[forwarded_count:]) and reply_preview is None:
             media = (ExpectedMedia('telegram-web:'+str(message)+':unknown','unsupported',None,'media-'+str(message)+'.bin',reason='Предпросмотр не предоставил содержимое публикации'),)
         preview = wrapper.select_one('.tgme_widget_message_link_preview')
         preview_text = readable(preview) if preview else ''
@@ -359,6 +360,17 @@ class WebTelegram:
         teaser = post.publication.teaser
         assert teaser
         assert teaser.source_manifest
+        if teaser.source_manifest.post_web_unavailable and post.text.strip():
+            from oko.collection.telegram.preview import fragment
+            preview, error = await fragment(self.username, publication.id, self.transport, staging)
+            previous = publication.teaser.source_manifest if publication.teaser else None
+            if error and previous and previous.preview_fragment:
+                preview = previous.preview_fragment
+            manifest = teaser.source_manifest.model_copy(update={'preview_fragment':preview, 'preview_error':error})
+            text = '\n\n'.join(part for part in (post.text, preview) if part)
+            return Material(preview.split('\n')[0] if preview else 'Фрагмент предпросмотра Telegram недоступен',
+                text, False, 'Сохранён фрагмент предпросмотра; полная публикация недоступна для веб-просмотра' if preview else 'Фрагмент предпросмотра недоступен; откройте пост в Telegram',
+                members=post.publication.members, source_manifest=manifest)
         collected = await Downloader(self.transport).collect(post.media,teaser.source_manifest.resources,publication.teaser,staging)
         partial = bool(collected.error and collected.error.code == 'media-unavailable'
                        and (post.text.strip() or collected.attachments))

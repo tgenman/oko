@@ -1,0 +1,34 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {expect} from 'playwright/test';
+import {productionReader} from './http-reader';
+import {artifactPath} from './artifacts';
+
+test('Forwarded Telegram metadata is a labelled partial fragment with original links and a manual retry',async t=>{
+ const r=await productionReader(t);
+ await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
+ await r.openReader();
+ await r.api('telegram/connect','POST',{source_locator:'@previewfragment',folder:'Fragments',initial_history:{mode:'count',count:'1'}});
+ await r.page.goto(r.origin+'/#token='+r.token);
+ await expect(r.page.locator('[data-card]')).toHaveCount(1);
+ await r.page.locator('[data-card]').click();
+ const text=r.page.locator('#text');
+ await expect(text).toContainText('Сохранённый фрагмент [это не восстановленная ссылка](https://example.test/fake)…');
+ await expect(text).toContainText('Фрагмент обрезан');
+ await expect(text).toContainText('неполная копия');
+ await expect(text.getByRole('link',{name:'Original author',exact:true})).toHaveAttribute('href','https://t.me/original/42');
+ await expect(text.getByRole('link',{name:'Открыть пост в Telegram',exact:true})).toHaveAttribute('href','https://t.me/previewfragment/11');
+ await expect(text.getByRole('link',{name:'это не восстановленная ссылка',exact:true})).toHaveCount(0);
+ await expect(text.getByRole('link',{name:'https://example.test/fake',exact:true})).toHaveAttribute('href','https://example.test/fake');
+ await expect(r.page.locator('#completeness')).not.toContainText('Fully saved');
+ await expect(r.page.getByRole('button',{name:'Retry Download',exact:true})).toBeVisible();
+ await r.page.screenshot({path:artifactPath('telegram-preview-fragment-desktop.png')});
+ const retried=r.page.waitForResponse(response=>response.url().endsWith('/retry')&&response.request().method()==='POST');
+ await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();await retried;
+ await expect.poll(async()=>{const cards=await r.api('cards');const material=await r.api(`materials/${cards[0]!.id}`);return material.content.availability==='available'&&!material.content.loading;}).toBe(true);
+ await expect(text).toContainText('Сохранённый фрагмент [это не восстановленная ссылка](https://example.test/fake)…');
+ await expect(r.page.getByRole('button',{name:'Retry Download',exact:true})).toBeVisible();
+ await r.page.setViewportSize({width:390,height:844});await text.scrollIntoViewIfNeeded();
+ await r.page.screenshot({path:artifactPath('telegram-preview-fragment-mobile.png')});
+ assert.equal(await r.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+});

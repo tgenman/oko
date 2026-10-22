@@ -55,3 +55,13 @@ class BrokenMediaStream(httpx.AsyncByteStream):
         import httpcore
         yield b'partial-unusable-video'
         raise httpcore.RemoteProtocolError('peer closed connection without sending complete message body')
+
+
+def forwarded_unavailable_page():
+    html=mark_post_unavailable(page([(11,'')]),'fixture/11')
+    return html.replace('<div class="tgme_widget_message_text"></div>','<div class="tgme_widget_message_forwarded_from">Forwarded from <a href="https://t.me/original/42">Original author</a></div>')
+
+
+def preview_metadata_page(text='Metadata fragment…', identity='fixture/11'):
+    from html import escape
+    return '<meta property="og:site_name" content="Telegram"><meta property="og:description" content="'+escape(text,quote=True)+'"><script data-telegram-post="'+identity+'"></script>'

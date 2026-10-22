@@ -100,6 +100,8 @@ def article_content(url: str, content: Any) -> tuple[str, tuple[ExpectedMedia, .
 async def enrich(material: Material, previous: Material | None, staging: DownloadStage | None,
                  transport: httpx.AsyncBaseTransport | None) -> Material:
     source = material.source_manifest
+    if source and source.preview_fragment is not None:
+        return material
     post_text = str(source.post.get('text',material.text)) if source else material.text
     urls = direct_articles(post_text)
     if not urls:
