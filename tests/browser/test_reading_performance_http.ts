@@ -1,24 +1,16 @@
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import assert from 'node:assert/strict';
-import {promisify} from 'node:util';
-import {execFile} from 'node:child_process';
-import {existsSync} from 'node:fs';
 import {writeFile} from 'node:fs/promises';
-import path from 'node:path';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
-const execute=promisify(execFile),root=path.resolve(__dirname,'../..');
-const python=process.env.OKO_PYTHON||(existsSync(path.join(root,'.venv/bin/python'))?path.join(root,'.venv/bin/python'):'python3');
 type Sample={id:string;phase:'first'|'repeat';ms:number};
 declare global {interface Window {readingBenchmark:{expected:string;started:number;phase:Sample['phase'];samples:Sample[]};}}
 
-for(const perFeed of [26,100])for(const active of [false,true]){
+for(const perFeed of [26,100] as const)for(const active of [false,true]){
  test(`saved reading latency: ${perFeed*4} materials, ${active?'active processing':'idle'}`,{timeout:90000},async t=>{
-  const r=await productionReader(t,{collection:false,processingDelay:active?.15:0,prepare:async directory=>{
-    await execute(python,['-m','tests.support.performance_seed',directory,'--per-feed',String(perFeed),...(active?['--active']:[])],{cwd:root,signal:t.signal});
-  }});
+  const r=await productionReader(t,{collection:false,processingDelay:active?.15:0,library:{perFeed,active}});
   await r.page.addInitScript(()=>{
     const state=window.readingBenchmark={expected:'',started:0,phase:'first' as const,samples:[] as Sample[]};
     document.addEventListener('click',event=>{

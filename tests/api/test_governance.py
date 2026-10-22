@@ -1,12 +1,15 @@
 """API validation and generated libraries from exact Git-index inputs."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 
 import yaml
 import pytest
+
+from scripts.api import contract
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,9 +43,8 @@ def test_missing_and_dynamic_remote_references_fail_before_validation(tmp_path):
         schema.clear()
         schema.update(reference)
         spec.write_text(json.dumps(value))
-        result = run(sys.executable, str(ROOT / 'scripts/api.py'), 'validate', '--spec', str(spec))
-        assert result.returncode != 0
-        assert 'reference' in result.stderr.lower()
+        with pytest.raises(ValueError, match='reference'):
+            contract(spec)
 
 
 def test_staged_codegen_rejects_index_drift_and_ignores_unstaged_drift(tmp_path):
@@ -87,7 +89,7 @@ def test_canonical_examples_pass_the_early_cli():
     ('invalid_response', 'GET /api/probe response 200 application/json'),
     ('invalid_named_response', 'GET /api/probe response 200 application/json'),
 ])
-def test_validate_and_bundle_reject_bad_examples_before_output(tmp_path, fault, location):
+def test_contract_rejects_bad_examples(tmp_path, fault, location):
     value, spec, _ = documents(tmp_path)
     schema = value['components']['schemas']['GovernanceProbe']
     response = value['paths']['/api/probe']['get']['responses']['200']['content']['application/json']
@@ -105,14 +107,32 @@ def test_validate_and_bundle_reject_bad_examples_before_output(tmp_path, fault, 
         del response['example']
         response['examples'] = {'valid': {'value': {'value': 'fixture'}}, 'invalid': {'value': {}}}
     spec.write_text(json.dumps(value))
-    for command in ['validate', 'bundle']:
-        output = tmp_path / 'must-not-be-written.json'
-        output.write_text('preserve existing output')
-        result = run(sys.executable, str(ROOT / 'scripts/api.py'), command, '--spec', str(spec), '--output', str(output))
-        assert result.returncode != 0
-        assert location in result.stderr, result.stderr
-        assert output.read_text() == 'preserve existing output'
-        assert not result.stdout
+    with pytest.raises(ValueError, match=re.escape(location)):
+        contract(spec)
+
+
+@pytest.mark.parametrize('command', ['validate', 'bundle'])
+def test_cli_validation_failure_preserves_output_and_reports_error(tmp_path, command):
+    value, spec, _ = documents(tmp_path)
+    value['components']['schemas']['GovernanceProbe']['examples'] = [{'value': 42}]
+    spec.write_text(json.dumps(value))
+    output = tmp_path / 'must-not-be-written.json'
+    output.write_text('preserve existing output')
+    result = run(sys.executable, str(ROOT / 'scripts/api.py'), command, '--spec', str(spec), '--output', str(output))
+    assert result.returncode != 0
+    assert 'Invalid example: schema GovernanceProbe' in result.stderr
+    assert output.read_text() == 'preserve existing output'
+    assert not result.stdout
+
+
+def test_cli_reference_failure_reports_error(tmp_path):
+    value, spec, _ = documents(tmp_path)
+    value['components']['schemas']['GovernanceProbe']['properties']['value'] = {'$ref':'https://example.invalid/private'}
+    spec.write_text(json.dumps(value))
+    result = run(sys.executable, str(ROOT / 'scripts/api.py'), 'validate', '--spec', str(spec))
+    assert result.returncode != 0
+    assert 'External contract references' in result.stderr
+    assert not result.stdout
 
 
 def test_false_null_and_named_response_examples_and_binary_exception(tmp_path):
