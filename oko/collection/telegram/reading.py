@@ -33,7 +33,7 @@ def article_error(post: str, url: str, message: str) -> str:
 def preview_text(text: str) -> str:
     """Escape metadata formatting while keeping literal HTTP URLs intact."""
     def escape(value: str) -> str:
-        return re.sub('([\\`*_{}\\[\\]()#+!<>|~])', lambda match: '\\' + match[0], value)
+        return ''.join('\\' + char if char in '\\`*_{}[]()#+.!<>|~-' else char for char in value)
     parts = []
     end = 0
     for match in re.finditer(r'https?://[^\s<>\[\]]+', text):

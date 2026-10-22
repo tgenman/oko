@@ -14,7 +14,9 @@ test('Forwarded Telegram metadata is a labelled partial fragment with original l
  await r.page.locator('[data-card]').click();
  const text=r.page.locator('#text');
  await expect(text).toContainText('Сохранённый фрагмент [это не восстановленная ссылка](https://example.test/fake)…');
- await expect(text).toContainText('Фрагмент обрезан');
+ await expect(text).toContainText('C:\\folder');
+ await expect(text).toContainText('1. Это обычная строка');
+ await expect(text.locator('ol')).toHaveCount(0);
  await expect(text).toContainText('неполная копия');
  await expect(text.getByRole('link',{name:'Original author',exact:true})).toHaveAttribute('href','https://t.me/original/42');
  await expect(text.getByRole('link',{name:'Открыть пост в Telegram',exact:true})).toHaveAttribute('href','https://t.me/previewfragment/11');
