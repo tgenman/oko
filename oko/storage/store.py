@@ -473,12 +473,12 @@ class Store:
             if retained and retained.teaser and not accept_preview:
                 material = replace(retained.teaser, full=False, members=material.members,
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
-        if previous and previous['full'] and not material.full and not material.collection_error and material.source_manifest and telegraph_partial(material.source_manifest) and not material.source_manifest.download_partial:
+        if previous and previous.get('full', False) and not material.full and not material.collection_error and material.source_manifest and telegraph_partial(material.source_manifest) and not material.source_manifest.download_partial:
             with self.db:
                 self.finish(job)
                 self.subscriptions.history.saved(job.item, True)
             return
-        if material.members and previous and previous['full'] and (not material.full or material.collection_error) and not (expected_incomplete(material.source_manifest) and not material.collection_error):
+        if material.members and previous and previous.get('full', False) and (not material.full or material.collection_error) and not (expected_incomplete(material.source_manifest) and not material.collection_error):
             error = material.collection_error or SourceError(material.reason or 'Повторная загрузка не завершена',
                 retryable=not bool(material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources)))
             if error.retryable and material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources):
