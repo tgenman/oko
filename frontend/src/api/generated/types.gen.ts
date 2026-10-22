@@ -1337,6 +1337,7 @@ export type ExternalAttachment = {
     poster_url: MediaUrl | null;
     reason: 'public_preview_unavailable';
     restriction: 'size_limit' | null;
+    size_label: string | null;
     source_url: SourceUrl;
     title: string | null;
 };

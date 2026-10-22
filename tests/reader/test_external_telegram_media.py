@@ -20,7 +20,7 @@ def test_external_audio_is_saved_without_errors_and_is_typed_for_reader(tmp_path
         content = client.get('/api/v3/materials/'+cards[0]['id']).json()['content']
         assert client.get('/api/v3/status').json()['problems']['count'] == 0
         assert content['completeness']['reason'] == 'external_attachment'
-        assert content['external_attachments'] == [dict(kind='audio', title='A recorded lesson', author='Fixture author', duration=None, poster_url=None, source_url='https://t.me/fixture/11', reason='public_preview_unavailable', restriction=None)]
+        assert content['external_attachments'] == [dict(kind='audio', title='A recorded lesson', author='Fixture author', size_label=None, duration=None, poster_url=None, source_url='https://t.me/fixture/11', reason='public_preview_unavailable', restriction=None)]
         assert cards[0]['external_attachment_kinds'] == ['audio']
 
 
@@ -215,3 +215,37 @@ def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
         restricted[0]=True
         client.post(url+'/retry');settled(client)
         assert client.get('/api/v3/status').json()['problems']['count']>0
+
+
+def test_external_document_metadata_text_and_restart(tmp_path):
+    from tests.support.telegram_web import DOCUMENT
+    requests = []
+    def response(request):
+        requests.append(str(request.url))
+        return httpx.Response(200, text=page([(13,'Own caption'+DOCUMENT), (14,DOCUMENT.replace('Бесы.txt','').replace('36.2 KB','')), (15,'<a class="tgme_widget_message_reply" href="https://t.me/fixture/1"><span class="tgme_widget_message_author_name">Author</span><div class="js-message_reply_text">Reply context</div></a>'+DOCUMENT)],before=int(request.url.params.get('before','0'))))
+    options = dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
+    headers = {'Authorization':'Bearer test'}
+    with TestClient(create_app(tmp_path,**options),headers=headers) as client:
+        configure_fast_web(client)
+        assert client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).status_code==200
+        cards=settled(client,count=3)
+        assert any(c['title']=='Бесы.txt' for c in cards)
+        card=next(c for c in cards if c['title']=='Own caption')
+        url='/api/v3/materials/'+card['id']
+        content=client.get(url).json()['content']
+        assert content['text']=='Own caption'
+        assert card['external_attachment_kinds']==['document']
+        media=content['external_attachments'][0]
+        assert media['title']=='Бесы.txt' and media['size_label']=='36.2 KB'
+        assert media['author'] is None and media['source_url']=='https://t.me/fixture/13'
+        assert content['completeness']['reason']=='external_attachment'
+        empty=next(c for c in cards if c['title']=='Файл доступен в Telegram')
+        empty_content=client.get('/api/v3/materials/'+empty['id']).json()['content']
+        assert empty_content['text']==''
+        assert empty_content['external_attachments'][0]['size_label'] is None
+        assert client.get('/api/v3/status').json()['problems']['count']==0
+        assert all('/s/' in request for request in requests)
+    with TestClient(create_app(tmp_path,**options),headers=headers) as client:
+        configure_fast_web(client)
+        assert client.get(url).json()['content']['external_attachments'][0]==media
+        assert client.get('/api/v3/status').json()['problems']['count']==0

@@ -41,6 +41,9 @@ def response(request):
     if request.url.host == 't.me' and any('/'+name in request.url.path for name in ('externalmedia','postunavailable')):
         username = 'postunavailable' if '/postunavailable' in request.url.path else 'externalmedia'
         posts = [(11,'External audio post'+AUDIO),(12,'External video post'+VIDEO)]
+        if username == 'externalmedia':
+            from tests.support.telegram_web import DOCUMENT
+            posts.append((13,'External document post'+DOCUMENT))
         if username == 'postunavailable':
             posts.append((13,''))
         html = external_page(posts,before=int(request.url.params.get('before','0')))
