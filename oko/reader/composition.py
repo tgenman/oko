@@ -89,6 +89,7 @@ class ReadingComposition:
                 text = material.pop('text')
                 description = material.pop('description', '')
                 material.pop('reply_preview', None)
+                material.pop('linked_content', None)
                 preview = description or text
                 filtered = material.get('filter', {})
                 if not description and filtered.get('status') == 'done' and not filtered['restored']:

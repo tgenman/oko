@@ -63,6 +63,7 @@ class ResourceManifest(BaseModel):
     mime: str
     status: Literal['missing', 'loaded', 'unsupported', 'external'] = 'missing'
     reason: str = ''
+    source_url: str | None = None
     sha256: str | None = None
     external: ExternalMedia | None = None
 

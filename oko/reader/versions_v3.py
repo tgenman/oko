@@ -1,6 +1,7 @@
 """Selective, versioned reading over the same Runtime and Store owners."""
 from collections.abc import Callable
 from oko.collection.external_media import saved_external
+from oko.collection.telegram.reading import saved_telegraph
 import sqlite3
 import json
 from typing import Any
@@ -96,7 +97,7 @@ class VersionedReading:
         full=header.get('full',True) and (not header.get('members') or set(header['members'])==set(json.loads(row['members'])))
         from oko.reader.reading_v3 import completeness
         external = saved_external(header,f'/api/v3/materials/{identity}')
-        return dict(data,availability='available',content=dict(availability='available',post_web_unavailable=external['post_web_unavailable'],text=text,description=header.get('description',''),reply_preview=header.get('reply_preview'),
+        return dict(data,availability='available',content=dict(availability='available',linked_content=saved_telegraph(header,f'/api/v3/materials/{identity}'),post_web_unavailable=external['post_web_unavailable'],text=text,description=header.get('description',''),reply_preview=header.get('reply_preview'),
             completeness=completeness(full,header.get('reason',''),external['external_only'],external['post_web_unavailable']).model_dump(mode='json'),loading=loading,
             changed=bool(store.versions.previous(identity)),source_deleted=store.versions.deleted(identity),
             revision_id=store.content_version(identity),version=store.versions.number(identity)))

@@ -147,9 +147,13 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
                 if retry is not None and not retry.retryable:
                     raise retry
                 raise
+            reason = error.label
+            if isinstance(error.__cause__, httpx.HTTPStatusError):
+                status = error.__cause__.response.status_code
+                reason = f'HTTP {status}' + (' — источник недоступен' if status >= 500 else ' — доступ запрещён' if status == 403 else '')
             old = old_articles.get(url)
             if old and old.text is not None:
-                article = old.model_copy(update={'reason':error.label})
+                article = old.model_copy(update={'reason':reason})
                 for key in old.resource_keys:
                     resource = old_resources.get(key)
                     if resource:
@@ -160,7 +164,7 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
                         elif resource.status!='loaded':
                             reasons.append(resource.reason or error.label)
             else:
-                article = article.model_copy(update={'reason':error.label})
+                article = article.model_copy(update={'reason':reason})
                 reasons.append(error.label+' · '+url)
             if retry is None or not error.retryable:
                 retry = error

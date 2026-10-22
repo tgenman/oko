@@ -28,7 +28,7 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await page.locator('[data-card]').first().click();
  await expect(page.locator('#text')).toContainText('Веб-публикация без аккаунта');
  await expect(page.locator('#text')).toContainText('Полный текст статьи сохранён локально.');
- await expect(page.locator('#images img')).toBeVisible();
+ await expect(page.locator('.telegraph-article img')).toBeVisible();
  await expect(page.locator('#completeness')).toContainText('External embed not saved locally');
  await page.locator('#settings-open').click();await page.locator('#settings-dialog').getByRole('button',{name:'Telegram',exact:true}).click();
  await page.locator('#telegram-profile-personal').selectOption('one');

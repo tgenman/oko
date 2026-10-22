@@ -233,7 +233,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             owner = feeds(value.feed_id)[value.feed_id]
             from oko.reader.composition import snippet
             data = value.model_dump(exclude_unset=True)
-            for key in ('text', 'description', 'display_text', 'reply_preview'):
+            for key in ('text', 'description', 'display_text', 'reply_preview', 'linked_content'):
                 data.pop(key, None)
             data.update(feed_title=owner.root.title, folder_id=owner.root.folder_id.root, importance=owner.root.importance.root,
                         snippet=snippet(value.description if isinstance(value.description, str) and value.description else value.display_text if isinstance(value.display_text, str) else value.text), published_known=value.published_known is not False)
@@ -243,6 +243,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             if isinstance(projected, wire.PendingReadingCard):
                 return wire.ReadableMaterial(wire.PendingReadableMaterial(**shared, availability='pending', content=wire.PendingPublicationContent(availability='pending', loading=projected.loading)))
             content = wire.AvailablePublicationContent(availability='available', text=value.text,
+                linked_content=wire.LinkedContent.model_validate(value.linked_content.model_dump()) if value.linked_content else None,
                 display_text=value.display_text if isinstance(value.display_text, str) else value.text,
                 description=value.description if isinstance(value.description, str) else '',
                 reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
@@ -261,7 +262,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             raise ApiError(404, wire.ErrorEnvelope(wire.VersionUnavailableError(code='version_unavailable', message='Версия недоступна', details=wire.VersionUnavailableErrorDetails(material_id=identity(item), number=n), command_id=None, diagnostic_id=None)))
         value = facts.Version.model_validate(raw)
         revision = current.versions.fingerprint(current.versions.path(item, n).parent)
-        return wire.PublicationVersion(number=n, revision_id=wire.RevisionId(revision), title=value.title, text=value.text, reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
+        return wire.PublicationVersion(linked_content=wire.LinkedContent.model_validate(value.linked_content.model_dump()) if value.linked_content else None, number=n, revision_id=wire.RevisionId(revision), title=value.title, text=value.text, reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
             post_web_unavailable=value.post_web_unavailable, external_attachments=[wire.ExternalAttachment(**a.model_dump()) for a in value.external_attachments], completeness=completeness(value.full, value.reason, value.external_only, value.post_web_unavailable), images=[media_url(url) for url in value.images], attachments=attachments(value.attachments))
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:

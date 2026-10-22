@@ -2055,6 +2055,27 @@ class IdentityUnconfirmedError(WireModel):
     message: StrictStr
 
 
+class LinkedArticle(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    error: StrictStr | None
+    media_urls: list[MediaUrl]
+    source_url: SourceUrl
+    text: StrictStr = Field(
+        ...,
+        description="Saved article Markdown. Failed resources remain safe source links with their error reason at the original position.",
+    )
+    title: StrictStr
+
+
+class LinkedContent(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    articles: list[LinkedArticle]
+    post_text: StrictStr = Field(
+        ...,
+        description="Saved post Markdown, with an inline error next to an article link when its initial load failed.",
+    )
+
+
 class LocalModel(RootModel[KnownLocalModel | UnknownLocalModel]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: KnownLocalModel | UnknownLocalModel = Field(
@@ -2191,6 +2212,10 @@ class PublicationVersion(WireModel):
         default=[], validate_default=True
     )
     images: list[MediaUrl]
+    linked_content: LinkedContent | None = Field(
+        default=None,
+        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.",
+    )
     number: StrictInt = Field(..., ge=1, le=9007199254740991)
     post_web_unavailable: StrictBool = Field(
         default=False,
@@ -2245,6 +2270,10 @@ class ReadingTextContent(WireModel):
     completeness: ContentCompleteness
     description: StrictStr = Field(
         ..., description="Source description stored separately from publication text."
+    )
+    linked_content: LinkedContent | None = Field(
+        default=None,
+        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.",
     )
     loading: StrictBool
     post_web_unavailable: StrictBool = Field(
@@ -2683,6 +2712,10 @@ class AvailablePublicationContent(WireModel):
         default=[], validate_default=True
     )
     images: list[MediaUrl]
+    linked_content: LinkedContent | None = Field(
+        default=None,
+        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.",
+    )
     loading: StrictBool
     post_web_unavailable: StrictBool = Field(
         default=False,

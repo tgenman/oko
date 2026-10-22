@@ -1,0 +1,11 @@
+#material .linked-content-label{display:block;font-size:11px;line-height:1.5;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#69766c;margin:0 0 8px}
+#material .telegram-post{margin-bottom:30px}
+#material section.telegraph-article{padding:0;border:1px solid #d8dfd9;background:#fafcf9;border-radius:12px;overflow:hidden;margin:24px 0;min-width:0;overflow-wrap:anywhere;white-space:normal}
+#material .telegraph-article>header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:15px 22px;border-bottom:1px solid #dfe5de;background:#eef3ec;font-size:12px}
+#material .telegraph-article>header .linked-content-label{margin:0}
+#material .telegraph-body{padding:24px}
+#material .telegraph-body>h2{font-size:23px;line-height:1.4;margin:0 0 18px}
+#material .telegraph-error{color:#a64a29;font-size:13px;line-height:1.6}
+#material .telegraph-article>footer{border-top:1px solid #e2e7df;padding:10px 24px;color:#84907e;font-size:11px}
+#material .telegraph-article :is(img,video,audio){display:block;max-width:100%;margin:16px 0}
+@media(max-width:800px){#material .telegraph-article>header{padding:13px 15px}#material .telegraph-body{padding:18px 15px}#material .telegraph-body>h2{font-size:21px}}

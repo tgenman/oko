@@ -239,7 +239,21 @@ class ExternalAttachment(WireModel):
     poster_url: str | None = None
 
 
+class LinkedArticle(WireModel):
+    source_url: str
+    title: str
+    text: str
+    error: str | None
+    media_urls: list[str]
+
+
+class LinkedContent(WireModel):
+    post_text: str
+    articles: list[LinkedArticle]
+
+
 class Version(WireModel):
+    linked_content: LinkedContent | None = None
     external_attachments: list[ExternalAttachment] = Field(default_factory=list)
     external_only: bool = False
     post_web_unavailable: bool = False
@@ -457,6 +471,7 @@ class FeedVerification(WireModel):
     verification: StrictStr
 
 class Material(WireModel):
+    linked_content: LinkedContent | None = None
     external_attachments: list[ExternalAttachment] = Field(default_factory=list)
     external_only: bool = False
     post_web_unavailable: bool = False

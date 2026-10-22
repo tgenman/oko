@@ -50,9 +50,20 @@ def response(request):
         if username == 'postunavailable':
             html = mark_post_unavailable(html,'fixture/13')
         return httpx.Response(200,text=html.replace('fixture',username))
+    if request.url.host == 'broken-image.example':
+        return httpx.Response(403)
+    if request.url.host == 't.me' and '/telegrapherrors' in request.url.path:
+        return httpx.Response(200, text=page([(11, 'Текст поста <a href="https://telegra.ph/FailedImage">Статья</a> <a href="https://telegra.ph/MissingArticle">Недоступная статья</a>')]).replace('fixture/', 'telegrapherrors/'))
     if request.url.host == 't.me':
         return httpx.Response(200, text=page([(11, 'Веб-публикация без аккаунта <a href="https://telegra.ph/Fixture">Статья</a>')]))
     if request.url.host == 'api.telegra.ph':
+        if request.url.path == '/getPage/MissingArticle':
+            return httpx.Response(503)
+        if request.url.path == '/getPage/FailedImage':
+            return httpx.Response(200, json={'ok': True, 'result': {'title': 'Статья с изображением', 'content': [
+                {'tag': 'p', 'children': ['Текст до изображения.']},
+                {'tag': 'img', 'attrs': {'src': 'https://broken-image.example/unavailable.png'}},
+                {'tag': 'p', 'children': ['Текст после изображения.']}]}})
         assert request.url.path == '/getPage/Fixture'
         return httpx.Response(200, json={'ok': True, 'result': {'title': 'Статья Telegraph', 'content': [
             {'tag': 'p', 'children': ['Полный текст статьи сохранён локально.']},

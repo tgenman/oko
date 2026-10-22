@@ -54,6 +54,10 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         assert client.post('/api/v3/telegram/connect',json=body).status_code == 200
         material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
         assert material['content']['text'].startswith(POST)
+        linked = material['content']['linked_content']
+        assert linked['post_text'] == POST
+        assert [a['title'] for a in linked['articles']] == ['Title One', 'Title Two']
+        assert linked['articles'][0]['media_urls'] == [material['content']['attachments'][0]['url']]
         assert material['content']['text'].count('Article One') == 1
         assert material['content']['text'].count('Article Two') == 1
         assert 'Photo caption' in material['content']['text']
@@ -131,6 +135,9 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         settled(client)
         changed = client.get('/api/v3/materials/'+identity).json()
         assert 'Version two' in changed['content']['text'] and len(changed['content']['previous_versions'])==1
+        previous = client.get(changed['content']['previous_versions'][0]['url']).json()
+        assert 'Version one' in previous['linked_content']['articles'][0]['text']
+        assert '/versions/' in previous['linked_content']['articles'][0]['media_urls'][0]
 
 
 def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
@@ -374,3 +381,79 @@ def test_retained_theses_and_provenance_come_from_the_same_committed_bytes(tmp_p
         assert moved.wait(3)
         current=client.get(path).json()['theses']['result']
         assert current==accepted
+
+
+@pytest.mark.parametrize('access', ['web', 'client'])
+def test_failed_article_and_image_keep_inline_links_and_http_reasons(tmp_path, access):
+    post = 'Original https://telegra.ph/Image https://telegra.ph/Unavailable'
+    async def response(request):
+        if request.url.host == 'api.telegra.ph':
+            if request.url.path.endswith('/Unavailable'):
+                return httpx.Response(503)
+            return httpx.Response(200, json={'ok': True, 'result': {'title': 'Readable article', 'content': [
+                {'tag': 'p', 'children': ['Before image']},
+                {'tag': 'img', 'attrs': {'src': 'https://cdn.example/blocked.png?token=secret-value'}},
+                {'tag': 'p', 'children': ['After image']}]}})
+        if request.url.host == 'cdn.example':
+            return httpx.Response(403)
+        return httpx.Response(200, text=page([(11, post)]))
+    telegram = TelegraphClient()
+    telegram.post_text = post
+    options = dict(token='test', api_only=True, rss_transport=httpx.MockTransport(response))
+    if access == 'client':
+        options['telegram_client'] = telegram
+    with TestClient(create_app(tmp_path, **options), headers={'Authorization': 'Bearer test'}) as client:
+        configure_fast_web(client)
+        body = dict(source_locator='@fixture', folder='Inbox')
+        if access == 'client':
+            client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref': 'fixture'})
+            body['access'] = {'kind': 'client', 'profile': 'personal'}
+        client.post('/api/v3/telegram/connect', json=body)
+        import time
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            cards = client.get('/api/v3/cards').json()
+            if cards:
+                material = client.get('/api/v3/materials/' + cards[0]['id']).json()
+                linked = material.get('content', {}).get('linked_content')
+                if linked and len(linked['articles']) == 2:
+                    break
+            time.sleep(.02)
+        else:
+            raise AssertionError('Linked content was not saved')
+        image, unavailable = linked['articles']
+        assert 'https://cdn.example/blocked.png' in image['text']
+        assert 'HTTP 403' in image['text'] and 'доступ запрещён' in image['text']
+        assert image['text'].index('Before image') < image['text'].index('https://cdn.example') < image['text'].index('After image')
+        assert 'secret-value' not in str(linked)
+        assert 'HTTP 503' in linked['post_text'] and 'https://telegra.ph/Unavailable' in linked['post_text']
+        assert unavailable['error'] and 'HTTP 503' in unavailable['error']
+        assert image['media_urls'] == []
+        assert material['content']['completeness']['state'] == 'incomplete'
+
+
+@pytest.mark.parametrize('url', ['https://telegra.ph/Query?foo=1', 'https://telegra.ph/Query#section', 'http://telegra.ph/Query', 'https://www.telegra.ph/Query'])
+def test_article_error_preserves_original_markdown_destination(tmp_path, url):
+    async def response(request):
+        if request.url.host == 'api.telegra.ph':
+            return httpx.Response(503)
+        return httpx.Response(200, text=page([(11, f'Post <a href="{url}">Read article</a> tail')]))
+    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)),
+                    headers={'Authorization': 'Bearer test'}) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
+        import time
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            cards = client.get('/api/v3/cards').json()
+            if cards:
+                material = client.get('/api/v3/materials/' + cards[0]['id']).json()
+                linked = material.get('content', {}).get('linked_content')
+                if linked:
+                    break
+            time.sleep(.02)
+        else:
+            raise AssertionError('Failed article was not saved')
+        assert f'[Read article]({url}) — Не удалось загрузить статью:' in linked['post_text']
+        assert linked['post_text'].endswith(' tail')
+        assert linked['post_text'].count('Read article') == 1

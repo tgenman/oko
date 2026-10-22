@@ -128,6 +128,10 @@ export type AvailablePublicationContent = {
     display_text: string;
     external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
+    /**
+     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+     */
+    linked_content?: LinkedContent | null;
     loading: boolean;
     /**
      * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
@@ -1854,6 +1858,25 @@ export type LifetimePolicyIncompatibleError = {
     message: string;
 };
 
+export type LinkedArticle = {
+    error: string | null;
+    media_urls: Array<MediaUrl>;
+    source_url: SourceUrl;
+    /**
+     * Saved article Markdown. Failed resources remain safe source links with their error reason at the original position.
+     */
+    text: string;
+    title: string;
+};
+
+export type LinkedContent = {
+    articles: Array<LinkedArticle>;
+    /**
+     * Saved post Markdown, with an inline error next to an article link when its initial load failed.
+     */
+    post_text: string;
+};
+
 export type LocalDate = string;
 
 export type LocalModel = ({
@@ -2249,6 +2272,10 @@ export type PublicationVersion = {
     completeness: ContentCompleteness;
     external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
+    /**
+     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+     */
+    linked_content?: LinkedContent | null;
     number: number;
     /**
      * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
@@ -2412,6 +2439,10 @@ export type ReadingTextContent = {
      * Source description stored separately from publication text.
      */
     description: string;
+    /**
+     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+     */
+    linked_content?: LinkedContent | null;
     loading: boolean;
     /**
      * Source-confirmed restriction of the whole post through Telegram web; separate from external media.

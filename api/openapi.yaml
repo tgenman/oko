@@ -17073,6 +17073,12 @@ components:
     PublicationVersion:
       type: object
       properties:
+        linked_content:
+          description: Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+          anyOf:
+          - $ref: '#/components/schemas/LinkedContent'
+          - type: 'null'
+          default: null
         post_web_unavailable:
           type: boolean
           default: false
@@ -17144,6 +17150,12 @@ components:
     AvailablePublicationContent:
       type: object
       properties:
+        linked_content:
+          description: Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+          anyOf:
+          - $ref: '#/components/schemas/LinkedContent'
+          - type: 'null'
+          default: null
         post_web_unavailable:
           type: boolean
           default: false
@@ -22961,6 +22973,12 @@ components:
     ReadingTextContent:
       type: object
       properties:
+        linked_content:
+          description: Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+          anyOf:
+          - $ref: '#/components/schemas/LinkedContent'
+          - type: 'null'
+          default: null
         post_web_unavailable:
           type: boolean
           default: false
@@ -24391,6 +24409,45 @@ components:
             redacted: false
             message_truncated: false
           request_count: 1
+    LinkedArticle:
+      type: object
+      additionalProperties: false
+      properties:
+        source_url:
+          $ref: '#/components/schemas/SourceUrl'
+        title:
+          type: string
+        text:
+          type: string
+          description: Saved article Markdown. Failed resources remain safe source links with their error reason at the original position.
+        error:
+          type: [string, 'null']
+        media_urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaUrl'
+      required: [source_url, title, text, error, media_urls]
+      examples:
+      - source_url: https://telegra.ph/Example
+        title: Article
+        text: Saved article
+        error: null
+        media_urls: []
+    LinkedContent:
+      type: object
+      additionalProperties: false
+      properties:
+        post_text:
+          type: string
+          description: Saved post Markdown, with an inline error next to an article link when its initial load failed.
+        articles:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkedArticle'
+      required: [post_text, articles]
+      examples:
+      - post_text: Original post
+        articles: []
   securitySchemes:
     BrowserSession:
       type: apiKey
@@ -24403,6 +24460,7 @@ components:
       description: Local application token; supplied explicitly. Host must be permitted
         and Origin, if present, must match. Presence sessions are separate and do
         not authenticate.
+
 security:
 - ReaderSession: []
 - BrowserSession: []

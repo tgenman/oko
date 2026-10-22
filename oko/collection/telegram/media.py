@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlsplit
 import httpcore
 import httpx
 from oko.collection import request_observation as observation
+from oko.diagnostics import redact
 
 from oko.collection.contracts import DownloadStage, SourceError, SourceDeferred, StagedPayload, Attachment, Material, ResourceManifest
 
@@ -189,7 +190,7 @@ class Downloader:
         for media,resource in zip(expected,templates):
             old = old_resources.get(resource.key)
             name = old.name if old else resource.name
-            resource = resource.model_copy(update={'name':name})
+            resource = resource.model_copy(update={'name':name,'source_url':redact(media.url) if media.url else None})
             retained = old_attachments.get(name)
             if media.external and not media.url:
                 if old and old.status=='loaded' and retained is None:
@@ -214,11 +215,17 @@ class Downloader:
                     if retry is not None and not retry.retryable:
                         raise retry
                     raise
+                reason = error.label
+                if isinstance(error.__cause__, httpx.HTTPStatusError):
+                    status = error.__cause__.response.status_code
+                    reason += f': HTTP {status}'
+                    if status == 403:
+                        reason += ' — доступ запрещён'
                 if retained and old:
                     attachments.append(retained)
                     resource = resource.model_copy(update={'status':'loaded','sha256':old.sha256,'reason':error.label})
                 else:
-                    resource = resource.model_copy(update={'status':'unsupported' if isinstance(error,MediaLimit) or error.code in terminal else 'missing','reason':error.label})
+                    resource = resource.model_copy(update={'status':'unsupported' if isinstance(error,MediaLimit) or error.code in terminal else 'missing','reason':reason})
                     reasons.append(error.label)
                 if retry is None or not error.retryable:
                     retry = error
