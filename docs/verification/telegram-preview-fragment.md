@@ -60,3 +60,11 @@ PASS 20261022T114431Z-0f302a6f, затем проверка точного plain
 включая обратные слеши и точки вне URL, чтобы metadata не становилась списком.
 Расширенный браузерный assertion на `C:\folder` и строку `1. ...` PASS:
 20261022T114635Z-c1486593. Буквальные HTTP URL остаются целыми.
+
+Live verification of all five materials passed: excerpts saved, four target sources
+complete/error_count=0, manual retry visible, existing history preserved against
+backup. Live screenshots exposed two invisible first-line titles and one overly
+long paragraph title. Fixed by selecting the first alphanumeric line, trimming
+invisible edge characters and limiting derived title to 140 characters plus
+ellipsis. The saved fragment is unchanged. Added two HTTP regressions; preview
+suite10 PASS, types90 PASS (20261022T115659Z-4e602af8).

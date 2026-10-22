@@ -115,3 +115,17 @@ def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):
         assert source['state']=='waiting' and source['operation']['retry_at']
         assert 'Saved fragment' in client.get(path).json()['content']['text']
         assert 'HTTP 429' not in client.get(path).json()['content']['linked_content']['post_text']
+
+
+@pytest.mark.parametrize('text',[chr(0x2063)+'\nReadable heading\nBody', 'Long first paragraph ' * 20])
+def test_fragment_title_is_readable_and_bounded_without_truncating_saved_text(tmp_path,text):
+    def response(request):
+        return httpx.Response(200,text=preview_metadata_page(text) if request.url.path=='/fixture/11' else forwarded_unavailable_page())
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
+        card=settled(client)[0]
+        material=client.get('/api/v3/materials/'+card['id']).json()
+        assert any(char.isalnum() for char in material['title'])
+        assert len(material['title'])<=141
+        assert text.strip() in material['content']['text']

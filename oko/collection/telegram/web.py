@@ -368,7 +368,9 @@ class WebTelegram:
                 preview = previous.preview_fragment
             manifest = teaser.source_manifest.model_copy(update={'preview_fragment':preview, 'preview_error':error})
             text = '\n\n'.join(part for part in (post.text, preview) if part)
-            return Material(preview.split('\n')[0] if preview else 'Фрагмент предпросмотра Telegram недоступен',
+            headline = next((line.strip(' \t\r\u2063\u200b\ufeff') for line in preview.splitlines() if any(char.isalnum() for char in line)), '')
+            title = headline if len(headline) <= 140 else headline[:140].rstrip() + '…'
+            return Material(title or 'Фрагмент предпросмотра Telegram недоступен',
                 text, False, 'Сохранён фрагмент предпросмотра; полная публикация недоступна для веб-просмотра' if preview else 'Фрагмент предпросмотра недоступен; откройте пост в Telegram',
                 members=post.publication.members, source_manifest=manifest)
         collected = await Downloader(self.transport).collect(post.media,teaser.source_manifest.resources,publication.teaser,staging)
