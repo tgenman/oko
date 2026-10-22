@@ -9,6 +9,7 @@ from oko.collection.contracts import Source
 from oko.collection.rss import RSSSource
 from oko.collection.telegram.source import TelegramClient, TelegramSource
 from oko.collection.telegram.web import WebTelegram
+from oko.collection.telegram.compatibility import TelegramWebSource
 from oko.collection.youtube.source import YouTubeSource
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -71,7 +72,7 @@ class Sources:
                 captions.append((config.feed, config.want_captions))
             elif access and access.kind == 'web':
                 assert access.username is not None
-                source = previous if isinstance(previous, TelegramSource) else TelegramSource(
+                source = previous if isinstance(previous, TelegramWebSource) else TelegramWebSource(
                     WebTelegram(access.username, self._telegram_transport), '', 0, config.initial_days, access.username,
                     http_transport=self._telegram_transport)
             elif config.transport == 'telegram' and self._telegram and access and access.peer:
