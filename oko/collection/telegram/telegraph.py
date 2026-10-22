@@ -176,4 +176,4 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
     manifest = source.model_copy(update={'resources':tuple(resources),'articles':tuple(articles)})
     return replace(material,text='\n\n'.join(sections),full=material.full and not reasons,
                    reason='; '.join(value for value in dict.fromkeys([material.reason,*reasons,*[resource.reason for resource in resources if resource.reason],*[article.reason for article in articles if article.reason]]) if value),attachments=tuple(attachments),
-                   source_manifest=manifest,collection_error=retry)
+                   source_manifest=manifest,collection_error=material.collection_error)

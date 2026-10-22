@@ -19,7 +19,8 @@ test('Telegraph is separate from its post and failed resources keep inline links
  await expect(articles).toHaveCount(2);
  await expect(articles.first()).toContainText('Статья по ссылке · Telegraph');
  await expect(articles.first()).toContainText('Текст до изображения.');
- await expect(articles.first()).toContainText('HTTP 403');
+ await expect(articles.first().locator('.publication-load-error')).toContainText('HTTP 403');
+ await expect(post.locator('.publication-load-error')).toContainText('HTTP 503');
  await expect(articles.first()).toContainText('Текст после изображения.');
  await expect(articles.first().getByRole('link',{name:'https://broken-image.example/unavailable.png',exact:true})).toHaveAttribute('href','https://broken-image.example/unavailable.png');
  await expect(post).not.toContainText('Текст до изображения.');

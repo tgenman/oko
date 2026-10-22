@@ -1,4 +1,4 @@
-from oko.collection.external_media import saved_external, expected_incomplete
+from oko.collection.external_media import saved_external, expected_incomplete, telegraph_partial
 from oko.collection.telegram.reading import saved_telegraph
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read
@@ -332,7 +332,9 @@ class Store:
 
     def _needs_collection(self, item: str, observed: Material | None = None) -> bool:
         material = self.material(item)
-        if not material or not material['full'] and not (material.get('external_only') or material.get('post_web_unavailable') and not material.get('reason')):
+        header, _ = self.original(item) if material and not material['full'] else ({}, '')
+        linked_partial = telegraph_partial(SourceManifest.model_validate_json(json.dumps(header['source_manifest']))) if header.get('source_manifest') else False
+        if not material or not material['full'] and not (linked_partial or material.get('external_only') or material.get('post_web_unavailable') and not material.get('reason')):
             return True
         if material['full']:
             return bool(observed and observed.source_manifest and observed.source_manifest.post_web_unavailable and not material.get('post_web_unavailable'))
@@ -466,6 +468,11 @@ class Store:
             if retained and retained.teaser:
                 material = replace(retained.teaser, full=False, members=material.members,
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
+        if previous and previous['full'] and not material.full and not material.collection_error and telegraph_partial(material.source_manifest):
+            with self.db:
+                self.finish(job)
+                self.subscriptions.history.saved(job.item, True)
+            return
         if material.members and previous and previous['full'] and (not material.full or material.collection_error) and not (expected_incomplete(material.source_manifest) and not material.collection_error):
             error = material.collection_error or SourceError(material.reason or 'Повторная загрузка не завершена',
                 retryable=not bool(material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources)))

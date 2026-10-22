@@ -20,6 +20,8 @@ function renderTokens(tokens:Token[],sourceUrl:string|undefined):ReactNode[] {
     const result:ReactNode[]=[];
     while(index<tokens.length){
       const token=tokens[index++]!,key=index;
+      const loadError=token.type==='blockquote_open'&&tokens[index]?.type==='paragraph_open'&&tokens[index+1]?.content==='[!load-error]';
+      if(loadError)index+=3;
       if(token.nesting===-1)break;
       let content:ReactNode=token.children?renderTokens(token.children,sourceUrl):token.content;
       if(token.nesting===1)content=children();
@@ -35,7 +37,7 @@ function renderTokens(tokens:Token[],sourceUrl:string|undefined):ReactNode[] {
       }
       const tag=/^h[1-6]$/.test(token.tag)?'h'+Math.min(6,Number(token.tag[1])+2):token.tag;
       if(['p','h3','h4','h5','h6','ul','ol','li','blockquote','strong','em','s','hr'].includes(tag)){
-        result.push(createElement(tag,{key,...(['p','li','h3','h4','h5','h6'].includes(tag)?{'data-reading-paragraph':true}:{}),...(tag==='ol'&&token.attrGet('start')?{start:Number(token.attrGet('start'))}:{})},tag==='hr'?undefined:content));
+        result.push(createElement(tag,{key,...(loadError?{className:'publication-load-error'}:{}),...(['p','li','h3','h4','h5','h6'].includes(tag)?{'data-reading-paragraph':true}:{}),...(tag==='ol'&&token.attrGet('start')?{start:Number(token.attrGet('start'))}:{})},tag==='hr'?undefined:content));
         if(token.block)result.push('\n');
       }else result.push(<Fragment key={key}>{content}</Fragment>);
     }

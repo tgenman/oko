@@ -11,9 +11,19 @@ def external_only(manifest: SourceManifest | None) -> bool:
         and all(not a.reason for a in manifest.articles))
 
 
+def telegraph_partial(manifest: SourceManifest | None) -> bool:
+    """An unavailable linked article/media is a saved result, not pending work."""
+    if not manifest or not manifest.articles or not str(manifest.post.get('text', '')).strip():
+        return False
+    article_keys = {key for article in manifest.articles for key in article.resource_keys}
+    return (all(r.key in article_keys or r.status in ('loaded', 'external') for r in manifest.resources)
+            and (any(a.text is None or a.reason for a in manifest.articles)
+                 or any(r.key in article_keys and r.status != 'loaded' for r in manifest.resources)))
+
+
 def expected_incomplete(manifest: SourceManifest | None) -> bool:
     """A confirmed access restriction alone does not require another download."""
-    return bool(manifest and (manifest.post_web_unavailable and all(r.status=='loaded' and not r.reason or r.status=='external' and r.external for r in manifest.resources) and all(not a.reason for a in manifest.articles) or external_only(manifest)))
+    return bool(manifest and (telegraph_partial(manifest) or manifest.post_web_unavailable and all(r.status=='loaded' and not r.reason or r.status=='external' and r.external for r in manifest.resources) and all(not a.reason for a in manifest.articles) or external_only(manifest)))
 
 
 def saved_external(header: dict[str, Any], base: str) -> dict[str, Any]:

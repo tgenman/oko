@@ -64,6 +64,7 @@ class CollectionStatus:
         if row is None or row['generation'] != job.generation:
             return
         data.update(finished_at=self.wall(), elapsed_seconds=elapsed)
+        completed = row['status'] == 'done' and not row['error']
         failure = bool(observation.get('error')) or bool(observation['requests'])
         if failure:
             details = observation.get('error') or {}
@@ -75,7 +76,7 @@ class CollectionStatus:
             requests = observation['requests'][:100]
             data['last_error'] = dict(attempt_id=data['attempt_id'], operation_id=data['operation_id'], occurred_at=timestamp(self.wall()),
                 error_type=redact(kind), message=message, traceback=trace, source=details.get('origin', 'server'),
-                message_truncated=message_cut, traceback_truncated=trace_cut, resolved=False,
+                message_truncated=message_cut, traceback_truncated=trace_cut, resolved=completed,
                 requests=requests, request_count=observation['request_count'])
         elif row['status'] == 'done':
             if data.get('last_error'):
@@ -84,11 +85,11 @@ class CollectionStatus:
             self._write(job.id, feed, data)
             result_row = self.db.execute('SELECT data FROM collection_results WHERE feed=?', (feed,)).fetchone()
             result = json.loads(result_row[0]) if result_row else {}
-            if not failure and row['status'] == 'done':
+            if completed:
                 result.update(success_at=self.wall(), duration=data['elapsed_seconds'])
             if data.get('last_error') and (not result.get('last_error') or data['last_error']['occurred_at'] >= result['last_error']['occurred_at']):
                 result['last_error'] = data['last_error']
-            if not failure and result.get('last_error') and row['status'] == 'done':
+            if completed and result.get('last_error'):
                 # Only a retry of the same operation resolves its error.
                 if result['last_error']['operation_id'] == data['operation_id']:
                     result['last_error']['resolved'] = True

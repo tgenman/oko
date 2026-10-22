@@ -119,13 +119,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         image = loaded['content']['attachments'][0]['url']
         phase[0] = 2
         client.post('/api/v3/materials/'+identity+'/retry')
-        deadline = time.monotonic()+2
-        while time.monotonic()<deadline:
-            if any('Не удалось загрузить' in error for error in [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]):
-                break
-            time.sleep(.02)
-        else:
-            raise AssertionError('Article retry error was not observable')
+        settled(client)
         retained = client.get('/api/v3/materials/'+identity).json()
         assert retained['content']['text'] == loaded['content']['text'] and (retained['content']['completeness']['state']=='complete') is True
         assert retained['content']['previous_versions'] == [] and retained['content']['revision_id']==loaded['content']['revision_id']
@@ -301,7 +295,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
             assert regeneration_started.wait(2)
         phase[0]=2
         assert client.post(path+'/retry').status_code==200
-        wait_for(client,lambda: [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')])
+        wait_for(client,lambda: client.get('/api/v3/collection-status').json()['counts']['complete']==1)
         retained=client.get(path).json()
         assert retained['content']['revision_id']==initial['content']['revision_id']
         assert retained['theses']['result']==accepted
@@ -375,7 +369,7 @@ def test_retained_theses_and_provenance_come_from_the_same_committed_bytes(tmp_p
         assert client.post(path+'/regenerate').status_code==200
         missing[0]=True
         assert client.post(path+'/retry').status_code==200
-        wait_for(client,lambda: [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')])
+        wait_for(client,lambda: client.get('/api/v3/collection-status').json()['counts']['complete']==1)
         fail[0]=True
         codex.hold=False
         assert moved.wait(3)
@@ -430,6 +424,17 @@ def test_failed_article_and_image_keep_inline_links_and_http_reasons(tmp_path, a
         assert unavailable['error'] and 'HTTP 503' in unavailable['error']
         assert image['media_urls'] == []
         assert material['content']['completeness']['state'] == 'incomplete'
+        assert '> [!load-error]' in image['text']
+        status = client.get('/api/v3/status').json()
+        assert not any(a.get('material_id') == material['id'] for p in status['problems']['current'] for a in p['affected'])
+        feed = client.get('/api/v3/collection-status/' + material['feed_id']).json()
+        assert feed['source']['operation_count'] == 0
+        assert feed['source']['state'] == 'complete'
+        before = material['content']['revision_id']
+        assert client.post('/api/v3/materials/' + material['id'] + '/retry').status_code == 200
+        settled(client)
+        after = client.get('/api/v3/materials/' + material['id']).json()
+        assert after['content']['revision_id'] == before
 
 
 @pytest.mark.parametrize('url', ['https://telegra.ph/Query?foo=1', 'https://telegra.ph/Query#section', 'http://telegra.ph/Query', 'https://www.telegra.ph/Query'])
@@ -454,6 +459,8 @@ def test_article_error_preserves_original_markdown_destination(tmp_path, url):
             time.sleep(.02)
         else:
             raise AssertionError('Failed article was not saved')
-        assert f'[Read article]({url}) — Не удалось загрузить статью:' in linked['post_text']
+        assert f'[Read article]({url})' in linked['post_text']
+        assert '> [!load-error]' in linked['post_text']
+        assert 'Не удалось загрузить статью:' in linked['post_text']
         assert linked['post_text'].endswith(' tail')
         assert linked['post_text'].count('Read article') == 1
