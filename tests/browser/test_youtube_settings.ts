@@ -6,7 +6,8 @@ import {test} from 'node:test';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {createInterface} from 'node:readline';
-import {chromium, expect} from 'playwright/test';
+import {expect} from 'playwright/test';
+import {launchBrowser} from '../../scripts/browser-launch.mts';
 import {reader} from './support.ts';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -37,7 +38,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     }
     await expect.poll(async () => {try {return (await fetch(origin)).status;} catch {return 0;}}, {timeout:10000}).toBe(200);
     await api('settings/oko/global', 'PATCH', {theses:false});
-    browser = await chromium.launch({headless:true, executablePath:process.env.OKO_BROWSER_EXECUTABLE || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+    browser = await launchBrowser();
     const page = await browser.newPage(), errors: string[] = [];
     page.setDefaultTimeout(5000); page.setDefaultNavigationTimeout(10000);
     page.on('pageerror', error => errors.push(error.message));

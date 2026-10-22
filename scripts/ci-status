@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Compact GitHub Actions status for an exact commit; bounded waits emit changes only."""
+import argparse
+import json
+import os
+import re
+import sys
+import time
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+
+class GitHub:
+    def get(self, path):
+        headers = {'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+        token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
+        if token:
+            headers['Authorization'] = 'Bearer '+token
+        try:
+            with urlopen(Request('https://api.github.com'+path, headers=headers), timeout=10) as response:
+                return json.load(response)
+        except HTTPError as error:
+            raise ValueError(f'GitHub HTTP {error.code}; check access/rate limit (GH_TOKEN is optional for public repos)') from None
+        except (URLError, TimeoutError) as error:
+            raise ValueError('GitHub request failed: '+type(error).__name__) from None
+
+    def pages(self, path, key):
+        result = []
+        for page in range(1, 101):
+            data = self.get(path+('&' if '?' in path else '?')+urlencode({'per_page':100, 'page':page}))
+            rows = data[key]
+            result.extend(rows)
+            if len(rows) < 100:
+                return result
+        raise ValueError('GitHub pagination limit exceeded')
+
+
+def status(client, repository, sha, workflow):
+    runs = client.pages(f'/repos/{repository}/actions/runs?'+urlencode({'head_sha':sha}), 'workflow_runs')
+    # main push and PR runs are distinct; select the newest exact-commit run.
+    runs = [run for run in runs if run['head_sha']==sha and run['name']==workflow]
+    if not runs:
+        return {'state':'pending', 'run':None, 'jobs':[]}
+    run = max(runs, key=lambda value:value['id'])
+    jobs = client.pages(f'/repos/{repository}/actions/runs/{run["id"]}/jobs?filter=latest', 'jobs')
+    state = 'pending' if run['status']!='completed' else 'success' if run['conclusion']=='success' else 'failure'
+    return {'state':state, 'run':run['id'], 'jobs':[{'name':job['name'], 'status':job['status'], 'conclusion':job['conclusion']} for job in jobs]}
+
+
+def watch(fetch, wait, interval, emit=print, now=time.monotonic, sleep=time.sleep):
+    deadline = now()+wait
+    previous = None
+    while True:
+        value = fetch()
+        if value != previous:
+            emit(json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+            previous = value
+        if value['state']!='pending':
+            return 0 if value['state']=='success' else 1
+        remaining = deadline-now()
+        if remaining <= 0:
+            return 3
+        sleep(min(interval, remaining))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--repo', required=True)
+    parser.add_argument('--sha', required=True)
+    parser.add_argument('--workflow', default='Checks')
+    parser.add_argument('--wait', type=int, default=0, help='Wait up to 60 seconds; exit 3 means still pending')
+    args = parser.parse_args()
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repo) or not re.fullmatch(r'[a-fA-F0-9]{40}', args.sha) or not 0<=args.wait<=60:
+        parser.error('Expected owner/repo, full commit SHA, and wait in 0..60')
+    try:
+        return watch(lambda:status(GitHub(), args.repo, args.sha.lower(), args.workflow), args.wait, 30)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())

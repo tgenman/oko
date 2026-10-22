@@ -226,7 +226,7 @@ def checkout_state(excluded):
     return result
 
 
-TOOL_TESTS = ('tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_TESTS = ('tests/development/test_agent_tools.py', 'tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
                'tests/support/', 'frontend/src/api/generated/',
                'oko/reader/generated/',
@@ -240,6 +240,7 @@ API_TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development
                   'tests/development/test_build_speed.py', 'tests/development/test_hooks.py',
                   'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_FAMILIES = (
+    (('scripts/prepare-integration', 'scripts/ci-status', 'tests/development/test_agent_tools.py'), ('tests/development/test_agent_tools.py',)),
     (('api/', 'frontend/src/api/generated/', 'oko/reader/generated/'), API_TOOL_TESTS),
     (('scripts/check-report',), ('tests/development/test_check_report.py',)),
     (('tests/support/telegram_web.py', 'tests/support/telegram.py', 'tests/support/browser_server.py'), ('tests/development/test_browser_host.py',)),
