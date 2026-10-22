@@ -40,11 +40,11 @@ def material(value: PublicationContent) -> Material:
 
 
 def legacy(value: PublicationContent) -> Publication:
-    result = material(value)
+    result = material(value) if value.content else None
     identity = value.metadata.reference.url.rstrip('/').split('/')[-1]
     return Publication(identity, value.metadata.reference.url,
         value.metadata.published_at.timestamp() if value.metadata.published_at else 0,
-        result, result.members, published_known=value.metadata.published_at is not None)
+        result, result.members if result else (int(identity),), published_known=value.metadata.published_at is not None)
 
 
 class _Downloads(Downloader):
@@ -91,15 +91,15 @@ class TelegramWebSource(TelegramSource):
         feed = reference('https://t.me/s/'+self.username)
         state: dict[str, Any] = dict(previous.position) if previous else {}
         observations: tuple[Publication, ...] = ()
+        warnings: tuple[str, ...] = ()
         try:
             if previous and previous.selection.scan_complete:
                 # Preserve the existing restriction-reclassification behavior
                 # until the storage migration: observe only the public page
                 # already used by a normal refresh, never enroll older items.
                 from oko.collection.telegram.web import WebTelegram
-                from oko.collection.telegram.adapter import decode
                 assert isinstance(self.client, WebTelegram)
-                upper = decode(state['adapter_cursor'])['upper'] if state['adapter_cursor'] else 0
+                upper = state.get('observed_after', 0)
                 await self.client.page('', 0, upper, 0)
                 observations = tuple(replace(p, observed_only=True) for p in self.client.observed)
                 self.identity_info = self.client.identity_info
@@ -110,7 +110,7 @@ class TelegramWebSource(TelegramSource):
                 state = dict(adapter_cursor=metadata.latest_cursor, locating=True, since=0)
                 complete = not metadata.latest_cursor
                 result: tuple[Publication, ...] = ()
-            elif self.initial_history.get('paused') and not previous.selection.scan_complete:
+            elif previous and self.initial_history.get('paused') and not previous.selection.scan_complete:
                 selection = previous.selection.model_copy(update={'paused': True, 'enrolled_ids': ()})
                 return DiscoveryResult((), previous.model_copy(update={'selection': selection}).encode(), self.observation())
             else:
@@ -121,13 +121,16 @@ class TelegramWebSource(TelegramSource):
                 page = await api.discover(feed, token, 50)
                 state['adapter_cursor'] = page.next_cursor
                 result = tuple(legacy(value) for value in page.publications)
+                state['observed_after'] = max([state.get('observed_after', 0)] + [max(p.members) for p in result])
+                warnings = tuple(dict.fromkeys(issue.message for issue in page.issues))
+                self.gap = '; '.join(warnings) or None
                 complete = not page.has_more
         except AdapterException as error:
             raise source_error(error) from error
         was_complete = previous.selection.scan_complete if previous else False
         enrolled = tuple(p.id for p in result) if not was_complete else ()
         selection = HistorySelection(since=0, enrolled_ids=enrolled,
-            scan_complete=complete, oldest=min((min(p.members) for p in result), default=None))
+            scan_complete=complete, warnings=warnings, oldest=min((min(p.members) for p in result), default=None))
         envelope = HistoryEnvelope(adapter='web', selection=selection, position=state)
         return DiscoveryResult(result + observations, envelope.encode(), self.observation(),
                                continuation=.1 if not complete else None)
@@ -141,6 +144,8 @@ class TelegramWebSource(TelegramSource):
             value = await api.fetch(reference(publication.url))
         except AdapterException as error:
             raise source_error(error) from error
+        if value.needs_fetch:
+            raise SourceError('Не удалось разобрать публикацию Telegram', code='malformed_publication', retryable=False)
         teaser = material(value)
         manifest = teaser.source_manifest
         assert manifest

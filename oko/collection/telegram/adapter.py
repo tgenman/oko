@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 import json
 import re
 from typing import Any, BinaryIO
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qsl, urlencode, urlunsplit
 
 import httpx
 
@@ -16,7 +16,7 @@ from oko.collection.adapters import (
 )
 from oko.collection.contracts import SourceDeleted, SourceDeferred, SourceError
 from oko.collection.telegram.contracts import TelegramPublication
-from oko.collection.telegram.media import Downloader, MAX_MEDIA, MediaLimit
+from oko.collection.telegram.media import Downloader
 from oko.collection.telegram.web import load
 
 
@@ -37,17 +37,17 @@ def username(feed: ExternalReference) -> str:
 
 
 def failure(error: SourceError, publication: ExternalReference | None = None,
-            media_key: str | None = None) -> AdapterException:
+            media_key: str | None = None, scope: str = 'telegram:html') -> AdapterException:
     kind = AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent
-    scope, retry_at = None, None
+    issue_scope, retry_at = None, None
     if isinstance(error, SourceDeleted):
         kind = AdapterErrorKind.unavailable
     if isinstance(error, SourceDeferred):
         kind = AdapterErrorKind.source_wait
-        scope = getattr(error, 'scope', 'telegram-http')
+        issue_scope = getattr(error, 'scope', scope)
         retry_at = datetime.now(timezone.utc) + timedelta(seconds=error.delay)
     result = AdapterException(AdapterIssue(error.code or 'source_unavailable', error.label,
-        kind, publication, media_key, scope, retry_at))
+        kind, publication, media_key, issue_scope, retry_at))
     return result
 
 
@@ -71,7 +71,9 @@ def decode(cursor: str) -> dict[str, Any]:
 def content(post: TelegramPublication) -> PublicationContent:
     publication = post.publication
     teaser = publication.teaser
-    assert teaser and teaser.source_manifest
+    if teaser is None:
+        return PublicationContent(PublicationMetadata(reference(publication.url), '', None), needs_fetch=True)
+    assert teaser.source_manifest
     blocks: list[dict[str, Any]] = []
     if post.text:
         blocks.append(dict(type='text', role='body', text=post.text))
@@ -96,6 +98,13 @@ def content(post: TelegramPublication) -> PublicationContent:
         tuple(media), needs_fetch=False, issues=tuple(issues))
 
 
+def resource_identity(locator: str) -> str:
+    url = urlsplit(locator)
+    query = [(key, value) for key, value in parse_qsl(url.query, keep_blank_values=True)
+             if key.lower() not in ('signature', 'expires')]
+    return urlunsplit((url.scheme.lower(), url.netloc.lower(), url.path, urlencode(query), ''))
+
+
 class TelegramWebAdapter:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.transport = transport
@@ -103,7 +112,7 @@ class TelegramWebAdapter:
     async def resolve_feed(self, url: str) -> FeedMetadata:
         name = username(reference(url))
         try:
-            page, _ = await load(name, 0, self.transport)
+            page, _ = await load(name, 0, self.transport, partial=True)
         except SourceError as error:
             raise failure(error) from error
         upper = max((max(p.publication.members) for p in page.posts), default=0)
@@ -111,15 +120,17 @@ class TelegramWebAdapter:
                             encode(upper, upper) if upper else '')
 
     async def _window(self, feed: ExternalReference, start: int, upper: int,
-                      *, count: int | None = None) -> list[TelegramPublication]:
+                      *, count: int | None = None) -> tuple[list[TelegramPublication], tuple[AdapterIssue, ...]]:
         name = username(feed)
         before = upper + 1
         posts: list[TelegramPublication] = []
+        issues: list[AdapterIssue] = []
         while True:
             try:
-                page, _ = await load(name, before, self.transport)
+                page, _ = await load(name, before, self.transport, partial=True)
             except SourceError as error:
                 raise failure(error) from error
+            issues.extend(issue for issue in page.issues if issue not in issues)
             for post in sorted(page.posts, key=lambda p: max(p.publication.members), reverse=True):
                 members = set(post.publication.members)
                 if max(members) < start or max(members) > upper:
@@ -130,7 +141,7 @@ class TelegramWebAdapter:
                 # Overlapping pages must not count one album twice.
             if (count is not None and len(posts) >= count) or not page.next_before or any(
                     min(p.publication.members) <= start for p in page.posts):
-                return sorted(posts, key=lambda p: max(p.publication.members), reverse=True)
+                return sorted(posts, key=lambda p: max(p.publication.members), reverse=True), tuple(issues)
             before = page.next_before
 
     async def cursor_before(self, feed: ExternalReference, cursor: str, offset: int) -> str:
@@ -139,7 +150,7 @@ class TelegramWebAdapter:
         if not cursor or offset == 0:
             return cursor
         state = decode(cursor)
-        posts = await self._window(feed, 0, state['start'], count=offset+1)
+        posts, _ = await self._window(feed, 0, state['start'], count=offset+1)
         return encode(max(posts[min(offset, len(posts)-1)].publication.members), state['upper']) if posts else ''
 
     async def discover(self, feed: ExternalReference, cursor: str, limit: int) -> DiscoveryPage:
@@ -159,11 +170,12 @@ class TelegramWebAdapter:
                 state = dict(start=state['upper']+1, upper=upper, done=False)
         if state['start'] > state['upper']:
             return DiscoveryPage((), encode(state['upper']+1, state['upper'], done=True), False)
-        posts = list(reversed(await self._window(feed, state['start'], state['upper'])))
+        window, issues = await self._window(feed, state['start'], state['upper'])
+        posts = list(reversed(window))
         selected = posts[:limit]
         more = len(posts) > limit
         start = max(selected[-1].publication.members)+1 if selected else state['upper']+1
-        return DiscoveryPage(tuple(content(p) for p in selected), encode(start, state['upper'], done=not more), more)
+        return DiscoveryPage(tuple(content(p) for p in selected), encode(start, state['upper'], done=not more), more, issues)
 
     async def fetch(self, publication: ExternalReference) -> PublicationContent:
         name = username(publication)
@@ -172,7 +184,7 @@ class TelegramWebAdapter:
         except ValueError:
             raise AdapterException(AdapterIssue('invalid_reference', 'Нужен адрес публикации', AdapterErrorKind.permanent)) from None
         try:
-            page, _ = await load(name, identity+1, self.transport)
+            page, _ = await load(name, identity+1, self.transport, partial=True)
         except SourceError as error:
             raise failure(error, publication) from error
         post = next((p for p in page.posts if identity in p.publication.members or int(p.publication.id) == identity), None)
@@ -184,28 +196,14 @@ class TelegramWebAdapter:
                              output: BinaryIO) -> MediaReference:
         current = await self.fetch(publication)
         actual = next((item for item in current.media if item.key == media.key), None)
-        if actual is None or actual.name != media.name:
+        if actual is None or actual.name != media.name or resource_identity(actual.locator) != resource_identity(media.locator):
             raise AdapterException(AdapterIssue('media_changed', 'Вложение изменилось',
                 AdapterErrorKind.media_changed, publication, media.key))
-        size = 0
         try:
-            async with asyncio.timeout(180), Downloader(self.transport).open(actual.locator) as response:
-                length = response.headers.get('content-length', '')
-                if length.isdecimal() and int(length) > MAX_MEDIA:
-                    raise MediaLimit()
-                if 'text/html' in response.headers.get('content-type', '').lower():
-                    raise SourceError('Сервер не предоставил файл вложения', code='media-not-file', retryable=False)
-                async for part in response.aiter_bytes():
-                    if not size and part.lstrip().lower().startswith((b'<!doctype html', b'<html')):
-                        raise SourceError('Сервер не предоставил файл вложения', code='media-not-file', retryable=False)
-                    size += len(part)
-                    if size > MAX_MEDIA:
-                        raise MediaLimit()
-                    output.write(part)
-                if not size:
-                    raise SourceError('Пустое вложение')
+            async with asyncio.timeout(180):
+                size, _ = await Downloader(self.transport).write(actual.locator, output)
         except SourceError as error:
-            raise failure(error, publication, media.key) from error
+            raise failure(error, publication, media.key, 'telegram:media:'+urlsplit(actual.locator).netloc) from error
         except TimeoutError as error:
             raise AdapterException(AdapterIssue('media-unavailable', 'Истекло время загрузки вложения',
                 AdapterErrorKind.temporary, publication, media.key)) from error

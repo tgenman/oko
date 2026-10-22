@@ -100,3 +100,46 @@ def test_failed_page_can_retry_same_window_without_admitting_new_posts():
         assert [p.metadata.reference.key.external_id for p in retried.publications] == [
             'https://t.me/fixture/3', 'https://t.me/fixture/5', 'https://t.me/fixture/6']
     asyncio.run(scenario())
+
+
+def test_broken_record_preserves_other_posts_and_known_key_for_fetch():
+    from oko.collection.telegram.adapter import TelegramWebAdapter
+    bad_album = '<a class="grouped_media_wrap" href="https://t.me/another/99"></a>'
+    html = page([(3, 'Good'), (5, 'Malformed album'+bad_album), (6, 'Other')])
+    async def scenario():
+        adapter = TelegramWebAdapter(httpx.MockTransport(lambda request: httpx.Response(200, text=html)))
+        feed = await adapter.resolve_feed('https://t.me/s/fixture')
+        cursor = await adapter.cursor_before(feed.reference, feed.latest_cursor, 2)
+        found = await adapter.discover(feed.reference, cursor, 10)
+        assert [p.metadata.reference.key.external_id for p in found.publications] == [
+            'https://t.me/fixture/3', 'https://t.me/fixture/5', 'https://t.me/fixture/6']
+        assert found.publications[1].needs_fetch
+        assert found.publications[1].content == {}
+        assert any(issue.publication.key.external_id == 'https://t.me/fixture/5' for issue in found.issues if issue.publication)
+    asyncio.run(scenario())
+
+
+def test_replaced_media_is_rejected_before_writing_new_bytes():
+    from io import BytesIO
+    from oko.collection.adapters import AdapterException, AdapterErrorKind
+    from oko.collection.telegram.adapter import TelegramWebAdapter
+    path = ['old']
+    def response(request):
+        if request.url.host == 'cdn.example':
+            return httpx.Response(200, content=b'replaced')
+        return httpx.Response(200, text=page([(5, 'Photo<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+path[0]+'\')"></a>')]))
+    async def scenario():
+        adapter = TelegramWebAdapter(httpx.MockTransport(response))
+        feed = await adapter.resolve_feed('https://t.me/s/fixture')
+        found = await adapter.discover(feed.reference, feed.latest_cursor, 10)
+        post = found.publications[0]
+        path[0] = 'replacement'
+        output = BytesIO()
+        try:
+            await adapter.download_media(post.metadata.reference, post.media[0], output)
+        except AdapterException as error:
+            assert error.issue.kind == AdapterErrorKind.media_changed
+        else:
+            raise AssertionError('Replacement must not be written under old identity')
+        assert output.getvalue() == b''
+    asyncio.run(scenario())

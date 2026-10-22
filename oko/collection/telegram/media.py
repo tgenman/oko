@@ -9,7 +9,8 @@ import hashlib
 from ipaddress import ip_address, IPv6Address
 import socket
 import ssl
-from typing import Any
+from typing import Any, BinaryIO
+from collections.abc import Callable
 from urllib.parse import urljoin, urlsplit
 
 import httpcore
@@ -147,6 +148,31 @@ class Downloader:
         except (ValueError,TimeoutError) as error:
             raise SourceError('Не удалось прочитать статью',code='article-unavailable') from error
 
+    async def write(self, url: str, output: BinaryIO, admitted: Callable[[], bool] = lambda: True) -> tuple[int, str]:
+        """Validate and stream one resource; the caller owns its output file."""
+        async with self.open(url) as response:
+            if not admitted():
+                raise asyncio.CancelledError
+            length = response.headers.get('content-length','')
+            if length.isdecimal() and int(length)>MAX_MEDIA:
+                raise MediaLimit()
+            if 'text/html' in response.headers.get('content-type','').lower():
+                raise SourceError('Сервер не предоставил файл вложения',code='media-not-file',retryable=False)
+            digest,size = hashlib.sha256(),0
+            async for part in response.aiter_bytes():
+                if not admitted():
+                    raise asyncio.CancelledError
+                if not size and part.lstrip().lower().startswith((b'<!doctype html',b'<html')):
+                    raise SourceError('Сервер не предоставил файл вложения',code='media-not-file',retryable=False)
+                size += len(part)
+                if size>MAX_MEDIA:
+                    raise MediaLimit()
+                output.write(part)
+                digest.update(part)
+            if not size:
+                raise SourceError('Пустое вложение')
+            return size, digest.hexdigest()
+
     async def download(self, url: str, stage: DownloadStage, name: str) -> StagedPayload:
         if not stage.admitted():
             raise asyncio.CancelledError
@@ -154,29 +180,10 @@ class Downloader:
             raise ValueError('media file basename')
         target = stage.path/('incoming-'+name)
         try:
-            async with asyncio.timeout(180), self.open(url) as response:
-                if not stage.admitted():
-                    raise asyncio.CancelledError
-                length = response.headers.get('content-length','')
-                if length.isdecimal() and int(length)>MAX_MEDIA:
-                    raise MediaLimit()
-                if 'text/html' in response.headers.get('content-type','').lower():
-                    raise SourceError('Сервер не предоставил файл вложения',code='media-not-file',retryable=False)
-                digest,size = hashlib.sha256(),0
+            async with asyncio.timeout(180):
                 with target.open('wb') as output:
-                    async for part in response.aiter_bytes():
-                        if not stage.admitted():
-                            raise asyncio.CancelledError
-                        if not size and part.lstrip().lower().startswith((b'<!doctype html',b'<html')):
-                            raise SourceError('Сервер не предоставил файл вложения',code='media-not-file',retryable=False)
-                        size += len(part)
-                        if size>MAX_MEDIA:
-                            raise MediaLimit()
-                        output.write(part)
-                        digest.update(part)
-                if not size:
-                    raise SourceError('Пустое вложение')
-                return StagedPayload(target,size,digest.hexdigest())
+                    size, digest = await self.write(url, output, stage.admitted)
+                return StagedPayload(target, size, digest)
         except BaseException as error:
             target.unlink(missing_ok=True)
             if isinstance(error,TimeoutError):
