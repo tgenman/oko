@@ -23,4 +23,12 @@ runs:
       shell: bash
       run: |
         uv sync --locked --python '${{ steps.python.outputs.python-path }}'
-        npm ci
+    - name: Install npm dependencies with diagnostic timings
+      shell: bash
+      run: npm ci --timing --loglevel=http --logs-dir=.scratch/npm-logs
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: npm-diagnostics-${{ github.job }}-${{ strategy.job-index }}
+        path: .scratch/npm-logs/
+        if-no-files-found: ignore
