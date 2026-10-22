@@ -66,7 +66,15 @@ jobs:
         if: matrix.suite != 'tools' || steps.selection.outputs.required == 'true'
         run: npm run build:check
       - if: matrix.suite == 'browser'
-        run: npx playwright install --with-deps chromium
+        name: Use launchable system Chrome or install Chromium
+        run: |
+          oko_ci_chrome=$(command -v google-chrome || true)
+          if [ -n "$oko_ci_chrome" ] && OKO_BROWSER_EXECUTABLE="$oko_ci_chrome" node --import tsx --input-type=module -e "import {launchBrowser} from './scripts/browser-launch.mts'; const browser=await launchBrowser(); await browser.close();"; then
+            "$oko_ci_chrome" --version
+            printf 'OKO_BROWSER_EXECUTABLE=%s\n' "$oko_ci_chrome" >> "$GITHUB_ENV"
+          else
+            npx playwright install --with-deps chromium
+          fi
       - if: matrix.suite != 'tools'
         run: ./scripts/check ${{ matrix.suite }}
       - if: matrix.suite == 'tools' && steps.selection.outputs.required == 'true'

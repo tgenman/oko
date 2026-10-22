@@ -67,3 +67,5 @@
 ## Исправление tools CI перед слиянием
 
 PR #88: tools job упал в новой batch regression, запускавшей browser wrapper, хотя Chromium устанавливается только browser job. Группировка вынесена в browser-free scripts/browser-batches.cts; tools regression использует этот же batch owner и настоящий Node test child без Chromium. При явно несуществующем OKO_BROWSER_EXECUTABLE regression PASS5,37 с. Настоящие HTTP/context/abort/suite process cleanup отдельно PASS (browser10,76 с), tooling/browser types PASS. Независимое ревью без замечаний. Полный локальный173,90 с относится к предшествующему коду с тем же алгоритмом; после выделения seam повторены затронутые границы.
+
+Browser CI setup: cancelled run145 downloaded25.9MB of Ubuntu packages/fonts from azure.archive.ubuntu.com from19:47:34 until cancellation19:56:06, without reaching tests. Official actions/runner-images Ubuntu2404 manifest lists installed Google Chrome. CI now checks whether system Chrome is actually launchable with the same Playwright launcher, uses existing OKO_BROWSER_EXECUTABLE for that job only, and retains install --with-deps chromium as fallback. Working Oko settings are unchanged.
