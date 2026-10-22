@@ -34,3 +34,15 @@ def mark_post_unavailable(html, identity):
 # Structure checked against public embed lexkravetski/861 on 2026-10-22;
 # URL/identity are synthetic so tests never contact the real channel.
 DOCUMENT = '<a class="tgme_widget_message_document_wrap" href="https://t.me/fixture/13"><div class="tgme_widget_message_document_icon accent_bg"></div><div class="tgme_widget_message_document"><div class="tgme_widget_message_document_title accent_color">Бесы.txt</div><div class="tgme_widget_message_document_extra">36.2 KB</div></div></a>'
+
+
+def hidden_fallback_page(text, active=False):
+    """Telegram keeps a CSS-hidden fallback next to supported text/emoji."""
+    from bs4 import BeautifulSoup
+    document = BeautifulSoup(mark_post_unavailable(page([(11, text)]), 'fixture/11'), 'html.parser')
+    wrapper = document.select_one('[data-post="fixture/11"]')
+    wrapper.select_one('.tgme_widget_message_text').wrap(document.new_tag('div', attrs={'class': 'media_supported_cont'}))
+    wrapper.select_one('.message_media_not_supported').wrap(document.new_tag('div', attrs={'class': 'media_not_supported_cont'}))
+    if active:
+        wrapper['class'].append('media_not_supported')
+    return str(document)

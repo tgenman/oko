@@ -54,6 +54,9 @@ def response(request):
         return httpx.Response(403)
     if request.url.host == 't.me' and '/telegrapherrors' in request.url.path:
         return httpx.Response(200, text=page([(11, 'Текст поста <a href="https://telegra.ph/FailedImage">Статья</a> <a href="https://telegra.ph/MissingArticle">Недоступная статья</a>')]).replace('fixture/', 'telegrapherrors/'))
+    if request.url.host == 't.me' and '/hiddenfallback' in request.url.path:
+        from tests.support.telegram_web import hidden_fallback_page
+        return httpx.Response(200, text=hidden_fallback_page('Available text <tg-emoji emoji-id="1"><b>🔵</b></tg-emoji> <a href="https://example.test/source">Source</a>').replace('fixture/', 'hiddenfallback/'))
     if request.url.host == 't.me':
         return httpx.Response(200, text=page([(11, 'Веб-публикация без аккаунта <a href="https://telegra.ph/Fixture">Статья</a>')]))
     if request.url.host == 'api.telegra.ph':

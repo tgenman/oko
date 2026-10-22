@@ -140,7 +140,13 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
             picture_url = str(picture.get('srcset','')).split(',')[0].split()[0] if picture else ''
             url = str(node.get('data-webp') or picture_url or (child.get('src') if child else '') or '')
             add(node,'photo',url or None,'webp','image/webp','Стикер не предоставлен публичным предпросмотром' if not url else '')
-    if wrapper.select_one('.message_media_not_supported') and not result:
+    # Telegram embeds a CSS-hidden fallback beside supported text/custom emoji.
+    # Its presence alone is not an unavailable attachment. An active fallback
+    # (media_not_supported ancestor), or a standalone placeholder, still is.
+    unsupported = any(node.find_parent(class_='media_not_supported_cont') is None
+                      or node.find_parent(class_='media_not_supported') is not None
+                      for node in wrapper.select('.message_media_not_supported'))
+    if unsupported and not result:
         add(wrapper,'unsupported',None,'bin','application/octet-stream','Пост не поддерживается публичным предпросмотром')
     return tuple(result)
 

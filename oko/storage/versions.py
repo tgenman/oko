@@ -113,6 +113,15 @@ class Versions:
             common = {p.name for p in previous.iterdir() if p.name.startswith(('media-','image-'))} & {p.name for p in current.iterdir()}
             return all(Versions.file_digest(previous/name)==Versions.file_digest(current/name) for name in common)
         old = SourceManifest.model_validate_json(json.dumps(old_header['source_manifest']))
+        if (old_text == new_text and old.resources and not new.resources
+                and not old.articles and not new.articles
+                and all(r.status == 'unsupported' and r.kind == 'file' and r.sha256 is None and r.external is None
+                        and r.reason == 'Пост не поддерживается публичным предпросмотром'
+                        and r.key.startswith('telegram-web:') and r.key.endswith(':unsupported') for r in old.resources)
+                and {k:v for k,v in old.post.items() if k != 'resources'} == {k:v for k,v in new.post.items() if k != 'resources'}):
+            # Removing an inferred fallback attachment corrects our knowledge;
+            # no source text or previously available media has changed.
+            return True
         if new.post_web_unavailable and not old_text and not new_text and not new.resources and all(r.status=='unsupported' and r.kind=='file' for r in old.resources):
             # Replacing an old unknown placeholder with an explicit access
             # restriction changes our knowledge, not the publication's content.
