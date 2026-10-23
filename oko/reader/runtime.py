@@ -6,6 +6,7 @@ happen outside the action lock; admission, transitions and result commits share 
 from oko.collection.request_observation import Capture
 from oko.storage.reading import reading_snapshot
 import asyncio
+from datetime import datetime,timezone
 from dataclasses import dataclass
 from oko.reviews.coordination import ProcessingWait
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -174,7 +175,7 @@ class Runtime:
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=self._wall_clock())
         self._viewed_ids: list[str] = []
         self._lanes: dict[str, asyncio.Task[None]] = {}
-        self._media_job: Job | None = None
+        self._media_jobs: dict[str,Job] = {}
         self._account_retry: dict[int, float] = {}
         self._restored_wait_feeds: set[str] = set()
         self._lane_feeds: dict[str, str] = {}
@@ -238,8 +239,9 @@ class Runtime:
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
             cancelled_feeds = {self._lane_feeds[lane] for lane in lanes if lane in self._lane_feeds}
             tasks = [self._lanes.pop(lane) for lane in lanes]
-            if 'media' in lanes:
-                self._media_job = None
+            for media_lane in ('media','captions'):
+                if media_lane in lanes:
+                    self._media_jobs.pop(media_lane,None)
             if self._ai and (feeds is None or self._ai_feed in feeds):
                 tasks.append(self._ai)
                 self._ai = None
@@ -1300,7 +1302,8 @@ class Runtime:
                 current.finish(job)
                 return
             from oko.storage import publication_links
-            adapter = self._collection.article_source().adapter if publication_links.feedless(current,download.publication_id) else self._collection.publication_adapter(current.item_feed(job.item))
+            caption_attempt=CaptionAttempt(self,current,job) if download.media.key=='youtube:subtitles' else None
+            adapter = self._collection.article_source().adapter if publication_links.feedless(current,download.publication_id) else self._collection.publication_adapter(current.item_feed(job.item),captions=caption_attempt)
         try:
             if adapter is None:
                 raise ValueError('Publication adapter unavailable')
@@ -1309,6 +1312,10 @@ class Runtime:
             async with self._actions:
                 if self._store is current and self._live() and current.valid(job):
                     current.media.complete(job, download, actual)
+                    if caption_attempt and caption_attempt.attempted:
+                        current.youtube.completed(caption_attempt.publication,True)
+        except CaptionsDeferred:
+            pass
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -1317,6 +1324,9 @@ class Runtime:
                     issue = error.issue if isinstance(error, AdapterException) else AdapterIssue('media-download',
                         'Не удалось сохранить вложение' if isinstance(error,OSError) else 'Нарушен контракт медиа',
                         AdapterErrorKind.temporary if isinstance(error,OSError) else AdapterErrorKind.permanent)
+                    if caption_attempt and caption_attempt.blocked:
+                        issue=AdapterIssue(issue.code,issue.message,AdapterErrorKind.source_wait,download.publication,download.media.key,
+                            'youtube:captions',datetime.fromtimestamp(current.youtube.ready_at(),timezone.utc))
                     current.media.failed(job, issue)
         finally:
             current.media.release(download)
@@ -1380,29 +1390,32 @@ class Runtime:
                                 self._store.enqueue_discovery(feed)
                             self._last_collection = now
                         state = self._store.status()
-                        for lane in ('common', 'personal', 'collection', 'media'):
+                        for lane in ('common', 'personal', 'collection', 'media','captions'):
+                            if lane=='captions' and not self._collection.has_captions():
+                                continue
+                            media_lane=lane in ('media','captions')
                             task = self._lanes.get(lane)
-                            if lane=='media' and task and not task.done() and self._media_job and not self._store.valid(self._media_job):
+                            if media_lane and task and not task.done() and lane in self._media_jobs and not self._store.valid(self._media_jobs[lane]):
                                 task.cancel()
                                 self._detach_task(task)
                                 del self._lanes[lane]
-                                self._media_job = None
+                                self._media_jobs.pop(lane,None)
                                 task = None
                             if task and task.done():
                                 await task
                                 del self._lanes[lane]
-                                if lane=='media':
-                                    self._media_job = None
+                                if media_lane:
+                                    self._media_jobs.pop(lane,None)
                             profile = self._store.subscriptions.telegram.profile(lane) if lane in ('personal','collection') else None
                             ready_at = self._account_retry.get(profile['user_id'], 0) if profile else 0
                             if lane in self._lanes or now < ready_at:
                                 continue
-                            feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if lane=='media' else [feed for feed in self._sources if self._lane(feed) == lane]
+                            feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else [feed for feed in self._sources if self._lane(feed) == lane]
                             job = self._store.next_job(now, deleting_only=state['deleting'] or not feeds,
-                                                       feeds=feeds, include_deletions=lane == 'common', media_only=lane=='media')
+                                                       feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions')
                             if job:
-                                if lane=='media':
-                                    self._media_job = job
+                                if media_lane:
+                                    self._media_jobs[lane] = job
                                 self._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self._store.item_feed(job.item)
                                 self._lanes[lane] = asyncio.create_task(self._execute(job))
                 await asyncio.sleep(.02)
@@ -1429,6 +1442,9 @@ class CaptionAttempt:
     """One runtime-owned caption call; waiting releases the collection slot."""
     def __init__(self, runtime: Runtime, store: Store, job: Job) -> None:
         self.runtime, self.store, self.job = runtime, store, job
+        publication=store.media.owner(job.item) if job.kind=='download_media' else job.item
+        assert publication is not None
+        self.publication=publication
         self.retry = False
         self.attempted = False
         self.blocked = False
@@ -1447,7 +1463,7 @@ class CaptionAttempt:
                 raise CaptionsDeferred
             config = store.youtube.config()
             client = LocalCaptions(proxy_url(config)) if isinstance(runtime._youtube_captions, LocalCaptions) else runtime._youtube_captions
-            store.youtube.start(job.item, runtime._wall_clock())
+            store.youtube.start(self.publication, runtime._wall_clock())
             self.attempted = True
             runtime._captions_active = True
         try:

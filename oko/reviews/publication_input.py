@@ -3,7 +3,7 @@ from copy import deepcopy
 import hashlib
 import json
 from typing import Any, TYPE_CHECKING
-from oko.storage import material_read
+from oko.storage import material_read, youtube_media
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -20,7 +20,7 @@ def blocks(content: dict[str, Any]) -> list[dict[str, Any]]:
 
 def content(store: 'Store', item: str) -> dict[str, Any]:
     row=store.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()
-    own=json.loads(row[0]) if row else {}
+    own=youtube_media.add_input(store,json.loads(row[0])) if row else {}
     linked=store.db.execute('''SELECT i.id,i.content FROM publication_links l JOIN items i ON i.id=l.target_publication_id
         WHERE l.source_publication_id=? AND i.complete=1 AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()
     if not linked:
@@ -39,7 +39,7 @@ def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
     from oko.collection.contracts import ReplyPreview
     selected=content(store,item)
     row=store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()
-    if kind=='theses' and row and row[0]!='{}':
+    if kind=='theses' and row and row[0]!='{}' and 'youtube' not in selected.get('extra',{}):
         selected=json.loads(row[0])
     groups: dict[str,list[dict[str,Any]]]={item:[]}
     for block in blocks(selected):
@@ -57,6 +57,9 @@ def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
 
 
 def awaiting_input(content: dict[str, Any]) -> bool:
+    youtube=content.get('extra',{}).get('youtube')
+    if youtube and youtube.get('captions') not in ('available','unavailable','not_requested'):
+        return True
     manifest=content.get('extra',{}).get('_reader',{}).get('source_manifest',{})
     return manifest.get('preview_fragment') is not None or bool(manifest.get('post_web_unavailable') and not any(block.get('text','').strip() for block in blocks(content)))
 
@@ -89,20 +92,23 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     values=rules['values']
     if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not values['theses']:
         return None
-    selected_content=content(store,item)
+    youtube=row['platform']=='youtube'
+    selected_content=json.loads(row['content']) if youtube else content(store,item)
     if awaiting_input(selected_content) or awaiting_linked_input(store,item,selected_content):
         return None
-    selected=blocks(selected_content)
+    selected=([dict(captions=selected_content.get('extra',{}).get('youtube',{}).get('captions'),
+                    digest=selected_content.get('extra',{}).get('youtube',{}).get('captions_digest'))]
+              if youtube else blocks(selected_content))
     if kind=='theses':
         filtered=store.filters.read(item)
         if filtered['status'] not in ('off','done') or filtered['hidden']:
             return None
-        if filtered['status']=='done':
+        if filtered['status']=='done' and row['platform']!='youtube':
             selected=blocks(json.loads(row['filtered_content']))
     config=store.processor_config() if values['processor'].startswith('llamacpp') else None
     processor=dict(endpoint=config.endpoint,local_execution=config.local_execution) if config else None
     relevant=dict(prompt=values['prompt_filters' if kind=='filter' else 'prompt_theses'],processor=values['processor'],public_ai=rules['public_ai'],local=processor)
-    return digest([row['title'],selected,relevant])
+    return digest([None if youtube else row['title'],selected,relevant])
 
 
 def snapshot(store: 'Store', item: str, generation: int) -> None:
