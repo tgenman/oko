@@ -4,6 +4,7 @@ import json
 import pytest
 
 from oko.storage.store import Store
+from tests.support.library_templates import templates
 
 
 @pytest.mark.parametrize('transport,mode,paused,complete,blocked', [
@@ -75,22 +76,20 @@ def test_nullable_history_ids_keep_existing_dispatch_outcome(tmp_path, item, mem
 def test_foreign_cancelled_history_does_not_add_linear_dispatch_work(tmp_path, analyze):
     costs = []
     for count in (100, 10000):
-        store = Store(tmp_path / str(count), lambda _: None)
+        root = tmp_path / str(count)
+        templates().copy(root, ('history-dispatch-archive', 10000), archive_seed)
+        store = Store(root, lambda _: None)
         try:
-            store.subscriptions.ensure_demo()
             with store.db:
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection) VALUES ('archive','archive','Archive','default','rss','rss','connected')")
-                store.db.execute("INSERT INTO initial_history(feed,selection,paused,scan_complete) VALUES ('archive','{\"cancelled\":true}',1,1)")
-                store.db.executemany("INSERT INTO items(id,feed_id,viewed) VALUES (?,'archive',1)",
-                                     [(f'old-{i}',) for i in range(10000)])
-                store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",
-                                     [(f'old-{i}',) for i in range(10000)])
                 store.db.executemany("INSERT INTO history_members(feed,item,outcome) VALUES ('archive',?,'loaded')",
                                      [(f'old-{i}',) for i in range(count)])
                 store.db.execute("INSERT INTO items(id,feed_id) VALUES ('live','demo')")
                 store.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch','live')")
                 if analyze:
                     store.db.execute('ANALYZE')
+            assert store.db.execute("SELECT count(*) FROM items WHERE feed_id='archive' AND viewed=1").fetchone()[0] == 10000
+            assert store.db.execute("SELECT count(*) FROM jobs WHERE kind='fetch' AND status='done'").fetchone()[0] == 10000
+            assert store.db.execute("SELECT count(*) FROM history_members WHERE feed='archive'").fetchone()[0] == count
             steps = []
             store.db.set_progress_handler(lambda: steps.append(1) or 0, 1)
             try:
@@ -104,3 +103,19 @@ def test_foreign_cancelled_history_does_not_add_linear_dispatch_work(tmp_path, a
         finally:
             store.db.close()
     assert costs[1] <= costs[0] + 200, costs
+
+
+def archive_seed(root):
+    """Closed immutable base; each measurement owns its history and dispatch."""
+    store = Store(root, lambda _: None)
+    try:
+        store.subscriptions.ensure_demo()
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection) VALUES ('archive','archive','Archive','default','rss','rss','connected')")
+            store.db.execute("INSERT INTO initial_history(feed,selection,paused,scan_complete) VALUES ('archive','{\"cancelled\":true}',1,1)")
+            store.db.executemany("INSERT INTO items(id,feed_id,viewed) VALUES (?,'archive',1)",
+                                 [(f'old-{i}',) for i in range(10000)])
+            store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",
+                                 [(f'old-{i}',) for i in range(10000)])
+    finally:
+        store.db.close()

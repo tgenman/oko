@@ -255,7 +255,7 @@ class YouTubeTranscriptApi:
         feed = subscribe(client)
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
-        wait(client, lambda m: m['source'].get('captions') == 'error')
+        wait(client, lambda m: m['source'].get('captions') == 'error', keep_alive=True)
         groups = client.get('/api/v3/diagnostics').json()['groups']
         matching = [g for g in groups if 'SDK failed' in g['message']]
         assert len(matching) == 1 and matching[0]['count'] == 1
