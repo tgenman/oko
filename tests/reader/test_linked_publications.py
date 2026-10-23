@@ -1,7 +1,7 @@
 """Linked articles remain independent publications at the reader HTTP boundary."""
 import httpx
 
-from tests.reader.test_independent_media import migrated_root
+from tests.support.publication_pipeline import migrated_root
 from tests.support.app import create_app
 from tests.support.rss import import_feed, wait_cards
 from tests.support.reader import presence

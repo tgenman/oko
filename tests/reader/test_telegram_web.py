@@ -427,7 +427,7 @@ def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync
 
 
 def test_malformed_web_record_does_not_discard_valid_neighbor_and_is_diagnosed(tmp_path):
-    from tests.reader.test_independent_media import migrated_root
+    from tests.support.publication_pipeline import migrated_root
     tmp_path=migrated_root(tmp_path)
     html = page([(11, 'Valid text'), (12, 'Broken identity')]).replace('data-post="fixture/12"', 'data-post="broken"')
     with TestClient(create_app(tmp_path, token='test', api_only=True,

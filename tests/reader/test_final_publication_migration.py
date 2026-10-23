@@ -98,7 +98,7 @@ def test_new_telegram_connection_rejects_date_selection(tmp_path):
 
 
 def test_canonical_reader_and_results_use_sql_without_persistent_markdown_projection(tmp_path):
-    from tests.reader.test_independent_media import migrated_root
+    from tests.support.publication_pipeline import migrated_root
     from tests.support.telegram_web import page
     from tests.support.models import model_transport
     root=migrated_root(tmp_path)
@@ -127,7 +127,7 @@ def test_canonical_reader_and_results_use_sql_without_persistent_markdown_projec
 
 def test_repeating_offline_copy_preserves_already_canonical_cursor_and_content(tmp_path):
     import sqlite3
-    from tests.reader.test_independent_media import migrated_root
+    from tests.support.publication_pipeline import migrated_root
     from tests.support.telegram_web import page
     from tests.support.models import model_transport
     root=migrated_root(tmp_path)
@@ -191,7 +191,7 @@ def test_cli_requires_offline_copy_before_opening_populated_legacy_store(tmp_pat
 
 
 def test_disabled_rss_does_not_retry_linked_article_after_restart(tmp_path):
-    from tests.reader.test_independent_media import migrated_root
+    from tests.support.publication_pipeline import migrated_root
     import time
     root=migrated_root(tmp_path)
     calls=[]
@@ -251,7 +251,7 @@ def test_migration_removes_old_viewed_tombstones_but_keeps_backup(tmp_path):
 
 def test_migration_reports_and_drops_unverified_canonical_result(tmp_path):
     import json,sqlite3
-    from tests.reader.test_independent_media import migrated_root
+    from tests.support.publication_pipeline import migrated_root
     from tests.support.telegram import configure_fast_web,settled
     from tests.support.telegram_web import page
     root=migrated_root(tmp_path)
@@ -259,12 +259,37 @@ def test_migration_reports_and_drops_unverified_canonical_result(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=settled(client)[0]['id']
-    with sqlite3.connect(root/'state.sqlite') as db:
-        db.create_function('oko_reader_time',0,lambda:1900000000.)
-        db.execute('UPDATE items SET summarized_content=?,processing_metadata=? WHERE id=?',
-            (json.dumps({'points':[{'text':'Unproven','source_publication_ids':[item]}]}),json.dumps({'summary':{'signature':'unproven'}}),item))
+    from oko.storage.store import Store
+    saved=Store(root,lambda _:None)
+    try:
+        with saved.db:
+            saved.db.execute('UPDATE items SET summarized_content=?,processing_metadata=? WHERE id=?',
+                (json.dumps({'points':[{'text':'Unproven','source_publication_ids':[item]}]}),json.dumps({'summary':{'signature':'unproven'}}),item))
+    finally:
+        saved.db.close()
     report=migrate_publications(root,tmp_path/'again')
     assert report['success'],report
     assert any(entry.get('publication_id')==item and 'summary result removed' in entry['reason'] for entry in report['unportable'])
     with sqlite3.connect(tmp_path/'again'/'storage'/'state.sqlite') as db:
         assert db.execute('SELECT summarized_content FROM items WHERE id=?',(item,)).fetchone()==('{}',)
+
+
+def test_offline_conversion_preserves_legacy_group_viewed_history(tmp_path):
+    import sqlite3
+    from tests.support.telegram import Telegram,connect_request,settled
+    class Group(Telegram):
+        async def info(self,*args):
+            return dict(peer=-1001234567890,username='fixture',title='Group',kind='group',forum=False)
+    source=tmp_path/'legacy'
+    with TestClient(create_app(source,token='test',api_only=True,telegram_client=Group()),headers=HEADERS) as client:
+        presence(client,'reader')
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+        result=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
+        assert result.status_code==200,result.text
+        item=settled(client)[0]['id']
+        client.post('/api/v3/materials/'+item+'/viewed')
+    report=migrate_publications(source,tmp_path/'converted')
+    assert report['success'],report
+    assert item not in report['removed_viewed']
+    with sqlite3.connect(tmp_path/'converted'/'storage'/'state.sqlite') as db:
+        assert db.execute('SELECT viewed,platform FROM items WHERE id=?',(item,)).fetchone()==(1,None)

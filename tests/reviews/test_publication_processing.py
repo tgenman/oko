@@ -5,7 +5,7 @@ import sqlite3
 import httpx
 import pytest
 
-from tests.reader.test_independent_media import migrated_root
+from tests.support.publication_pipeline import migrated_root
 from tests.reviews.test_processing_coordination import coordinated_transport
 from tests.support.app import create_app
 from tests.support.presence import presence

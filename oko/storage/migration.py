@@ -242,7 +242,7 @@ def _remove_viewed(store: Store, report: dict[str,Any]) -> None:
     """No tombstones in converted feeds; the backup retains the old history."""
     report['removed_viewed']=[]
     rows=store.db.execute("""SELECT i.* FROM items i LEFT JOIN feeds f ON f.id=i.feed_id
-        WHERE i.viewed=1 AND (i.platform IS NOT NULL OR f.adapter IS NOT NULL)""").fetchall()
+        WHERE i.viewed=1 AND (i.platform IS NOT NULL OR f.adapter IN ('telegram_web_adapter','telegram_client_adapter','rss_adapter','youtube_adapter'))""").fetchall()
     for row in rows:
         item=row['id']
         if store.db.execute('SELECT 1 FROM publication_links l JOIN items i ON i.id=l.source_publication_id WHERE l.target_publication_id=? AND i.viewed=0',(item,)).fetchone():
