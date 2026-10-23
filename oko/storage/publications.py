@@ -72,6 +72,9 @@ class Publications:
           storage_key TEXT, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
           UNIQUE(publication_id,resource_key));
         ''')
+        if 'resource_identity' not in {r['name'] for r in db.execute('PRAGMA table_info(media_files)')}:
+            db.execute('ALTER TABLE media_files ADD COLUMN resource_identity TEXT')
+            db.commit()
         (store.root/'media').mkdir(exist_ok=True)
 
     def owns(self, item: str) -> bool:
@@ -152,7 +155,7 @@ class Publications:
             blocks.append(dict(type='quote', text=reply.text, author=reply.author, source_url=reply.source_url))
         known = {r['resource_key']: dict(r) for r in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (item,))}
         resources = {r.name: r for r in material.source_manifest.resources} if material.source_manifest else {}
-        locators = {r.key: r.locator for r in material.adapter_content.media} if material.adapter_content else {}
+        references = {r.key: r for r in material.adapter_content.media} if material.adapter_content else {}
         media: list[dict[str, Any]] = []
         names = {p.name for p in directory.iterdir() if p.name.startswith(('media-', 'image-'))}
         names.update(resources)
@@ -165,10 +168,17 @@ class Publications:
             key = resource.key if resource else name
             path = directory/name
             old = known.get(key)
+            ref = references.get(key)
             same = bool(old and path.is_file() and old['storage_key'] and (self.store.root/old['storage_key']).is_file()
                         and self.store.versions.file_digest(path) == self.store.versions.file_digest(self.store.root/old['storage_key']))
+            if ref and ref.resource_identity and old and old['resource_identity'] == ref.resource_identity and old['name'] == name:
+                same = True
             identity = old['id'] if same and old else str(uuid4())
             storage_key = 'media/'+item+'/'+identity if path.is_file() else None
+            if same and old and old['status']=='ready' and old['storage_key'] and (self.store.root/old['storage_key']).is_file():
+                storage_key = old['storage_key']
+                if not path.is_file():
+                    os.link(self.store.root/storage_key, path)
             if storage_key and not same:
                 destination = self.store.root/storage_key
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -182,16 +192,21 @@ class Publications:
             attachment = attachments.get(name)
             kind = resource.kind if resource else attachment.kind if attachment else 'image'
             media.append(dict(id=identity, publication_id=item, resource_key=key,
-                source_locator=locators.get(key, resource.source_url or '' if resource else ''), name=name,
+                source_locator=ref.locator if ref else resource.source_url or '' if resource else '', name=name,
                 mime_type=resource.mime if resource else attachment.mime if attachment else None,
-                size_bytes=path.stat().st_size if path.is_file() else None, storage_key=storage_key,
-                status='ready' if storage_key else 'unavailable', reason=resource.reason or '' if resource else ''))
+                size_bytes=path.stat().st_size if path.is_file() else ref.size_bytes if ref else None, storage_key=storage_key,
+                status='ready' if storage_key else 'pending_download' if ref else 'unavailable',
+                reason=resource.reason or '' if resource else '', resource_identity=ref.resource_identity if ref else None))
             blocks.append(dict(type='media', role='attachment' if kind=='file' else kind, media_id=identity))
         extra = deepcopy(material.adapter_content.content.get('extra', {})) if material.adapter_content else {}
         # Temporary header for the old HTTP/processor projection, removed when
         # those consumers read blocks directly. It never owns body text/files.
         extra['_reader'] = header
-        return dict(blocks=blocks, extra=extra), media
+        extra['_collection_reason'] = '' if header.get('reason', '').startswith('Вложения ещё не загружены') else header.get('reason', '')
+        content = dict(blocks=blocks, extra=extra)
+        self.store.media.project_header(content, media)
+        self.store.versions._write(directory/'original.md', (json.dumps(header,ensure_ascii=False)+'\n\n'+text).encode())
+        return content, media
 
     def publish(self, item: str, prepared: tuple[dict[str, Any], list[dict[str, Any]]], fingerprint: str) -> None:
         """Called in the accepting transaction, after durable media preparation."""
@@ -203,7 +218,9 @@ class Publications:
         content['extra']['_input_hash'] = fingerprint
         store.db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         for row in media:
-            store.db.execute('INSERT INTO media_files VALUES (:id,:publication_id,:resource_key,:source_locator,:name,:mime_type,:size_bytes,:storage_key,:status,:reason)', row)
+            store.db.execute('''INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,mime_type,size_bytes,storage_key,status,reason,resource_identity)
+                VALUES (:id,:publication_id,:resource_key,:source_locator,:name,:mime_type,:size_bytes,:storage_key,:status,:reason,:resource_identity)''', row)
+        self.store.media.schedule(item)
         store.db.execute('UPDATE items SET content=?,media_ids=?,title=?,status=? WHERE id=?',
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
@@ -212,9 +229,10 @@ class Publications:
         # Compatibility index points only to the current projection, never history.
         store.db.execute('DELETE FROM content_versions WHERE item=? AND number!=(SELECT number FROM content_current WHERE item=?)', (item, item))
 
-    def recover(self) -> None:
+    def recover(self, item: str | None = None) -> None:
         store = self.store
-        for row in store.db.execute("SELECT * FROM items WHERE platform IS NOT NULL AND viewed=0 AND content!='{}'").fetchall():
+        query = "SELECT * FROM items WHERE platform IS NOT NULL AND viewed=0 AND content!='{}'"
+        for row in store.db.execute(query+(' AND id=?' if item else ''), (item,) if item else ()).fetchall():
             content = json.loads(row['content'])
             directory = store.path(row['id']).parent
             directory.mkdir(parents=True, exist_ok=True)
@@ -224,7 +242,11 @@ class Publications:
             for media in store.db.execute("SELECT * FROM media_files WHERE publication_id=? AND status='ready'", (row['id'],)):
                 saved = store.root/media['storage_key']
                 if saved.is_file():
-                    shutil.copyfile(saved, directory/media['name'])
+                    target = directory/media['name']
+                    if target.exists() and os.path.samefile(saved,target):
+                        continue
+                    target.unlink(missing_ok=True)
+                    os.link(saved,target)
             metadata = json.loads(row['processing_metadata'])
             for kind, result in metadata.get('_legacy', {}).items():
                 store.versions._write(directory/(kind+'.md'), result['file'].encode())
@@ -300,11 +322,13 @@ class Publications:
         if media_directory.is_dir():
             referenced = {r[0] for r in self.store.db.execute('SELECT storage_key FROM media_files WHERE publication_id=?', (item,))}
             for path in media_directory.iterdir():
-                if str(path.relative_to(self.store.root)) not in referenced:
+                if str(path.relative_to(self.store.root)) not in referenced and path not in self.store.media.active_paths:
                     path.unlink()
 
     def forget(self, item: str) -> None:
         db = self.store.db
+        db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL
+            WHERE kind='download_media' AND item IN (SELECT id FROM media_files WHERE publication_id=?)""", (item,))
         db.execute('DELETE FROM feed_publications WHERE publication_id=?', (item,))
         db.execute('DELETE FROM publication_links WHERE source_publication_id=? OR target_publication_id=?', (item, item))
         db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))

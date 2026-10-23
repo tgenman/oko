@@ -87,7 +87,9 @@ class _Downloads(Downloader):
 
 class TelegramWebSource(TelegramSource):
     """Use the external API while keeping old storage/HTTP presentation working."""
-    def _api(self) -> TelegramWebAdapter:
+    independent_media = False
+
+    def publication_adapter(self) -> TelegramWebAdapter:
         if not hasattr(self, '_publication_adapter'):
             self._publication_adapter = TelegramWebAdapter(self.http_transport)
         return self._publication_adapter
@@ -101,7 +103,7 @@ class TelegramWebSource(TelegramSource):
             previous_result = await super().discover(cursor)
             return replace(previous_result, publications=tuple(replace(p, adapter_reference=publication_reference(p.url)) for p in previous_result.publications))
         assert self.username
-        api = self._api()
+        api = self.publication_adapter()
         feed = reference('https://t.me/s/'+self.username)
         state: dict[str, Any] = dict(previous.position) if previous else {}
         observations: tuple[Publication, ...] = ()
@@ -153,7 +155,7 @@ class TelegramWebSource(TelegramSource):
         stage = resources.staging
         if stage and not stage.admitted():
             raise asyncio.CancelledError
-        api = self._api()
+        api = self.publication_adapter()
         try:
             value = await api.fetch(reference(publication.url))
         except AdapterException as error:
@@ -161,6 +163,10 @@ class TelegramWebSource(TelegramSource):
         if value.needs_fetch:
             raise SourceError('Не удалось разобрать публикацию Telegram', code='malformed_publication', retryable=False)
         teaser = material(value, publication.teaser)
+        if self.independent_media:
+            # The canonical store saves descriptions and schedules each file.
+            # Linked-article collection is separated in #94.
+            return FetchResult(replace(teaser, full=not value.media and not teaser.reason), self.observation())
         manifest = teaser.source_manifest
         assert manifest
         if manifest.post_web_unavailable and str(manifest.post['text']).strip():

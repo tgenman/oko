@@ -123,6 +123,10 @@ class ReaderVersions:
         return f"""INSERT INTO reader_entities VALUES ('{kind}',{identity},1,oko_reader_time())
           ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed;"""
 
+    def media_changed(self, item: str) -> None:
+        for kind in ('material','media','card'):
+            self.db.execute(self._bump(kind, '?'), (item,))
+
     @classmethod
     def _material(cls, identity: str, *, card: bool = True) -> str:
         return cls._bump('material', identity) + (cls._bump('card', identity) if card else '')

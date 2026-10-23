@@ -94,7 +94,7 @@ def content(post: TelegramPublication) -> PublicationContent:
     issues = []
     for item, resource in zip(post.media, teaser.source_manifest.resources):
         if item.url:
-            media.append(MediaReference(item.id, item.url, item.name, item.mime, item.size))
+            media.append(MediaReference(item.id, item.url, item.name, item.mime, item.size, resource_identity(item.url)))
             blocks.append(dict(type='media', ref={'$media': item.id}, role='attachment' if resource.kind=='file' else resource.kind))
         elif item.external:
             blocks.append(dict(type='external_media', kind=item.external.kind, url=item.external.source_url))

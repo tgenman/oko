@@ -23,6 +23,7 @@ from oko.collection.rss import RSSSource, feed_title, normalized
 from oko.collection.sources import Sources, SourceSettings, TelegramAccess
 from oko.collection.contracts import FetchResources, SourceError, SourceDeleted, SourceSkipped, SourceDeferred, DownloadStage
 from oko.collection.contracts import Source
+from oko.collection.adapters import AdapterException
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
@@ -277,7 +278,8 @@ class Runtime:
                 access = TelegramAccess('client', feed.get('telegram_username'), feed.get('telegram_account'), feed.get('telegram_peer'))
             settings.append(SourceSettings(feed['id'], feed['transport'], feed['original_urls'][0],
                 feed['initial_days'], feed['initial_history'], feed['connection'] == 'deleting', access,
-                self._store.subscriptions.youtube_theses(feed['id']) if feed['transport'] == 'youtube' else False))
+                self._store.subscriptions.youtube_theses(feed['id']) if feed['transport'] == 'youtube' else False,
+                self._store.publications.feed(feed['id'])))
         updates = self._collection.configure(settings)
         for identity in updates.created:
             self._store.enqueue_discovery(identity)
@@ -1129,6 +1131,9 @@ class Runtime:
             await self._execute_observed(job, capture)
 
     async def _execute_observed(self, job: Job, capture: Capture) -> None:
+        if job.kind == 'download_media':
+            await self._execute_media(job)
+            return
         diagnostic_materials.set((job.item,) if job.kind in ('fetch','delete') else ())
         capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
@@ -1248,6 +1253,34 @@ class Runtime:
             if staging:
                 shutil.rmtree(staging.path,ignore_errors=True)
 
+    async def _execute_media(self, job: Job) -> None:
+        async with self._actions:
+            current = self._store
+            if not current or not self._live() or not current.valid(job):
+                return
+            download = current.media.begin(job)
+            if download is None:
+                current.finish(job)
+                return
+            adapter = self._collection.publication_adapter(current.item_feed(job.item))
+        try:
+            if adapter is None:
+                raise ValueError('Publication adapter unavailable')
+            with download.temporary.open('wb') as output:
+                actual = await adapter.download_media(download.publication, download.media, output)
+            async with self._actions:
+                if self._store is current and self._live() and current.valid(job):
+                    current.media.complete(job, download, actual)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            async with self._actions:
+                if self._store is current and self._live() and current.valid(job):
+                    current.retry(job, self._clock(), str(error), 60,
+                                  code=error.issue.code if isinstance(error, AdapterException) else 'media-download')
+        finally:
+            current.media.release(download)
+
     async def run(self) -> None:
         journal_context = active_journal.set(self.diagnostics)
         try:
@@ -1298,18 +1331,18 @@ class Runtime:
                                 self._store.enqueue_discovery(feed)
                             self._last_collection = now
                         state = self._store.status()
-                        for lane in ('common', 'personal', 'collection'):
+                        for lane in ('common', 'personal', 'collection', 'media'):
                             task = self._lanes.get(lane)
                             if task and task.done():
                                 await task
                                 del self._lanes[lane]
-                            profile = self._store.subscriptions.telegram.profile(lane) if lane != 'common' else None
+                            profile = self._store.subscriptions.telegram.profile(lane) if lane in ('personal','collection') else None
                             ready_at = self._account_retry.get(profile['user_id'], 0) if profile else 0
                             if lane in self._lanes or now < ready_at:
                                 continue
-                            feeds = [feed for feed in self._sources if self._lane(feed) == lane]
+                            feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if lane=='media' else [feed for feed in self._sources if self._lane(feed) == lane]
                             job = self._store.next_job(now, deleting_only=state['deleting'] or not feeds,
-                                                       feeds=feeds, include_deletions=lane == 'common')
+                                                       feeds=feeds, include_deletions=lane == 'common', media_only=lane=='media')
                             if job:
                                 self._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self._store.item_feed(job.item)
                                 self._lanes[lane] = asyncio.create_task(self._execute(job))

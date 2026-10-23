@@ -19,6 +19,7 @@ from typing import Any, Literal
 from oko.storage.aggregate_upgrade import remove_aggregates
 from oko.storage.versions import Versions
 from oko.storage.publications import Publications
+from oko.storage.media import MediaFiles
 from oko.storage.reader_versions import ReaderVersions, ReadingConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
@@ -129,6 +130,7 @@ class Store:
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.publications = Publications(self)
+        self.media = MediaFiles(self)
         self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock)
         self.filters = Filters(self)
         self.processing = ProcessingCoordination(self)
@@ -397,7 +399,13 @@ class Store:
 
     @reading_value
     def item_feed(self, item: str) -> str:
-        return str(self.db.execute('SELECT feed_id FROM items WHERE id=?', (item,)).fetchone()[0])
+        row = self.db.execute('SELECT feed_id FROM items WHERE id=?', (item,)).fetchone()
+        if row is None:
+            owner = self.media.owner(item)
+            row = self.db.execute('SELECT feed_id FROM items WHERE id=?', (owner,)).fetchone()
+        if row is None:
+            raise LookupError('Publication not found')
+        return str(row[0])
 
     def feed_status(self, feed: str, **state: Any) -> None:
         with self.db:
@@ -411,12 +419,16 @@ class Store:
             "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=? AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL)"
         if ai_only:
             query += " AND kind IN ('filter','theses')"
         elif deleting_only:
             query += " AND kind IN ('delete','feed-delete')"
+        elif media_only:
+            available = feeds if feeds is not None else [source_feed]
+            placeholders = ','.join('?' for _ in available) or "''"
+            query += f" AND kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND i.feed_id IN ({placeholders}))"
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
@@ -434,7 +446,7 @@ class Store:
             ELSE EXISTS ({blocked_history} AND m.item=jobs.item) END)"""
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
-        params = (now,) if deleting_only or ai_only else (now, *('' if f == 'demo' else f for f in available), *available)
+        params = (now,) if deleting_only or ai_only else (now, *available) if media_only else (now, *('' if f == 'demo' else f for f in available), *available)
         row = self.db.execute(query, params).fetchone()
         if not row:
             return None
@@ -679,8 +691,8 @@ class Store:
         params: tuple[str, ...] = ()
         if feeds is not None:
             placeholders = ','.join('?' for _ in feeds) or "''"
-            selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})))"
-            params = (*feeds, *feeds)
+            selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})) OR item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.feed_id IN ({placeholders})))"
+            params = (*feeds, *feeds, *feeds)
         with self.db:
             self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
             self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
@@ -728,6 +740,7 @@ class Store:
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
             base.update(saved_external(header, f'/api/v3/materials/{item}'))
+            base['loading'] = base['loading'] or self.media.loading(item)
             base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=saved_telegraph(header, f'/api/v3/materials/{item}'))
             return base
         except (OSError, ValueError, KeyError):
