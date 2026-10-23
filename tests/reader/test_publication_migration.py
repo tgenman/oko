@@ -264,3 +264,52 @@ def test_migration_refuses_a_locked_storage_without_writing(tmp_path):
             migrate_publications(source, destination)
         assert snapshot(source) == before
         assert not destination.exists()
+
+
+def test_migrated_reload_keeps_saved_copy_when_source_restricts_whole_post(tmp_path):
+    from oko.storage.migration import migrate_publications
+    from tests.support.telegram_web import mark_post_unavailable
+
+    source, destination = tmp_path/'old', tmp_path/'migration'
+    restricted = [False]
+    def response(request):
+        html = page([(11, '' if restricted[0] else 'Saved own text')])
+        return httpx.Response(200, text=mark_post_unavailable(html, 'fixture/11') if restricted[0] else html)
+    options = dict(token='test', api_only=True, rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(source, **options), headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
+        item = settled(client)[0]['id']
+    assert migrate_publications(source, destination)['success']
+    restricted[0] = True
+    with TestClient(create_app(destination/'storage', **options), headers=HEADERS) as client:
+        client.post('/api/v3/materials/'+item+'/retry')
+        settled(client)
+        content = client.get('/api/v3/materials/'+item).json()['content']
+        assert content['text'] == 'Saved own text'
+        assert content['post_web_unavailable']
+        assert content['previous_versions'] == []
+
+
+def test_migration_preserves_external_video_in_common_content(tmp_path):
+    from oko.storage.migration import migrate_publications
+    from tests.support.telegram_web import external_page, VIDEO
+    from tests.support.youtube import PNG
+    import json
+    import sqlite3
+
+    source, destination = tmp_path/'old', tmp_path/'migration'
+    def response(request):
+        if request.url.host == 'cdn.example':
+            return httpx.Response(200, content=PNG, headers={'content-type':'image/png'})
+        return httpx.Response(200, text=external_page([(11, 'External video'+VIDEO)], before=int(request.url.params.get('before', '0'))))
+    options = dict(token='test', api_only=True, rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(source, **options), headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
+        item = settled(client)[0]['id']
+    assert migrate_publications(source, destination)['success']
+    with sqlite3.connect(destination/'storage/state.sqlite') as db:
+        content = json.loads(db.execute('SELECT content FROM items WHERE id=?', (item,)).fetchone()[0])
+        assert {'type':'external_media', 'kind':'video', 'url':'https://t.me/fixture/11'} in content['blocks']
+        assert db.execute('SELECT COUNT(*) FROM media_files').fetchone()[0] == 1

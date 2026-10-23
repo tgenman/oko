@@ -484,22 +484,6 @@ class Store:
         item = job.item
         if not self.valid(job) or not self._has_unviewed(item):
             return
-        if self.publications.owns(item):
-            prepared = self.versions.prepare(item, material, job, staging)
-            canonical = self.publications.prepare(item, material, self.versions.path(item, prepared[0]).parent)
-            self.fault('after_file_move')
-            with self.db:
-                if not self.valid(job) or not self._has_unviewed(item):
-                    return
-                self.versions.publish(item, prepared, True)
-                self.publications.publish(item, canonical, prepared[1])
-                self.db.execute('UPDATE items SET complete=1,members=? WHERE id=?', (json.dumps(material.members), item))
-                self._finish_fetch(job, material, self.clock() if now is None else now)
-            self.publications.prune(item)
-            self.processing.sync()
-            with self.db:
-                self.publications.status(item)
-            return
         previous = self.material(item)
         if material.source_manifest and material.source_manifest.post_web_unavailable and previous and (previous['text'].strip() or previous['attachments'] or previous['images']):
             header, _ = self.original(item)
@@ -519,6 +503,22 @@ class Store:
             if retained and retained.teaser and not accept_preview:
                 material = replace(retained.teaser, full=False, members=material.members,
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
+        if self.publications.owns(item):
+            prepared = self.versions.prepare(item, material, job, staging)
+            canonical = self.publications.prepare(item, material, self.versions.path(item, prepared[0]).parent)
+            self.fault('after_file_move')
+            with self.db:
+                if not self.valid(job) or not self._has_unviewed(item):
+                    return
+                self.versions.publish(item, prepared, True)
+                self.publications.publish(item, canonical, prepared[1])
+                self.db.execute('UPDATE items SET complete=1,members=? WHERE id=?', (json.dumps(material.members), item))
+                self._finish_fetch(job, material, self.clock() if now is None else now)
+            self.publications.prune(item)
+            self.processing.sync()
+            with self.db:
+                self.publications.status(item)
+            return
         if previous and previous.get('full', False) and not material.full and not material.collection_error and material.source_manifest and telegraph_partial(material.source_manifest) and not material.source_manifest.download_partial:
             with self.db:
                 self.finish(job)

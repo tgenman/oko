@@ -80,6 +80,12 @@ class Publications:
     def feed(self, feed: str) -> bool:
         return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter='telegram_web_adapter'", (feed,)).fetchone() is not None
 
+    def sync_feeds(self, feeds: list[str]) -> None:
+        if self.store.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
+            with self.store.db:
+                for feed in feeds:
+                    self.configure_feed(feed)
+
     def configure_feed(self, feed: str) -> None:
         store = self.store
         row = store.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
@@ -153,6 +159,9 @@ class Publications:
         attachments = {a.name: a for a in material.attachments}
         for name in sorted(names):
             resource = resources.get(name)
+            if resource and resource.external:
+                blocks.append(dict(type='external_media', kind=resource.external.kind, url=resource.external.source_url))
+                continue
             key = resource.key if resource else name
             path = directory/name
             old = known.get(key)
