@@ -1,5 +1,6 @@
 from oko.collection.external_media import saved_external, expected_incomplete, telegraph_partial
-from oko.collection.adapters import AdapterIssue, AdapterErrorKind
+from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, Platform, MediaReference, PublicationContent, PublicationMetadata
+from datetime import datetime, timezone
 from oko.collection.telegram.reading import saved_telegraph
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read
@@ -515,10 +516,14 @@ class Store:
             kinds = {a['media_id']:a['kind'] for a in header.get('attachments', []) if 'media_id' in a}
             retained = tuple(Attachment(self.media.projection_name(media), self._retained_payload(self.root/media['storage_key'], staging),
                 kinds.get(media['id'],'file'), media['mime_type'] or 'application/octet-stream') for media in files if (self.root/media['storage_key']).is_file())
+            refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
+                for m in self.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,)) if m['source_locator'])
+            last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
+                header.get('title',''),datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),media=refs)
             teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),attachments=retained,
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
                 source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
-                reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None) if row['complete'] else None
+                reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None,adapter_content=last_description) if row['complete'] else None
             return Publication(row['source_id'].split(':',1)[1],row['url'],row['published'],teaser,tuple(json.loads(row['members'])),bool(row['published_known']))
         fallback = self.material(item) if row else None
         teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', []) if (self.path(item).parent / Path(url).name).is_file()), captions=fallback.get('captions'), description=fallback.get('description', ''), reply_preview=ReplyPreview.model_validate(fallback['reply_preview']) if fallback.get('reply_preview') else None, attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []) if (self.path(item).parent / Path(a['url']).name).is_file())) if fallback else None

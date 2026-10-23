@@ -554,3 +554,94 @@ def test_explicit_feed_refresh_rechecks_unavailable_media(tmp_path):
         ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
         assert client.get(ready['content']['attachments'][0]['url']).content==b'available-again'
         assert len(files)==1
+
+
+def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
+    import sqlite3
+    root=migrated_root(tmp_path)
+    broken=[False]
+    started,release=threading.Event(),threading.Event()
+    async def response(request):
+        if request.url.host=='api.telegra.ph':
+            if broken[0]:
+                return httpx.Response(503)
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Saved article']},{'tag':'img','attrs':{'src':'https://cdn.example/article.png'}}]}})
+        if request.url.host=='cdn.example':
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(.01)
+            return httpx.Response(200,content=b'article-image',headers={'content-type':'image/png'})
+        return httpx.Response(200,text=page([(11,('New post' if broken[0] else 'Old post')+' <a href="https://telegra.ph/Fixture">article</a>')]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+            assert started.wait(3)
+            item=client.get('/api/v3/cards').json()[0]['id']
+            with sqlite3.connect(root/'state.sqlite') as db:
+                before=db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)).fetchone()[0]
+            broken[0]=True
+            client.post('/api/v3/materials/'+item+'/retry')
+            wait_for(client,lambda:'New post' in client.get('/api/v3/materials/'+item).json()['content']['text'])
+            with sqlite3.connect(root/'state.sqlite') as db:
+                assert db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)).fetchone()[0]==before
+            broken[0]=False
+            release.set()
+            client.post('/api/v3/materials/'+item+'/retry')
+            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+            assert ready['content']['attachments'][0]['url'].endswith('/'+before)
+        finally:
+            release.set()
+
+
+def test_media_source_wait_survives_restart_and_does_not_pause_another_host(tmp_path):
+    import time
+    root=migrated_root(tmp_path)
+    calls={'paused':0,'other':0}
+    def response(request):
+        if request.url.host=='paused.example':
+            calls['paused']+=1
+            return httpx.Response(429,headers={'Retry-After':'120'})
+        if request.url.host=='other.example':
+            calls['other']+=1
+            return httpx.Response(200,content=b'other-image',headers={'content-type':'image/jpeg'})
+        photos=''.join('<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://'+host+'.example/photo.jpg\')"></a>' for host in ('paused','other'))
+        return httpx.Response(200,text=page([(11,'Saved text'+photos)]))
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':2})
+        connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()
+        item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
+        content=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+        assert client.get(content['content']['attachments'][0]['url']).content==b'other-image'
+        assert calls=={'paused':1,'other':1}
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+        client.post('/api/v3/collect',json={'scope':'feed','feed_id':connected['feed_id']})
+        status=client.get('/api/v3/status').json()
+        from datetime import datetime
+        waits=[datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp() for w in status['work'] if w['phase']=='waiting' and w.get('retry_at')]
+        assert waits and max(waits)>time.time()+100
+        assert calls=={'paused':1,'other':1}
+
+
+def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_path):
+    import sqlite3
+    root=migrated_root(tmp_path)
+    missing=[False]
+    def response(request):
+        return httpx.Response(200,text=page([] if missing[0] else [(11,'Saved text')]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+        missing[0]=True
+        client.post('/api/v3/materials/'+item+'/retry')
+        wait_for(client,lambda:client.get('/api/v3/status').json()['sources'][0]['state']=='unavailable')
+        with sqlite3.connect(root/'state.sqlite') as db:
+            assert db.execute("SELECT status FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()[0]=='unavailable'
+        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+        missing[0]=False
+        client.post('/api/v3/materials/'+item+'/retry')
+        wait_for(client,lambda:client.get('/api/v3/status').json()['sources'][0]['state']=='ready')

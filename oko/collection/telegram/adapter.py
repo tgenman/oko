@@ -229,6 +229,7 @@ class TelegramWebAdapter:
             if manifest.get('preview_fragment') is None:
                 media_refs = list(value.media)
                 articles = []
+                issues = list(value.issues)
                 for url in direct_articles(str(manifest['post'].get('text',''))):
                     try:
                         article, expected, resources = await describe(url,self.transport)
@@ -242,15 +243,20 @@ class TelegramWebAdapter:
                             body['blocks'].append(dict(type='text',role='body',text=article.text))
                     except SourceError as error:
                         article = ArticleManifest(url=url,reason=error.label)
+                        issues.append(replace(failure(error,publication).issue,scope='telegraph:'+url))
                     articles.append(article.model_dump(mode='json'))
                 manifest['articles'] = articles
-                value = replace(value,content=body,media=tuple(media_refs),needs_fetch=False)
+                value = replace(value,content=body,media=tuple(media_refs),needs_fetch=False,issues=tuple(issues))
         return value
 
     async def download_media(self, publication: ExternalReference, media: MediaReference,
                              output: BinaryIO) -> MediaReference:
         current = await self.fetch(publication)
         actual = next((item for item in current.media if item.key == media.key), None)
+        if actual is None:
+            for issue in current.issues:
+                if issue.scope and issue.scope.startswith('telegraph:') and media.key.startswith(issue.scope+':'):
+                    raise AdapterException(replace(issue,publication=publication,media_key=media.key))
         if actual is None or resource_identity(actual.locator) != resource_identity(media.locator):
             raise AdapterException(AdapterIssue('media_changed', 'Вложение изменилось',
                 AdapterErrorKind.media_changed, publication, media.key))

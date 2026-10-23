@@ -107,7 +107,17 @@ def response(request):
 
 
 def build_app(root, token, *, persistent=False, public_url=None,collection=True,processing_delay=0):
-    def external(request):
+    async def external(request):
+        if request.url.host=='controlled.example':
+            path=root/'fixture-media-state'
+            while path.is_file() and path.read_text()=='held':
+                await asyncio.sleep(.01)
+            if path.is_file() and path.read_text()=='error':
+                return httpx.Response(503)
+            return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+        if request.url.host=='t.me' and '/mediastate' in request.url.path:
+            photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://controlled.example/photo.jpg\')"></a>'
+            return httpx.Response(200,text=page([(11,'Text before media'+photo)]).replace('fixture/','mediastate/'))
         if request.url.host=='t.me' and '/lateststate' in request.url.path:
             path = root/'fixture-publication.txt'
             text = path.read_text() if path.is_file() else 'Initial publication'

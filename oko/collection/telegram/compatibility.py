@@ -41,6 +41,7 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
         articles = []
         resources = list(manifest.resources)
         retained_names = set()
+        retained_keys = set()
         for article in manifest.articles:
             old = old_articles.get(article.url)
             if article.text is None and old and old.text is not None:
@@ -50,9 +51,13 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
                         resource = old_resources[key]
                         resources.append(resource)
                         retained_names.add(resource.name)
+                        retained_keys.add(key)
             articles.append(article)
         retained_attachments = tuple(a for a in previous.attachments if a.name in retained_names)
         manifest = manifest.model_copy(update={'articles':tuple(articles),'resources':tuple(resources)})
+        if previous.adapter_content:
+            present = {r.key for r in value.media}
+            value = replace(value,media=value.media+tuple(r for r in previous.adapter_content.media if r.key in retained_keys and r.key not in present))
     if manifest.preview_error and previous and previous.source_manifest and previous.source_manifest.preview_fragment:
         manifest = manifest.model_copy(update={'preview_fragment': previous.source_manifest.preview_fragment})
     reply = manifest.post.get('reply_preview')
