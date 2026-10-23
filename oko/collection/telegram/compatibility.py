@@ -12,7 +12,7 @@ from typing import Any, Literal, cast
 from oko.collection.adapters import AdapterException, PublicationContent
 from oko.collection.contracts import (
     DownloadStage, StagedPayload, SourceError, SourceManifest, Material,
-    Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview,
+    Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview, Attachment,
 )
 from oko.collection.telegram.adapter import TelegramWebAdapter, reference, publication_reference
 from oko.collection.telegram.contracts import HistoryEnvelope, HistorySelection, ExpectedMedia
@@ -34,6 +34,25 @@ def source_error(error: AdapterException) -> SourceError:
 def material(value: PublicationContent, previous: Material | None = None) -> Material:
     extra = value.content['extra']['telegram']
     manifest = SourceManifest.model_validate_json(json.dumps(extra['manifest']))
+    retained_attachments: tuple[Attachment, ...] = ()
+    if previous and previous.source_manifest and manifest.articles:
+        old_articles = {a.url:a for a in previous.source_manifest.articles}
+        old_resources = {r.key:r for r in previous.source_manifest.resources}
+        articles = []
+        resources = list(manifest.resources)
+        retained_names = set()
+        for article in manifest.articles:
+            old = old_articles.get(article.url)
+            if article.text is None and old and old.text is not None:
+                article = old.model_copy(update={'reason':article.reason})
+                for key in old.resource_keys:
+                    if key in old_resources:
+                        resource = old_resources[key]
+                        resources.append(resource)
+                        retained_names.add(resource.name)
+            articles.append(article)
+        retained_attachments = tuple(a for a in previous.attachments if a.name in retained_names)
+        manifest = manifest.model_copy(update={'articles':tuple(articles),'resources':tuple(resources)})
     if manifest.preview_error and previous and previous.source_manifest and previous.source_manifest.preview_fragment:
         manifest = manifest.model_copy(update={'preview_fragment': previous.source_manifest.preview_fragment})
     reply = manifest.post.get('reply_preview')
@@ -46,8 +65,18 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
         text = '\n\n'.join(part for part in (text, preview) if part)
         reason = ('Сохранён фрагмент предпросмотра; полная публикация недоступна для веб-просмотра'
                   if preview else 'Фрагмент предпросмотра недоступен; откройте пост в Telegram')
+    if manifest.preview_fragment is None and manifest.articles:
+        sections = [text]
+        for article in manifest.articles:
+            if article.text is not None:
+                sections.append('---\n\n# '+(article.title or 'Telegraph')+'\n\nИсходник: '+article.url+'\n\n'+article.text)
+            else:
+                sections.append('Telegraph: '+article.url+'\nСтатья ещё не сохранена.')
+        text = '\n\n'.join(sections)
+        reason = '; '.join(value for value in dict.fromkeys([reason,*[article.reason for article in manifest.articles]]) if value)
     return Material(title, text, False, reason,
                     members=tuple(extra['members']), description=extra['description'],
+                    attachments=retained_attachments,
                     source_manifest=manifest,
                     reply_preview=ReplyPreview.model_validate(reply) if reply else None, adapter_content=value)
 
@@ -102,7 +131,7 @@ class TelegramWebSource(TelegramSource):
 
     def publication_adapter(self) -> TelegramWebAdapter:
         if not hasattr(self, '_publication_adapter'):
-            self._publication_adapter = TelegramWebAdapter(self.http_transport)
+            self._publication_adapter = TelegramWebAdapter(self.http_transport,linked_descriptions=self.independent_media)
         return self._publication_adapter
 
     async def discover(self, cursor: str | None) -> DiscoveryResult:

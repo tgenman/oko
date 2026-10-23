@@ -123,16 +123,9 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
             raise asyncio.CancelledError
         article = ArticleManifest(url=url)
         try:
-            path = urlsplit(url).path
-            data = await downloader.metadata('https://api.telegra.ph/getPage'+path+'?return_content=true')
+            article,expected,templates = await describe(url,transport)
             if staging and not staging.admitted():
                 raise asyncio.CancelledError
-            if not isinstance(data,dict) or data.get('ok') is not True or not isinstance(data.get('result'),dict):
-                raise SourceError('Статья Telegraph недоступна',code='article-unavailable')
-            result = data['result']
-            if not isinstance(result.get('title'),str):
-                raise SourceError('Telegraph не предоставил заголовок статьи',code='article-unavailable')
-            body,expected,templates = article_content(url,result.get('content'))
             collected = await downloader.collect(expected,templates,previous,staging)
             offset = len(resources)
             resources.extend(resource.model_copy(update={'order':offset+index}) for index,resource in enumerate(collected.resources))
@@ -140,7 +133,7 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
             reasons.extend(collected.reasons)
             if collected.error and (retry is None or not collected.error.retryable):
                 retry = collected.error
-            article = ArticleManifest(url=url,title=result['title'],text=body,resource_keys=tuple(resource.key for resource in collected.resources))
+            article = article.model_copy(update={'resource_keys':tuple(resource.key for resource in collected.resources)})
             known = old_articles.get(url)
             if known and known.text is not None and (known.title,known.text,known.resource_keys)!=(article.title,article.text,article.resource_keys):
                 reasons.extend(resource.reason for resource in collected.resources if resource.reason)
@@ -179,3 +172,15 @@ async def enrich(material: Material, previous: Material | None, staging: Downloa
     return replace(material,text='\n\n'.join(sections),full=material.full and not reasons,
                    reason='; '.join(value for value in dict.fromkeys([material.reason,*reasons,*[resource.reason for resource in resources if resource.reason],*[article.reason for article in articles if article.reason]]) if value),attachments=tuple(attachments),
                    source_manifest=manifest,collection_error=material.collection_error)
+
+
+async def describe(url: str, transport: httpx.AsyncBaseTransport | None) -> tuple[ArticleManifest, tuple[ExpectedMedia, ...], tuple[ResourceManifest, ...]]:
+    """Text and file descriptions only; the caller schedules each byte stream."""
+    data = await Downloader(transport).metadata('https://api.telegra.ph/getPage'+urlsplit(url).path+'?return_content=true')
+    if not isinstance(data,dict) or data.get('ok') is not True or not isinstance(data.get('result'),dict):
+        raise SourceError('Статья Telegraph недоступна',code='article-unavailable')
+    result = data['result']
+    if not isinstance(result.get('title'),str):
+        raise SourceError('Telegraph не предоставил заголовок статьи',code='article-unavailable')
+    body,expected,resources = article_content(url,result.get('content'))
+    return ArticleManifest(url=url,title=result['title'],text=body,resource_keys=tuple(r.key for r in resources)),expected,resources

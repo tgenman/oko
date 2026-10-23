@@ -202,6 +202,10 @@ class Store:
 
     def refresh_feed(self, feed: str) -> None:
         """Admit one manual refresh without restarting work already in progress."""
+        with self.db:
+            for row in self.db.execute('''SELECT DISTINCT i.id FROM items i JOIN media_files m ON m.publication_id=i.id
+                WHERE i.feed_id=? AND i.viewed=0''', (feed,)).fetchall():
+                self.media.retry(row['id'])
         discovery = '' if feed == 'demo' else feed
         active = self.db.execute("""SELECT 1 FROM jobs WHERE kind='discover' AND item=?
             AND (status='running' OR (status='pending' AND error IS NULL))""", (discovery,)).fetchone()

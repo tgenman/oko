@@ -72,7 +72,8 @@ class MediaFiles:
                 continue
             ready = row['status']=='ready'
             resource['name'] = self.projection_name(row)
-            resource.update(status='loaded' if ready else 'missing' if row['status']=='pending_download' else 'unsupported', reason=row['reason'])
+            resource.update(status='loaded' if ready else 'missing' if row['status']=='pending_download' else 'unsupported',
+                reason=row['reason'] or ('Вложение загружается' if row['status']=='pending_download' else ''))
             if ready:
                 resource['sha256'] = self.store.versions.file_digest(self.store.root/row['storage_key'])
         header['_media_urls'] = {}

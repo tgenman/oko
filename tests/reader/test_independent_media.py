@@ -471,3 +471,86 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
             client.post('/api/v3/materials/'+item+'/retry')
         ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
         assert client.get(ready['content']['attachments'][0]['url']).content==b'process-media'
+
+
+def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
+    root=migrated_root(tmp_path)
+    started,release=threading.Event(),threading.Event()
+    async def response(request):
+        if request.url.host=='api.telegra.ph':
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Article text']},{'tag':'img','attrs':{'src':'https://cdn.example/article.png'}}]}})
+        if request.url.host=='cdn.example':
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(.01)
+            return httpx.Response(200,content=b'article-image',headers={'content-type':'image/png'})
+        return httpx.Response(200,text=page([(11,'Post <a href="https://telegra.ph/Fixture">article</a>')]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+            assert started.wait(3)
+            item=client.get('/api/v3/cards').json()[0]['id']
+            content=client.get('/api/v3/materials/'+item).json()['content']
+            assert 'Article text' in content['text']
+            assert 'Article text' in content['linked_content']['articles'][0]['text']
+            assert 'Не удалось' not in content['linked_content']['articles'][0]['text']
+            release.set()
+            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+            assert client.get(ready['content']['linked_content']['articles'][0]['media_urls'][0]).content==b'article-image'
+        finally:
+            release.set()
+
+
+def test_unavailable_telegraph_keeps_the_last_article_with_new_post_text(tmp_path):
+    root=migrated_root(tmp_path)
+    broken=[False]
+    def response(request):
+        if request.url.host=='cdn.example':
+            return httpx.Response(200,content=b'saved-article-image',headers={'content-type':'image/png'})
+        if request.url.host=='api.telegra.ph':
+            if broken[0]:
+                return httpx.Response(503)
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Saved article text']},{'tag':'img','attrs':{'src':'https://cdn.example/article.png'}}]}})
+        return httpx.Response(200,text=page([(11,('New post' if broken[0] else 'Old post')+' <a href="https://telegra.ph/Fixture">article</a>')]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+        assert 'Saved article text' in client.get('/api/v3/materials/'+item).json()['content']['text']
+        old_url=client.get('/api/v3/materials/'+item).json()['content']['linked_content']['articles'][0]['media_urls'][0]
+        broken[0]=True
+        client.post('/api/v3/materials/'+item+'/retry')
+        settled(client)
+        content=client.get('/api/v3/materials/'+item).json()['content']
+        assert 'New post' in content['text']
+        assert 'Saved article text' in content['text']
+        assert content['linked_content']['articles'][0]['error']
+        new_url=content['linked_content']['articles'][0]['media_urls'][0]
+        assert new_url==old_url
+        assert client.get(new_url).content==b'saved-article-image'
+
+
+def test_explicit_feed_refresh_rechecks_unavailable_media(tmp_path):
+    root=migrated_root(tmp_path)
+    unavailable=[True]
+    files=[]
+    def response(request):
+        if request.url.host=='cdn.example':
+            files.append(str(request.url))
+            return httpx.Response(200,content=b'available-again',headers={'content-type':'image/jpeg'})
+        if unavailable[0] and request.url.params.get('before'):
+            return httpx.Response(200,text=page([]))
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg\')"></a>'
+        return httpx.Response(200,text=page([(11,'Saved text'+photo)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()
+        item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
+        wait_for(client,lambda:'удалена или недоступна' in client.get('/api/v3/materials/'+item).json()['content']['completeness'].get('message',''))
+        assert files==[]
+        unavailable[0]=False
+        client.post('/api/v3/collect',json={'scope':'feed','feed_id':connected['feed_id']})
+        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+        assert client.get(ready['content']['attachments'][0]['url']).content==b'available-again'
+        assert len(files)==1
