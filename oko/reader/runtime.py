@@ -262,6 +262,10 @@ class Runtime:
             return
         settings = []
         feeds = self._store.subscriptions.feeds()
+        if self._store.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
+            with self._store.db:
+                for feed in feeds:
+                    self._store.publications.configure_feed(feed['id'])
         for feed in feeds:
             if feed['id'] == self._source_feed and self._source:
                 continue

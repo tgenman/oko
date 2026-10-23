@@ -239,6 +239,11 @@ class Subscriptions:
         if row is None:
             raise LookupError('Фид не найден')
         feed = dict(row)
+        # The existing reader DTO contains subscription settings only. New
+        # persistence fields are consumed by the publication collection path.
+        from oko.storage.publications import FEED_COLUMNS
+        for field in FEED_COLUMNS:
+            feed.pop(field, None)
         feed.pop('telegram_topic', None)
         avatar = self.db.execute('SELECT digest FROM telegram_avatars WHERE feed=?', (feed['id'],)).fetchone() if feed['kind'] == 'telegram' else None
         if avatar:

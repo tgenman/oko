@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 from oko.storage.aggregate_upgrade import remove_aggregates
 from oko.storage.versions import Versions
+from oko.storage.publications import Publications
 from oko.storage.reader_versions import ReaderVersions, ReadingConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
@@ -52,7 +53,7 @@ class WorkSummary:
 
 
 class Store:
-    """SQLite owns identity/lifecycle; files own all publication content."""
+    """SQLite owns lifecycle and migrated publications; files hold local media."""
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic) -> None:
         self.root, self.fault = root, fault
         self.wall_clock = wall_clock
@@ -127,6 +128,7 @@ class Store:
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
+        self.publications = Publications(self)
         self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock)
         self.filters = Filters(self)
         self.processing = ProcessingCoordination(self)
@@ -141,6 +143,7 @@ class Store:
             self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
             self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
         self.versions = Versions(self)
+        self.publications.recover()
         self.versions.recover()
         remove_aggregates(self)
         self.recover_files()
@@ -227,12 +230,16 @@ class Store:
         return 'cursor:' + namespace + ':' + feed if namespace else 'cursor' if feed == 'demo' else 'cursor:' + feed
 
     def cursor(self, feed: str = 'demo', namespace: str = '') -> str | None:
+        if self.publications.feed(feed):
+            return str(self.db.execute('SELECT cursor FROM feeds WHERE id=?', (feed,)).fetchone()[0]) or None
         row = self.db.execute("SELECT value FROM state WHERE key=?", (self.cursor_key(feed, namespace),)).fetchone()
         return row[0] if row else None
 
     def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo', namespace: str = '', *, description: str | None = None, successful: bool = True) -> None:
         if not self.valid(job):
             return
+        target = self.publications.feed(feed)
+        plans = self.publications.plan(feed, publications) if target else {}
         with self.db:
             history_items = []
             envelope = HistoryEnvelope.decode(cursor, adapter='client' if namespace == 'telegram' else 'web') if namespace in ('telegram', 'telegram-web') else None
@@ -240,10 +247,16 @@ class Store:
             history_ids = set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_ids', selection.get('history_enroll', [])))
             for p in publications:
                 item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
-                if p.observed_only and not self.db.execute('SELECT 1 FROM items WHERE id=?', (item,)).fetchone():
+                if not target and p.observed_only and not self.db.execute('SELECT 1 FROM items WHERE id=?', (item,)).fetchone():
                     continue
                 source_id = p.id if feed == 'demo' else feed + ':' + p.id
                 existing = self.db.execute('SELECT id,source_id,url FROM items WHERE source_id=?', (source_id,)).fetchone()
+                if target:
+                    plan = plans.get(p.id)
+                    if plan is None:
+                        continue
+                    item, source_id = plan.item, plan.source_id
+                    existing = self.db.execute('SELECT id,source_id,url FROM items WHERE id=?', (item,)).fetchone()
                 if envelope and p.members and not existing:
                     placeholders = ','.join('?' for _ in p.members)
                     matches = self.db.execute(f"SELECT DISTINCT i.id,i.source_id,i.url FROM items i JOIN json_each(i.members) m WHERE i.feed_id=? AND m.value IN ({placeholders})", (feed,*p.members)).fetchall()
@@ -260,12 +273,26 @@ class Store:
                         item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
                 inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members,published_known) VALUES (?,?,?,?,?,?,?)',
                                 (item, source_id, p.url, p.published, feed, json.dumps(p.members), p.published_known))
+                if target:
+                    if p.adapter_reference is None:
+                        raise ValueError('Adapter did not return a publication external key')
+                    self.publications.identify(item, p.adapter_reference)
+                    self.db.execute('INSERT OR IGNORE INTO feed_publications VALUES (?,?)', (feed, item))
                 if inserted.rowcount and p.teaser:
-                    self.versions.publish(item, self.versions.prepare(item, p.teaser), False)
+                    planned = plans.get(p.id)
+                    prepared = planned.version if planned else None
+                    prepared = prepared or self.versions.prepare(item, p.teaser)
+                    self.versions.publish(item, prepared, False)
+                    if target:
+                        assert planned and planned.content
+                        canonical = planned.content
+                        self.publications.publish(item, canonical, prepared[1])
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and p.published_known and not row['published_known']:
                     self.db.execute('UPDATE items SET published=?,published_known=1 WHERE id=?', (p.published, row['id']))
+                    if target:
+                        self.db.execute('UPDATE items SET published_at=? WHERE id=?', (p.published, row['id']))
                 if row and p.id in history_ids:
                     history_items.append(row['id'])
                 if row and row['viewed'] and namespace=='telegram-web':
@@ -318,7 +345,10 @@ class Store:
                 self.subscriptions.details.record(feed, 'updated')
             self.subscriptions.details.description(feed, description)
             self.fault('before_discovery_commit')
-            self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
+            if target:
+                self.db.execute('UPDATE feeds SET cursor=?,description=COALESCE(?,description) WHERE id=?', (cursor, description, feed))
+            else:
+                self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
 
     def telegram_http_state(self, group: str) -> dict[str, Any]:
@@ -454,6 +484,22 @@ class Store:
         item = job.item
         if not self.valid(job) or not self._has_unviewed(item):
             return
+        if self.publications.owns(item):
+            prepared = self.versions.prepare(item, material, job, staging)
+            canonical = self.publications.prepare(item, material, self.versions.path(item, prepared[0]).parent)
+            self.fault('after_file_move')
+            with self.db:
+                if not self.valid(job) or not self._has_unviewed(item):
+                    return
+                self.versions.publish(item, prepared, True)
+                self.publications.publish(item, canonical, prepared[1])
+                self.db.execute('UPDATE items SET complete=1,members=? WHERE id=?', (json.dumps(material.members), item))
+                self._finish_fetch(job, material, self.clock() if now is None else now)
+            self.publications.prune(item)
+            self.processing.sync()
+            with self.db:
+                self.publications.status(item)
+            return
         previous = self.material(item)
         if material.source_manifest and material.source_manifest.post_web_unavailable and previous and (previous['text'].strip() or previous['attachments'] or previous['images']):
             header, _ = self.original(item)
@@ -553,6 +599,8 @@ class Store:
                 self.filters.forget(member)
                 self.youtube.reset(member)
                 self.versions.forget(member)
+                if self.publications.owns(member):
+                    self.publications.forget(member)
                 self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (member,))
                 self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))
                 self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (member,))
@@ -572,6 +620,8 @@ class Store:
                 self.filters.forget(item)
                 self.youtube.reset(item)
                 self.versions.forget(item)
+                if self.publications.owns(item):
+                    self.publications.forget(item)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
                 self.db.execute('DELETE FROM retained_theses WHERE item=?', (item,))
                 # This is local cleanup, not viewed(): never create read eligibility.
@@ -600,7 +650,7 @@ class Store:
 
     def delete(self, job: Job) -> None:
         self.fault('before_delete')
-        for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item):
+        for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item, self.root / 'media' / job.item):
             if path.exists():
                 shutil.rmtree(path)
         self.fault('after_delete_files')
@@ -835,6 +885,8 @@ class Store:
         self.fault('after_' + job.kind + '_move')
         if finish:
             with self.db:
+                if self.publications.owns(job.item):
+                    self.publications.results(job.item, {job.kind: dict(file=destination.read_text())})
                 self.finish(job)
                 if job.kind == 'filter':
                     self.read_versions.sync_filter(job.item, bool(result['hidden']) and not self.filters.read(job.item).get('restored', False))

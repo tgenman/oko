@@ -85,6 +85,9 @@ def feed(db: sqlite3.Connection, identity: str) -> dict[str, Any]:
     if row is None:
         raise ValueError('Feed not found')
     result = dict(row)
+    from oko.storage.publications import FEED_COLUMNS
+    for field in FEED_COLUMNS:
+        result.pop(field, None)
     for name in ('public_ai', 'read_history', 'auto_read'):
         result[name] = None if result[name] is None else bool(result[name])
     return result

@@ -107,6 +107,13 @@ def response(request):
 
 
 def build_app(root, token, *, persistent=False, public_url=None,collection=True,processing_delay=0):
+    def external(request):
+        if request.url.host=='t.me' and '/lateststate' in request.url.path:
+            path = root/'fixture-publication.txt'
+            text = path.read_text() if path.is_file() else 'Initial publication'
+            photo = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg\')"></a>'
+            return httpx.Response(200, text=page([(11, text+photo)]).replace('fixture/', 'lateststate/'))
+        return response(request)
     models=model_transport([])
     async def delayed_model(request):
         if request.url.path=='/v1/chat/completions':
@@ -114,7 +121,7 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
         return await models.handle_async_request(request)
     ai=httpx.MockTransport(delayed_model) if processing_delay else models
     return create_app(root, token=token, rss_enabled=collection, persistent=persistent, public_url=public_url,
-                     rss_transport=httpx.MockTransport(response), telegram_client=BrowserTelegram(), ai_transport=ai, codex_client=CodexService(),
+                     rss_transport=httpx.MockTransport(external), telegram_client=BrowserTelegram(), ai_transport=ai, codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
                      lease=60, grace=60)
 

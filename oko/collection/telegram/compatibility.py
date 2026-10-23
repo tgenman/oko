@@ -14,7 +14,7 @@ from oko.collection.contracts import (
     DownloadStage, StagedPayload, SourceError, SourceManifest, Material,
     Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview,
 )
-from oko.collection.telegram.adapter import TelegramWebAdapter, reference
+from oko.collection.telegram.adapter import TelegramWebAdapter, reference, publication_reference
 from oko.collection.telegram.contracts import HistoryEnvelope, HistorySelection, ExpectedMedia
 from oko.collection.telegram.media import Downloader
 from oko.collection.telegram.source import TelegramSource
@@ -46,7 +46,7 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
     return Material(title, text, False, reason,
                     members=tuple(extra['members']), description=extra['description'],
                     source_manifest=manifest,
-                    reply_preview=ReplyPreview.model_validate(reply) if reply else None)
+                    reply_preview=ReplyPreview.model_validate(reply) if reply else None, adapter_content=value)
 
 
 def legacy(value: PublicationContent) -> Publication:
@@ -54,7 +54,8 @@ def legacy(value: PublicationContent) -> Publication:
     identity = value.metadata.reference.url.rstrip('/').split('/')[-1]
     return Publication(identity, value.metadata.reference.url,
         value.metadata.published_at.timestamp() if value.metadata.published_at else 0,
-        result, result.members if result else (int(identity),), published_known=value.metadata.published_at is not None)
+        result, result.members if result else (int(identity),), published_known=value.metadata.published_at is not None,
+        adapter_reference=value.metadata.reference)
 
 
 class _Downloads(Downloader):
@@ -97,7 +98,8 @@ class TelegramWebSource(TelegramSource):
         previous = HistoryEnvelope.decode(cursor, adapter='web') if cursor else None
         if ((previous and 'adapter_cursor' not in previous.position)
                 or not self.initial_history or self.initial_history.get('mode') != 'count'):
-            return await super().discover(cursor)
+            previous_result = await super().discover(cursor)
+            return replace(previous_result, publications=tuple(replace(p, adapter_reference=publication_reference(p.url)) for p in previous_result.publications))
         assert self.username
         api = self._api()
         feed = reference('https://t.me/s/'+self.username)
@@ -113,7 +115,7 @@ class TelegramWebSource(TelegramSource):
                 assert isinstance(self.client, WebTelegram)
                 upper = state.get('observed_after', 0)
                 await self.client.page('', 0, upper, 0)
-                observations = tuple(replace(p, observed_only=True) for p in self.client.observed)
+                observations = tuple(replace(p, observed_only=True, adapter_reference=publication_reference(p.url)) for p in self.client.observed)
                 self.identity_info = self.client.identity_info
             if 'adapter_cursor' not in state:
                 metadata = await api.resolve_feed(feed.url)
@@ -180,7 +182,8 @@ class TelegramWebSource(TelegramSource):
             not partial and not manifest.post_web_unavailable and not reasons and not any(r.status=='external' for r in collected.resources),
             '; '.join(dict.fromkeys([*reasons, *warnings])), members=teaser.members,
             attachments=collected.attachments, description=teaser.description,
-            source_manifest=manifest, collection_error=None if partial else collected.error, reply_preview=teaser.reply_preview)
+            source_manifest=manifest, collection_error=None if partial else collected.error, reply_preview=teaser.reply_preview,
+            adapter_content=value)
         if stage and not stage.admitted():
             raise asyncio.CancelledError
         return FetchResult(await enrich(result, publication.teaser, stage, self.http_transport), self.observation())

@@ -1,10 +1,13 @@
 from dataclasses import dataclass
 from copy import deepcopy
-from typing import Any, Protocol, Literal
+from typing import Any, Protocol, Literal, TYPE_CHECKING
 from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, JsonValue, Field
+
+if TYPE_CHECKING:
+    from oko.collection.adapters import PublicationContent, ExternalReference
 
 
 @dataclass(frozen=True)
@@ -16,6 +19,7 @@ class Publication:
     members: tuple[int, ...] = ()
     published_known: bool = True
     observed_only: bool = False
+    adapter_reference: 'ExternalReference | None' = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,7 @@ class Material:
     description: str = ''
     source_manifest: SourceManifest | None = None
     reply_preview: ReplyPreview | None = None
+    adapter_content: 'PublicationContent | None' = None
 
 
 @dataclass(frozen=True)
