@@ -75,6 +75,8 @@ def migrate_publications(source: Path, destination: Path) -> dict[str, Any]:
                         new_identity = str(uuid4())
                         store.db.execute('UPDATE reader_identity SET value=? WHERE id=1', (new_identity,))
                         report['storage_id'] = dict(old=old_identity, new=new_identity)
+                    from oko.storage.publication_schema import remove_feed_url_key
+                    remove_feed_url_key(store.db)
                     store.publications.recover()
                     report['success'] = True
             finally:

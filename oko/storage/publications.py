@@ -18,6 +18,7 @@ from oko.collection.contracts import Material, Publication
 from oko.collection.adapters import ExternalReference
 from oko.collection.telegram.adapter import reference
 from oko.storage.reading import saved_document
+from oko.storage import publication_links
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -53,6 +54,10 @@ class Publications:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         db = store.db
+        self.active=db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone() is not None
+        if self.active:
+            from oko.storage.publication_schema import remove_feed_url_key
+            remove_feed_url_key(db)
         with db:
             for table, additions in (('items', PUBLICATION_COLUMNS), ('feeds', FEED_COLUMNS)):
                 columns = {r['name'] for r in db.execute('PRAGMA table_info('+table+')')}
@@ -84,7 +89,7 @@ class Publications:
         return self.store.db.execute('SELECT 1 FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone() is not None
 
     def feed(self, feed: str) -> bool:
-        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter='telegram_web_adapter'", (feed,)).fetchone() is not None
+        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','rss_adapter')", (feed,)).fetchone() is not None
 
     def sync_feeds(self, feeds: list[str]) -> None:
         if self.store.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
@@ -96,6 +101,21 @@ class Publications:
         store = self.store
         row = store.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
         binding = store.subscriptions.telegram.binding(feed)
+        if row and row['transport']=='rss':
+            # Existing legacy RSS rows are converted by the final offline migration.
+            if store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():
+                return
+            from oko.collection.rss import normalized
+            url=normalized(json.loads(row['original_urls'])[0])
+            details=store.subscriptions.details.snapshot(feed)
+            effective=store.subscriptions.effective('feed',feed)['effective']
+            store.db.execute('''UPDATE feeds SET platform='rss',external_id=?,url=?,description=?,created_at=?,
+                adapter='rss_adapter',config='{}',interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
+                (url,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),
+                 store.subscriptions.feed_refresh_minutes()*60,
+                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
+                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))
+            return
         if not row or not binding or binding['kind'] != 'web':
             return
         url = reference('https://t.me/s/'+binding['username']).url
@@ -136,20 +156,22 @@ class Publications:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:
                 continue
-            if existing:
-                plans[publication.id] = DiscoveryProjection(existing[0]['id'], existing[0]['source_id'])
-            else:
-                item = str(uuid4())
-                plan = DiscoveryProjection(item, source_id)
-                if publication.teaser:
-                    plan.version = self.store.versions.prepare(item, publication.teaser)
-                    plan.content = self.prepare(item, publication.teaser, self.store.versions.path(item, plan.version[0]).parent)
-                plans[publication.id] = plan
+            item=existing[0]['id'] if existing else str(uuid4())
+            plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
+            current=self.store.db.execute('SELECT viewed FROM items WHERE id=?',(item,)).fetchone() if existing else None
+            refresh=bool(ref.key.platform.value=='rss' and current and not current['viewed']
+                and publication.teaser and publication.teaser.adapter_content and not publication.teaser.adapter_content.needs_fetch)
+            if publication.teaser and (not existing or refresh):
+                plan.version=self.store.versions.prepare(item,publication.teaser)
+                plan.content=self.prepare(item,publication.teaser,self.store.versions.path(item,plan.version[0]).parent)
+            plans[publication.id]=plan
         return plans
 
     def prepare(self, item: str, material: Material, directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Prepare durable files outside the accepting transaction."""
         header, text = saved_document(directory/'original.md')
+        if material.adapter_content and material.adapter_content.metadata.reference.key.platform.value != 'telegram':
+            return self._prepare_adapter(item, material, header, directory)
         manifest=material.source_manifest
         if manifest and manifest.articles and manifest.preview_fragment is None:
             text='\n\n'.join(part for part in [str(manifest.post.get('text','')),*[article.text for article in manifest.articles if article.text is not None]] if part)
@@ -207,6 +229,7 @@ class Publications:
         extra = deepcopy(material.adapter_content.content.get('extra', {})) if material.adapter_content else {}
         # Temporary header for the old HTTP/processor projection, removed when
         # those consumers read blocks directly. It never owns body text/files.
+        extra['_links'] = [dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in material.adapter_content.linked_publications] if material.adapter_content else []
         extra['_reader'] = header
         extra['_collection_reason'] = '' if header.get('reason', '').startswith('Вложения ещё не загружены') else header.get('reason', '')
         content = dict(blocks=blocks, extra=extra)
@@ -214,13 +237,49 @@ class Publications:
         self.store.versions._write(directory/'original.md', (json.dumps(header,ensure_ascii=False)+'\n\n'+text).encode())
         return content, media
 
+    def _prepare_adapter(self, item: str, material: Material, header: dict[str,Any], directory: Path) -> tuple[dict[str,Any],list[dict[str,Any]]]:
+        value=material.adapter_content
+        assert value is not None
+        content=deepcopy(value.content)
+        media=[]
+        identities={}
+        known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,))}
+        for ref in value.media:
+            previous=known.get(ref.key)
+            unchanged=bool(previous and (
+                ref.resource_identity is not None and ref.resource_identity==previous['resource_identity']
+                or previous['status']=='pending_download' and previous['source_locator']==ref.locator
+                and previous['name']==ref.name and previous['mime_type']==ref.mime_type and previous['size_bytes']==ref.size_bytes))
+            identity=previous['id'] if previous and unchanged else str(uuid4())
+            if ref.key in identities:
+                raise ValueError('Duplicate adapter media key')
+            identities[ref.key]=identity
+            ready=bool(unchanged and previous and previous['status']=='ready' and previous['storage_key'] and (self.store.root/previous['storage_key']).is_file())
+            media.append(dict(id=identity,publication_id=item,resource_key=ref.key,source_locator=ref.locator,
+                name=ref.name,mime_type=ref.mime_type or (previous['mime_type'] if ready and previous else None),
+                size_bytes=previous['size_bytes'] if ready and previous else ref.size_bytes,
+                storage_key=previous['storage_key'] if ready and previous else None,
+                status='ready' if ready else 'pending_download',reason='',resource_identity=ref.resource_identity))
+        for block in content.get('blocks',[]):
+            if block['type']=='media':
+                block['media_id']=identities[block.pop('ref')['$media']]
+        content.setdefault('extra',{}).update(_reader=header,_collection_reason='',
+            _links=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in value.linked_publications])
+        self.store.media.project_header(content,media)
+        text='\n\n'.join(block.get('text','') for block in content['blocks'] if block['type']=='text' and block.get('role')=='body')
+        self.store.versions._write(directory/'original.md',(json.dumps(header,ensure_ascii=False)+'\n\n'+text).encode())
+        return content,media
+
     def publish(self, item: str, prepared: tuple[dict[str, Any], list[dict[str, Any]]], fingerprint: str) -> None:
         """Called in the accepting transaction, after durable media preparation."""
         content, media = prepared
         store = self.store
+        from oko.collection.adapters import ExternalKey,Platform
+        links=content['extra'].pop('_links',[])
+        links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links))
         old = store.db.execute('SELECT content FROM items WHERE id=?', (item,)).fetchone()
         previous = json.loads(old['content'])
-        same = publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
+        same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         content['extra']['_input_hash'] = fingerprint
         store.db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         for row in media:
@@ -237,8 +296,9 @@ class Publications:
             filtered=json.loads(row[0])
             if filtered:
                 result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
-                refreshed=publication_input.filtered(content,item,result)
+                refreshed=publication_input.filtered(publication_input.content(store,item),item,result)
                 store.db.execute('UPDATE items SET filtered_content=? WHERE id=?',(json.dumps(refreshed,ensure_ascii=False),item))
+        publication_links.notify_parents(store,item)
         # Compatibility index points only to the current projection, never history.
         store.db.execute('DELETE FROM content_versions WHERE item=? AND number!=(SELECT number FROM content_current WHERE item=?)', (item, item))
 
@@ -273,7 +333,7 @@ class Publications:
     def results(self, item: str, results: dict[str, Any]) -> None:
         """Bridge already validated legacy results until processing moves to blocks."""
         row = self.store.db.execute('SELECT content,processing_metadata FROM items WHERE id=?', (item,)).fetchone()
-        content = json.loads(row['content'])
+        content = publication_input.content(self.store,item)
         metadata = json.loads(row['processing_metadata'])
         metadata.setdefault('_legacy', {}).update(results)
         for kind, value in results.items():
@@ -299,7 +359,9 @@ class Publications:
         row=self.store.db.execute('SELECT * FROM items WHERE id=? AND platform IS NOT NULL AND viewed=0 AND complete=1',(item,)).fetchone()
         if not row or row['content']=='{}':
             return
-        content=json.loads(row['content'])
+        content=publication_input.content(self.store,item)
+        if publication_input.awaiting_linked_input(self.store,item,content):
+            return
         if any(block.get('text','').strip() for block in publication_input.blocks(content)):
             return
         header=content['extra'].get('_reader',{})
@@ -333,7 +395,11 @@ class Publications:
         row = self.store.db.execute('SELECT * FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone()
         if not row or row['content']=='{}':
             return
-        if publication_input.awaiting_input(json.loads(row['content'])):
+        if row['feed_id'] is None:
+            self.store.db.execute("UPDATE items SET status='ready' WHERE id=?",(item,))
+            return
+        selected=publication_input.content(self.store,item)
+        if publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
             self.store.db.execute("UPDATE items SET status='pending_collection' WHERE id=?",(item,))
             return
         filtered = self.store.filters.read(item)
@@ -385,9 +451,11 @@ class Publications:
 
     def forget(self, item: str) -> None:
         db = self.store.db
+        linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,))}
         db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL
             WHERE kind='download_media' AND item IN (SELECT id FROM media_files WHERE publication_id=?)""", (item,))
         db.execute('DELETE FROM feed_publications WHERE publication_id=?', (item,))
         db.execute('DELETE FROM publication_links WHERE source_publication_id=? OR target_publication_id=?', (item, item))
         db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         db.execute("UPDATE items SET content='{}',media_ids='[]',filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id=?", (item,))
+        publication_links.prune(self.store,linked)

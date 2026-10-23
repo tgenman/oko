@@ -3,7 +3,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey,
 from datetime import datetime, timezone
 from oko.collection.telegram.reading import saved_telegraph
 from oko.storage.collection_status import CollectionStatus
-from oko.storage import material_read, collection_jobs
+from oko.storage import material_read, collection_jobs, publication_links
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
@@ -277,7 +277,7 @@ class Store:
                         existing = matches[0]
                         item,source_id = existing['id'],existing['source_id']
                 if existing and existing['url'] != p.url:
-                    if envelope:
+                    if envelope or target:
                         self.db.execute('UPDATE items SET url=? WHERE id=?', (p.url,existing['id']))
                     elif not (p.members and p.id.startswith('album:')):
                         source_id = feed + ':' + p.url
@@ -289,7 +289,7 @@ class Store:
                         raise ValueError('Adapter did not return a publication external key')
                     self.publications.identify(item, p.adapter_reference)
                     self.db.execute('INSERT OR IGNORE INTO feed_publications VALUES (?,?)', (feed, item))
-                if inserted.rowcount and p.teaser:
+                if p.teaser and (inserted.rowcount or target and plans.get(p.id) and plans[p.id].content is not None):
                     planned = plans.get(p.id)
                     prepared = planned.version if planned else None
                     prepared = prepared or self.versions.prepare(item, p.teaser)
@@ -367,6 +367,15 @@ class Store:
                 self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
 
+    def source_http_until(self, scope: str) -> float:
+        row=self.db.execute('SELECT value FROM state WHERE key=?',('source-http:'+scope,)).fetchone()
+        return float(row[0]) if row else 0.
+
+    def source_http_wait(self, scope: str, until: float) -> None:
+        with self.db:
+            self.db.execute('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                            ('source-http:'+scope,str(until)))
+
     def telegram_http_state(self, group: str) -> dict[str, Any]:
         row = self.db.execute('SELECT value FROM state WHERE key=?', ('telegram-http:'+group,)).fetchone()
         return json.loads(row[0]) if row else {}
@@ -411,6 +420,9 @@ class Store:
     def retry_material(self, item: str) -> bool:
         if not self._has_unviewed(item):
             return False
+        if self.publications.active:
+            with self.db:
+                publication_links.retry(self,item)
         with self.db:
             self.youtube.reset(item)
             self.media.retry(item)
@@ -433,6 +445,12 @@ class Store:
             row = self.db.execute('SELECT feed_id FROM items WHERE id=?', (owner,)).fetchone()
         if row is None:
             raise LookupError('Publication not found')
+        if row[0] is None:
+            root=self.db.execute('''SELECT i.feed_id FROM publication_links l JOIN items i ON i.id=l.source_publication_id
+                WHERE l.target_publication_id=? AND i.viewed=0 AND i.feed_id IS NOT NULL ORDER BY i.id LIMIT 1''',(item,)).fetchone()
+            if root:
+                return str(root[0])
+            return ''
         return str(row[0])
 
     def feed_status(self, feed: str, **state: Any) -> None:
@@ -457,11 +475,11 @@ class Store:
         elif media_only:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
-            query += f" AND kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND i.feed_id IN ({placeholders}))"
+            query += f" AND kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND (i.feed_id IN ({placeholders}) OR i.feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=i.id AND root.viewed=0 AND root.feed_id IN ({placeholders}))))"
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
-            query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}))))"
+            query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}) OR feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=items.id AND root.viewed=0 AND root.feed_id IN ({placeholders})))))"
         if not include_deletions:
             query += " AND kind NOT IN ('delete','feed-delete')"
         blocked_history = """SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed
@@ -475,7 +493,7 @@ class Store:
             ELSE EXISTS ({blocked_history} AND m.item=jobs.item) END)"""
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
-        params = (now,) if deleting_only or ai_only else (now, *available) if media_only else (now, *('' if f == 'demo' else f for f in available), *available)
+        params = (now,) if deleting_only or ai_only else (now, *available, *available) if media_only else (now, *('' if f == 'demo' else f for f in available), *available, *available)
         row = self.db.execute(query, params).fetchone()
         if not row:
             return None
@@ -514,7 +532,7 @@ class Store:
     def publication(self, item: str, staging: DownloadStage | None = None) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         if row and row['platform'] is not None:
-            header, text = self.original(item) if row['complete'] else ({},'')
+            header, text = saved_document(self.path(item)) if row['complete'] else ({},'')
             files = self.db.execute("SELECT * FROM media_files WHERE publication_id=? AND status='ready'", (item,)).fetchall()
             kinds = {a['media_id']:a['kind'] for a in header.get('attachments', []) if 'media_id' in a}
             retained = tuple(Attachment(self.media.projection_name(media), self._retained_payload(self.root/media['storage_key'], staging),
@@ -522,12 +540,13 @@ class Store:
             refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
                 for m in self.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,)) if m['source_locator'])
             last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
-                header.get('title',''),datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),media=refs)
+                header.get('title',''),datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),media=refs,
+                linked_publications=tuple(ExternalReference(ExternalKey(Platform(target['platform']),target['external_id']),target['url']) for target in self.db.execute('SELECT i.* FROM publication_links l JOIN items i ON i.id=l.target_publication_id WHERE l.source_publication_id=?',(item,))))
             teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),attachments=retained,
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
                 source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
                 reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None,adapter_content=last_description) if row['complete'] else None
-            return Publication(row['source_id'].split(':',1)[1],row['url'],row['published'],teaser,tuple(json.loads(row['members'])),bool(row['published_known']))
+            return Publication(row['source_id'].split(':',1)[1],row['url'],row['published'],teaser,tuple(json.loads(row['members'])),bool(row['published_known']),adapter_reference=last_description.metadata.reference)
         fallback = self.material(item) if row else None
         teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', []) if (self.path(item).parent / Path(url).name).is_file()), captions=fallback.get('captions'), description=fallback.get('description', ''), reply_preview=ReplyPreview.model_validate(fallback['reply_preview']) if fallback.get('reply_preview') else None, attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []) if (self.path(item).parent / Path(a['url']).name).is_file())) if fallback else None
         if teaser and fallback:
@@ -716,6 +735,8 @@ class Store:
         with self.db:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
+            if self.publications.active:
+                self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL AND (platform='rss' OR feed_id IS NULL)",(job.item,))
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind in ('fetch','filter','theses') and self.publications.owns(job.item):
@@ -752,11 +773,17 @@ class Store:
 
     @reading_value
     def original(self, item: str) -> tuple[dict[str, Any], str]:
-        return saved_document(self.path(item))
+        header,text=saved_document(self.path(item))
+        if self.publications.active:
+            header=publication_links.project_header(self,item,header)
+            article_text=publication_links.text(self,item)
+            if article_text:
+                text='\n\n'.join(part for part in (text,article_text) if part)
+        return header,text
 
     def material(self, item: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
-        material = self.saved_publication(row) if row else None
+        material = self.saved_publication(row) if row and row['feed_id'] is not None else None
         if material and material['complete']:
             display = material['text']
             filtered = material['filter']
@@ -790,11 +817,14 @@ class Store:
                     (item, reader_now(self.clock()))).fetchone()),
                 full=header.get('full', True) and (not header.get('members') or set(header['members']) == set(base['members'])),
                 reason=header.get('reason', ''), captions=header.get('captions'),
-                attachments=[dict(url=f"/api/v3/materials/{item}/media/{a.get('media_id',a['name'])}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
+                attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{item}/media/{a.get('media_id',a['name'])}"), kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[] if row['platform'] is not None else [f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
             base.update(saved_external(header, f'/api/v3/materials/{item}'))
             base['loading'] = base['loading'] or row['platform'] is not None and self.media.loading(item)
-            base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=saved_telegraph(header, f'/api/v3/materials/{item}'))
+            linked=saved_telegraph(header, f'/api/v3/materials/{item}')
+            if row['platform']=='telegram':
+                linked=publication_links.reading(self,item,saved_document(self.path(item))[1]) or linked
+            base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=linked)
             return base
         except (OSError, ValueError, KeyError):
             record_caught('store.material')
@@ -907,7 +937,14 @@ class Store:
         self.processing.sync()
 
     def content_version(self, item: str) -> str:
-        return self.versions.version(item)
+        version=self.versions.version(item)
+        if self.publications.active:
+            linked=self.db.execute('''SELECT i.id,i.complete,v.fingerprint FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+                LEFT JOIN content_current c ON c.item=i.id LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
+                WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()
+            if linked:
+                return hashlib.sha256(json.dumps([version,[tuple(row) for row in linked]]).encode()).hexdigest()
+        return version
 
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
         if not want_captions:

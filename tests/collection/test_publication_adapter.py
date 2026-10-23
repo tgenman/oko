@@ -161,3 +161,24 @@ def test_no_usable_keys_is_diagnosed_instead_of_confirming_empty_source():
         else:
             raise AssertionError('Malformed source must not be classified as empty')
     asyncio.run(scenario())
+
+
+def test_canonical_telegram_returns_telegraph_reference_without_fetching_the_article():
+    from oko.collection.telegram.adapter import TelegramWebAdapter
+    from oko.collection.adapters import Platform
+    calls=[]
+    def respond(request):
+        calls.append(str(request.url))
+        return httpx.Response(200,text=page([(11,'Post <a href="https://telegra.ph/Fixture">article</a>')]))
+    async def scenario():
+        adapter=TelegramWebAdapter(httpx.MockTransport(respond),linked_descriptions=True)
+        feed=await adapter.resolve_feed('https://t.me/s/fixture')
+        result=await adapter.discover(feed.reference,feed.latest_cursor,10)
+        value,=result.publications
+        assert not value.needs_fetch
+        ref,=value.linked_publications
+        assert ref.key.platform==Platform.telegraph and ref.key.external_id=='https://telegra.ph/Fixture'
+        fetched=await adapter.fetch(value.metadata.reference)
+        assert fetched.linked_publications==(ref,)
+        assert all('api.telegra.ph' not in url for url in calls)
+    asyncio.run(scenario())

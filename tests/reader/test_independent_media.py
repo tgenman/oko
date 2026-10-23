@@ -493,6 +493,8 @@ def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
             item=client.get('/api/v3/cards').json()[0]['id']
             content=client.get('/api/v3/materials/'+item).json()['content']
             assert 'Article text' in content['text']
+            selective=client.get('/api/v3/reading/materials/'+item)
+            assert selective.status_code==200,selective.text
             assert 'Article text' in content['linked_content']['articles'][0]['text']
             assert 'Не удалось' not in content['linked_content']['articles'][0]['text']
             release.set()
@@ -517,12 +519,13 @@ def test_unavailable_telegraph_keeps_the_last_article_with_new_post_text(tmp_pat
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=settled(client)[0]['id']
-        assert 'Saved article text' in client.get('/api/v3/materials/'+item).json()['content']['text']
-        old_url=client.get('/api/v3/materials/'+item).json()['content']['linked_content']['articles'][0]['media_urls'][0]
+        initial=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+        assert 'Saved article text' in initial['content']['text']
+        old_url=initial['content']['linked_content']['articles'][0]['media_urls'][0]
         broken[0]=True
         client.post('/api/v3/materials/'+item+'/retry')
         settled(client)
-        content=client.get('/api/v3/materials/'+item).json()['content']
+        content=wait_for(client,lambda:(m['content'] if 'New post' in (m:=client.get('/api/v3/materials/'+item).json())['content']['text'] and m['content']['linked_content']['articles'][0]['error'] else None))
         assert 'New post' in content['text']
         assert 'Saved article text' in content['text']
         assert content['linked_content']['articles'][0]['error']
@@ -579,17 +582,18 @@ def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
             assert started.wait(3)
             item=client.get('/api/v3/cards').json()[0]['id']
             with sqlite3.connect(root/'state.sqlite') as db:
-                before=db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)).fetchone()[0]
+                article=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,)).fetchone()[0]
+                before=db.execute('SELECT id FROM media_files WHERE publication_id=?',(article,)).fetchone()[0]
             broken[0]=True
             client.post('/api/v3/materials/'+item+'/retry')
             wait_for(client,lambda:'New post' in client.get('/api/v3/materials/'+item).json()['content']['text'])
             with sqlite3.connect(root/'state.sqlite') as db:
-                assert db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)).fetchone()[0]==before
+                assert db.execute('SELECT id FROM media_files WHERE publication_id=?',(article,)).fetchone()[0]==before
             broken[0]=False
             release.set()
             client.post('/api/v3/materials/'+item+'/retry')
             ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-            assert ready['content']['attachments'][0]['url'].endswith('/'+before)
+            assert client.get(ready['content']['attachments'][0]['url']).content==b'article-image'
         finally:
             release.set()
 
@@ -667,16 +671,19 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
         client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
-        wait_for(client,lambda:any(a.get('error') for a in (client.get('/api/v3/materials/'+item).json()['content'].get('linked_content') or {}).get('articles',[])))
+        wait_for(client,lambda:any(a.get('error') and a['source_url']=='https://telegra.ph/Fixture' for a in (client.get('/api/v3/materials/'+item).json()['content'].get('linked_content') or {}).get('articles',[])))
         with sqlite3.connect(root/'state.sqlite') as db:
-            job=db.execute("SELECT status,retry_at,error FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()
+            article=db.execute("SELECT i.id FROM publication_links l JOIN items i ON i.id=l.target_publication_id WHERE l.source_publication_id=? AND i.url='https://telegra.ph/Fixture'",(item,)).fetchone()[0]
+            job=db.execute("SELECT status,retry_at,error FROM jobs WHERE kind='fetch' AND item=?",(article,)).fetchone()
         assert job[0]=='pending' and job[1]>time.time() and job[2]
         assert 'Useful post' in client.get('/api/v3/materials/'+item).json()['content']['text']
     broken[0]=False
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         wait_for(client,lambda:'Recovered article' in client.get('/api/v3/materials/'+item).json()['content']['text'])
         with sqlite3.connect(root/'state.sqlite') as db:
-            assert db.execute("SELECT status,retry_at FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()==(('failed' if 'Missing' in extra else 'done'),None)
+            assert db.execute("SELECT status,retry_at FROM jobs WHERE kind='fetch' AND item=?",(article,)).fetchone()==('done',None)
+            if 'Missing' in extra:
+                assert db.execute("SELECT j.status FROM jobs j JOIN items i ON i.id=j.item WHERE j.kind='fetch' AND i.url='https://telegra.ph/Missing'").fetchone()==('unavailable',)
     assert len(calls)>=2
 
 
@@ -694,15 +701,15 @@ def test_manual_fetch_retry_is_immediate_after_restart_without_resetting_backoff
         item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
         def failed():
             with sqlite3.connect(root/'state.sqlite') as db:
-                return db.execute("SELECT retry_delay FROM jobs WHERE kind='fetch' AND item=? AND status='pending' AND error IS NOT NULL",(item,)).fetchone()
-        delay=wait_for(client,failed)[0]
+                return db.execute("SELECT j.retry_delay,j.item FROM jobs j JOIN publication_links l ON l.target_publication_id=j.item WHERE j.kind='fetch' AND l.source_publication_id=? AND j.status='pending' AND j.error IS NOT NULL",(item,)).fetchone()
+        delay,article=wait_for(client,failed)
     store=Store(root,lambda _:None)
     assert store.retry_material(item)
     store.db.close()
     store=Store(root,lambda _:None)
     try:
         job=store.next_job(store.clock(),feeds=[feed],include_deletions=False)
-        assert job is not None and job.kind=='fetch' and job.item==item
+        assert job is not None and job.kind=='fetch' and job.item==article
         assert store.db.execute('SELECT retry_delay FROM jobs WHERE id=?',(job.id,)).fetchone()[0]==delay
     finally:
         store.db.close()

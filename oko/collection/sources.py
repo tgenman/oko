@@ -8,6 +8,9 @@ import httpx
 from oko.collection.contracts import Source
 from oko.collection.adapters import PublicationAdapter
 from oko.collection.rss import RSSSource
+from oko.collection.rss_compatibility import RSSAdapterSource
+from oko.collection.web_adapter import WebAdapter
+from oko.collection.web_compatibility import WebArticleSource
 from oko.collection.telegram.source import TelegramClient, TelegramSource
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.compatibility import TelegramWebSource
@@ -47,12 +50,14 @@ class Sources:
     def __init__(self, source: Source | None, source_feed: str, rss_enabled: bool,
                  transport: httpx.AsyncBaseTransport | None, telegram: TelegramClient | None,
                  captions: CaptionsClient, history: HistoryClient | None,
-                 telegram_transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 telegram_transport: httpx.AsyncBaseTransport | None = None,
+                 publication_transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.sources: dict[str, Source] = {source_feed: source} if source else {}
         self._injected = source_feed if source else None
         self._rss_enabled, self._transport, self._telegram = rss_enabled, transport, telegram
         self._captions, self._history = captions, history
         self._telegram_transport = telegram_transport or transport
+        self._publication_transport = publication_transport or transport
         self._settings: dict[str, SourceSettings] = {}
 
     def configure(self, settings: list[SourceSettings]) -> SourceUpdates:
@@ -83,7 +88,8 @@ class Sources:
                     self._telegram, access.account, access.peer, config.initial_days, access.username,
                     http_transport=self._telegram_transport)
             elif config.transport == 'rss' and self._rss_enabled:
-                source = previous if isinstance(previous, RSSSource) else RSSSource(config.url, config.initial_days, self._transport)
+                source_type = RSSAdapterSource if config.independent_media else RSSSource
+                source = previous if type(previous) is source_type else source_type(config.url, config.initial_days, self._publication_transport if config.independent_media else self._transport)
             else:
                 continue
             active.add(config.feed)
@@ -116,6 +122,11 @@ class Sources:
         source = self.sources.get(feed)
         return source.adapter if isinstance(source, TelegramSource) else None
 
+    def article_source(self) -> WebArticleSource:
+        return WebArticleSource(WebAdapter(self._publication_transport))
+
     def publication_adapter(self, feed: str) -> PublicationAdapter | None:
         source = self.sources.get(feed)
+        if isinstance(source,RSSAdapterSource):
+            return source.publication_adapter()
         return source.publication_adapter() if isinstance(source, TelegramWebSource) and source.independent_media else None

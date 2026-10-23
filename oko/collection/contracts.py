@@ -234,6 +234,7 @@ class SourceError(Exception):
 
 class SourceDeferred(SourceError):
     """Shared external wait; stop further requests in the current attempt."""
+    scope: str
 
 
 class SourceDeleted(SourceError):

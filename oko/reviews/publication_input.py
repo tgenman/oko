@@ -7,6 +7,7 @@ from oko.storage import material_read
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
+    from oko.processing.contracts import InputSource
 
 
 def digest(value: Any) -> str:
@@ -17,9 +18,54 @@ def blocks(content: dict[str, Any]) -> list[dict[str, Any]]:
     return [block for block in content.get('blocks',[]) if block['type']=='quote' or block['type']=='text' and block['role']=='body']
 
 
+def content(store: 'Store', item: str) -> dict[str, Any]:
+    row=store.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()
+    own=json.loads(row[0]) if row else {}
+    linked=store.db.execute('''SELECT i.id,i.content FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+        WHERE l.source_publication_id=? AND i.complete=1 AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()
+    if not linked:
+        return own
+    for block in own.get('blocks',[]):
+        block.setdefault('source_publication_id',item)
+    for row in linked:
+        for index,block in enumerate(json.loads(row['content']).get('blocks',[])):
+            block.update(source_publication_id=row['id'],source_block_index=index)
+            own.setdefault('blocks',[]).append(block)
+    return own
+
+
+def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
+    from oko.processing.contracts import InputSource
+    from oko.collection.contracts import ReplyPreview
+    selected=content(store,item)
+    row=store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()
+    if kind=='theses' and row and row[0]!='{}':
+        selected=json.loads(row[0])
+    groups: dict[str,list[dict[str,Any]]]={item:[]}
+    for block in blocks(selected):
+        groups.setdefault(block.get('source_publication_id',item),[]).append(block)
+    result=[]
+    for identity,parts in groups.items():
+        record=store.db.execute('SELECT title,url,published FROM items WHERE id=?',(identity,)).fetchone()
+        text='\n\n'.join(part['text'] for part in parts if part['type']=='text')
+        quotes=[part for part in parts if part['type']=='quote']
+        quote=ReplyPreview(text='\n\n'.join(part['text'] for part in quotes),
+            author=quotes[0].get('author'),source_url=quotes[0].get('source_url')) if quotes else None
+        result.append(InputSource(id=identity,version=digest(parts),url=record['url'],title=record['title'],
+                                  text=text,published=record['published'] or 0.,reply_preview=quote))
+    return tuple(result)
+
+
 def awaiting_input(content: dict[str, Any]) -> bool:
     manifest=content.get('extra',{}).get('_reader',{}).get('source_manifest',{})
     return manifest.get('preview_fragment') is not None or bool(manifest.get('post_web_unavailable') and not any(block.get('text','').strip() for block in blocks(content)))
+
+
+def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) -> bool:
+    if any(block.get('text','').strip() for block in blocks(selected)):
+        return False
+    return store.db.execute('''SELECT 1 FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+        WHERE l.source_publication_id=? AND i.viewed=0 AND i.complete=0 LIMIT 1''',(item,)).fetchone() is not None
 
 
 def live_settings(store: 'Store', item: str) -> dict[str, Any]:
@@ -37,16 +83,16 @@ def settings(store: 'Store', item: str) -> dict[str, Any]:
 
 def signature(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
-    if not row or row['viewed'] or not row['complete'] or row['content']=='{}':
+    if not row or row['viewed'] or row['feed_id'] is None or not row['complete'] or row['content']=='{}':
         return None
     rules=live_settings(store,item)
     values=rules['values']
     if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not values['theses']:
         return None
-    content=json.loads(row['content'])
-    if awaiting_input(content):
+    selected_content=content(store,item)
+    if awaiting_input(selected_content) or awaiting_linked_input(store,item,selected_content):
         return None
-    selected=blocks(content)
+    selected=blocks(selected_content)
     if kind=='theses':
         filtered=store.filters.read(item)
         if filtered['status'] not in ('off','done') or filtered['hidden']:
@@ -82,13 +128,13 @@ def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict
     from oko.processing.contracts import ProcessingError
     output=deepcopy(content)
     for block in output['blocks']:
-        block['source_publication_id']=item
+        block.setdefault('source_publication_id',item)
     removed=[]
     for fragment in result['removed']:
         for index,block in enumerate(output['blocks']):
             if block['type']=='text' and block['role']=='body' and fragment in block['text']:
                 block['text']=block['text'].replace(fragment,'')
-                removed.append(dict(publication_id=item,block_index=index,text=fragment))
+                removed.append(dict(publication_id=block['source_publication_id'],block_index=block.get('source_block_index',index),text=fragment))
                 break
         else:
             raise ProcessingError('Фрагмент фильтра отсутствует в собственном блоке публикации')

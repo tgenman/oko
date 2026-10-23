@@ -343,7 +343,9 @@ def test_new_feed_on_migrated_storage_uses_uuid_identity(tmp_path):
         UUID(rss.json()['id'])
         cards = settled(client, 2)
         rss_card = next(c for c in cards if c['feed_id'] == rss.json()['id'])
-        assert client.get('/api/v3/materials/'+rss_card['id']).json()['content']['text'] == 'Article text'
+        from tests.support.reader import wait_for
+        article=wait_for(client,lambda:(m if 'Article text' in (m:=client.get('/api/v3/materials/'+rss_card['id']).json())['content']['text'] else None))
+        assert 'https://example.org/article' in article['content']['text']
 
 
 def test_migration_does_not_relabel_results_when_processing_text_changes(tmp_path):

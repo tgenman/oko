@@ -2,8 +2,9 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
+from email.message import Message
 import re
 import hashlib
 from ipaddress import ip_address, IPv6Address
@@ -16,6 +17,7 @@ from urllib.parse import urljoin, urlsplit
 import httpcore
 import httpx
 from oko.collection import request_observation as observation
+from oko.collection.adapters import MediaReference
 from oko.diagnostics import redact
 
 from oko.collection.contracts import DownloadStage, SourceError, SourceDeferred, StagedPayload, Attachment, Material, ResourceManifest
@@ -151,27 +153,40 @@ class Downloader:
     async def write(self, url: str, output: BinaryIO, admitted: Callable[[], bool] = lambda: True, *, allow_empty: bool = False) -> tuple[int, str]:
         """Validate and stream one resource; the caller owns its output file."""
         async with self.open(url) as response:
+            return await self._write(response,output,admitted,allow_empty=allow_empty)
+
+    async def write_media(self, media: MediaReference, output: BinaryIO, *, allow_empty: bool = False) -> MediaReference:
+        async with self.open(media.locator) as response:
+            size,_=await self._write(response,output,lambda:True,allow_empty=allow_empty)
+            disposition=Message()
+            disposition['Content-Disposition']=response.headers.get('content-disposition','')
+            filename=disposition.get_filename()
+            mime=response.headers.get('content-type','').split(';',1)[0].strip() or media.mime_type
+            return replace(media,size_bytes=size,mime_type=mime,name=filename or media.name)
+
+    async def _write(self, response: httpx.Response, output: BinaryIO, admitted: Callable[[],bool], *, allow_empty: bool) -> tuple[int,str]:
+        if not admitted():
+            raise asyncio.CancelledError
+        length = response.headers.get('content-length','')
+        if length.isdecimal() and int(length)>MAX_MEDIA:
+            raise MediaLimit()
+        if 'text/html' in response.headers.get('content-type','').lower():
+            raise SourceError('Сервер не предоставил файл вложения',code='media-not-file',retryable=False)
+        digest,size = hashlib.sha256(),0
+        async for part in response.aiter_bytes():
             if not admitted():
                 raise asyncio.CancelledError
-            length = response.headers.get('content-length','')
-            if length.isdecimal() and int(length)>MAX_MEDIA:
-                raise MediaLimit()
-            if 'text/html' in response.headers.get('content-type','').lower():
+            if not size and part.lstrip().lower().startswith((b'<!doctype html',b'<html')):
                 raise SourceError('Сервер не предоставил файл вложения',code='media-not-file',retryable=False)
-            digest,size = hashlib.sha256(),0
-            async for part in response.aiter_bytes():
-                if not admitted():
-                    raise asyncio.CancelledError
-                if not size and part.lstrip().lower().startswith((b'<!doctype html',b'<html')):
-                    raise SourceError('Сервер не предоставил файл вложения',code='media-not-file',retryable=False)
-                size += len(part)
-                if size>MAX_MEDIA:
-                    raise MediaLimit()
-                output.write(part)
-                digest.update(part)
-            if not size and not allow_empty:
-                raise SourceError('Пустое вложение')
-            return size, digest.hexdigest()
+            size += len(part)
+            if size>MAX_MEDIA:
+                raise MediaLimit()
+            output.write(part)
+            digest.update(part)
+        if not size and not allow_empty:
+            raise SourceError('Пустое вложение')
+        return size, digest.hexdigest()
+
 
     async def download(self, url: str, stage: DownloadStage, name: str) -> StagedPayload:
         if not stage.admitted():

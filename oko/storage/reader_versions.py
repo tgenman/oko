@@ -127,6 +127,11 @@ class ReaderVersions:
         for kind in ('material','media','card'):
             self.db.execute(self._bump(kind, '?'), (item,))
 
+    def linked_changed(self, item: str) -> None:
+        self.media_changed(item)
+        for kind in ('filter','theses'):
+            self.db.execute(self._bump(kind,'?'),(item,))
+
     @classmethod
     def _material(cls, identity: str, *, card: bool = True) -> str:
         return cls._bump('material', identity) + (cls._bump('card', identity) if card else '')

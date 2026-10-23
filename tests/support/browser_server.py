@@ -3,6 +3,7 @@ import json
 import asyncio
 from pathlib import Path
 import secrets
+import re
 import socket
 import sys
 from datetime import datetime, timezone
@@ -108,6 +109,19 @@ def response(request):
 
 def build_app(root, token, *, persistent=False, public_url=None,collection=True,processing_delay=0):
     async def external(request):
+        if request.url.host=='a.test' and request.url.path=='/linked-feed':
+            return httpx.Response(200,text='<rss><channel><title>RSS pipeline</title><item><guid>announcement</guid><title>RSS announcement</title><link>https://linked.example/article</link><description>Own announcement.</description></item></channel></rss>')
+        if request.url.host=='t.me' and '/linkedposts' in request.url.path:
+            return httpx.Response(200,text=page([(11,'Own Telegram post. <a href="https://telegra.ph/ControlledArticle">Article</a>')]).replace('fixture/','linkedposts/'))
+        if request.url.host=='linked.example' or request.url.host=='api.telegra.ph' and request.url.path=='/getPage/ControlledArticle':
+            state=root/'fixture-article-state'
+            while state.is_file() and state.read_text()=='held':
+                await asyncio.sleep(.01)
+            if state.is_file() and state.read_text()=='error':
+                return httpx.Response(503)
+            if request.url.host=='api.telegra.ph':
+                return httpx.Response(200,json={'ok':True,'result':{'title':'Linked article','content':[{'tag':'p','children':['Article text arrived.']},{'tag':'img','attrs':{'src':'https://controlled.example/linked-image.png'}}]}})
+            return httpx.Response(200,text='<title>Linked article</title><article>Article text arrived.<img src="https://controlled.example/linked-image.png"></article>')
         if request.url.host=='controlled.example':
             path=root/'fixture-media-state'
             while path.is_file() and path.read_text()=='held':
@@ -130,6 +144,13 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
     async def delayed_model(request):
         if request.url.path=='/v1/chat/completions':
             await asyncio.sleep(processing_delay)
+            linked_state=root/'fixture-article-state'
+            if linked_state.is_file():
+                task=json.loads(json.loads(request.content)['messages'][1]['content'])
+                result=(dict(hidden=False,removed=[],reason='') if task['operation']=='filter' else
+                    dict(points=[dict(text=re.sub(r'\[([^]]+)\]\(https?://[^)]+\)',r'\1',source['text']),sources=[dict(id=source['id'],url=source['url'])])
+                                 for source in task['sources'] if source['text'].strip()]))
+                return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(result)}}]})
             state=root/'fixture-model-state'
             if state.is_file():
                 if state.read_text()=='error':

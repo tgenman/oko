@@ -30,6 +30,7 @@ from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
 from oko.reviews.coordination import PreparedWork
 from oko.reader.telegram_http import TelegramHTTP
+from oko.reader.source_http import SourceHTTP
 from oko.reader.composition import FolderContents
 from oko.storage.media import MediaOutput
 from oko.storage.store import Job, Store
@@ -151,8 +152,11 @@ class Runtime:
             self._save_telegram_http_wait,
             lambda: self._live() and not self._cancelling, lambda: self._epoch,
             lambda: float(self.require_store().subscriptions.telegram_http_settings()['value']))
+        self._source_http=SourceHTTP(rss_transport,wall_clock,
+            lambda scope:self.require_store().source_http_until(scope),self._save_source_http_wait,
+            lambda:self._live() and not self._cancelling,lambda:self._epoch)
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport, telegram_client,
-                                   self._youtube_captions, self._youtube_history, self._telegram_http)
+                                   self._youtube_captions, self._youtube_history, self._telegram_http,self._source_http)
         self._sources = self._collection.sources
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
@@ -184,6 +188,16 @@ class Runtime:
         self._reader_advanced = float('-inf')
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
+
+    async def _save_source_http_wait(self, scope: str, server_delay: float | None, generation: int) -> float:
+        async with self._actions:
+            if not self._live() or self._cancelling or generation!=self._epoch:
+                raise asyncio.CancelledError
+            current=self.require_store()
+            delay=max(current.subscriptions.retry_settings()['initial_seconds'],server_delay or 0)
+            until=max(current.source_http_until(scope),self._wall_clock()+delay)
+            current.source_http_wait(scope,until)
+            return until
 
     async def _save_telegram_http_wait(self, group: str, server_delay: float | None, generation: int) -> float:
         async with self._actions:
@@ -1163,13 +1177,15 @@ class Runtime:
                 if job.kind in ('discover','fetch'):
                     self._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,current.collection_status.start(job,feed))
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
+                from oko.storage import publication_links
+                linked=job.kind=='fetch' and publication_links.feedless(current,job.item)
                 source = self._sources.get(feed)
-                staging = current.download_stage(job,lambda:self._store is current and self._live() and current.valid(job)) if job.kind == 'fetch' and source and source.fetch_requirements.staging else None
+                staging = current.download_stage(job,lambda:self._store is current and self._live() and current.valid(job)) if job.kind == 'fetch' and not linked and source and source.fetch_requirements.staging else None
                 publication = current.publication(job.item, staging) if job.kind == 'fetch' else None
                 binding = self._telegram_bindings.get(feed)
                 namespace = binding.cursor_key if binding else ''
                 cursor = current.cursor(feed, namespace) if job.kind == 'discover' else None
-                access = self._collection.telegram_access(feed)
+                access = None if linked else self._collection.telegram_access(feed)
                 caption_attempt = CaptionAttempt(self, current, job) if job.kind == 'fetch' and source and source.fetch_requirements.captions else None
                 resources = FetchResources(staging, caption_attempt, not current.youtube.terminal(job.item) if caption_attempt else True)
             if not source:
@@ -1198,7 +1214,7 @@ class Runtime:
                         current.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
                         self._finish_collection(job, current, collection_error)
             elif publication:
-                fetched = await source.fetch(publication, resources)
+                fetched = await self._collection.article_source().fetch(publication,resources) if linked else await source.fetch(publication, resources)
                 material = fetched.material
                 collection_error = material.collection_error
                 async with self._actions:
@@ -1232,7 +1248,13 @@ class Runtime:
                         return
                     if isinstance(error, SourceDeleted) and job.kind == 'fetch':
                         collection_error = None
-                        current.source_removed(job)
+                        if current.publications.owns(job.item):
+                            current.retry(job,self._clock(),error.label,terminal=True,
+                                issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
+                            from oko.storage import publication_links
+                            publication_links.notify_parents(current,job.item)
+                        else:
+                            current.source_removed(job)
                         self._finish_collection(job,current)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
@@ -1252,6 +1274,9 @@ class Runtime:
                     current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
                         terminal=isinstance(error, SourceError) and not error.retryable or job.kind=='fetch' and current.publications.owns(job.item) and isinstance(error,(ValueError,sqlite3.IntegrityError)),
                         issue=error.adapter_issue if isinstance(error,SourceError) else None)
+                    if job.kind=='fetch':
+                        from oko.storage import publication_links
+                        publication_links.notify_parents(current,job.item)
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):
@@ -1274,7 +1299,8 @@ class Runtime:
             if download is None:
                 current.finish(job)
                 return
-            adapter = self._collection.publication_adapter(current.item_feed(job.item))
+            from oko.storage import publication_links
+            adapter = self._collection.article_source().adapter if publication_links.feedless(current,download.publication_id) else self._collection.publication_adapter(current.item_feed(job.item))
         try:
             if adapter is None:
                 raise ValueError('Publication adapter unavailable')
@@ -1393,6 +1419,7 @@ class Runtime:
                     self._store.db.close()
                     self._store = None
                 self._closed = True
+            await self._source_http.close()
             await self._telegram_http.close()
             self._shutdown()
             active_journal.reset(journal_context)

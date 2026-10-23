@@ -1,13 +1,12 @@
 """Runtime-owned HTTP admission shared by Telegram collection and connections."""
 import asyncio
 from collections.abc import Awaitable, Callable
-from email.utils import parsedate_to_datetime
-import math
 from typing import Any
 
 import httpx
 
 from oko.collection.contracts import SourceDeferred
+from oko.reader.source_http import retry_after
 from oko.collection.telegram.media import PublicTransport
 
 
@@ -43,14 +42,7 @@ class TelegramHTTP(httpx.AsyncBaseTransport):
             raise SourceDeferred('Запрос Telegram прерван', code='source_unavailable')
         if response.status_code != 429:
             return response
-        server_delay = None
-        value = response.headers.get('retry-after', '')
-        try:
-            parsed = float(int(value)) if value.isdecimal() else parsedate_to_datetime(value).timestamp() - self._wall()
-            if math.isfinite(parsed):
-                server_delay = parsed
-        except (ValueError, TypeError, OverflowError):
-            pass
+        server_delay = retry_after(response,self._wall())
         try:
             until = await self._write(group, server_delay, generation)
         finally:

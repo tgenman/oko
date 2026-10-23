@@ -143,7 +143,8 @@ class Filters:
         version_settings=self.store.settings_version(material['feed_id'])
         if self.store.publications.owns(job.item):
             values,public_ai,version_settings=publication_input.request_settings(self.store,job.item)
-        request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text'], reply_preview=material.get('reply_preview')),), settings_version=version_settings, prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
+        sources=publication_input.sources(store,job.item,'filter') if store.publications.owns(job.item) else (InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text'], reply_preview=material.get('reply_preview')),)
+        request = ProcessingRequest(operation='filter', sources=sources, settings_version=version_settings, prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, public_ai
 
     def save(self, job: 'Job', signature: str, result: FilterResult) -> None:
