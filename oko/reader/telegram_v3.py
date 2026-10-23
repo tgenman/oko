@@ -50,7 +50,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.post('/api/v3/telegram/connect', response_model=wire.TelegramConnectResult)
     async def connect(request: Request, body: wire.TelegramConnectRequest) -> wire.TelegramConnectResult:
         value = body.root
-        history = selection(value.initial_history) if isinstance(value.initial_history, wire.HistorySelection) else InitialHistory()
+        history = selection(value.initial_history) if isinstance(value.initial_history, wire.HistoryCountSelection) else InitialHistory()
         role = value.access.profile.root if isinstance(value, wire.TelegramClientConnectRequest) else None
         auto_read = value.auto_read if isinstance(value, wire.TelegramClientConnectRequest) and 'auto_read' in value.model_fields_set else None
         feed_id=value.feed_id.root if isinstance(value.feed_id,wire.FeedId) else None

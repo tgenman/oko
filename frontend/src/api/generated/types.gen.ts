@@ -57,7 +57,7 @@ export type AddFeedRequest = {
     /**
      * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
      */
-    initial_history?: HistorySelection;
+    initial_history?: HistoryCountSelection;
     title: string;
     url: FeedConnectionUrl;
     verification: string;
@@ -2896,7 +2896,7 @@ export type TelegramClientConnectRequest = {
     /**
      * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
      */
-    initial_history?: HistorySelection;
+    initial_history?: HistoryCountSelection;
     source_locator: string;
 };
 
@@ -3123,7 +3123,7 @@ export type TelegramWebConnectRequest = {
     /**
      * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
      */
-    initial_history?: HistorySelection;
+    initial_history?: HistoryCountSelection;
     source_locator: string;
 };
 
@@ -4394,7 +4394,7 @@ export type HistoryPauseResponses = {
 export type HistoryPauseResponse = HistoryPauseResponses[keyof HistoryPauseResponses];
 
 export type HistoryStartData = {
-    body: HistorySelection;
+    body: HistoryCountSelection;
     headers?: {
         /**
          * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
@@ -4752,62 +4752,6 @@ export type MaterialResponses = {
 
 export type MaterialResponse = MaterialResponses[keyof MaterialResponses];
 
-export type RestoreFilterData = {
-    body?: never;
-    headers?: {
-        /**
-         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: CommandId;
-    };
-    path: {
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        item: string;
-    };
-    query?: never;
-    url: '/api/v3/materials/{item}/filter/restore';
-};
-
-export type RestoreFilterErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    400: ActionInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    404: ResourceNotFoundError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: StorageUnavailableError;
-};
-
-export type RestoreFilterError = RestoreFilterErrors[keyof RestoreFilterErrors];
-
-export type RestoreFilterResponses = {
-    /**
-     * Restore publication visibility and filtered fragments without completing reading or creating a viewed acknowledgement.
-     */
-    200: CommandAcknowledgement;
-};
-
-export type RestoreFilterResponse = RestoreFilterResponses[keyof RestoreFilterResponses];
-
 export type RetryFilterData = {
     body?: never;
     headers?: {
@@ -5147,114 +5091,6 @@ export type RetryThesesResponses = {
 };
 
 export type RetryThesesResponse = RetryThesesResponses[keyof RetryThesesResponses];
-
-export type PreviousVersionData = {
-    body?: never;
-    path: {
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        item: string;
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        number: number;
-    };
-    query?: never;
-    url: '/api/v3/materials/{item}/versions/{number}';
-};
-
-export type PreviousVersionErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    404: PreviousVersion404Errors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: StorageUnavailableError;
-};
-
-export type PreviousVersionError = PreviousVersionErrors[keyof PreviousVersionErrors];
-
-export type PreviousVersionResponses = {
-    /**
-     * Read a saved author version by positive decimal version number. The previous version is not substituted for current content.
-     */
-    200: PublicationVersion;
-};
-
-export type PreviousVersionResponse = PreviousVersionResponses[keyof PreviousVersionResponses];
-
-export type PreviousMediaData = {
-    body?: never;
-    path: {
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        item: string;
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        number: number;
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        kind: 'images' | 'media';
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        name: string;
-    };
-    query?: never;
-    url: '/api/v3/materials/{item}/versions/{number}/{kind}/{name}';
-};
-
-export type PreviousMediaErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    404: PreviousMedia404Errors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: StorageUnavailableError;
-};
-
-export type PreviousMediaError = PreviousMediaErrors[keyof PreviousMediaErrors];
-
-export type PreviousMediaResponses = {
-    /**
-     * Saved bytes; no JSON wrapper.
-     */
-    200: Blob | File;
-};
-
-export type PreviousMediaResponse = PreviousMediaResponses[keyof PreviousMediaResponses];
 
 export type ViewedData = {
     body?: never;

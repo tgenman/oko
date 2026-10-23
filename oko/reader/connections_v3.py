@@ -17,13 +17,11 @@ from oko.subscriptions.history import InitialHistory
 from oko.subscriptions.subscriptions import AddFeed, FeedURL
 
 
-def selection(value: wire.HistorySelection) -> InitialHistory:
+def selection(value: wire.HistoryCountSelection) -> InitialHistory:
     from oko.reader.api_v3 import ApiError, invalid
-    item = value.root
+    item = value
     try:
-        if isinstance(item, wire.HistoryCountSelection):
-            return InitialHistory(mode='count', count=int(item.count.root))
-        return InitialHistory(mode='date', count=None, date=item.date.root, timezone=item.timezone.root)
+        return InitialHistory(mode='count',count=int(item.count.root))
     except (ValidationError, ValueError):
         raise ApiError(422, invalid('body', 'initial_history')) from None
 
@@ -88,7 +86,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
 
     @router.post('/api/v3/feeds', response_model=wire.SubscriptionFeed)
     async def add(request: Request, body: wire.AddFeedRequest) -> wire.SubscriptionFeed:
-        history = selection(body.initial_history) if isinstance(body.initial_history, wire.HistorySelection) else InitialHistory()
+        history = selection(body.initial_history) if isinstance(body.initial_history, wire.HistoryCountSelection) else InitialHistory()
         async with track(runtime, request, wire.CommandContext(wire.CommandAddFeed(operation='add_feed'))):
             result = await runtime.add_feed(AddFeed(url=body.url.root, verification=body.verification, title=body.title, folder=body.folder, initial_history=history))
             return project.subscription(facts.SubscriptionFeed.model_validate(result))
@@ -139,7 +137,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             return history(identity, await runtime.pause_history(identity, body.paused))
 
     @router.post('/api/v3/feeds/{identity}/history', response_model=wire.FeedHistoryState)
-    async def start(request: Request, identity: str, body: wire.HistorySelection) -> wire.FeedHistoryState:
+    async def start(request: Request, identity: str, body: wire.HistoryCountSelection) -> wire.FeedHistoryState:
         selected = selection(body)
         async with archive(request, identity, wire.CommandContext(wire.CommandHistoryStart(operation='history_start', feed_id=wire.FeedId(identity)))):
             return history(identity, await runtime.change_history(identity, selected))

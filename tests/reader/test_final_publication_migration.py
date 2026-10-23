@@ -31,6 +31,17 @@ def test_rss_cached_article_and_image_survive_offline_conversion(tmp_path,enable
         wait_for(client,lambda:bool(client.get('/api/v3/materials/'+card['id']).json()['content']['images']))
         if not enabled:
             assert client.patch('/api/v3/feeds/'+card['feed_id'],json={'transport':None}).status_code==200
+    # Saved date boundaries are historical data, not a new API operation.
+    from oko.storage.store import Store
+    import json
+    from datetime import date,timedelta
+    from oko.subscriptions.history import InitialHistory
+    saved=Store(source,lambda _:None)
+    try:
+        with saved.db:
+            saved.db.execute('UPDATE initial_history SET selection=?',(json.dumps(InitialHistory(mode='date',count=None,date=str(date.today()-timedelta(days=1)),timezone='UTC').selection()),))
+    finally:
+        saved.db.close()
     destination=tmp_path/'converted'
     report=migrate_publications(source,destination)
     assert report['success'],report
@@ -64,3 +75,23 @@ def test_migration_refuses_unknown_native_source_kind_instead_of_skipping_it(tmp
     assert not report['success']
     assert any('source_kind' in entry['reason'] for entry in report['conflicts'])
     assert not (tmp_path/'converted'/'storage').exists()
+
+
+def test_current_contract_has_no_restore_or_previous_version_operations():
+    from tests.api.test_contract import bundled
+    paths=bundled()['paths']
+    assert '/api/v3/materials/{item}/filter/restore' not in paths
+    assert not any('/versions/' in path for path in paths)
+
+
+def test_new_telegram_connection_rejects_date_selection(tmp_path):
+    from datetime import date,timedelta
+    from tests.support.telegram_web import page
+    def response(request):
+        return httpx.Response(200,text=page([(11,'Post')]))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        presence(client,'reader')
+        result=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',
+            initial_history={'mode':'date','date':str(date.today()-timedelta(days=1)),'timezone':'UTC'}))
+        assert result.status_code==422,result.text
+        assert client.get('/api/v3/subscriptions').json()['feeds']==[]

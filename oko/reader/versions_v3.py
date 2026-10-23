@@ -118,7 +118,7 @@ class VersionedReading:
         return dict(post_web_unavailable=external['post_web_unavailable'],external_attachments=external['external_attachments'],revision_id=store.content_version(identity),
             images=[] if store.publications.owns(identity) else [f'/api/v3/materials/{identity}/images/{p.name}' for p in sorted(path.parent.glob('image-*'))],
             attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{identity}/media/{a.get('media_id',a['name'])}"),kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])],
-            previous_versions=[dict(number=v['number'],revision_id=v['version'],url=v['url']) for v in store.versions.previous(identity)])
+            previous_versions=[])
 
     def navigation(self) -> dict[str, Any]:
         store=self.runtime.require_store()

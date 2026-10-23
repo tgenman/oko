@@ -2506,7 +2506,7 @@ class TelegramClientConnectRequest(WireModel):
         description="Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.",
     )
     folder: StrictStr = Field(..., max_length=200, min_length=1)
-    initial_history: HistorySelection = Field(
+    initial_history: HistoryCountSelection = Field(
         default={"count": "20", "mode": "count"},
         description="Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.",
         validate_default=True,
@@ -2604,7 +2604,7 @@ class TelegramWebConnectRequest(WireModel):
         description="Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.",
     )
     folder: StrictStr = Field(..., max_length=200, min_length=1)
-    initial_history: HistorySelection = Field(
+    initial_history: HistoryCountSelection = Field(
         default={"count": "20", "mode": "count"},
         description="Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.",
         validate_default=True,
@@ -2695,7 +2695,7 @@ class AccountIdentityMismatchError(WireModel):
 class AddFeedRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     folder: StrictStr = Field(default="Без папки", max_length=200, min_length=1)
-    initial_history: HistorySelection = Field(
+    initial_history: HistoryCountSelection = Field(
         default={"count": "20", "mode": "count"},
         description="Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.",
         validate_default=True,

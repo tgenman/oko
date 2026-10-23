@@ -800,14 +800,6 @@ class Runtime:
             self._codex_status = result
         return result
 
-    async def restore_filter(self, item: str) -> None:
-        async with self._actions:
-            if self.require_store().publications.owns(item):
-                raise ActionError('conflict','Восстановление фильтра недоступно; исходник сохранён',expected=True)
-            if not self.require_store().filters.restore(item):
-                raise ActionError('missing', 'Обработанный материал недоступен')
-            await self._cancel()
-
     async def retry_filter(self, item: str) -> None:
         async with self._actions:
             self.require_work()

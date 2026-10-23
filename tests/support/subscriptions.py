@@ -14,7 +14,7 @@ def add_source(client, url, title='Источник', folder='Без папки'
         close_presence(client, 'setup')
         return value['existing_feed']
     result = client.post('/api/v3/feeds', json=dict(url=value['candidate']['url'], verification=value['verification'], title=title, folder=folder,
-        initial_history={'mode':'date','date':str(date.today()-timedelta(days=1)), 'timezone':'UTC'}))
+        initial_history={'mode':'count','count':'20'}))
     assert result.status_code == 200, result.text
     close_presence(client, 'setup')
     return result.json()
