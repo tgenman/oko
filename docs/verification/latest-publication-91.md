@@ -57,7 +57,12 @@ test_telegram_http_settings.py на 441dbda: 4 PASS, тест не ослабл�
 при ограничении и потеря external_media в JSON воспроизведены красными тестами,
 исправлены; повторное ревью — 0 замечаний, reviewer отдельно запустил 9 тестов PASS.
 
-Финальный полный прогон 441dbda выполняется; его результат будет записан отдельно.
+Финальный полный прогон кода 441dbda:
+`.scratch/check-runs/20261023T053524Z-7128049a/report.json`.
+Команда `./scripts/check all --browser-workers 2 --compact`, exit 0,
+314.89 секунды. Все группы PASS: contracts, tooling-types, syntax, lint, types,
+browser-types, build, http, browser, diff, python-tests, entrypoint, tool-tests.
+После этого прогона менялась только документация.
 
 ## Границы
 
