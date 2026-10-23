@@ -58,7 +58,7 @@ def test_remote_exception_projection_keeps_domain_code_and_material_recovery(ext
         title='Source failed',consequence='Saved content remains',next_step='Retry',
         reason='Saved source reason',created_at=1800000000.0,finished_at=None,
         next_at=None,outcome=None,operation='producer:fetch',
-        objects=[facts.ProblemObject(kind='material',id='fixture-item',label='Fixture')])
+        objects=[facts.ProblemObject(kind='material',id='fixture-item')])
     projected=project.problem(value).model_dump(mode='json')
     assert projected['code']=='source_unavailable'
     assert projected['message']=='Saved source reason'

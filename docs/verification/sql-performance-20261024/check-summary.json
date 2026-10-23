@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-24",
+  "base": "dcd5318669b68d533f87eb8597c5944284630b2d",
+  "tested_tree": "59c88757f3d496621ff8d09d77d4e8d058165932",
+  "duration_seconds": 166.76,
+  "suites": {
+    "contracts": "PASS (0.56s)",
+    "tooling-types": "PASS (1.09s)",
+    "syntax": "PASS (0.57s)",
+    "lint": "PASS (0.56s)",
+    "types": "PASS (2.24s)",
+    "browser-types": "PASS (1.55s)",
+    "build": "PASS (8.29s)",
+    "http": "PASS (2.31s)",
+    "browser": "PASS (138.66s)",
+    "diff": "PASS (0.29s)",
+    "python-tests": "PASS (147.93s)",
+    "entrypoint": "PASS (0.59s)",
+    "tool-tests": "PASS (122.30s)"
+  },
+  "python": {
+    "passed": 1013,
+    "functional": 842,
+    "tools": 162,
+    "http": 9
+  },
+  "browser": {
+    "passed": 334,
+    "skipped": 2,
+    "failed": 0
+  },
+  "limitations": [
+    "Synthetic sources/models and temporary stores only",
+    "Two browser scenarios remain skipped at prior user request",
+    "Working installation is verified separately after deployment"
+  ]
+}

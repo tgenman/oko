@@ -170,7 +170,6 @@ class ProblemObject(WireModel):
     model_config = ConfigDict(extra='forbid')
     id: StrictStr = Field(..., title='Id')
     kind: Literal['settings', 'feed', 'folder', 'material'] = Field(..., title='Kind')
-    label: StrictStr = Field(..., title='Label')
 
 class ProcessorCheck(WireModel):
     model_config = ConfigDict(extra='forbid')

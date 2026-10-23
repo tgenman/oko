@@ -349,8 +349,9 @@ class Runtime:
     def collection_snapshot(self) -> dict[str, Any]:
         current = self.require_store()
         feeds = current.subscriptions.feeds()
+        bindings=current.subscriptions.telegram.bindings([feed['id'] for feed in feeds if feed['kind']=='telegram'])
         for feed in feeds:
-            binding = current.subscriptions.telegram.binding(feed['id']) if feed['kind']=='telegram' else None
+            binding=bindings.get(feed['id'])
             feed['collection_access'] = 'Веб' if binding and binding['kind']=='web' else 'Личный аккаунт' if binding and binding.get('role')=='personal' else 'Аккаунт для сбора' if binding and binding.get('role')=='collection' else feed.get('transport', feed['kind'])
         sources = current.collection_status.snapshot(feeds, self._live(),
             'Око выключено' if not self.enabled else 'Ожидание присутствия читателя' if not self._admitted() else 'Работа приостановлена',
@@ -369,7 +370,7 @@ class Runtime:
             if self._store and not self.stopped:
                 candidates = self._store.problems.candidates(self._wall_clock())
             feeds = {f['id']: f for f in self._store.subscriptions.feeds()} if self._store else {}
-            bindings = {identity: binding for identity in feeds if self._store and not self.stopped and (binding := self._store.subscriptions.telegram.binding(identity))}
+            bindings=self._store.subscriptions.telegram.bindings(list(feeds)) if self._store and not self.stopped else {}
             state = self._status()
         if candidates is not None and self._store:
             self._last_problems = self._store.problems.reconcile(candidates, self._wall_clock(), feeds)
@@ -1404,8 +1405,9 @@ class Runtime:
                                 self._store.enqueue_discovery(feed)
                             self._last_collection = now
                         state = self._store.status()
+                        caption_feeds=self._collection.caption_feeds()
                         for lane in ('common', 'personal', 'collection', 'media','captions'):
-                            if lane=='captions' and not self._collection.has_captions():
+                            if lane=='captions' and not caption_feeds:
                                 continue
                             media_lane=lane in ('media','captions')
                             task = self._lanes.get(lane)
@@ -1426,6 +1428,8 @@ class Runtime:
                             if lane in self._lanes or now < ready_at:
                                 continue
                             feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else [feed for feed in self._sources if self._lane(feed) == lane]
+                            if lane=='captions':
+                                feeds=caption_feeds
                             dependencies=self._dependency_feeds if lane in ('common','media') else []
                             job = self._store.next_job(now, deleting_only=state['deleting'] or not (feeds or dependencies),
                                                        feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)

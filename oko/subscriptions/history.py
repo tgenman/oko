@@ -147,16 +147,35 @@ class History:
         row = self.db.execute('SELECT * FROM initial_history WHERE feed=?', (feed,)).fetchone()
         if not row:
             return None
+        counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome,count(*) n FROM history_members WHERE feed=? GROUP BY outcome', (feed,))}
+        errors = [dict(item=r['item'],message=r['error']) for r in self.db.execute("SELECT h.item,(SELECT j.error FROM jobs j WHERE j.item=h.item AND j.kind='fetch') AS error FROM history_members h WHERE h.feed=? AND h.outcome IN ('retrying','unavailable')",(feed,)) if r['error'] is not None]
+        return self._status(row,counts,errors)
+
+    def statuses(self, feeds: list[str]) -> dict[str,dict[str,Any]]:
+        if not feeds:
+            return {}
+        selected=json.dumps(feeds)
+        rows=self.db.execute('SELECT * FROM initial_history WHERE feed IN (SELECT value FROM json_each(?))',(selected,)).fetchall()
+        counts: dict[str,dict[str,int]]={}
+        for row in self.db.execute('SELECT feed,outcome,count(*) n FROM history_members WHERE feed IN (SELECT value FROM json_each(?)) GROUP BY feed,outcome',(selected,)):
+            counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
+        errors: dict[str,list[dict[str,Any]]]={}
+        for row in self.db.execute("""SELECT h.feed,h.item,j.error FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch'
+                WHERE h.feed IN (SELECT value FROM json_each(?)) AND h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL""",(selected,)):
+            errors.setdefault(row['feed'],[]).append(dict(item=row['item'],message=row['error']))
+        return {row['feed']:self._status(row,counts.get(row['feed'],{}),errors.get(row['feed'],[])) for row in rows}
+
+    @staticmethod
+    def _status(row: sqlite3.Row, counts: dict[str,int], errors: list[dict[str,Any]]) -> dict[str,Any]:
         result: dict[str, Any] = json.loads(row['selection'])
         result.pop('date',None)
         result.pop('timezone',None)
         result['count_text'] = str(result['count']) if result['count'] is not None else None
-        counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome,count(*) n FROM history_members WHERE feed=? GROUP BY outcome', (feed,))}
         loaded = counts.get('loaded', 0) + counts.get('incomplete', 0)
         result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen'] and row['scan_complete']))
         result['retrying'] = counts.get('retrying', 0)
         result['unavailable'] = counts.get('unavailable', 0)
-        result['errors'] = [dict(item=r['item'], message=r['error']) for r in self.db.execute("SELECT h.item,(SELECT j.error FROM jobs j WHERE j.item=h.item AND j.kind='fetch') AS error FROM history_members h WHERE h.feed=? AND h.outcome IN ('retrying','unavailable')", (feed,)) if r['error'] is not None]
+        result['errors'] = errors
         result['scan_complete'] = bool(row['scan_complete'])
         result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or counts.get('retrying', 0) or not row['scan_complete'] else 'done'
         if row['frozen'] and not result['scan_complete'] and result['mode'] == 'count':

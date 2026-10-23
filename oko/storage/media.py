@@ -104,8 +104,6 @@ class MediaFiles:
 
     def schedule(self, item: str) -> None:
         db = self.store.db
-        db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL WHERE kind='download_media'
-            AND status IN ('pending','running','failed','unavailable') AND item NOT IN (SELECT id FROM media_files)""")
         db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE kind='download_media' AND status IN ('pending','running') AND item IN (SELECT id FROM media_files WHERE publication_id=? AND status='unavailable')",(item,))
         for row in db.execute("SELECT id FROM media_files WHERE publication_id=? AND status='pending_download'", (item,)).fetchall():
             now,wall=self.store.clock(),self.store.wall_clock()
@@ -267,6 +265,10 @@ class MediaFiles:
 
     def cleanup(self) -> None:
         """Runs under Runtime's file admission, outside a database transaction."""
+        with self.store.db:
+            self.store.db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL
+                WHERE kind='download_media' AND status IN ('pending','running','failed','unavailable')
+                AND item NOT IN (SELECT id FROM media_files)""")
         root = self.store.root
         referenced = {root/row[0] for row in self.store.db.execute("SELECT storage_key FROM media_files WHERE storage_key IS NOT NULL")}
         for directory in (root/'media').iterdir():

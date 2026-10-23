@@ -124,8 +124,8 @@ class Sources:
         source = self.sources.get(feed)
         return source.adapter if isinstance(source, TelegramSource) else None
 
-    def has_captions(self) -> bool:
-        return any(isinstance(source,YouTubeAdapterSource) for source in self.sources.values())
+    def caption_feeds(self) -> list[str]:
+        return [feed for feed,source in self.sources.items() if isinstance(source,YouTubeAdapterSource)]
 
     def article_source(self) -> WebArticleSource:
         return WebArticleSource(WebAdapter(self._publication_transport))

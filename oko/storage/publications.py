@@ -332,6 +332,10 @@ class Publications:
             source_changed=False
         content['extra']['_reader']['changed']=bool(old_header.get('changed')) or source_changed
         content['extra']['_input_hash'] = fingerprint
+        retained={row['id'] for row in media}
+        removed=[(row[0],) for row in store.db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)) if row[0] not in retained]
+        store.db.executemany("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL
+            WHERE kind='download_media' AND item=? AND status IN ('pending','running','failed','unavailable')""",removed)
         store.db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         for row in media:
             store.db.execute('''INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,mime_type,size_bytes,storage_key,status,reason,resource_identity)

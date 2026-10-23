@@ -50,9 +50,9 @@ class Problems:
 
     def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
-        scopes = [('oko','global')] + [('feed', feed['id']) for feed in self.store.subscriptions.feeds()]
-        needs_codex = any((values := self.store.subscriptions.effective(scope, owner)['effective'])['processor']['value'] == 'codex' and
-                         any(values[key]['value'] for key in ('theses', 'prompt_filters')) for scope, owner in scopes)
+        configurations=[self.store.subscriptions.effective('oko','global'),*self.store.subscriptions.effective_feeds().values()]
+        needs_codex = any((values := configuration['effective'])['processor']['value'] == 'codex' and
+                         any(values[key]['value'] for key in ('theses', 'prompt_filters')) for configuration in configurations)
         if needs_codex and self.store.codex_config() is None:
             current.append(dict(id='processor:codex-choice', code='codex-choice', section='action',
                                 title='Не выбрана модель Codex', consequence='Тезисы пока не создаются.',
@@ -62,10 +62,11 @@ class Problems:
                                 state='current', finished_at=None, outcome=None, next_at=None))
         groups: dict[str, dict[str, Any]] = {}
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
+        bindings=self.store.subscriptions.telegram.bindings(list(feeds))
         for saved_feed in feeds.values():
             if saved_feed['kind'] != 'telegram' or saved_feed['connection'] == 'deleting':
                 continue
-            binding = self.store.subscriptions.telegram.binding(saved_feed['id'])
+            binding = bindings.get(saved_feed['id'])
             if not binding or binding['kind'] != 'client':
                 continue
             role = binding.get('role')
@@ -145,9 +146,19 @@ class Problems:
                 objects=objects,action=None,created_at=now,state='retrying',finished_at=None,outcome=None,next_at=youtube['next_at'])
         affected = {obj['id'] for group in groups.values() for obj in group['objects'] if obj['kind'] == 'material'}
         known_partial = {obj['id'] for record in self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND json_extract(body,'$.code')='material-incomplete'") for obj in json.loads(record['body'])['objects']}
-        saved = self.db.execute("""SELECT i.id,i.feed_id,json_extract(i.content,'$.extra._reader') AS header FROM items i
-            LEFT JOIN source_deleted d ON d.item=i.id
-            WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.complete=1 AND d.item IS NULL""").fetchall()
+        saved = self.db.execute("""SELECT i.id,i.feed_id,json_extract(i.content,'$.extra._reader') AS header,
+            f.status AS fetch_status,f.problem_code AS fetch_code,
+            EXISTS (SELECT 1 FROM media_files m WHERE m.publication_id=i.id AND EXISTS (
+                SELECT 1 FROM jobs j WHERE j.item=m.id AND j.kind='download_media'
+                    AND j.status IN ('pending','running') AND j.error IS NULL AND j.problem_code IS NULL)) AS media_waiting,
+            CASE WHEN i.platform='youtube' THEN EXISTS (
+                SELECT 1 FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media'
+                WHERE m.publication_id=i.id AND m.resource_key='youtube:subtitles'
+                    AND j.status='pending' AND j.problem_code IS NULL) ELSE 0 END AS caption_waiting
+            FROM items i LEFT JOIN source_deleted d ON d.item=i.id
+            LEFT JOIN jobs f ON f.item=i.id AND f.kind='fetch'
+            WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.complete=1 AND d.item IS NULL
+                AND json_extract(i.content,'$.extra._reader.full')=0""").fetchall()
         for row in saved:
             if row['id'] in affected:
                 continue
@@ -156,16 +167,12 @@ class Problems:
                 continue
             if header.get('expected_incomplete'):
                 continue
-            if feeds.get(row['feed_id'],{}).get('kind')=='youtube' and self.store.youtube.ready_at()>now and self.db.execute("""
-                    SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item
-                    WHERE m.publication_id=? AND m.resource_key='youtube:subtitles' AND j.kind='download_media'
-                    AND j.status='pending' AND j.problem_code IS NULL""",(row['id'],)).fetchone():
+            if row['caption_waiting'] and self.store.youtube.ready_at()>now:
                 continue
             cause = header.get('captions')
-            waiting = self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running') AND problem_code IS NULL", (row['id'],)).fetchone()
-            media_waiting=self.db.execute("""SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item
-                WHERE m.publication_id=? AND j.kind='download_media' AND j.status IN ('pending','running')
-                AND j.error IS NULL AND j.problem_code IS NULL LIMIT 1""",(row['id'],)).fetchone()
+            active=row['fetch_status'] in ('pending','running')
+            waiting=active and row['fetch_code'] is None
+            media_waiting=bool(row['media_waiting'])
             if (waiting or media_waiting) and row['id'] not in known_partial:
                 continue
             identity = 'incomplete:' + row['feed_id'] + ':' + (cause if cause in ('missing','error') else row['id'])
@@ -176,7 +183,7 @@ class Problems:
                 if header.get('reason'):
                     groups[identity]['reason'] = header['reason']
             groups[identity]['objects'].append(dict(kind='material',id=row['id']))
-            if self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (row['id'],)).fetchone():
+            if active:
                 groups[identity]['state'] = 'retrying'
         current.extend(groups.values())
         for receipt in self.db.execute('''SELECT * FROM reader_action_results r WHERE sequence=(
@@ -307,7 +314,7 @@ class Problems:
                     candidate.setdefault('operation','producer:status')
                 identity = candidate['id']
                 body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome')}
-                # Object labels are hydrated at read time, never an archive of titles.
+                # v3 carries resource identities; it never archives object titles.
                 body['objects'] = [{key: value for key, value in obj.items() if key != 'label'} for obj in candidate['objects']]
                 encoded = json.dumps(body)
                 row = existing.get(identity)
@@ -322,7 +329,6 @@ class Problems:
                 (SELECT max(sequence) FROM reader_action_results GROUP BY identity)''', (now - 86400,))
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
-        labels: dict[tuple[str, str], str] = {}
         for row in self.db.execute('SELECT * FROM reader_problems ORDER BY created DESC').fetchall():
             problem = json.loads(row['body'])
             if row['finished'] is None:
@@ -330,29 +336,13 @@ class Problems:
                 if candidate.get('reason'):
                     problem['reason'] = candidate['reason']
             for obj in problem['objects']:
-                key = (obj['kind'], obj['id'])
-                if key not in labels:
-                    labels[key] = feeds.get(obj['id'], {}).get('title', 'Источник недоступен') if obj['kind'] == 'feed' else self.label(obj)
-                obj['label'] = labels[key]
+                obj.pop('label',None)
             problem.update(id=row['id'], created_at=row['created'], finished_at=row['finished'],
                            outcome=row['outcome'], state='finished' if row['finished'] is not None else problem['state'])
             if row['finished'] is not None:
                 pass  # Keep the recorded consequence and cause; outcome owns completion.
             (recent if row['finished'] is not None else current).append(problem)
         return dict(current=current, recent=recent, count=len(current), updated_at=now)
-
-    def label(self, obj: dict[str, Any]) -> str:
-        if obj['kind'] == 'settings':
-            return 'Настройки Око'
-        if obj['kind'] == 'feed':
-            return next((feed['title'] for feed in self.store.subscriptions.feeds() if feed['id'] == obj['id']), 'Источник недоступен')
-        if obj['kind'] == 'folder':
-            return next((folder['title'] for folder in self.store.subscriptions.folders() if folder['id'] == obj['id']), 'Папка недоступна')
-        row = self.db.execute('SELECT viewed FROM items WHERE id=?', (obj['id'],)).fetchone()
-        if row and row['viewed']:
-            return 'Удалённый материал'
-        row=self.db.execute('SELECT title FROM items WHERE id=?',(obj['id'],)).fetchone()
-        return str(row['title'] or 'Материал') if row else 'Материал'
 
     @staticmethod
     def header(raw: str | None) -> dict[str,Any]:

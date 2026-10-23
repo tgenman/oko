@@ -167,7 +167,9 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
         saved = runtime.require_store().subscriptions
-        return {v['id']: project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds(identity)}
+        rows=saved.feeds() if identity is None else saved.feeds(identity)
+        bindings=saved.telegram.bindings([row['id'] for row in rows])
+        return {v['id']:project.subscription(facts.SubscriptionFeed.model_validate(v),bindings.get(v['id'])) for v in rows}
 
     def composition() -> wire.ReadingComposition:
         current = runtime.require_store()

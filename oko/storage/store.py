@@ -99,7 +99,9 @@ class Store:
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_running ON jobs(kind,item) WHERE status='running'")
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_active ON jobs(status,kind,item) WHERE status IN ('pending','running') OR error IS NOT NULL")
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
+        self.db.execute('CREATE INDEX IF NOT EXISTS items_feed_all ON items(feed_id,id)')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_kind_item ON jobs(kind,item,next,id) WHERE status='pending'")
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_problems ON jobs(kind,item) WHERE problem_code IS NOT NULL OR error IS NOT NULL")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.publications = Publications(self)
@@ -354,9 +356,13 @@ class Store:
         return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key LIKE 'feed-status:%'")]
 
     def ready_sources(self, feeds: list[str]) -> int:
-        return sum(1 for feed in feeds if not self.db.execute(
-            "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
-            ('' if feed == 'demo' else feed, feed)).fetchone())
+        if not feeds:
+            return 0
+        return int(self.db.execute("""SELECT count(*) FROM json_each(?) f WHERE
+            NOT EXISTS (SELECT 1 FROM jobs j WHERE j.item=CASE f.value WHEN 'demo' THEN '' ELSE f.value END
+                AND j.status IN ('pending','running') AND j.kind!='read')
+            AND NOT EXISTS (SELECT 1 FROM items i JOIN jobs j ON j.item=i.id WHERE i.feed_id=f.value
+                AND j.status IN ('pending','running') AND j.kind!='read')""",(json.dumps(feeds),)).fetchone()[0])
 
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=? AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL)"
@@ -370,18 +376,31 @@ class Store:
             placeholders = ','.join('?' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('?' for _ in dependencies) or "''"
-            query += f" AND kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND (i.feed_id IN ({placeholders}) OR i.feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=i.id AND root.viewed=0 AND root.feed_id IN ({dependency_keys}))))"
+            # CROSS JOIN keeps dependencies root→link→article; reordering multiplies roots by feedless items.
+            query += f""" AND kind='download_media' AND item IN (
+                SELECT m.id FROM items i JOIN media_files m ON m.publication_id=i.id
+                    WHERE i.viewed=0 AND i.feed_id IN ({placeholders})
+                UNION SELECT m.id FROM items root CROSS JOIN publication_links l ON l.source_publication_id=root.id
+                    CROSS JOIN items i ON i.id=l.target_publication_id JOIN media_files m ON m.publication_id=i.id
+                    WHERE root.viewed=0 AND root.feed_id IN ({dependency_keys}) AND i.viewed=0 AND i.feed_id IS NULL)"""
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('?' for _ in dependencies) or "''"
-            query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}) OR feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=items.id AND root.viewed=0 AND root.feed_id IN ({dependency_keys})))))"
+            query += f""" AND id IN (
+                SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
+                UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('discover','read') AND item IN ({placeholders})
+                UNION SELECT id FROM jobs WHERE status='pending' AND kind='fetch' AND item IN (
+                    SELECT own.id FROM items own WHERE own.viewed=0 AND own.feed_id IN ({placeholders})
+                    UNION SELECT i.id FROM items root CROSS JOIN publication_links l ON l.source_publication_id=root.id
+                        CROSS JOIN items i ON i.id=l.target_publication_id
+                        WHERE root.viewed=0 AND root.feed_id IN ({dependency_keys}) AND i.feed_id IS NULL AND i.viewed=0))"""
         if media_only:
-            subtitles="""SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id
+            subtitles="""SELECT 1 FROM media_files m JOIN items i ON i.id=m.publication_id
                 JOIN json_each(i.content,'$.blocks') b ON json_extract(b.value,'$.media_id')=m.id
-                WHERE json_extract(b.value,'$.role')='subtitles'"""
-            query += ' AND item '+('IN' if captions_only else 'NOT IN')+' ('+subtitles+')'
+                WHERE m.id=jobs.item AND i.platform='youtube' AND json_extract(b.value,'$.role')='subtitles'"""
+            query += ' AND '+('EXISTS' if captions_only else 'NOT EXISTS')+' ('+subtitles+')'
         if not include_deletions:
             query += " AND kind NOT IN ('delete','feed-delete')"
         blocked_history = """SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed

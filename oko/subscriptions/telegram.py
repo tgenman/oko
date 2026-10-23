@@ -64,8 +64,13 @@ class TelegramAccess:
                 kind TEXT, value TEXT, feed TEXT, evidence TEXT, PRIMARY KEY(kind,value,feed))''')
             db.execute("UPDATE telegram_profiles SET state='unavailable',message='Требуется проверка сессии после запуска'")
 
-    def bindings(self) -> dict[str, dict[str, Any]]:
-        return {row['feed']: json.loads(row['binding']) for row in self.db.execute('SELECT feed,binding FROM telegram_bindings')}
+    def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
+        query='SELECT feed,binding FROM telegram_bindings'
+        params: tuple[str,...]=()
+        if feeds is not None:
+            query+=' WHERE feed IN (SELECT value FROM json_each(?))'
+            params=(json.dumps(feeds),)
+        return {row['feed']:json.loads(row['binding']) for row in self.db.execute(query,params)}
 
     def profiles(self) -> dict[str, dict[str, Any]]:
         return {row['role']: dict(row) for row in self.db.execute('SELECT * FROM telegram_profiles')}
