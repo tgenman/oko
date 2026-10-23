@@ -66,7 +66,7 @@ class RSSAdapter:
                         raise SourceError('Разные записи RSS имеют один внешний ID',
                             code='rss-identity-conflict', retryable=False)
                     batch[entry.publication.id] = entry
-                issues.extend(AdapterIssue(code, 'Запись RSS без внешнего ключа пропущена', AdapterErrorKind.notice)
+                issues.extend(AdapterIssue(code, 'Запись RSS без внешнего ключа пропущена' if code=='rss-missing-key' else 'Неверная ссылка RSS; анонс сохранён', AdapterErrorKind.notice)
                               for code in diagnostics)
                 if not archives or wanted is not None and wanted <= batch.keys():
                     break

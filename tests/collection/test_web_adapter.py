@@ -74,3 +74,8 @@ def test_web_failure_describes_article_and_keeps_source_wait_metadata():
     issue=caught.value.issue
     assert issue.kind==AdapterErrorKind.source_wait and issue.retry_at is not None
     assert issue.scope=='web:web.example' and issue.message=='Не удалось загрузить статью'
+
+
+def test_telegraph_key_uses_its_page_path_across_source_tracking_links():
+    assert reference('https://www.telegra.ph/Fixture?utm_source=rss#section')==reference('https://telegra.ph/Fixture')
+    assert reference('https://telegra.ph/Статья').key==reference('https://telegra.ph/%D0%A1%D1%82%D0%B0%D1%82%D1%8C%D1%8F').key

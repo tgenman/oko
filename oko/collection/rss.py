@@ -150,8 +150,10 @@ def entries(raw: bytes, base: str, *, strict: bool = False, diagnostics: list[st
             continue
         try:
             url = normalized(urljoin(entry_base, link)) if link else ''
-        except SourceError:
+        except (SourceError,ValueError):
             record_caught('rss.entries')
+            if strict and identity and diagnostics is not None:
+                diagnostics.append('rss-invalid-link')
             if not strict or not identity:
                 if strict and diagnostics is not None:
                     diagnostics.append('rss-missing-key')

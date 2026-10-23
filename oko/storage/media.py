@@ -238,5 +238,6 @@ class MediaFiles:
                 store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),owner))
                 store.subscriptions.history.saved(owner,False)
                 store.read_versions.media_changed(owner)
+                publication_links.notify_parents(store,owner)
         if content is not None:
             store.publications.recover(owner)

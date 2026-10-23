@@ -186,3 +186,14 @@ def test_new_rss_history_run_freezes_its_count_and_resolves_an_archive_offset():
     source.initial_history={'mode':'count','count':1,'run':'second'}
     second=asyncio.run(source.discover(boundary.cursor))
     assert [p.teaser.text for p in second.publications]==['One','Two']
+
+
+def test_invalid_rss_permalink_keeps_a_known_guid_and_healthy_records():
+    raw='<rss><channel><item><guid>bad-link</guid><link>https://[bad/</link><description>Usable excerpt</description></item><item><guid>good</guid><description>Good</description></item></channel></rss>'
+    adapter=RSSAdapter(httpx.MockTransport(lambda _:httpx.Response(200,text=raw)))
+    feed=asyncio.run(adapter.resolve_feed('https://rss.example/feed'))
+    cursor=asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,1))
+    page=asyncio.run(adapter.discover(feed.reference,cursor,10))
+    assert [value.content['blocks'][0]['text'] for value in page.publications]==['Good','Usable excerpt']
+    assert page.publications[1].metadata.reference.url=='https://rss.example/feed'
+    assert any(issue.code=='rss-invalid-link' for issue in page.issues)

@@ -33,6 +33,10 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...]) ->
                 store.db.execute('UPDATE items SET viewed=0,complete=0 WHERE id=?',(identity,))
                 store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE kind='delete' AND item=?",(identity,))
                 store.enqueue_fetch(identity)
+            elif owner['platform']=='rss':
+                # RSS rechecks the main article in each observed finite window.
+                # Pending waits and permanent failures keep their existing policy.
+                store.db.execute("UPDATE jobs SET status='pending',next=0,generation=generation+1 WHERE kind='fetch' AND item=? AND status='done' AND error IS NULL",(identity,))
         targets.append(identity)
     previous={row[0] for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,))}
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id=?',(item,))

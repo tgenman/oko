@@ -85,11 +85,13 @@ class Problems:
             groups[identity]['objects'].append(dict(kind='feed',id=saved_feed['id']))
         youtube = self.store.youtube.status(now)
         read_states = {state['feed_id']: state for state in self.store.read_sync.statuses()}
-        jobs = self.db.execute("""SELECT jobs.*,coalesce(items.feed_id,media_owner.feed_id) AS feed_id,
-            coalesce(items.viewed,media_owner.viewed) AS viewed,coalesce(m.publication_id,jobs.item) AS affected_item
+        jobs = self.db.execute("""SELECT jobs.*,coalesce(items.feed_id,media_owner.feed_id,linked_root.feed_id) AS feed_id,
+            coalesce(items.viewed,media_owner.viewed) AS viewed,coalesce(linked_root.id,m.publication_id,jobs.item) AS affected_item
             FROM jobs LEFT JOIN items ON items.id=jobs.item
             LEFT JOIN media_files m ON jobs.kind='download_media' AND m.id=jobs.item
             LEFT JOIN items media_owner ON media_owner.id=m.publication_id
+            LEFT JOIN publication_links link ON link.target_publication_id=coalesce(items.id,media_owner.id)
+            LEFT JOIN items linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
             WHERE (jobs.status IN ('pending','running','failed','unavailable') OR
                 (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL))
             AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)""").fetchall()
@@ -143,7 +145,7 @@ class Problems:
         saved = self.db.execute("""SELECT i.id,i.feed_id,c.number FROM items i
             LEFT JOIN content_current c ON c.item=i.id
             LEFT JOIN source_deleted d ON d.item=i.id
-            WHERE i.viewed=0 AND i.complete=1 AND d.item IS NULL""").fetchall()
+            WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.complete=1 AND d.item IS NULL""").fetchall()
         self._numbers = {row['id']: row['number'] or 1 for row in saved}
         self._headers = {key: value for key, value in self._headers.items() if key in self._numbers}
         for row in saved:

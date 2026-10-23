@@ -2,7 +2,7 @@
 from html import escape
 import re
 from typing import Any,BinaryIO
-from urllib.parse import urljoin,urlsplit
+from urllib.parse import urljoin,urlsplit,quote,unquote
 
 from bs4 import BeautifulSoup
 from bs4.element import Comment,NavigableString,Tag
@@ -23,7 +23,7 @@ def reference(url: str) -> ExternalReference:
     parts=urlsplit(url)
     platform=Platform.telegraph if parts.hostname in ('telegra.ph','www.telegra.ph') else Platform.other_web
     if platform==Platform.telegraph:
-        url='https://telegra.ph'+parts.path+('?' + parts.query if parts.query else '')
+        url='https://telegra.ph/'+quote(unquote(parts.path.lstrip('/')),safe='/-_')
     return ExternalReference(ExternalKey(platform,url),url)
 
 

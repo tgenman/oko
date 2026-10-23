@@ -120,8 +120,8 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
             if state.is_file() and state.read_text()=='error':
                 return httpx.Response(503)
             if request.url.host=='api.telegra.ph':
-                return httpx.Response(200,json={'ok':True,'result':{'title':'Linked article','content':[{'tag':'p','children':['Article text arrived.']}]}})
-            return httpx.Response(200,text='<title>Linked article</title><article>Article text arrived.</article>')
+                return httpx.Response(200,json={'ok':True,'result':{'title':'Linked article','content':[{'tag':'p','children':['Article text arrived.']},{'tag':'img','attrs':{'src':'https://controlled.example/linked-image.png'}}]}})
+            return httpx.Response(200,text='<title>Linked article</title><article>Article text arrived.<img src="https://controlled.example/linked-image.png"></article>')
         if request.url.host=='controlled.example':
             path=root/'fixture-media-state'
             while path.is_file() and path.read_text()=='held':

@@ -7,6 +7,7 @@ import {artifactPath} from './artifacts';
 for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable while a separate article fails and updates its theses`,{timeout:30000},async t=>{
  const r=await productionReader(t,{publicationPipeline:true});
  await r.setArticleState('held');
+ await r.setMediaState('held');
  await r.api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
  await r.api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:1,retry_max_seconds:1});
  await r.openReader();
@@ -35,5 +36,11 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  if(cards[0].availability!=='available'||!cards[0].theses.result) throw new Error('Missing accepted theses');
  const refs=cards[0].theses.result.points.flatMap(p=>p.references);
  expect(refs.some(ref=>ref.material_id!==cards[0].id&&ref.source_url.includes(kind==='rss'?'linked.example':'telegra.ph'))).toBe(true);
+ await r.setMediaState('error');
+ await expect(r.page.locator('#completeness')).toContainText('Не удалось загрузить вложение');
+ await r.setMediaState('ready');
+ await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
+ const image=r.page.locator(kind==='telegram'?'#text .telegraph-article img':'#images img');
+ await expect(image).toHaveAttribute('src',/^blob:/);
  await r.page.screenshot({path:artifactPath(`linked-${kind}-ready.png`)});
 });

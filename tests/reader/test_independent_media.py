@@ -493,6 +493,8 @@ def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
             item=client.get('/api/v3/cards').json()[0]['id']
             content=client.get('/api/v3/materials/'+item).json()['content']
             assert 'Article text' in content['text']
+            selective=client.get('/api/v3/reading/materials/'+item)
+            assert selective.status_code==200,selective.text
             assert 'Article text' in content['linked_content']['articles'][0]['text']
             assert 'Не удалось' not in content['linked_content']['articles'][0]['text']
             release.set()

@@ -53,12 +53,18 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
     from tests.support.reader import wait_for
     root=migrated_root(tmp_path)
     started,release=threading.Event(),threading.Event()
+    media_started,media_release=threading.Event(),threading.Event()
     async def response(request):
+        if request.url.host=='cdn.example':
+            media_started.set()
+            while not media_release.is_set():
+                await asyncio.sleep(.01)
+            return httpx.Response(200,content=b'article-image',headers={'content-type':'image/png'})
         if request.url.host=='web.example':
             started.set()
             while not release.is_set():
                 await asyncio.sleep(.01)
-            return httpx.Response(200,text='<title>Article</title><article><p>Article body</p><a href="https://web.example/another">Do not follow</a></article>')
+            return httpx.Response(200,text='<title>Article</title><article><p>Article body</p><a href="https://web.example/another">Do not follow</a><img src="https://cdn.example/article.png"></article>')
         return httpx.Response(200,text='<rss><channel><item><guid>entry</guid><title>Announcement</title><link>https://web.example/article</link><description>Own excerpt</description></item></channel></rss>')
     with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
                               rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
@@ -70,6 +76,9 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             assert started.wait(3)
             release.set()
             value=wait_for(client,lambda:(value if 'Article body' in (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['text'] else None))
+            assert media_started.wait(3)
+            assert client.get('/api/v3/status').status_code==200
+            assert client.get('/api/v3/reading/materials/'+card['id']).status_code==200
             assert 'Own excerpt' in value['content']['text']
             assert value['content']['revision_id']!=card['revision_id']
             assert len(client.get('/api/v3/cards').json())==1
@@ -80,8 +89,14 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
                 assert 'Article body' in json.loads(row[3])['blocks'][0]['text']
                 assert not db.execute('SELECT 1 FROM feed_publications WHERE publication_id=?',(linked,)).fetchone()
                 assert db.execute('SELECT COUNT(*) FROM items').fetchone()[0]==2
+            media_release.set()
+            complete=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] else None))
+            url=complete['content']['attachments'][0]['url']
+            assert url.startswith('/api/v3/materials/'+linked+'/media/')
+            assert client.get(url).content==b'article-image'
         finally:
             release.set()
+            media_release.set()
 
 
 def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp_path):
@@ -237,6 +252,9 @@ def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_p
         card=wait_cards(client)[0]
         value=wait_for(client,lambda:(value if 'недоступна' in (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['completeness'].get('message','').lower() else None))
         assert value['content']['text']=='Own excerpt'
+        status=client.get('/api/v3/status')
+        assert status.status_code==200
+        assert any(resource=={'kind':'material','material_id':card['id']} for problem in status.json()['problems']['current'] for resource in problem['affected'])
         missing[0]=False
         client.post('/api/v3/materials/'+card['id']+'/retry')
         wait_for(client,lambda:'Retrieved article' in client.get('/api/v3/materials/'+card['id']).json()['content']['text'])
@@ -398,4 +416,26 @@ def test_article_host_wait_blocks_new_jobs_across_restart_but_not_other_hosts(tm
         wait_cards(client,4)
         third=next(card for card in client.get('/api/v3/cards').json() if card['feed_title']=='Third')
         wait_for(client,lambda:'недоступна' in client.get('/api/v3/materials/'+third['id']).json()['content']['completeness'].get('message',''))
-        assert calls==['https://blocked.example/first','https://other.example/other']
+        assert [url for url in calls if url.startswith('https://blocked.example/')]==['https://blocked.example/first']
+        assert 'https://other.example/other' in calls
+
+
+def test_regular_rss_window_refreshes_an_existing_linked_article(tmp_path):
+    from tests.support.reader import wait_for
+    root=migrated_root(tmp_path)
+    body=['First article text']
+    def response(request):
+        if request.url.host=='web.example':
+            return httpx.Response(200,text='<article>'+body[0]+'</article>')
+        return httpx.Response(200,text='<rss><channel><item><guid>entry</guid><link>https://web.example/article</link><description>Same excerpt</description></item></channel></rss>')
+    with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
+                              rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        import_feed(client)
+        presence(client,'rss')
+        card=wait_cards(client)[0]
+        wait_for(client,lambda:'First article text' in client.get('/api/v3/materials/'+card['id']).json()['content']['text'])
+        body[0]='Updated article text'
+        client.post('/api/v3/collect')
+        value=wait_for(client,lambda:(value if 'Updated article text' in (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['text'] else None))
+        assert 'First article text' not in value['content']['text']
+        assert 'Same excerpt' in value['content']['text']
