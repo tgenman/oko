@@ -127,7 +127,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                 if not saved:
                     raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), diagnostic_id=None, command_id=command_id,
                         details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(identity))))))) from None
-                state = project.subscription(facts.SubscriptionFeed.model_validate(saved[0])).root.history
+                state = project.subscription(facts.SubscriptionFeed.model_validate(saved[0]),runtime.require_store().subscriptions.telegram.binding(identity)).root.history
                 raise ApiError(409, wire.ErrorEnvelope(wire.HistoryConflictError(code='history_conflict', message=str(error.detail), diagnostic_id=None, command_id=command_id,
                     details=wire.HistoryConflictErrorDetails(feed_id=wire.FeedId(identity), history=state)))) from None
 

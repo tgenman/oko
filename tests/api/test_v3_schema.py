@@ -22,11 +22,11 @@ def accepts(name, value):
 
 def test_v3_exact_history_and_absence_are_distinct():
     assert accepts('HistorySelection', {'mode': 'count', 'count': '9007199254740993'})
-    assert accepts('HistorySelection', {'mode': 'date', 'date': '2026-10-14', 'timezone': 'Europe/Moscow'})
+    assert not accepts('HistorySelection', {'mode': 'date', 'date': '2026-10-14', 'timezone': 'Europe/Moscow'})
     for invalid in [{}, None, {'mode': 'count'}, {'mode': 'count', 'count': 20}, {'mode': 'count', 'count': '020'}, {'mode': 'count', 'count': '20', 'date': None}]:
         assert not accepts('HistorySelection', invalid)
-    assert accepts('HistoryState', {'state': 'absent', 'legacy_since': None})
-    assert not accepts('HistoryState', {'state': 'absent', 'legacy_since': None, 'selection': {'mode': 'count', 'count': '20'}})
+    assert accepts('HistoryState', {'state': 'absent'})
+    assert not accepts('HistoryState', {'state': 'absent', 'selection': {'mode': 'count', 'count': '20'}})
 
 
 def test_settings_reset_is_not_feed_patch_null():
@@ -40,7 +40,7 @@ def test_settings_reset_is_not_feed_patch_null():
 
 def test_telegram_legacy_is_response_only_and_web_does_not_accept_auto_read():
     legacy = {'kind': 'legacy_client', 'alias': 'old', 'source_locator': '@example', 'peer_id': None}
-    assert accepts('TelegramAccess', legacy)
+    assert not accepts('TelegramAccess', legacy)
     assert not accepts('TelegramAccess', dict(legacy, role='personal'))
     assert not accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News', 'access': legacy})
     assert accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News'})
@@ -85,7 +85,7 @@ def test_persisted_not_started_history_has_explicit_progress():
 
 def test_problem_keeps_title_and_consequence_separate_from_diagnostic_message():
     spec = contract()
-    for name in ['CurrentProblem', 'RetryingProblem', 'FinishedProblem', 'LegacyCurrentProblem', 'LegacyRetryingProblem', 'LegacyFinishedProblem']:
+    for name in ['CurrentProblem', 'RetryingProblem', 'FinishedProblem']:
         example = spec['components']['schemas'][name]['examples'][0]
         assert accepts(name, example)
         for field in ['title', 'consequence', 'message']:
@@ -123,8 +123,7 @@ def test_saved_subscription_transport_and_unresolved_connection_are_preserved():
     feed = contract()['components']['schemas']['UnresolvedSubscriptionFeed']['examples'][0]
     assert accepts('SubscriptionFeed', dict(feed, transport=None, connection='ambiguous', original_urls=['@saved_name', '-100123']))
     assert accepts('SubscriptionFeed', dict(feed, transport='rss', connection='needs_connection'))
-    legacy = contract()['components']['schemas']['TelegramLegacyClientSubscriptionFeed']['examples'][0]
-    assert accepts('SubscriptionFeed', dict(legacy, connection='deleting'))
+    assert 'TelegramLegacyClientSubscriptionFeed' not in contract()['components']['schemas']
 
 
 def test_command_context_covers_checks_and_empty_patches():
@@ -156,7 +155,7 @@ def test_profile_roles_and_command_problem_correlation_are_explicit():
 def test_saved_model_bound_processor_and_unknown_historical_choice_are_explicit():
     assert accepts('SettingsPatch', {'processor': 'llamacpp:local/model-v2'})
     assert not accepts('SettingsPatch', {'processor': 'unknown-processor'})
-    assert accepts('StoredOverrides', {'processor': {'kind': 'legacy', 'value': 'unknown-processor'}})
+    assert not accepts('StoredOverrides', {'processor': {'kind': 'legacy', 'value': 'unknown-processor'}})
     assert not accepts('SettingsPatch', {'processor': {'kind': 'legacy', 'value': 'unknown-processor'}})
     assert accepts('CodexAvailability', {'state': 'unavailable', 'local': None, 'auth': 'unchecked', 'version': None, 'limits_checked': False, 'quota_windows': [], 'reason': 'unavailable', 'message': 'Not checked'})
 

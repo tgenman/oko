@@ -217,7 +217,7 @@ export const historyCancel = <ThrowOnError extends boolean = true>(options: Opti
 /**
  * History pause
  *
- * Legacy resume of the existing archive run. Manual pause (paused=true) returns 409 history_conflict. Use collect to continue unfinished history. All operations require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ * Resume of the existing archive run. Manual pause (paused=true) returns 409 history_conflict. Use collect to continue unfinished history. All operations require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const historyPause = <ThrowOnError extends boolean = true>(options: Options<HistoryPauseData, ThrowOnError>) => (options.client ?? client).patch<HistoryPauseResponses, HistoryPauseErrors, ThrowOnError>({
     url: '/api/v3/feeds/{identity}/history',
@@ -518,7 +518,7 @@ export const stop = <ThrowOnError extends boolean = true>(options?: Options<Stop
 /**
  * Subscription list
  *
- * Read saved folders and source subscriptions, including deleting entries and unconfirmed legacy client bindings without inventing identity. All operations require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+ * Read saved folders and source subscriptions, including deleting entries without inventing identity. All operations require bearer or persistent browser session authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
  */
 export const subscriptionList = <ThrowOnError extends boolean = true>(options?: Options<SubscriptionListData, ThrowOnError>) => (options?.client ?? client).get<SubscriptionListResponses, SubscriptionListErrors, ThrowOnError>({ url: '/api/v3/subscriptions', ...options });
 

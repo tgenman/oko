@@ -14,7 +14,7 @@ test('opened publication shows variant B with avatar and wrapping long feed and 
   const publicationTitle='Анализирую всё подряд, особенно детство. '+ 'ОченьДлинныйЗаголовокБезПробелов'.repeat(2);
   await r.start([material('one',{title:publicationTitle}),material('two',{feed_id:'second'})]);
   await r.page.evaluate(({avatarUrl,feedTitle})=>{const t=readerTransport;
-   t.replies.set('/api/v3/reading-composition',{body:{count:2,folders:[{id:'f',title:'Каналы',position:0,count:2}],feeds:[{count:1,has_unviewed:true,feed:{id:'feed',title:feedTitle,folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent',legacy_since:null},avatar_url:avatarUrl}},{count:1,has_unviewed:true,feed:{id:'second',title:'Другой фид',folder_id:'f',kind:'rss',connection:'ready',identity:'https://second.test/feed',transport:'rss',importance:'normal',original_urls:['https://second.test/feed'],initial_days:1,public_ai:false,history:{state:'absent',legacy_since:null}}}]}});
+   t.replies.set('/api/v3/reading-composition',{body:{count:2,folders:[{id:'f',title:'Каналы',position:0,count:2}],feeds:[{count:1,has_unviewed:true,feed:{id:'feed',title:feedTitle,folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent'},avatar_url:avatarUrl}},{count:1,has_unviewed:true,feed:{id:'second',title:'Другой фид',folder_id:'f',kind:'rss',connection:'ready',identity:'https://second.test/feed',transport:'rss',importance:'normal',original_urls:['https://second.test/feed'],initial_days:1,public_ai:false,history:{state:'absent'}}}]}});
    t.replies.set(avatarUrl,{mime:'image/svg+xml',base64:'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjYjZiOGQxIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIxMCIgcj0iMjUiIGZpbGw9IiNlOGQ0YjciLz48cGF0aCBkPSJNMCA1NVEzMCAxNSA2NCA1NVY2NEgwIiBmaWxsPSIjNmU3YTc4Ii8+PHRleHQgeD0iMzIiIHk9IjQyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjgiPtCbPC90ZXh0Pjwvc3ZnPg=='});
   },{avatarUrl,feedTitle});
   await expect(r.page.locator('[data-feed="feed"]')).toHaveAttribute('title',feedTitle);
@@ -319,7 +319,7 @@ test('removed cards and connection loss keep loaded text, reload drops it',async
 for(const fallback of ['neighbour','relative','filtered'])test('version replacement preserves '+fallback+' reading position',async()=>{
   const r=await reader();try{
     const lines=Array.from({length:90},(_,i)=>'Абзац '+i+' '+('длинный текст '.repeat(15)));
-    const filter=fallback==='filtered'?{status:'done' as const,hidden:false,restored:false,reason:'Фильтр',removed:['Реклама']}:undefined;
+    const filter=fallback==='filtered'?{status:'done' as const,hidden:false,reason:'Фильтр',removed:['Реклама']}:undefined;
     const old=material('A',{text:lines.join('\n\n')+'\nРеклама',version:'old',...(filter?{filter}:{})});
     await r.start([old]);await r.page.locator('[data-card="A"]').click();
     const selector=fallback==='filtered'?'#filtered-text':'#text';
@@ -393,7 +393,7 @@ test('reconnect resumes missing media for unchanged text without replacing loade
 
 test('current publication text is first-class and previous versions start collapsed',async()=>{
  const r=await reader();try{
-  await r.start([material('A',{originals:false,title:'AI-агент Tolan, которым пользуются в основном женщины, поднял $30 млн',text:'Сегодня новостью про AI-агента сложно удивить. Но я сегодня погрузился [в историю от Upstarts Media про стартап Tolan](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust).\n\nОснователи Tolan — Квинтен Фармер, Аджай Мехта и Эван Голдшмидт. Их агент помогает с повседневными задачами.\n\nОн может запоминать, о чём с ним разговаривали, и поддерживать беседу на базе этих знаний.',previous:[{number:1,url:'/api/v3/materials/A/versions/1'},{number:2,url:'/api/v3/materials/A/versions/2'}]}),material('B')]);
+  await r.start([material('A',{originals:false,title:'AI-агент Tolan, которым пользуются в основном женщины, поднял $30 млн',text:'Сегодня новостью про AI-агента сложно удивить. Но я сегодня погрузился [в историю от Upstarts Media про стартап Tolan](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust).\n\nОснователи Tolan — Квинтен Фармер, Аджай Мехта и Эван Голдшмидт. Их агент помогает с повседневными задачами.\n\nОн может запоминать, о чём с ним разговаривали, и поддерживать беседу на базе этих знаний.'}),material('B')]);
   await r.page.locator('[data-card="A"]').click();
   await expect(r.page.locator('#text')).toBeVisible();
   assert.equal(await r.page.locator('#text').locator('xpath=ancestor::details').count(),0);
@@ -480,7 +480,7 @@ test('reply context is a compact separate card with safe navigation and local ex
 
 test('reply context stays with its revision and historical previews use their own source',async()=>{
   const r=await reader();try{
-    const old=material('A',{version:'old',reply_preview:{author:null,text:'Старый фрагмент '.repeat(18),source_url:null},previous:[{number:1,url:'/api/v3/materials/A/versions/1'}]});
+    const old=material('A',{version:'old',reply_preview:{author:null,text:'Старый фрагмент '.repeat(18),source_url:null}});
     await r.start([old]);await r.page.locator('[data-card="A"]').click();
     const card=r.page.locator('#reply-preview');
     await expect(card).toBeVisible();

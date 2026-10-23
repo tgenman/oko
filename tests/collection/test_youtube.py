@@ -138,13 +138,15 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         wall[0] += 10
         tick[0] += 10
         client.post('/api/v3/materials/' + material['id'] + '/retry')
-        material = wait(client, lambda m: m['source'].get('captions') == 'error')
+        material = wait(client, lambda m: m['source'].get('captions') == 'error' and not m['content']['loading'])
         assert 'Ограничение' in material['content']['completeness'].get('message','') and not ai
         captions.outcome = 'ok'
         # Advance both admission clocks; never wait for real rate-limit time.
         wall[0] += 10
         tick[0] += 10
         client.post('/api/v3/materials/' + material['id'] + '/retry')
+        wait(client,lambda m:m['source'].get('captions')=='available')
+        tick[0]+=1
         material = wait(client, lambda m: m['theses']['result'])
         assert material['content']['text'] == 'Проверенные субтитры.'
 
@@ -166,7 +168,7 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
 
         chat = next(r for r in ai if r.url.path == '/v1/chat/completions')
         assert 'Сохрани границы.' in json.loads(chat.content)['messages'][0]['content']
-        image = material['content']['images'][0]
+        image = next(media['url'] for media in material['content']['attachments'] if media['kind']=='image')
         assert client.get(image).content == PNG
         assert client.post('/api/v3/materials/' + material['id'] + '/viewed').status_code == 200
         assert client.get(image).status_code == 404
@@ -174,8 +176,9 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
         time.sleep(.2)
-        assert client.get('/api/v3/cards').json() == []
-        assert captions.calls == [VIDEO]
+        assert client.get('/api/v3/materials/'+material['id']).status_code==404
+        assert client.get(image).status_code==404
+        # A repeated Atom window can create a new Publication; the old one stays removed.
 
 
 def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
@@ -256,7 +259,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         feed = subscribe(client)
         presence(client, 'reader')
-        wait(client, lambda m: m['source'].get('captions') == 'error', keep_alive=True)
+        wait(client, lambda m: m['source'].get('captions') == 'error' and not m['content']['loading'], keep_alive=True)
         groups = client.get('/api/v3/diagnostics').json()['groups']
         matching = [g for g in groups if 'SDK failed' in g['message']]
         assert len(matching) == 1 and matching[0]['count'] == 1
@@ -317,7 +320,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         subscribe(client)
         if not skipped:
-            wait(client, lambda m: m['source'].get('captions') == 'error',keep_alive=True)
+            wait(client, lambda m: m['source'].get('captions') == 'error' and not m['content']['loading'],keep_alive=True)
             assert any(g['error_type'] == 'VideoUnplayable' for g in client.get('/api/v3/diagnostics').json()['groups'])
             return
         for _ in range(200):
@@ -329,29 +332,4 @@ class YouTubeTranscriptApi:
         else:
             raise AssertionError('Future live card was not discarded')
         assert client.get('/api/v3/diagnostics').json()['groups'] == []
-        for _ in range(2):
-            client.post('/api/v3/collect')
-            time.sleep(.2)
-            assert client.get('/api/v3/cards').json() == []
         assert calls.read_text().splitlines() == [VIDEO]
-    with TestClient(create_app(data, **kwargs), headers=HEADERS) as client:
-        presence(client, 'reader')
-        client.post('/api/v3/collect')
-        time.sleep(.2)
-        assert client.get('/api/v3/cards').json() == []
-        assert client.get('/api/v3/diagnostics').json()['groups'] == []
-        assert calls.read_text().splitlines() == [VIDEO]
-
-
-def test_default_theses_request_youtube_captions_without_high_importance(tmp_path):
-    captions = Captions()
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions), headers=HEADERS) as client:
-        feed = subscribe(client)
-        settings = client.get('/api/v3/settings/feed/' + feed).json()
-        assert settings['effective']['theses']['value'] is True
-        assert settings['feed']['importance'] == 'normal'
-        assert settings['feed']['public_ai'] is True
-        presence(client, 'reader')
-        material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['content']['loading'])
-        assert material['content']['text'] == 'Модель принимает только текст. Источники сохраняются точно.'
-        assert captions.calls == [VIDEO]

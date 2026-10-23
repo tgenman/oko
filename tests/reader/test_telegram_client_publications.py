@@ -1,11 +1,12 @@
 """Native channel publications through actual reader HTTP and temporary storage."""
 import asyncio
+import pytest
 import json
 import sqlite3
 import threading
 import time
 
-from tests.support.publication_pipeline import migrated_root
+from tests.support.publication_pipeline import publication_root
 from tests.support.app import create_app
 from tests.support.reader import HEADERS,wait_for
 from tests.support.presence import presence
@@ -14,7 +15,7 @@ from tests.support.v3 import TestClient
 
 
 def test_channel_text_is_ready_before_independent_native_media(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     class Client(Telegram):
         async def info(self,account,peer):
@@ -54,7 +55,7 @@ def test_channel_text_is_ready_before_independent_native_media(tmp_path):
 
 def test_native_media_flood_wait_blocks_only_its_account_and_survives_restart(tmp_path):
     from oko.collection.contracts import SourceError
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     tick,wall=[100.],[1_900_000_000.]
     calls=[]
     blocked=[False]
@@ -103,50 +104,13 @@ def test_native_media_flood_wait_blocks_only_its_account_and_survives_restart(tm
         assert len(client.get('/api/v3/cards').json())==2
 
 
-def test_offline_copy_migrates_proven_channel_latest_files_and_keeps_source(tmp_path):
-    from oko.storage.migration import migrate_publications
-    from tests.reader.test_publication_migration import snapshot
-    from tests.support.telegram import settled
-    class Client(Telegram):
-        async def info(self,account,peer):
-            return dict(peer=-1001234567890,username='fixture',title='Channel',kind='channel',forum=False)
-        async def page(self,account,peer,after,since):
-            return dict(messages=[dict(id=11,date=time.time()-60,text='Native latest',group=None,
-                media=dict(kind='image',extension='jpg',mime='image/jpeg'))],more=False,gap=None)
-        async def messages(self,account,peer,ids):
-            return (await self.page(account,peer,0,0))['messages']
-        async def download(self,*args):
-            return b'native-image'
-    source,destination=tmp_path/'legacy',tmp_path/'migration'
-    options=dict(token='test',api_only=True,telegram_client=Client())
-    with TestClient(create_app(source,**options),headers=HEADERS) as client:
-        presence(client,'reader')
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        result=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
-        assert result.status_code==200,result.text
-        item=settled(client)[0]['id']
-    before=snapshot(source)
-    report=migrate_publications(source,destination)
-    assert report['success'],report
-    assert snapshot(source)==before==snapshot(destination/'backup')
-    assert any(row['old_id']==item and row['platform']=='telegram' for row in report['publications'])
-    with sqlite3.connect(destination/'storage'/'state.sqlite') as db:
-        assert db.execute('SELECT platform,external_id FROM items WHERE id=?',(item,)).fetchone()==('telegram','https://t.me/fixture/11')
-    with TestClient(create_app(destination/'storage',**options),headers=HEADERS) as client:
-        value=client.get('/api/v3/materials/'+item).json()
-        assert value['content']['text']=='Native latest'
-        assert value['source_url']=='https://t.me/fixture/11'
-        assert client.get(value['content']['attachments'][0]['url']).content==b'native-image'
-        assert client.post('/api/v3/materials/'+item+'/retry').status_code==200
-        settled(client)
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Native latest'
 
 
 def test_explicit_web_to_client_switch_keeps_feed_and_publication(tmp_path):
     import httpx
     from tests.support.telegram_web import page
     from tests.support.telegram import configure,settled,configure_fast_web
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     class Client(Telegram):
         async def info(self,account,peer):
             return dict(peer=-1001234567890,username='fixture',title='Verified channel',kind='channel',forum=False)
@@ -177,7 +141,7 @@ def test_switch_rejects_late_native_file_and_keeps_new_web_content(tmp_path):
     import httpx
     from tests.support.telegram_web import page
     from tests.support.telegram import configure_fast_web
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release,cancelled=threading.Event(),threading.Event(),threading.Event()
     class Client(Telegram):
         async def info(self,account,peer):
@@ -220,7 +184,7 @@ def test_switch_rejects_late_native_file_and_keeps_new_web_content(tmp_path):
 
 def test_native_auto_read_waits_for_saved_file_and_manual_mode_waits_for_view(tmp_path):
     for automatic in (True,False):
-        root=migrated_root(tmp_path/str(automatic))
+        root=publication_root(tmp_path/str(automatic))
         started,release=threading.Event(),threading.Event()
         acknowledgements=[]
         class Client(Telegram):
@@ -265,7 +229,7 @@ def test_native_auto_read_waits_for_saved_file_and_manual_mode_waits_for_view(tm
 
 
 def test_changing_native_profile_does_not_reuse_other_accounts_read_frontier(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     acknowledgements=[]
     class Client(Telegram):
         async def identity(self,account):
@@ -295,30 +259,26 @@ def test_changing_native_profile_does_not_reuse_other_accounts_read_frontier(tmp
         assert acknowledgements==[('one',11),('two',11)]
 
 
-def test_group_keeps_legacy_collection_and_cannot_enter_channel_switch(tmp_path):
-    from tests.support.telegram import settled
-    root=migrated_root(tmp_path)
+@pytest.mark.parametrize('kind,forum', [('group',False),('group',True),('channel',True)])
+def test_group_cannot_be_connected_before_new_pagination(tmp_path,kind,forum):
+    root=publication_root(tmp_path)
     class Client(Telegram):
         async def info(self,*args):
-            return dict(peer=-1001234567890,username='fixture',title='Group',kind='group',forum=False)
+            return dict(peer=-1001234567890,username='fixture',title='Group',kind=kind,forum=forum)
     with TestClient(create_app(root,token='test',api_only=True,telegram_client=Client()),headers=HEADERS) as client:
         presence(client,'reader')
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
-        assert connected.status_code==200,connected.text
-        item=settled(client)[0]['id']
-        with sqlite3.connect(root/'state.sqlite') as db:
-            assert db.execute('SELECT platform FROM items WHERE id=?',(item,)).fetchone()[0] is None
-        changed=client.post('/api/v3/telegram/connect',json=dict(feed_id=connected.json()['feed_id'],source_locator='@fixture',folder='Keep',access={'kind':'web'}))
-        assert changed.status_code==409 and changed.json()['code']=='access_immutable'
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Текст канала'
+        assert connected.status_code==400,connected.text
+        assert connected.json()['code']=='source_connection_invalid'
+        assert connected.json()['details']['reason']=='unsupported_group'
+        assert client.get('/api/v3/subscriptions').json()['feeds']==[]
 
 
 def test_true_feed_id_conflict_refuses_switch_without_merging_or_overwriting(tmp_path):
     import httpx
     from tests.support.telegram_web import page
     from tests.support.telegram import configure_fast_web,settled
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     alias=['other']
     class Client(Telegram):
         async def info(self,account,peer):
@@ -344,7 +304,7 @@ def test_true_feed_id_conflict_refuses_switch_without_merging_or_overwriting(tmp
 
 
 def test_unsupported_native_media_keeps_text_and_reports_incompleteness(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     class Client(Telegram):
         async def page(self,*args):
             return dict(messages=[dict(id=11,date=time.time()-60,text='Readable native text',group=None,
@@ -364,7 +324,7 @@ def test_unsupported_native_media_keeps_text_and_reports_incompleteness(tmp_path
 
 
 def test_native_peer_proof_handles_known_rename_and_keeps_publication_after_restart(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     renamed=[False]
     class Client(Telegram):
         async def info(self,*args):
@@ -395,7 +355,7 @@ def test_native_peer_proof_handles_known_rename_and_keeps_publication_after_rest
 
 
 def test_native_album_growth_updates_same_publication_and_its_members(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     expanded=[False]
     class Client(Telegram):
         async def info(self,*args):
@@ -423,7 +383,7 @@ def test_native_album_growth_updates_same_publication_and_its_members(tmp_path):
 
 def test_native_media_change_refreshes_description_and_retries_same_file_after_backoff(tmp_path):
     from oko.collection.contracts import SourceError
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     tick,wall=[100.],[1_900_000_000.]
     calls=[]
     class Client(Telegram):
@@ -468,7 +428,7 @@ def test_native_media_change_refreshes_description_and_retries_same_file_after_b
 def test_native_account_wait_does_not_hold_separate_telegraph_articles(tmp_path):
     import httpx
     from oko.collection.contracts import SourceError
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     paused=threading.Event()
     calls=[]
     class Client(Telegram):
@@ -501,49 +461,10 @@ def test_native_account_wait_does_not_hold_separate_telegraph_articles(tmp_path)
         assert len(calls)==1
 
 
-def test_offline_native_migration_preserves_accepted_results_and_reprocesses_new_input(tmp_path):
-    from oko.storage.migration import migrate_publications
-    from tests.support.models import model_transport
-    text=['Latest native text']
-    requests=[]
-    class Client(Telegram):
-        async def info(self,*args):
-            return dict(peer=-1001234567890,username='fixture',title='Channel',kind='channel',forum=False)
-        async def page(self,*args):
-            return dict(messages=[dict(id=11,date=time.time()-60,text=text[0],group=None,media=None)],more=False,gap=None)
-        async def messages(self,*args):
-            return (await self.page())['messages']
-    source,destination=tmp_path/'legacy',tmp_path/'migration'
-    options=dict(token='test',api_only=True,telegram_client=Client(),ai_transport=model_transport(requests))
-    with TestClient(create_app(source,**options),headers=HEADERS) as client:
-        presence(client,'reader')
-        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
-        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
-        connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
-        assert connected.status_code==200,connected.text
-        card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result']),None))
-        item=card['id']
-        before=client.get('/api/v3/materials/'+item).json()['theses']['result']
-    count=sum(r.url.path=='/v1/chat/completions' for r in requests)
-    report=migrate_publications(source,destination)
-    assert report['success'] and any(row['old_id']==item and row['results']==['theses'] for row in report['publications'])
-    with TestClient(create_app(destination/'storage',**options),headers=HEADERS) as client:
-        current=client.get('/api/v3/materials/'+item).json()['theses']['result']
-        assert [p['text'] for p in current['points']]==[p['text'] for p in before['points']]
-        assert current['provenance']==before['provenance']
-        assert all(ref['material_id']==item and ref['source_url']=='https://t.me/fixture/11' for p in current['points'] for ref in p['references'])
-        assert sum(r.url.path=='/v1/chat/completions' for r in requests)==count
-        presence(client,'reader')
-        text[0]='Changed native input'
-        client.post('/api/v3/materials/'+item+'/retry')
-        wait_for(client,lambda:sum(r.url.path=='/v1/chat/completions' for r in requests)==count+1 and client.get('/api/v3/materials/'+item).json()['theses']['result'])
-        latest=next(r for r in reversed(requests) if r.url.path=='/v1/chat/completions')
-        task=json.loads(json.loads(latest.content)['messages'][1]['content'])
-        assert task['sources'][0]['text']=='Changed native input'
 
 
 def test_partial_native_album_reload_keeps_saved_content_until_members_return(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     partial=[False]
     class Client(Telegram):
         async def page(self,*args):
@@ -567,49 +488,12 @@ def test_partial_native_album_reload_keeps_saved_content_until_members_return(tm
         assert value['source']['message_ids']==['11','12']
 
 
-def test_native_migration_keeps_cached_telegraph_text_and_image_without_network(tmp_path):
-    import httpx
-    from oko.storage.migration import migrate_publications
-    from tests.support.youtube import PNG
-    from tests.support.telegram import settled
-    class Client(Telegram):
-        async def info(self,*args):
-            return dict(peer=-1001234567890,username='fixture',title='Channel',kind='channel',forum=False)
-        async def page(self,*args):
-            return dict(messages=[dict(id=11,date=time.time()-60,text='Own [Article](https://telegra.ph/LegacyNative)',group=None,media=None)],more=False,gap=None)
-        async def messages(self,*args):
-            return (await self.page())['messages']
-    def response(request):
-        if request.url.host=='files.example':
-            return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
-        assert request.url.host=='api.telegra.ph'
-        return httpx.Response(200,json={'ok':True,'result':{'title':'Cached article','content':[{'tag':'p','children':['Cached article body']},{'tag':'img','attrs':{'src':'https://files.example/cached.png'}}]}})
-    source,destination=tmp_path/'legacy',tmp_path/'migration'
-    with TestClient(create_app(source,token='test',api_only=True,telegram_client=Client(),rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
-        presence(client,'reader')
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
-        assert connected.status_code==200,connected.text
-        item=settled(client)[0]['id']
-        assert 'Cached article body' in client.get('/api/v3/materials/'+item).json()['content']['text']
-    report=migrate_publications(source,destination)
-    assert report['success'],report
-    def offline(request):
-        raise AssertionError('Reading the migrated cache must not fetch anything')
-    with TestClient(create_app(destination/'storage',token='test',api_only=True,rss_transport=httpx.MockTransport(offline)),headers=HEADERS) as client:
-        value=client.get('/api/v3/materials/'+item).json()
-        assert 'Cached article body' in value['content']['text']
-        attachment=value['content']['attachments'][0]
-        assert client.get(attachment['url']).content==PNG
-        with sqlite3.connect(destination/'storage'/'state.sqlite') as db:
-            article=db.execute("SELECT id FROM items WHERE platform='telegraph'").fetchone()[0]
-            assert db.execute('SELECT publication_id FROM media_files').fetchone()[0]==article
 
 
 def test_native_auto_read_waits_for_linked_article_image(tmp_path):
     import httpx
     from tests.support.youtube import PNG
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     acknowledgements=[]
     class Client(Telegram):

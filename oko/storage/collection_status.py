@@ -27,11 +27,11 @@ class CollectionStatus:
           DROP TRIGGER IF EXISTS collection_queued_insert;
           DROP TRIGGER IF EXISTS collection_queued_update;
           CREATE TRIGGER collection_queued_insert AFTER INSERT ON jobs
-          WHEN NEW.kind IN ('discover','fetch') BEGIN
+          WHEN NEW.kind IN ('discover','fetch','download_media') BEGIN
             UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
           END;
           CREATE TRIGGER collection_queued_update AFTER UPDATE OF status ON jobs
-          WHEN NEW.kind IN ('discover','fetch') AND NEW.status='pending' AND OLD.status!='pending' BEGIN
+          WHEN NEW.kind IN ('discover','fetch','download_media') AND NEW.status='pending' AND OLD.status!='pending' BEGIN
             UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
           END;
           CREATE TRIGGER IF NOT EXISTS collection_job_deleted AFTER DELETE ON jobs BEGIN
@@ -126,8 +126,9 @@ class CollectionStatus:
     def snapshot(self, feeds: list[dict[str, Any]], allowed: bool, reason: str, active: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
         now, wall = self.clock(), self.wall()
         jobs = self.db.execute("""SELECT j.*,CASE WHEN j.kind='discover' THEN CASE WHEN j.item='' THEN 'demo' ELSE j.item END ELSE i.feed_id END AS feed
-            FROM jobs j LEFT JOIN items i ON j.kind='fetch' AND i.id=j.item
-            WHERE j.kind IN ('discover','fetch') AND (i.viewed=0 OR j.kind='discover') AND (j.status!='done' OR j.error IS NOT NULL) AND coalesce(j.problem_code,'')!='source-deleted'""").fetchall()
+            FROM jobs j LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
+            LEFT JOIN items i ON (j.kind='fetch' AND i.id=j.item) OR (j.kind='download_media' AND i.id=m.publication_id)
+            WHERE j.kind IN ('discover','fetch','download_media') AND (i.viewed=0 OR j.kind='discover') AND (j.status IN ('pending','running','failed','unavailable') OR j.status='done' AND j.error IS NOT NULL) AND coalesce(j.problem_code,'')!='source-deleted'""").fetchall()
         groups: dict[str, list[dict[str, Any]]] = {}
         for job in jobs:
             data = self.read(job['id'])
@@ -136,12 +137,12 @@ class CollectionStatus:
                 continue
             collecting = bool(running and running['generation'] == job['generation'] and allowed)
             wait = job['status'] == 'pending' and (job['next'] > now or bool(job['error']))
-            state = 'collecting' if collecting else 'waiting' if wait else 'error' if job['status']=='done' and job['error'] else 'queued'
+            state = 'collecting' if collecting else 'waiting' if wait else 'error' if job['status'] in ('done','failed','unavailable') and job['error'] else 'queued'
             if not allowed and state != 'error':
                 state = 'paused'
-            stage = (running['stage'] if running else '') or ('Поиск публикаций' if job['kind']=='discover' else 'Загрузка содержимого')
+            stage = (running['stage'] if running else '') or ('Поиск публикаций' if job['kind']=='discover' else 'Загрузка вложения' if job['kind']=='download_media' else 'Загрузка содержимого')
             elapsed = running['elapsed_seconds'] if collecting and running else data.get('elapsed_seconds') if state in ('paused','error') else max(0.,wall-data['finished_at']) if state=='waiting' and data.get('finished_at') else max(0.,wall-job['queued_wall']) if state=='queued' and job['queued_wall'] is not None else None
-            groups.setdefault(job['feed'], []).append(dict(operation_id=f"{job['kind']}:{job['item']}", attempt_id=data.get('attempt_id'), kind=job['kind'],
+            groups.setdefault(job['feed'], []).append(dict(operation_id=f"{job['kind']}:{job['item']}", attempt_id=data.get('attempt_id'), kind='fetch' if job['kind']=='download_media' else job['kind'],
                 state=state, stage=stage, reason=redact(reason if state=='paused' else job['error'] or ''),
                 elapsed_seconds=elapsed, time_kind='attempt' if state in ('collecting','paused','error') else 'waiting' if state=='waiting' else 'queue',
                 queued_at=timestamp(job['queued_wall']), started_at=timestamp(data.get('started_at')), finished_at=timestamp(data.get('finished_at')),
@@ -155,9 +156,9 @@ class CollectionStatus:
             result_row = self.db.execute('SELECT data FROM collection_results WHERE feed=?', (feed['id'],)).fetchone()
             result = json.loads(result_row[0]) if result_row else {}
             if not result.get('success_at'):
-                legacy = self.db.execute('SELECT updated FROM feed_details WHERE feed=?', (feed['id'],)).fetchone()
-                if legacy and legacy[0] is not None:
-                    result['success_at'] = legacy[0]
+                details = self.db.execute('SELECT updated FROM feed_details WHERE feed=?', (feed['id'],)).fetchone()
+                if details and details[0] is not None:
+                    result['success_at'] = details[0]
             primary = operations[0] if operations else None
             state = primary['state'] if primary else 'complete' if result.get('success_at') else 'never'
             if feed['connection'] == 'deleting':

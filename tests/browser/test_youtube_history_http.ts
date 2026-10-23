@@ -4,7 +4,7 @@ import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader.ts';
 
-test('real HTTP settings load three YouTube materials and keep viewed IDs on a second selection', {timeout:45000}, async t=>{
+test('real HTTP settings load three YouTube materials and can rediscover a viewed publication on a second selection', {timeout:45000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await api('settings/oko/global','PATCH',{theses:false});
@@ -40,7 +40,7 @@ test('real HTTP settings load three YouTube materials and keep viewed IDs on a s
     const value=await history();
     return [value.state==='absent'?null:value.selection.mode==='count'?value.selection.count:null,value.state];
   }).toEqual(['2', 'complete']);
-  const finalHistory=await history();expect(finalHistory.state!=='absent'&&finalHistory.progress.viewed).toBe(1);
-  expect((await api('cards')).length).toBe(2);
+  const finalHistory=await history();expect(finalHistory.state!=='absent'&&finalHistory.progress.viewed).toBe(0);
+  expect((await api('cards')).length).toBe(3); // Retain the third card and rediscover the viewed one in the new window.
   expect(errors).toEqual([]);
 });

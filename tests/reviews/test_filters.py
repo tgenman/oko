@@ -1,4 +1,4 @@
-from oko.collection.contracts import FetchResult, FetchResources
+from oko.collection.contracts import FetchResult
 from tests.support.presence import presence, close_presence
 from tests.support.filters import FilterSource, transport, setup_filters
 import json
@@ -30,10 +30,10 @@ def test_hidden_ads_and_clean_view_preserve_original_and_restore_same_version(tm
         client.patch('/api/v3/settings/oko/global', json={'prompt_filters': 'Ещё раз убирай рекламу.'})
         wait_for(client, lambda: all(c['filter']['attempt']['state'] == 'ready' for c in client.get('/api/v3/cards').json()))
         assert len(client.get('/api/v3/cards').json()) == 2
-        assert not client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
+        assert 'restored' not in client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert len(client.get('/api/v3/cards').json()) == 2
-        assert not client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
+        assert 'restored' not in client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']
         client.post('/api/v3/materials/' + hidden['id'] + '/viewed')
         assert client.get('/api/v3/materials/' + hidden['id']).status_code == 404
         assert not (tmp_path / 'content' / hidden['id']).exists()
@@ -108,91 +108,10 @@ def test_filter_delete_and_stop_reject_cancel_resistant_late_reply(tmp_path):
         assert len(client.get('/api/v3/cards?show_hidden=true').json()) == 2
 
 
-def test_filter_missing_file_retries_without_losing_user_correction(tmp_path):
-    calls = []
-    options = dict(source=FilterSource(), token='test', ai_transport=transport(calls))
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        setup_filters(client)
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c) else None))
-        item = next(c['id'] for c in cards if c['filter']['result']['hidden'])
-        client.post('/api/v3/materials/' + item + '/filter/restore')
-    (tmp_path / 'content' / item / '1' / 'filter.md').unlink()
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        presence(client, 'reader')
-        result = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['filter']['attempt']['state'] == 'ready' else None))
-        assert not result['filter']['result']['restored']
-        assert result['filter']['result']['hidden']
-        assert len(client.get('/api/v3/cards').json()) == 2
 
 
-def test_restore_applies_only_to_original_version_and_media_survive_filter(tmp_path):
-    from oko.collection.contracts import Attachment
-    class ChangingSource(FilterSource):
-        revision = False
-        async def fetch(self, publication, resources=FetchResources()):
-            result = (await super().fetch(publication, resources)).material
-            return FetchResult(Material(result.title, result.text + (' Новая версия.' if self.revision else ''), attachments=(Attachment('media-0.txt', b'attachment', 'file', 'text/plain'),)))
-    source = ChangingSource()
-    with TestClient(create_app(tmp_path, source=source, token='test', ai_transport=transport([])), headers=HEADERS) as client:
-        setup_filters(client)
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c) else None))
-        hidden = next(c for c in cards if c['filter']['result']['hidden'])
-        item = hidden['id']
-        assert client.get(hidden['attachments'][0]['url']).content == b'attachment'
-        client.post('/api/v3/materials/' + item + '/filter/restore')
-        source.revision = True
-        client.post('/api/v3/materials/' + item + '/retry')
-        result = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['content']['version'] != hidden['version'] and m['filter']['attempt']['state'] == 'ready' else None))
-        assert result['filter']['result']['hidden']
-        assert not result['filter']['result']['restored']
-        client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get(hidden['attachments'][0]['url']).status_code == 404
 
 
-def test_process_death_after_filter_move_does_not_publish_orphan(tmp_path):
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from tests.support.processes import launch, connect, wait_cards, cleanup
-
-    class ModelServer(BaseHTTPRequestHandler):
-        def log_message(self, *args):
-            pass
-        def answer(self, body):
-            data = json.dumps(body).encode()
-            self.send_response(200)
-            self.send_header('Content-Length', str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        def do_GET(self):
-            self.answer({'data': [{'id': 'local:latest', 'owned_by': 'llamacpp', 'meta': {'size': 100}}]} if self.path == '/v1/models' else {'model_path': '/models/local.gguf', 'build_info': 'b-test'})
-        def do_POST(self):
-            self.rfile.read(int(self.headers['Content-Length']))
-            self.answer({'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(dict(hidden=True, reason='Скрыто по правилу пользователя', removed=[]))}}]})
-    server = ThreadingHTTPServer(('127.0.0.1', 0), ModelServer)
-    worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
-    worker.start()
-    process = launch(tmp_path, 'after_filter_move', model_origin=f'http://127.0.0.1:{server.server_port}')
-    try:
-        with connect(tmp_path, process) as client:
-            presence(client, 'a')
-            item = wait_cards(client, 3)[0]['id']
-            client.put('/api/v3/processors/llamacpp', json={'endpoint': f'http://127.0.0.1:{server.server_port}', 'model': 'local:latest', 'local_execution': True})
-            client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'prompt_filters': 'Скрыть тестовые публикации.'})
-        assert process.wait(timeout=5) == 79
-        process = launch(tmp_path, model_origin=f'http://127.0.0.1:{server.server_port}')
-        with connect(tmp_path, process) as client:
-            assert len(client.get('/api/v3/cards').json()) == 3
-            assert client.get('/api/v3/materials/' + item).json()['filter']['attempt']['state'] == 'queued'
-            presence(client, 'a')
-            wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 0)
-            assert len(client.get('/api/v3/cards?show_hidden=true').json()) == 3
-            client.post('/api/v3/materials/' + item + '/viewed')
-            assert not (tmp_path / 'content' / item).exists()
-    finally:
-        cleanup(process)
-        server.shutdown()
-        server.server_close()
-        worker.join(2)
 
 
 def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):

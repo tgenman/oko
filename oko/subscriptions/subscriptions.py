@@ -119,27 +119,11 @@ class Subscriptions:
           id TEXT PRIMARY KEY, identity TEXT UNIQUE, title TEXT, kind TEXT, folder_id TEXT,
           original_urls TEXT, connection TEXT, transport TEXT,
           importance TEXT DEFAULT 'normal', initial_days INTEGER DEFAULT 1,
-          public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER);
+          public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER,
+          telegram_peer INTEGER,telegram_account TEXT,telegram_username TEXT);
         CREATE TABLE IF NOT EXISTS settings (scope TEXT, owner TEXT, field TEXT, value TEXT,
           PRIMARY KEY(scope,owner,field));
         ''')
-
-        with db:
-            db.execute('BEGIN IMMEDIATE')
-            columns = {row['name'] for row in db.execute('PRAGMA table_info(feeds)')}
-            for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT'), ('telegram_topic', 'INTEGER')]:
-                if column not in columns:
-                    db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
-            if 'telegram_username' not in columns:
-                # Infer only while upgrading legacy storage. A new connection's
-                # explicit absence of a public username must remain authoritative.
-                for row in db.execute("SELECT * FROM feeds WHERE kind='telegram' AND telegram_peer IS NOT NULL").fetchall():
-                    candidates = ([row['identity'].removeprefix('telegram:')]
-                                  if row['identity'].startswith('telegram:') else []) + json.loads(row['original_urls'])
-                    username = next((name.lstrip('@') for name in candidates
-                                     if re.fullmatch(r'@?[a-zA-Z][a-zA-Z0-9_]{3,31}', name)), None)
-                    db.execute('UPDATE feeds SET telegram_username=? WHERE id=?', (username, row['id']))
-                fault('before_telegram_username_commit')
 
         self.details = FeedDetails(db, wall_clock)
         self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
@@ -259,20 +243,6 @@ class Subscriptions:
             if not profile or profile['state'] != 'ready':
                 feed['connection'] = 'unavailable'
         feed['initial_history'] = self.history.status(feed['id'])
-        if feed['initial_history'] is None:
-            namespace = 'telegram:' if feed['transport'] == 'telegram' else ''
-            saved = self.db.execute('SELECT value FROM state WHERE key=?', ('cursor:' + namespace + feed['id'],)).fetchone()
-            try:
-                cursor = json.loads(saved['value']) if saved else {}
-            except json.JSONDecodeError:
-                cursor = {}  # Adapters may own opaque, non-JSON cursors.
-            if feed['transport']=='telegram' and saved:
-                try:
-                    feed['legacy_since'] = HistoryEnvelope.decode(saved['value'],adapter='client').selection.since
-                except SourceError:
-                    feed['legacy_since'] = None
-            else:
-                feed['legacy_since'] = cursor.get('since') if isinstance(cursor,dict) else None
         for field in ('public_ai', 'read_history', 'auto_read'):
             feed[field] = None if feed[field] is None else bool(feed[field])
         return feed
@@ -285,7 +255,7 @@ class Subscriptions:
         if old:
             return old
         title = body.title or urlsplit(body.url).hostname or 'RSS'
-        identity_id = self.new_feed_id(key(identity))
+        identity_id = self.new_feed_id()
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             folder = self.ensure_folder(body.folder)
@@ -296,8 +266,8 @@ class Subscriptions:
             self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
 
-    def new_feed_id(self, legacy_id: str) -> str:
-        return str(uuid4()) if self.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone() else legacy_id
+    def new_feed_id(self) -> str:
+        return str(uuid4())
 
     def existing_feed(self, url: str) -> dict[str, Any] | None:
         identity, _, _ = identify(url)

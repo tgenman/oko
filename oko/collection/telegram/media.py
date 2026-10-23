@@ -20,7 +20,7 @@ from oko.collection import request_observation as observation
 from oko.collection.adapters import MediaReference
 from oko.diagnostics import redact
 
-from oko.collection.contracts import DownloadStage, SourceError, SourceDeferred, StagedPayload, Attachment, Material, ResourceManifest
+from oko.collection.contracts import SourceError, SourceDeferred, Material, ResourceManifest
 
 from oko.collection.telegram.contracts import ExpectedMedia
 
@@ -93,12 +93,6 @@ class PublicTransport(httpx.AsyncBaseTransport):
         await self.pool.aclose()
 
 
-@dataclass(frozen=True)
-class CollectedMedia:
-    attachments: tuple[Attachment, ...]
-    resources: tuple[ResourceManifest, ...]
-    reasons: tuple[str, ...]
-    error: SourceError | None
 
 
 class Downloader:
@@ -131,6 +125,7 @@ class Downloader:
             elif isinstance(error, (httpcore.TimeoutException, httpx.TimeoutException, TimeoutError)):
                 label = 'Не удалось загрузить вложение: истекло время ожидания'
             if isinstance(error,httpx.HTTPStatusError):
+                label += f': HTTP {error.response.status_code}'
                 if error.response.status_code == 429:
                     value = error.response.headers.get('retry-after','60')
                     delay = max(1,min(86400,int(value))) if value.isdecimal() else 60
@@ -186,75 +181,3 @@ class Downloader:
         if not size and not allow_empty:
             raise SourceError('Пустое вложение')
         return size, digest.hexdigest()
-
-
-    async def download(self, url: str, stage: DownloadStage, name: str) -> StagedPayload:
-        if not stage.admitted():
-            raise asyncio.CancelledError
-        if not re.fullmatch(r'media-[0-9]+\.[a-z0-9]+',name):
-            raise ValueError('media file basename')
-        target = stage.path/('incoming-'+name)
-        try:
-            async with asyncio.timeout(180):
-                with target.open('wb') as output:
-                    size, digest = await self.write(url, output, stage.admitted)
-                return StagedPayload(target, size, digest)
-        except BaseException as error:
-            target.unlink(missing_ok=True)
-            if isinstance(error,TimeoutError):
-                raise SourceError('Истекло время загрузки вложения',code='media-unavailable') from error
-            raise
-
-    async def collect(self, expected: tuple[ExpectedMedia, ...], templates: tuple[ResourceManifest, ...],
-                      previous: Material | None, stage: DownloadStage | None) -> CollectedMedia:
-        old_resources = {r.key:r for r in previous.source_manifest.resources} if previous and previous.source_manifest else {}
-        old_attachments = {a.name:a for a in previous.attachments} if previous else {}
-        attachments: list[Attachment] = []
-        resources: list[ResourceManifest] = []
-        reasons: list[str] = []
-        retry = None
-        terminal = ('media-unsupported','media-address','media-not-found','media-not-file','metadata-limit')
-        for media,resource in zip(expected,templates):
-            old = old_resources.get(resource.key)
-            name = old.name if old else resource.name
-            resource = resource.model_copy(update={'name':name,'source_url':redact(media.url) if media.url else None})
-            retained = old_attachments.get(name)
-            if media.external and not media.url:
-                if old and old.status=='loaded' and retained is None:
-                    raise SourceError('Локальный файл вложения недоступен',code='media-unavailable')
-                if retained and old and old.status=='loaded':
-                    attachments.append(retained)
-                    resource = resource.model_copy(update={'status':'loaded','sha256':old.sha256,'external':None,'reason':''})
-                else:
-                    resource = resource.model_copy(update={'status':'external','external':media.external})
-                resources.append(resource)
-                continue
-            try:
-                if not media.url:
-                    raise SourceError(media.reason or 'Вложение недоступно',code='media-unsupported',retryable=False)
-                if stage is None:
-                    raise ValueError('Media requires an owned download stage')
-                payload = await self.download(media.url,stage,name)
-                attachments.append(Attachment(name,payload,resource.kind,resource.mime))
-                resource = resource.model_copy(update={'status':'loaded','reason':'','sha256':payload.sha256})
-            except SourceError as error:
-                if isinstance(error, SourceDeferred):
-                    if retry is not None and not retry.retryable:
-                        raise retry
-                    raise
-                reason = error.label
-                if isinstance(error.__cause__, httpx.HTTPStatusError):
-                    status = error.__cause__.response.status_code
-                    reason += f': HTTP {status}'
-                    if status == 403:
-                        reason += ' — доступ запрещён'
-                if retained and old:
-                    attachments.append(retained)
-                    resource = resource.model_copy(update={'status':'loaded','sha256':old.sha256,'reason':reason})
-                else:
-                    resource = resource.model_copy(update={'status':'unsupported' if isinstance(error,MediaLimit) or error.code in terminal else 'missing','reason':reason})
-                    reasons.append(error.label)
-                if retry is None or not error.retryable:
-                    retry = error
-            resources.append(resource)
-        return CollectedMedia(tuple(attachments),tuple(resources),tuple(reasons),retry)

@@ -37,7 +37,7 @@ def test_material_and_stopped_status_preserve_wire_fields(tmp_path):
         assert CONTRACTS['material'].dump_python(CONTRACTS['material'].validate_python(body), mode='json', by_alias=True, exclude_unset=True) == body
         assert body['theses']['attempt']['state'] == 'disabled'
         assert body['theses']['result'] is None
-        assert body['content']['previous_versions'] == []
+        assert 'previous_versions' not in body['content']
         status = client.get('/api/v3/status').json()
         assert CONTRACTS['status'].dump_python(CONTRACTS['status'].validate_python(status), mode='json', by_alias=True, exclude_unset=True) == status
         assert status['runtime_state'] == 'running'

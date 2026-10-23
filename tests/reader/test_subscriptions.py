@@ -1,6 +1,6 @@
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 from pathlib import Path
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -11,7 +11,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 
 
 def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: Path):
-    saved_sources(tmp_path, [('https://t.me/example_channel','Saved','3 Политика')])
+    configured_sources(tmp_path, [('https://source.test/example-feed','Saved','3 Политика')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         feed = client.get('/api/v3/subscriptions').json()['feeds'][0]
         folder = feed['folder_id']
@@ -29,7 +29,7 @@ def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: P
         assert reset['overrides'] == {'prompt_filters': 'Без рекламы'}
         patch = {'importance':'high','initial_days':7,'public_ai':True}
         assert client.patch('/api/v3/feeds/' + feed['id'], json=patch).status_code == 200
-        assert client.patch('/api/v3/feeds/' + feed['id'], json={'transport':'telegram'}).status_code == 409
+        assert client.patch('/api/v3/feeds/' + feed['id'], json={'transport':'telegram'}).status_code == 400
         assert client.patch(url, json={'importance': 'high'}).status_code == 422
         assert client.patch(url, json={'theses': 'yes'}).status_code == 422
         assert client.patch(url, json={'originals': 'wrong'}).status_code == 422
@@ -48,7 +48,6 @@ def test_folders_and_sorting_use_feed_importance_not_folder_prefix(tmp_path: Pat
     from oko.collection.contracts import Publication, Material
 
     class Sample:
-        fetch_requirements = FetchRequirements()
         changes = None
         def __init__(self, item, published):
             self.item, self.published = item, published
@@ -56,10 +55,10 @@ def test_folders_and_sorting_use_feed_importance_not_folder_prefix(tmp_path: Pat
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication(self.item, 'https://example.org/' + self.item, self.published)]), 'done')
 
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material(self.item, 'Текст'))
 
-    saved_sources(tmp_path, [('https://example.org/a.xml', 'A', '9 Второй'), ('https://example.org/b.xml', 'B', '1 Первый')])
+    configured_sources(tmp_path, [('https://example.org/a.xml', 'A', '9 Второй'), ('https://example.org/b.xml', 'B', '1 Первый')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         feeds = client.get('/api/v3/subscriptions').json()['feeds']
         a, b = feeds
@@ -96,15 +95,14 @@ def test_same_url_in_two_feeds_remains_in_each_folder_after_viewing_one(tmp_path
     from oko.collection.contracts import Publication, Material
 
     class SharedArticle:
-        fetch_requirements = FetchRequirements()
         changes = None
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication('same', 'https://example.org/shared', 100)]), 'done')
 
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material('Общая статья', 'Текст статьи'))
 
-    saved_sources(tmp_path, [('https://example.org/a', 'Источник', 'A'), ('https://example.org/b', 'Источник', 'B')])
+    configured_sources(tmp_path, [('https://example.org/a', 'Источник', 'A'), ('https://example.org/b', 'Источник', 'B')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         feeds = client.get('/api/v3/subscriptions').json()['feeds']
     for feed in feeds:
@@ -118,64 +116,23 @@ def test_same_url_in_two_feeds_remains_in_each_folder_after_viewing_one(tmp_path
             assert len(cards) == 1 and (cards[0]['availability'] == 'available')
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         cards = client.get('/api/v3/cards').json()
-        assert len(cards) == 2
-        first = next(c for c in cards if c['feed_id'] == feeds[0]['id'])
+        assert len(cards) == 1
+        first = cards[0]
         client.post('/api/v3/materials/' + first['id'] + '/viewed')
         remaining = client.get('/api/v3/cards').json()
-        assert len(remaining) == 1 and remaining[0]['feed_id'] == feeds[1]['id']
+        assert remaining == []
     with TestClient(create_app(tmp_path, source=SharedArticle(), source_feed=feeds[0]['id'], token='test-token'), headers=HEADERS) as client:
         presence(client, 'test')
         time.sleep(.1)
         assert len(client.get('/api/v3/cards').json()) == 1
 
 
-def test_upgrade_preserves_old_reader_and_pending_deletion(tmp_path: Path):
-    import hashlib
-    import json
-    import sqlite3
-    import time
-    from oko.collection.demo import DemoSource
-
-    first = hashlib.sha256(b'demo:1').hexdigest()[:32]
-    second = hashlib.sha256(b'demo:2').hexdigest()[:32]
-    # Storage is an agreed system boundary: this is an input from release 01,
-    # not a query into the implementation under test.
-    with sqlite3.connect(tmp_path / 'state.sqlite') as db:
-        db.executescript('''CREATE TABLE items (id TEXT PRIMARY KEY, source_id TEXT UNIQUE,
-        url TEXT UNIQUE,published REAL,viewed INTEGER DEFAULT 0,complete INTEGER DEFAULT 0);
-        CREATE TABLE jobs (id INTEGER PRIMARY KEY,kind TEXT,item TEXT DEFAULT '',
-        status TEXT DEFAULT 'pending',attempt INTEGER DEFAULT 0,next REAL DEFAULT 0,
-        generation INTEGER DEFAULT 0,error TEXT,UNIQUE(kind,item));
-        CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT);''')
-        db.execute('INSERT INTO items VALUES (?,?,?,100,0,1)', (first, '1', 'https://example.org/oko/1'))
-        db.execute('INSERT INTO items VALUES (?,?,?,NULL,1,0)', (second, '2', 'https://example.org/oko/2'))
-        db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?)", (second,))
-        db.execute("INSERT INTO state VALUES ('cursor','3')")
-    for item in (first, second):
-        path = tmp_path / 'content' / item / '1'
-        path.mkdir(parents=True)
-        (path / 'original.md').write_text(json.dumps({'title': 'Сохранённый материал'}) + '\n\nИсходный текст')
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token'), headers=HEADERS) as client:
-        cards = client.get('/api/v3/cards').json()
-        assert len(cards) == 1 and cards[0]['id'] == first
-        assert client.get('/api/v3/materials/' + first).json()['content']['text'] == 'Исходный текст'
-        assert client.get('/api/v3/materials/' + second).status_code == 404
-        assert client.get('/api/v3/status').json()['work']==[{'phase':'waiting','reason':'client_presence_required','retry_at':None}]
-        presence(client, 'test')
-        for _ in range(100):
-            if not any(w['phase']=='deleting' for w in client.get('/api/v3/status').json()['work']):
-                break
-            time.sleep(.02)
-        assert not (tmp_path / 'content' / second).exists()
-    with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
-        assert client.get('/api/v3/materials/' + first).json()['content']['text'] == 'Исходный текст'
-        assert client.get('/api/v3/materials/' + second).status_code == 404
 
 
 
 
 def test_theses_default_is_youtube_only_and_explicit_override_can_be_reset(tmp_path: Path):
-    saved_sources(tmp_path, [('https://source.test/feed', 'RSS', 'Папка'), ('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa', 'YouTube', 'Папка'), ('https://t.me/example_channel', 'Telegram', 'Папка')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'RSS', 'Папка'), ('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa', 'YouTube', 'Папка'), ('https://source.test/example-feed', 'Telegram', 'Папка')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         result = client.get('/api/v3/subscriptions')
         assert result.status_code == 200

@@ -38,7 +38,7 @@ def username(feed: ExternalReference) -> str:
 
 
 def publication_reference(url: str) -> ExternalReference:
-    """Resolve legacy public links without inventing a Telegram numeric peer ID."""
+    """Resolve public links without inventing a Telegram numeric peer ID."""
     parsed = urlsplit(url)
     name = username(reference(url))
     message = parsed.path.rstrip('/').rsplit('/', 1)[-1]
@@ -79,24 +79,6 @@ def decode(cursor: str) -> dict[str, Any]:
             'Несовместимый курсор Telegram', AdapterErrorKind.permanent)) from None
 
 
-def legacy_cursor(cursor: str, selection: dict[str,Any]) -> str:
-    """Translate a stopped old reader boundary without changing its selection."""
-    if not cursor:
-        return ''
-    from oko.collection.telegram.contracts import HistoryEnvelope
-    previous=HistoryEnvelope.decode(cursor,adapter='web')
-    if 'adapter_cursor' in previous.position:
-        return cursor
-    position=previous.position
-    after=position.get('after',0)
-    upper=position.get('upper',after) or after
-    if type(after) is not int or type(upper) is not int or after<0 or upper<0:
-        raise ValueError('Invalid legacy Telegram web boundary')
-    complete=previous.selection.scan_complete or bool(selection.get('cancelled'))
-    bound=max(after,upper)
-    token=encode(bound+1,bound,done=True) if complete else encode(upper,upper)
-    return previous.model_copy(update={'position':dict(adapter_cursor=token,run=selection.get('run','initial'),
-        locating=not complete,observed_after=after)}).encode()
 
 
 def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> PublicationContent:
@@ -127,7 +109,7 @@ def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> 
         dict(blocks=blocks, extra=dict(telegram=dict(members=list(publication.members),
             description=teaser.description, manifest=teaser.source_manifest.model_dump(mode='json')))),
         tuple(media), linked_publications=tuple(_article_reference(url) for url in direct_articles(post.text)) if linked_descriptions and teaser.source_manifest.preview_fragment is None else (),
-        needs_fetch=bool(teaser.source_manifest.post_web_unavailable and post.text.strip()), issues=tuple(issues))
+        needs_fetch=bool(issues or teaser.source_manifest.post_web_unavailable and post.text.strip()), issues=tuple(issues))
 
 
 def _article_reference(url: str) -> ExternalReference:
@@ -245,7 +227,7 @@ class TelegramWebAdapter:
         if value.needs_fetch and post.publication.teaser and post.publication.teaser.source_manifest and post.publication.teaser.source_manifest.post_web_unavailable:
             from oko.collection.telegram.preview import fragment
             try:
-                preview, preview_error = await fragment(name, post.publication.id, self.transport, None)
+                preview, preview_error = await fragment(name, post.publication.id, self.transport)
             except SourceError as source_error:
                 raise failure(source_error, publication) from source_error
             manifest = value.content['extra']['telegram']['manifest']
@@ -253,7 +235,7 @@ class TelegramWebAdapter:
             if preview:
                 value.content['blocks'].append(dict(type='text', role='body', text=preview))
             value = replace(value, needs_fetch=False)
-        return value
+        return replace(value,needs_fetch=False)
 
     async def download_media(self, publication: ExternalReference, media: MediaReference,
                              output: BinaryIO) -> MediaReference:

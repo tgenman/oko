@@ -41,13 +41,13 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
         async def discover(self,cursor):
             self.cursors.append(cursor)
             return DiscoveryResult(tuple(Publication(str(i),'https://fixture.test/'+str(i),1800000000) for i in range(1,3)) if cursor is None else (), '2')
-        async def fetch(self,publication,resources=None):
+        async def fetch(self,publication):
             self.calls[publication.id]+=1
             if publication.id=='2' and self.calls['2']>2:
                 raise SourceError('Still unavailable',delay=.03)
             if publication.id=='2' and self.calls['2']>1:
                 raise SourceDeleted()
-            return FetchResult(Material('Item '+publication.id,'Saved copy',full=False))
+            return FetchResult(Material('Item '+publication.id,'Saved copy',full=False,reason='Incomplete source'))
     source=Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
@@ -96,22 +96,6 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
         assert model.calls[-1]==old[0]
 
 
-def test_manual_history_pause_is_rejected_and_old_pause_is_removed_on_restart(tmp_path):
-    from tests.support.subscriptions import saved_sources
-    from oko.storage.store import Store
-    from oko.subscriptions.history import InitialHistory
-    saved_sources(tmp_path,[('https://source.test/feed','Fixture','Folder')])
-    store=Store(tmp_path,lambda _:None)
-    feed=store.subscriptions.feeds()[0]['id']
-    with store.db:
-        store.subscriptions.history.configure(feed,InitialHistory(mode='count',count=2))
-        store.db.execute('UPDATE initial_history SET paused=1 WHERE feed=?',(feed,))
-    store.db.close()
-    def reply(request):
-        return httpx.Response(200,text='<rss><channel><title>Fixture</title></channel></rss>')
-    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(reply)),headers=HEADERS) as client:
-        wait_for(client,lambda:client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']['state']=='complete')
-        assert client.patch('/api/v3/feeds/'+feed+'/history',json={'paused':True}).status_code==409
 
 
 def test_refresh_does_not_cancel_or_duplicate_running_collection(tmp_path):
@@ -150,7 +134,7 @@ def test_refresh_restores_previously_unavailable_publication(tmp_path):
     from oko.collection.contracts import SourceDeleted
     class Source(DemoSource):
         unavailable=False
-        async def fetch(self,publication,resources=None):
+        async def fetch(self,publication):
             if self.unavailable:
                 raise SourceDeleted()
             return await super().fetch(publication)
@@ -176,10 +160,16 @@ def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path
         calls=Counter()
         async def discover(self,cursor):
             return DiscoveryResult(tuple(Publication(str(i),'https://fixture.test/'+str(i),1800000000) for i in (1,2)) if cursor is None else (), '2')
-        async def fetch(self,p,resources=None):
+        async def fetch(self,p):
             self.calls[p.id]+=1
             if self.calls[p.id]==1:
-                raise SourceError('Wait for source' if p.id=='1' else 'Network error',delay=30,code='fetch:FloodWaitError' if p.id=='1' else 'source-unavailable')
+                error=SourceError('Wait for source' if p.id=='1' else 'Network error',delay=30,code='source-unavailable')
+                if p.id=='1':
+                    from oko.collection.adapters import AdapterIssue,AdapterErrorKind
+                    from datetime import datetime,timezone,timedelta
+                    error.adapter_issue=AdapterIssue('source-wait',error.label,AdapterErrorKind.source_wait,
+                        scope='fixture:source',retry_at=datetime.now(timezone.utc)+timedelta(seconds=30))
+                raise error
             return await super().fetch(p)
     clock,source=Clock(),Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS) as client:
@@ -190,7 +180,7 @@ def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path
         assert source.calls['1']==1
         status=client.get('/api/v3/status').json()
         assert any(w['phase']=='waiting' and w['retry_at'] for w in status['work'])
-        clock.now+=31
+        clock.now+=61
         wait_for(client,lambda:source.calls['1']==2)
 
 
@@ -205,7 +195,7 @@ def test_automatic_discovery_does_not_repeat_terminally_unavailable_material(tmp
         async def discover(self,cursor):
             self.discoveries+=1
             return DiscoveryResult((Publication('1','https://fixture.test/one',1800000000),),'1')
-        async def fetch(self,p,resources=None):
+        async def fetch(self,p):
             self.calls+=1
             raise SourceDeleted()
     clock,source=Clock(),Source()
@@ -246,60 +236,3 @@ def test_refresh_retries_failed_filter_without_repeating_successful_filters(tmp_
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:all(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state']=='ready' for c in cards))
         assert len(model.calls)==len(old)+1 and model.calls[-1]==old[0]
-
-
-@pytest.mark.parametrize('wait_outcome', ['partial', 'exception'])
-@pytest.mark.parametrize('failure_outcome', ['partial', 'exception'])
-@pytest.mark.parametrize('restart', [False, True])
-def test_one_attempt_survives_forced_source_wait(tmp_path, wait_outcome, failure_outcome, restart):
-    import time
-    from oko.collection.demo import DemoSource
-    from oko.collection.contracts import DiscoveryResult, Publication, SourceDeleted, SourceError, FetchResult, Material
-    from tests.support.reader import Clock
-    class Source(DemoSource):
-        calls=0
-        async def discover(self,cursor):
-            return DiscoveryResult((Publication('1','https://fixture.test/one',1800000000),) if cursor is None else (), '1')
-        async def fetch(self,p,resources=None):
-            self.calls+=1
-            if self.calls==1:
-                return FetchResult(Material('Saved','Old text',full=False))
-            if self.calls==2:
-                raise SourceDeleted()
-            if self.calls==3:
-                error=SourceError('Forced wait',delay=30,code='fetch:FloodWaitError')
-                error.remote_type='FloodWaitError'
-                if wait_outcome=='exception':
-                    raise error
-                return FetchResult(Material('Saved','Old text',full=False,collection_error=error))
-            error=SourceError('Still unavailable',delay=.03)
-            if failure_outcome=='exception':
-                raise error
-            return FetchResult(Material('Saved','Old text',full=False,collection_error=error))
-    clock,source=Clock(),Source()
-    def reader():
-        return TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS)
-    def finish_attempt(client):
-        wait_for(client,lambda:source.calls==4)
-        wait_for(client,lambda:any(p['message']=='Still unavailable' for p in client.get('/api/v3/status').json()['problems']['current']))
-        clock.now+=1
-        time.sleep(.12)
-        assert source.calls==4
-        item=client.get('/api/v3/cards').json()[0]['id']
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Old text'
-    with reader() as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        wait_for(client,lambda:len(client.get('/api/v3/cards').json())==1 and client.get('/api/v3/cards').json()[0]['availability']=='available')
-        client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'})
-        wait_for(client,lambda:any('удалена' in p['message'] for p in client.get('/api/v3/status').json()['problems']['current']))
-        client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'})
-        wait_for(client,lambda:any(p['message']=='Forced wait' for p in client.get('/api/v3/status').json()['problems']['current']))
-        assert source.calls==3
-        if not restart:
-            clock.now+=31
-            finish_attempt(client)
-    if restart:
-        assert source.calls==3
-        clock.now+=31
-        with reader() as client:
-            finish_attempt(client)

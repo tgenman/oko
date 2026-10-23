@@ -14,10 +14,10 @@ def import_feed(client, url='https://source.test/feed'):
     return add_source(client, url, 'Источник', 'Новости')
 
 
-def wait_cards(client, count=1):
+def wait_cards(client, count=1, *, idle=True):
     for _ in range(200):
         cards = client.get('/api/v3/cards').json()
-        if len(cards) == count and all((c['availability'] == 'available') and not c.get('loading') for c in cards):
+        if len(cards) == count and all((c['availability'] == 'available') and not c.get('loading') for c in cards) and (not idle or not any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work'])):
             return cards
         time.sleep(.02)
     raise AssertionError(client.get('/api/v3/status').json())

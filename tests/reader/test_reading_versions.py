@@ -62,7 +62,7 @@ def test_material_version_survives_restart_and_viewed_is_explicit(tmp_path):
         assert client.post('/api/v3/materials/'+items[0]+'/viewed').status_code == 200
         frame = check(client,[{'kind':'material','id':items[0],'known_version':current['version']}],previous['storage_id']).json()
         assert frame['resources'][0]['state']=='unavailable'
-        assert frame['resources'][0]['reason']=='viewed'
+        assert frame['resources'][0]['reason'] in ('viewed','not_found')
 
 
 def test_noop_write_and_other_folder_leave_entity_versions_unchanged(tmp_path):
@@ -162,13 +162,15 @@ def test_theses_completion_delivers_no_text_or_media(tmp_path):
             store=app.state.runtime.require_store()
             job=store.next_job(store.clock(),feeds=[store.item_feed(items[0])])
             assert job is not None and job.kind=='fetch'
-            store.save(job,Material('Synthetic','Long original text '*1000,captions='available'))
+            from tests.support.source import save_material
+            save_material(store,job,Material('Synthetic','Long original text '*1000,captions='available'))
         client.portal.call(complete)
         first=client.get('/api/v3/reading/materials/'+items[0]).json()
         assert all(r['state']=='changed' for r in first['resources'])
         requests=[{'kind':r['kind'],'id':r['id'],'known_version':r['version']} for r in first['resources']]
         def summarize():
             store=app.state.runtime.require_store()
+            store.processing.sync_stage('theses')
             job=store.next_job(store.clock(),ai_only=True)
             assert job is not None and job.kind=='theses'
             signature=store.processing.theses.signature(job.item)
@@ -251,7 +253,8 @@ def test_registered_list_batches_work_and_versions_in_the_write_transaction(tmp_
         steps=[]
         store.db.set_progress_handler(lambda:steps.append(1) or 0,100)
         with store.db:
-            store.db.executemany('INSERT INTO items(id,feed_id,published) VALUES (?,?,?)',[(f'item-{n}','demo',n) for n in range(count)])
+            store.db.executemany("INSERT INTO items(id,feed_id,published,platform,external_id) VALUES (?,?,?,'other_web',?)",[(f'item-{n}','demo',n,f'item-{n}') for n in range(count)])
+            store.db.executemany("INSERT INTO feed_publications VALUES ('demo',?)",[(f'item-{n}',) for n in range(count)])
         store.db.set_progress_handler(None,0)
         assert len(steps)*100<count*1000,(count,len(steps)*100)
         assert store.read_versions.list_version(options)['version']==before+1

@@ -4,7 +4,7 @@ import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
-test('Broken Telegram stream saves text, a red linked reason and an explicit retry through HTTP',async t=>{
+test('Broken Telegram stream saves text, a separate reason and an explicit retry through HTTP',async t=>{
  const r=await productionReader(t);
  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
  await r.openReader();
@@ -12,12 +12,12 @@ test('Broken Telegram stream saves text, a red linked reason and an explicit ret
  await r.page.goto(r.origin+'/#token='+r.token);
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
  await r.page.locator('[data-card]').click();
- const error=r.page.locator('#text .publication-load-error');
+ const error=r.page.locator('#completeness');
  await expect(r.page.locator('#text')).toContainText('Текст сохранён до обрыва');
  await expect(error).toContainText('соединение оборвано');
- await expect(error.getByRole('link')).toHaveAttribute('href','https://t.me/brokenstream/11');
+ const card=(await r.api('cards'))[0]!;
+ assert.equal(card.source_url,'https://t.me/brokenstream/11');
  await expect(r.page.getByRole('button',{name:'Retry Download',exact:true})).toBeVisible();
- assert.equal(await error.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 240, 240)');
  await r.page.screenshot({path:artifactPath('telegram-download-partial-desktop.png')});
  await r.page.setViewportSize({width:390,height:844});
  await error.scrollIntoViewIfNeeded();

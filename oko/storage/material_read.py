@@ -18,7 +18,7 @@ class Inputs:
     db: sqlite3.Connection
     items: dict[str, sqlite3.Row] = field(default_factory=dict)
     jobs: dict[str, dict[str, sqlite3.Row]] = field(default_factory=dict)
-    versions: dict[str, list[sqlite3.Row]] = field(default_factory=dict)
+    media_jobs: dict[str,list[sqlite3.Row]] = field(default_factory=dict)
     feeds: dict[str, sqlite3.Row] = field(default_factory=dict)
     settings: dict[tuple[str, str], list[sqlite3.Row]] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
@@ -33,12 +33,7 @@ def current(db: sqlite3.Connection) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = '''SELECT i.*,c.number AS current_number,v.fingerprint AS current_fingerprint,
-    d.item AS source_deleted,r.version AS restored_version,t.path AS retained_path,t.digest AS retained_digest
-    FROM items i LEFT JOIN content_current c ON c.item=i.id
-    LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
-    LEFT JOIN source_deleted d ON d.item=i.id LEFT JOIN filter_restores r ON r.item=i.id
-    LEFT JOIN retained_theses t ON t.item=i.id'''
+_ITEM = '''SELECT i.*,d.item AS source_deleted FROM items i LEFT JOIN source_deleted d ON d.item=i.id'''
 _FEED = 'SELECT f.*,b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b.feed=f.id'
 
 
@@ -48,22 +43,8 @@ def item(db: sqlite3.Connection, identity: str) -> sqlite3.Row | None:
     return value.items.get(identity) if value and identity in value.items else db.execute('SELECT * FROM items WHERE id=?', (identity,)).fetchone()
 
 
-def restored_version(db: sqlite3.Connection, identity: str) -> str | None:
-    value=current(db)
-    if value and identity in value.items:
-        saved=value.items[identity]['restored_version']
-        return str(saved) if saved is not None else None
-    row=db.execute('SELECT version FROM filter_restores WHERE item=?',(identity,)).fetchone()
-    return str(row[0]) if row else None
 
 
-def retained(db: sqlite3.Connection, identity: str) -> dict[str, Any] | None:
-    value=current(db)
-    if value and identity in value.items:
-        row=value.items[identity]
-        return dict(path=row['retained_path'],digest=row['retained_digest']) if row['retained_path'] else None
-    row=db.execute('SELECT path,digest FROM retained_theses WHERE item=?',(identity,)).fetchone()
-    return dict(row) if row else None
 
 
 @reading_value
@@ -72,10 +53,6 @@ def jobs(db: sqlite3.Connection, identity: str) -> dict[str, sqlite3.Row]:
     return value.jobs.get(identity, {}) if value and identity in value.items else {r['kind']: r for r in db.execute('SELECT * FROM jobs WHERE item=?', (identity,))}
 
 
-@reading_value
-def versions(db: sqlite3.Connection, identity: str) -> list[sqlite3.Row]:
-    value = current(db)
-    return value.versions.get(identity, []) if value and identity in value.items else list(db.execute('SELECT * FROM content_versions WHERE item=? ORDER BY number DESC', (identity,)))
 
 
 @reading_value
@@ -115,10 +92,13 @@ def material_inputs(db: sqlite3.Connection, identities: set[str]) -> Iterator[No
         batch = ids[start:start+400]
         marks = ','.join('?' for _ in batch)
         value.items.update({r['id']: r for r in db.execute(_ITEM+f' WHERE i.id IN ({marks})',batch)})
-        for r in db.execute(f'SELECT * FROM jobs WHERE item IN ({marks})',batch):
-            value.jobs.setdefault(r['item'], {})[r['kind']] = r
-        for r in db.execute(f'SELECT * FROM content_versions WHERE item IN ({marks}) ORDER BY number DESC',batch):
-            value.versions.setdefault(r['item'], []).append(r)
+        for r in db.execute(f'''SELECT j.*,coalesce(m.publication_id,j.item) AS reader_item FROM jobs j
+                LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
+                WHERE j.item IN ({marks}) OR m.publication_id IN ({marks})''',batch+batch):
+            if r['kind']=='download_media':
+                value.media_jobs.setdefault(r['reader_item'],[]).append(r)
+            else:
+                value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
     feeds = sorted({r['feed_id'] for r in value.items.values()})
     for start in range(0, len(feeds), 400):
         batch = feeds[start:start+400]

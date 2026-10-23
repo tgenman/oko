@@ -16,9 +16,20 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from oko.collection.telegram.topics import history, message_topic, topic_info, read_state, read_window
 
 MAX_MEDIA = 200 * 1024 * 1024
+
+
+def require_channel(entity: Any, body: dict[str, Any]) -> None:
+    if not getattr(entity, 'broadcast', False) or getattr(entity, 'forum', False):
+        raise ValueError('Only broadcast channels are supported')
+    if body.get('topic_id') is not None:
+        raise ValueError('Topics are not supported')
+
+
+async def history(client: Any, entity: Any, **params: Any) -> tuple[list[Any], list[Any]]:
+    batch = list(await client.get_messages(entity, **params))
+    return batch, [message for message in batch if message]
 
 
 class ChangedMedia(Exception):
@@ -151,15 +162,14 @@ async def main() -> None:
             peers[(account, str(utils.get_peer_id(entity)))] = entity
         return peers[cache_key]
 
-    async def album(cl: Any, entity: Any, msg: Any, topic_id: int | None) -> list[Any]:
+    async def album(cl: Any, entity: Any, msg: Any) -> list[Any]:
         if not msg.grouped_id:
             return [msg]
-        # Scan history, not numeric neighbours: IDs in basic groups may have gaps
-        # from other dialogs. Telegram albums contain at most ten messages.
+        # Expand both ends of an album at page boundaries (at most ten messages).
         before = await cl.get_messages(entity, limit=10, offset_id=msg.id)
         after = await cl.get_messages(entity, limit=10, offset_id=msg.id, reverse=True)
         return sorted({m.id: m for m in [*before, msg, *after]
-                       if m and m.grouped_id == msg.grouped_id and (topic_id is None or message_topic(m) == topic_id)}.values(), key=lambda m: m.id)
+                       if m and m.grouped_id == msg.grouped_id}.values(), key=lambda m: m.id)
 
     try:
         while True:
@@ -181,9 +191,8 @@ async def main() -> None:
                     if 'expected_user_id' in body and int((await cl.get_me()).id) != body['expected_user_id']:
                         raise PermissionError('account-identity-mismatch')
                     entity = await entity_for(cl, body['account'], body['peer'], refresh=op == 'info')
-                    topic_id = body.get('topic_id') if op in ('read_state', 'read_window', 'acknowledge') else None
-                    if topic_id is not None and not getattr(entity, 'forum', False):
-                        raise ValueError('topic requires forum')
+                    if op != 'info':
+                        require_channel(entity, body)
                     if op == 'info':
                         value = dict(peer=utils.get_peer_id(entity), title=entity.title,
                                      kind='channel' if getattr(entity, 'broadcast', False) else 'group', forum=bool(getattr(entity, 'forum', False)), username=getattr(entity, 'username', None),
@@ -209,12 +218,12 @@ async def main() -> None:
                             archive_params['offset_id'] = before
                         elif upper:
                             archive_params['offset_id'] = upper + 1
-                        raw, batch = await history(cl, entity, topic_id, **archive_params)
+                        raw, batch = await history(cl, entity, **archive_params)
                         upper = upper or max([0] + [m.id for m in raw])
                         expanded = {m.id: m for m in batch}
                         for msg in (batch[0:1] + batch[-1:]) if batch else []:
                             if msg.grouped_id:
-                                expanded.update({m.id: m for m in await album(cl, entity, msg, topic_id)})
+                                expanded.update({m.id: m for m in await album(cl, entity, msg)})
                         if first:
                             upper = max([upper] + list(expanded))
                         value = dict(messages=[record(m) for m in expanded.values()], upper=upper,
@@ -226,11 +235,11 @@ async def main() -> None:
                             params['offset_id'] = after
                         else:
                             params['offset_date'] = datetime.fromtimestamp(since, timezone.utc)
-                        raw, batch = await history(cl, entity, topic_id, **params)
+                        raw, batch = await history(cl, entity, **params)
                         expanded = {m.id: m for m in batch}
                         for msg in (batch[0:1] + batch[-1:]) if batch else []:
                             if msg.grouped_id:
-                                expanded.update({m.id: m for m in await album(cl, entity, msg, topic_id)})
+                                expanded.update({m.id: m for m in await album(cl, entity, msg)})
                         messages = [record(m) for m in sorted(expanded.values(), key=lambda m: m.id)]
                         gap = None
                         if after:
@@ -240,62 +249,34 @@ async def main() -> None:
                         value = dict(messages=messages, more=len(raw) == 100, gap=gap, next_after=max([after] + [m.id for m in raw] + list(expanded)))
                     elif op == 'messages':
                         batch = await cl.get_messages(entity, ids=body['ids'])
-                        batch = [m for m in batch if m and (topic_id is None or message_topic(m) == topic_id)]
+                        batch = [m for m in batch if m]
                         expanded = {m.id: m for m in batch}
                         for msg in batch:
                             if msg and msg.grouped_id:
-                                expanded.update({m.id: m for m in await album(cl, entity, msg, topic_id)})
+                                expanded.update({m.id: m for m in await album(cl, entity, msg)})
                         value = [record(m) for m in sorted(expanded.values(), key=lambda m: m.id)]
                     elif op == 'read_state':
                         since = datetime.fromtimestamp(body['since'], timezone.utc)
-                        if topic_id is not None:
-                            value = await read_state(cl, entity, topic_id, since)
-                        elif getattr(entity, 'forum', False):
-                            before = await cl.get_messages(entity, limit=1, offset_date=since)
-                            value = dict(read_max=0, initial=before[0].id if before else 0, forum=True)
-                        else:
-                            from telethon import functions
-                            dialog = await cl(functions.messages.GetPeerDialogsRequest(
-                                peers=[types.InputDialogPeer(peer=await cl.get_input_entity(entity))]))
-                            if not dialog.dialogs:
-                                raise ValueError('read state')
-                            before = await cl.get_messages(entity, limit=1, offset_date=since)
-                            value = dict(read_max=dialog.dialogs[0].read_inbox_max_id,
-                                         initial=before[0].id if before else 0)
+                        from telethon import functions
+                        dialog = await cl(functions.messages.GetPeerDialogsRequest(
+                            peers=[types.InputDialogPeer(peer=await cl.get_input_entity(entity))]))
+                        if not dialog.dialogs:
+                            raise ValueError('read state')
+                        before = await cl.get_messages(entity, limit=1, offset_date=since)
+                        value = dict(read_max=dialog.dialogs[0].read_inbox_max_id,
+                                     initial=before[0].id if before else 0)
                     elif op == 'read_window':
-                        if topic_id is not None:
-                            value = await read_window(cl, entity, topic_id, body['after'], body['until'])
-                        else:
-                            batch = await cl.get_messages(entity, limit=100, reverse=True,
-                                offset_id=body['after'], max_id=body['until']+1)
-                            value = dict(ids=sorted(m.id for m in batch), more=len(batch) == 100)
-                            if getattr(entity, 'forum', False):
-                                value['topics'] = {str(m.id): message_topic(m) for m in batch}
-                                boundaries = {}
-                                for topic in set(value['topics'].values()):
-                                    try:
-                                        boundaries[topic] = (await topic_info(cl, entity, topic)).read_inbox_max_id
-                                    except ValueError:
-                                        # Deleted/unknown topic: keep it unread and let its
-                                        # explicit acknowledgement surface the problem.
-                                        boundaries[topic] = 0
-                                value['read_ids'] = [m.id for m in batch if m.id <= boundaries[message_topic(m)]]
+                        batch = await cl.get_messages(entity, limit=100, reverse=True,
+                            offset_id=body['after'], max_id=body['until']+1)
+                        value = dict(ids=sorted(m.id for m in batch), more=len(batch) == 100)
                     elif op == 'acknowledge':
                         max_id = body['max_id']
                         if not isinstance(max_id, int) or max_id <= 0:
                             raise ValueError('read boundary')
-                        if topic_id is not None:
-                            from telethon import functions
-                            await topic_info(cl, entity, topic_id)
-                            value = bool(await cl(functions.messages.ReadDiscussionRequest(
-                                peer=entity, msg_id=topic_id, read_max_id=max_id)))
-                        elif getattr(entity, 'forum', False):
-                            raise ValueError('forum requires a verified topic boundary')
-                        else:
-                            value = bool(await cl.send_read_acknowledge(entity, max_id=max_id))
+                        value = bool(await cl.send_read_acknowledge(entity, max_id=max_id))
                     elif op == 'download':
                         msg = await cl.get_messages(entity, ids=body['id'])
-                        if not msg or not msg.media or (topic_id is not None and message_topic(msg) != topic_id):
+                        if not msg or not msg.media:
                             raise FileNotFoundError('media')
                         expected=body.get('expected_media_identity')
                         if expected is not None and (record(msg)['media'] or {}).get('identity')!=expected:

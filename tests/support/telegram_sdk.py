@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def forum_sdk(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+def channel_sdk(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
     """Keep the installed SDK types/requests; replace only the Telegram network client."""
     project = tmp_path / 'sdk'
     project.mkdir()
@@ -9,7 +9,7 @@ def forum_sdk(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
     env = project / '.env'
     env.write_text('TELEGRAM_API_ID=1\nTELEGRAM_API_HASH=fixture\nTELEGRAM_SESSION_NAME_FIXTURE=fixture.session\n')
     trace = project / 'calls.jsonl'
-    monkeypatch.setenv('SDK_FORUM_TRACE', str(trace))
+    monkeypatch.setenv('SDK_CHANNEL_TRACE', str(trace))
     import os
     monkeypatch.setenv('PYTHONPATH', str(project) + os.pathsep + os.environ.get('PYTHONPATH', ''))
     (project / 'sitecustomize.py').write_text('''
@@ -24,10 +24,8 @@ now = datetime.now(timezone.utc)
 class FakeClient:
     def __init__(self, session, *args, **kwargs):
         self.session = SimpleNamespace(filename=session)
-        self.read = {1: 0, 20: 0, 30: 0}
-        if os.environ.get('SDK_WHOLE_FORUM'): self.read[50] = 0
-        self.entity = types.Channel(id=1234567890, title='Forum', photo=types.ChatPhotoEmpty(),
-                                   date=now, megagroup=True, forum=True, username='forum', access_hash=1)
+        self.entity = types.Channel(id=1234567890, title='Channel', photo=types.ChatPhotoEmpty(),
+                                   date=now, broadcast=True, megagroup=False, forum=False, username='forum', access_hash=1)
     async def connect(self): pass
     async def disconnect(self): pass
     async def get_me(self):
@@ -37,23 +35,13 @@ class FakeClient:
     async def is_user_authorized(self): return True
     async def get_entity(self, peer): return self.entity
     def log(self, **body):
-        with Path(os.environ['SDK_FORUM_TRACE']).open('a') as f: f.write(json.dumps(body) + '\\n')
+        with Path(os.environ['SDK_CHANNEL_TRACE']).open('a') as f: f.write(json.dumps(body) + '\\n')
     async def __call__(self, request):
         name = type(request).__name__
         self.log(op=name, topics=getattr(request, 'topics', None),
                  topic=getattr(request, 'msg_id', None), maximum=getattr(request, 'read_max_id', None))
-        def topic(id):
-            return SimpleNamespace(id=id, title={1:'General',20:'Engineering',30:'News',50:'New'}[id],
-                                   top_message=150+id, read_inbox_max_id=self.read[id], date=now)
-        if name == 'GetForumTopicsRequest':
-            # Server pages can be shorter than the requested limit.
-            ids = [1,20] if not request.offset_topic else [30] if request.offset_topic == 20 else []
-            return SimpleNamespace(count=3, topics=[topic(i) for i in ids], messages=[], order_by_create_date=True)
-        if name == 'GetForumTopicsByIDRequest':
-            return SimpleNamespace(topics=[topic(i) for i in request.topics if i in self.read])
-        if name == 'ReadDiscussionRequest':
-            self.read[request.msg_id] = request.read_max_id
-            return True
+        if name == 'GetPeerDialogsRequest':
+            return SimpleNamespace(dialogs=[SimpleNamespace(read_inbox_max_id=0)])
         raise RuntimeError('unexpected broad request')
     def rows(self):
         def message(id, topic, group=None, photo=False):
@@ -63,9 +51,6 @@ class FakeClient:
         # A full first page in other topics must not stall General's cursor.
         rows = [message(i,30) for i in range(31,131)]
         rows += [message(131,1), message(140,20,777,True), message(141,20,777,True), message(142,30)]
-        if os.environ.get('SDK_WHOLE_FORUM'):
-            # 50 is new; 60 no longer appears in the topic catalogue.
-            rows += [message(143,50), message(144,60)]
         return rows
     async def get_messages(self, entity, **params):
         self.log(op='history', reply_to=params.get('reply_to'), after=params.get('offset_id'), ids=params.get('ids'))
@@ -87,8 +72,8 @@ class FakeClient:
         file.write(b'fixture-image')
         return True
     async def send_read_acknowledge(self, *args, **kwargs):
-        self.log(op='BROAD_ACK')
-        raise RuntimeError('must never mark the entire forum')
+        self.log(op='ACK',maximum=kwargs.get('max_id'))
+        return True
 
 telethon.TelegramClient = FakeClient
 ''')

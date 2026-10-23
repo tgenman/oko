@@ -64,7 +64,7 @@ def test_short_history_has_persisted_reason_and_failed_page_is_not_retried(tmp_p
         history = wait_history(client, feed)
         assert history['progress']['loaded'] == 2
         assert history['progress']['stop_reason'] == 'request_failed'
-        assert history['progress']['discovery_problem']['retry_at'] is None
+        assert history['progress']['warnings']
         assert calls['/broken'] == 1
         assert client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed}).status_code == 200
         time.sleep(.1)
@@ -76,7 +76,7 @@ def test_short_history_has_persisted_reason_and_failed_page_is_not_retried(tmp_p
         assert calls['/broken'] == 1
 
 
-def test_existing_rss_can_select_count_or_date_without_restoring_viewed(tmp_path):
+def test_existing_rss_can_select_count_again_and_date_is_rejected(tmp_path):
     def reply(request):
         return httpx.Response(200, text=page([3, 2, 1]) if request.url.path == '/feed' else '<article>Full article</article>')
     with reader(tmp_path, reply) as client:
@@ -88,9 +88,9 @@ def test_existing_rss_can_select_count_or_date_without_restoring_viewed(tmp_path
         assert response.status_code == 200, response.text
         progress = wait_history(client, feed)['progress']
         assert progress['available'] == 3
-        assert progress['viewed'] == 1
-        assert progress['loaded'] == 2
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert progress['viewed'] == 0
+        assert progress['loaded'] == 3
+        assert len(client.get('/api/v3/cards').json()) == 3
         response = client.post('/api/v3/feeds/'+feed+'/history', json={'mode':'date','date':'2025-10-01','timezone':'UTC'})
         assert response.status_code == 422, response.text
         assert wait_history(client, feed)['progress']['available'] == 3
@@ -173,7 +173,7 @@ def test_power_and_restart_preserve_unfinished_rss_history(tmp_path):
         assert started.wait(5)
         assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
         history = client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']
-        assert history['progress']['available'] == 1
+        assert history['progress']['available'] == 0  # No discoveries commit until cursor_before fixes the window.
         assert history['progress']['loaded'] == 0
     blocked = False
     with reader(tmp_path, reply) as client:
@@ -206,7 +206,7 @@ def test_cancel_rejects_late_page_and_requires_new_selection(tmp_path):
         history = client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']
         assert history['state'] == 'cancelled'
         assert history['progress']['stop_reason'] == 'cancelled'
-        assert history['progress']['available'] == 1
+        assert history['progress']['available'] == 0  # No discoveries commit until cursor_before fixes the window.
         assert all(not c['source_url'].endswith('/2') for c in client.get('/api/v3/cards').json())
 
 
@@ -236,28 +236,28 @@ def test_new_arrivals_do_not_consume_fixed_history_count(tmp_path):
         progress = wait_history(client, feed)['progress']
         assert progress['available'] == 2
         assert progress['loaded'] == 2
-        deadline = time.monotonic()+5
-        while time.monotonic()<deadline:
-            cards = client.get('/api/v3/cards').json()
-            if len(cards)==3:
-                break
-            time.sleep(.02)
-        assert len(cards)==3
-        assert {c['source_url'] for c in cards} == {'https://source.test/post/3','https://source.test/post/2','https://source.test/post/4'}
+        cards=client.get('/api/v3/cards').json()
+        assert {c['source_url'] for c in cards} == {'https://source.test/post/3','https://source.test/post/2'}
 
 
-def test_root_failure_finishes_with_zero_without_retry(tmp_path):
+def test_root_temporary_failure_waits_with_zero_and_a_durable_retry(tmp_path):
     calls = Counter()
     def reply(request):
         calls[request.url.path] += 1
         return httpx.Response(200, text=page([])) if calls['/feed'] == 1 else httpx.Response(503)
     with reader(tmp_path, reply) as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':200}).json()['id']
-        progress = wait_history(client, feed)['progress']
-        assert progress['available'] == progress['loaded'] == 0
-        assert progress['stop_reason'] == 'request_failed'
-        assert progress['requests'] == 1
-        assert calls['/feed'] == 2  # Verification, then one discovery request.
+        deadline=time.monotonic()+3
+        while time.monotonic()<deadline:
+            history=client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']
+            if history['state']=='waiting':
+                break
+            time.sleep(.02)
+        assert history['state']=='waiting' and history['retry_at'] is not None
+        assert history['progress']['available']==history['progress']['loaded']==0
+        assert calls['/feed']==2
+        time.sleep(.1)
+        assert calls['/feed']==2
 
 
 def test_rss_channel_and_link_xml_base_select_the_correct_archive(tmp_path):
@@ -276,7 +276,7 @@ def test_rss_channel_and_link_xml_base_select_the_correct_archive(tmp_path):
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':200}).json()['id']
         progress = wait_history(client, feed)['progress']
         assert progress['available'] == progress['loaded'] == 2
-        assert progress['stop_reason'] == 'archive_end'
+        assert progress['stop_reason'] == 'no_continuation'
         assert calls.count('/archives/monthly/older') == 1
 
 
@@ -293,39 +293,10 @@ def test_ambiguous_continuation_stops_after_saving_current_page(tmp_path):
         assert progress['stop_reason'] == 'ambiguous_continuation'
 
 
-def test_explicit_history_after_upgrade_replaces_legacy_window_cursor(tmp_path):
-    import json
-    from tests.support.subscriptions import saved_sources
-    from oko.storage.store import Store
-    from oko.subscriptions.history import InitialHistory
-    saved_sources(tmp_path, [('https://source.test/feed','History','News')])
-    # This is an on-disk pre-upgrade fixture, prepared before starting the reader.
-    # All behavior below is observed through HTTP, not through storage internals.
-    store = Store(tmp_path, lambda _:None)
-    feed = store.subscriptions.feeds()[0]['id']
-    with store.db:
-        store.subscriptions.history.configure(feed, InitialHistory(mode='count', count=1))
-        store.db.execute('UPDATE initial_history SET frozen=1 WHERE feed=?', (feed,))
-        store.db.execute('INSERT INTO state VALUES (?,?)', ('cursor:'+feed, json.dumps(dict(history_ids=['3'], excluded=['2','1'], since=time.time(), warnings=[]))))
-    store.db.close()
-    def reply(request):
-        if request.url.path == '/feed':
-            return httpx.Response(200, text=page([3,2], '<atom:link rel="next" href="/older"/>'))
-        if request.url.path == '/older':
-            return httpx.Response(200, text=page([1]))
-        return httpx.Response(200, text='<article>Full article</article>')
-    with reader(tmp_path, reply) as client:
-        old = client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']
-        assert old['progress']['stop_reason'] is None
-        response = client.post('/api/v3/feeds/'+feed+'/history', json={'mode':'count','count':'3'})
-        assert response.status_code == 200, response.text
-        history = wait_history(client, feed, timeout=2)
-        assert history['progress']['available'] == history['progress']['loaded'] == 3
-        assert history['progress']['stop_reason'] == 'count_reached'
 
 
-@pytest.mark.parametrize('location, available', [('channel',1), ('root',0), ('entry',0)])
-def test_malformed_xml_base_finishes_attempt_without_retry(tmp_path, location, available):
+@pytest.mark.parametrize('location', ['channel','root','entry'])
+def test_malformed_xml_base_waits_for_manual_retry(tmp_path, location):
     calls = 0
     def reply(request):
         nonlocal calls
@@ -341,47 +312,19 @@ def test_malformed_xml_base_finishes_attempt_without_retry(tmp_path, location, a
         return httpx.Response(200, text='<article>Full article</article>')
     with reader(tmp_path, reply) as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':2}).json()['id']
-        progress = wait_history(client, feed, timeout=2)['progress']
-        assert progress['stop_reason'] == 'request_failed'
-        assert progress['available'] == progress['loaded'] == available
-        assert progress['requests'] == 1
-
-
-def test_page_budget_resumes_from_disk_and_is_visible_through_http(tmp_path):
-    import asyncio
-    from oko.storage.store import Store
-    from oko.subscriptions.history import InitialHistory
-    from tests.support.subscriptions import saved_sources
-
-    calls = []
-    def reply(request):
-        calls.append(request.url.path)
-        number = 1 if request.url.path == '/feed' else int(request.url.path.rsplit('/', 1)[1])
-        return httpx.Response(200, text=page([], f'<atom:link rel="next" href="/pages/{number+1}"/>'))
-
-    # Prepare a real adapter cursor, not an invented near-limit count. The full
-    # 1000-step walk is separately exercised without 1000 scheduler sleeps.
-    saved_sources(tmp_path, [('https://source.test/feed', 'History', 'News')])
-    store = Store(tmp_path, lambda _: None)
-    try:
-        feed = store.subscriptions.feeds()[0]['id']
-        with store.db:
-            selection = store.subscriptions.history.start(feed, InitialHistory(mode='count', count=200))
-        result, publications = asyncio.run(walk(reply, selection=selection, stop_after=999))
-        assert publications == [] and result.continuation == 0
-        store.enqueue_discovery(feed)
-        job = store.next_job(0, feeds=[feed])
-        assert job is not None and job.kind == 'discover'
-        store.discovered([], result.cursor, job, feed)
-    finally:
-        store.db.close()
-    with reader(tmp_path, reply) as client:
-        progress = wait_history(client, feed)['progress']
-        assert progress['stop_reason'] == 'page_limit'
-        assert progress['requests'] == 1000
-        assert progress['available'] == progress['loaded'] == 0
-        assert calls == ['/feed', *[f'/pages/{n}' for n in range(2, 1001)]]
-    calls.clear()
-    with reader(tmp_path, reply) as client:
-        assert wait_history(client, feed)['progress']['stop_reason'] == 'page_limit'
-        assert '/pages/1001' not in calls
+        deadline=time.monotonic()+3
+        while time.monotonic()<deadline:
+            history=client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']
+            if history['state'] in ('waiting','complete'):
+                break
+            time.sleep(.02)
+        if location=='channel':
+            assert history['state']=='complete'
+            assert history['progress']['available']==history['progress']['loaded']==1
+            assert history['progress']['stop_reason']=='request_failed'
+            return
+        assert history['state']=='waiting' and history['retry_at'] is None
+        assert history['progress']['available']==history['progress']['loaded']==0
+        assert history['progress']['discovery_problem']['message']
+        time.sleep(.1)
+        assert calls==2

@@ -40,17 +40,6 @@ def _encode(state: dict[str,Any]) -> str:
     return json.dumps(state,separators=(',',':'),ensure_ascii=False)
 
 
-def legacy_cursor(feed: ExternalReference, legacy: dict[str,Any], selection: dict[str,Any], chosen: list[str]) -> str:
-    """Translate a saved metadata selection offline; callers keep the result opaque."""
-    history=legacy.get('youtube_history',{})
-    excluded=[key.removeprefix('yt:video:') for key in history.get('baseline',legacy.get('baseline',[])) if key.removeprefix('yt:video:') not in chosen]
-    state: dict[str,Any]=dict(channel=feed.key.external_id,keys=chosen,position=len(chosen),done=True,excluded=excluded)
-    if history and not history.get('complete',False):
-        anchor=history.get('state',{}).get('anchors',{}).get('UU')
-        count=selection.get('count') or 1
-        state.update(keys=[anchor] if anchor else [],position=0,done=False,history=history.get('state',{}),
-            history_count=count,provider_count=count,history_position=anchor,history_offset=count-1 if anchor else count,locating=True)
-    return _encode(state)
 
 
 class YouTubeAdapter:
@@ -215,6 +204,9 @@ class YouTubeAdapter:
         if state.pop('shortfall',0):
             issues+=(AdapterIssue('history-shortfall','Доступно меньше видео, чем запрошено',AdapterErrorKind.notice),)
         return DiscoveryPage(values,_encode(state),not state['done'],issues)
+
+    def window_order(self, feed: ExternalReference, cursor: str) -> tuple[ExternalKey,...]:
+        return tuple(ExternalKey(Platform.youtube,key) for key in self._state(feed,cursor)['keys'])
 
     async def fetch(self, publication: ExternalReference) -> PublicationContent:
         expected=video_reference(publication.key.external_id)

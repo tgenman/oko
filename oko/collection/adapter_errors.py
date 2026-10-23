@@ -18,7 +18,10 @@ def failure(error: SourceError, publication: ExternalReference | None = None,
         kind=AdapterErrorKind.source_wait
         wait_scope=getattr(error,'scope',scope)
         retry_at=datetime.now(timezone.utc)+timedelta(seconds=error.delay)
-    return AdapterException(AdapterIssue(error.code or 'source_unavailable',error.label,kind,publication,media_key,wait_scope,retry_at))
+    label=error.label
+    if isinstance(cause,httpx.HTTPStatusError) and f'HTTP {cause.response.status_code}' not in label:
+        label+=f': HTTP {cause.response.status_code}'
+    return AdapterException(AdapterIssue(error.code or 'source_unavailable',label,kind,publication,media_key,wait_scope,retry_at))
 
 
 def source_error(error: AdapterException) -> SourceError:

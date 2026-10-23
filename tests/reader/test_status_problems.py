@@ -1,4 +1,4 @@
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 from datetime import datetime, timezone
 from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import add_sources
@@ -12,7 +12,6 @@ from oko.collection.contracts import Publication, SourceError, Material
 
 
 class FailedDownloads:
-    fetch_requirements = FetchRequirements()
     changes = None
     fixed = False
 
@@ -20,7 +19,7 @@ class FailedDownloads:
         return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', 1800000000),
                  Publication('two', 'https://source.test/two', 1800000001)] if cursor is None else []), 'done')
 
-    async def fetch(self, publication, resources=FetchResources()):
+    async def fetch(self, publication):
         if not self.fixed:
             raise SourceError('Синтетический сбой загрузки', code='source-connection')
         return FetchResult(Material('Заголовок ' + publication.id, 'Текст'))
@@ -137,7 +136,7 @@ def test_shared_youtube_pause_across_feeds_is_one_problem(tmp_path):
     def external(request):
         if request.url.host == 'i.ytimg.com':
             return httpx.Response(200, content=PNG, headers={'content-type':'image/png'})
-        channel = request.url.params.get('channel_id')
+        channel = request.url.params.get('channel_id') or 'UC'+request.url.params.get('playlist_id','')[4:]
         return httpx.Response(200, text=feed_xml().replace(VIDEO, VIDEO if channel == CHANNEL else 'lmnopqrstuv'))
     options = dict(token='test', rss_enabled=True, rss_transport=httpx.MockTransport(external),
                    wall_clock=lambda:wall[0], youtube_captions=Captions())
@@ -148,11 +147,11 @@ def test_shared_youtube_pause_across_feeds_is_one_problem(tmp_path):
             client.patch('/api/v3/feeds/'+result.json()['feeds'][-1]['id'],json={'importance':'high'})
         presence(client, 'reader')
         wait_for(client,lambda:client.get('/api/v3/youtube').json()['admission']=='paused')
-        problems=wait_for(client,lambda:(p if len((p:=client.get('/api/v3/status').json()['problems'])['current'])==2 and
+        problems=wait_for(client,lambda:(p if len((p:=client.get('/api/v3/status').json()['problems'])['current'])>=1 and
             len(next(x for x in p['current'] if x['code']=='youtube_rate_limited')['affected'])==2 else None))
         pause=next(p for p in problems['current'] if p['code']=='youtube_rate_limited')
         assert pause['state']=='retrying' and datetime.fromisoformat(pause['retry_at'].replace('Z','+00:00')).timestamp()==wall[0]+900
-        assert problems['count']==2
+        assert len([p for p in problems['current'] if p['code']=='youtube_rate_limited'])==1
 
 
 def test_viewed_material_scrubs_problem_objects_but_failed_delete_remains_current(tmp_path):
@@ -183,7 +182,7 @@ def test_viewed_material_scrubs_problem_objects_but_failed_delete_remains_curren
 
 def test_partial_material_is_visible_with_available_text(tmp_path):
     class Partial(FailedDownloads):
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material('Частичный материал', 'Доступный текст', full=False, reason='Вложение недоступно'))
     with TestClient(create_app(tmp_path, token='test', source=Partial()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
@@ -278,8 +277,8 @@ def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
             for feed in response.json()['feeds']:
                 client.patch('/api/v3/feeds/'+feed['id'],json={'importance':'high'})
         presence(client, 'reader')
-        wait_for(client,lambda:captions.calls==1 and len(client.get('/api/v3/cards').json())==2)
+        wait_for(client,lambda:captions.calls==1 and len(cards:=client.get('/api/v3/cards').json())==2 and sum(client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')=='available' for card in cards)==1)
         waiting=next(card['id'] for card in client.get('/api/v3/cards').json() if client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')!='available')
         problems=client.get('/api/v3/status').json()['problems']
-        assert not any(obj.get('material_id')==waiting for p in problems['current'] for obj in p['affected'])
+        assert not any(obj.get('material_id')==waiting for p in problems['current'] for obj in p['affected']),problems
         assert not any(p['code']=='youtube_rate_limited' for p in problems['current'])

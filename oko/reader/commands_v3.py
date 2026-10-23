@@ -29,7 +29,7 @@ def context_record(context: wire.CommandContext) -> dict[str, object]:
         objects = [{'kind':'folder', 'id':value.folder_id.root}]
     elif isinstance(value, (wire.CommandCodexSave, wire.CommandCodexCheck, wire.CommandProcessorSave, wire.CommandProcessorCheck)):
         objects = [{'kind': 'settings', 'id': 'global'}]
-    elif isinstance(value, (wire.CommandRegenerate, wire.CommandRetryTheses, wire.CommandRetryMaterial, wire.CommandRestoreFilter, wire.CommandRetryFilter, wire.CommandViewed)):
+    elif isinstance(value, (wire.CommandRegenerate, wire.CommandRetryTheses, wire.CommandRetryMaterial, wire.CommandRetryFilter, wire.CommandViewed)):
         objects = [{'kind':'material', 'id':value.material_id.root}]
     return dict(identity=identity, title='Не удалось выполнить действие', objects=objects, action=None,
                 discardable=isinstance(value, (wire.CommandSettingsPatch, wire.CommandCodexSave, wire.CommandProcessorSave)), command_context=context.model_dump(mode='json'))
@@ -64,9 +64,18 @@ async def track(runtime: Runtime, request: Request, context: wire.CommandContext
         await runtime.action_finished(identity, True)
 
 
+def stored_context(value: str | None) -> wire.CommandContext | None:
+    if value is None:
+        return None
+    try:
+        return wire.CommandContext.model_validate_json(value)
+    except ValueError:
+        return None
+
+
 def check_context(runtime: Runtime, identity: str, context: wire.CommandContext) -> None:
     row = runtime.require_store().problems.command_record(identity)
-    old = (wire.CommandContext.model_validate_json(row.context_json) if row.context_json else legacy_context(row.identity)) if row else None
+    old = stored_context(row.context_json) if row else None
     if row is not None and (old is None or canonical_context(old) != canonical_context(context)):
         raise mismatch(identity)
 
@@ -75,23 +84,19 @@ def receipt(runtime: Runtime, identity: str) -> wire.CommandReceipt:
     from oko.reader.api_v3 import timestamp
     row = runtime.require_store().problems.command_record(identity)
     command_id = wire.CommandId(identity)
-    context = (wire.CommandContext.model_validate_json(row.context_json) if row.context_json else legacy_context(row.identity)) if row else None
-    if row is None or row.result == 'unknown':
-        return wire.CommandReceipt(wire.CommandReceiptUnknown(id=command_id, outcome='unknown'))
-    if context is None:
-        name = {'POST:/api/import':'import_subscriptions','POST:/api/import/preview':'import_preview'}.get(row.identity.rsplit(':', 1)[0], 'unrecognized_operation')
-        stored_context = wire.StoredCommandContext.model_validate({'operation':'legacy','name':name})
-    else:
-        stored_context = wire.StoredCommandContext.model_validate(context.model_dump(mode='json'))
+    context = stored_context(row.context_json) if row else None
+    if row is None or row.result=='unknown' or context is None:
+        return wire.CommandReceipt(wire.CommandReceiptUnknown(id=command_id,outcome='unknown'))
+    saved_context=wire.StoredCommandContext.model_validate(context.model_dump(mode='json'))
     updated = timestamp(row.updated)
     if row.result == 'succeeded':
-        return wire.CommandReceipt(wire.CommandReceiptSucceeded(id=command_id, context=stored_context, outcome='succeeded', updated_at=updated))
+        return wire.CommandReceipt(wire.CommandReceiptSucceeded(id=command_id, context=saved_context, outcome='succeeded', updated_at=updated))
     if row.result == 'abandoned':
-        return wire.CommandReceipt(wire.CommandReceiptAbandoned(id=command_id, context=stored_context, outcome='abandoned', updated_at=updated))
+        return wire.CommandReceipt(wire.CommandReceiptAbandoned(id=command_id, context=saved_context, outcome='abandoned', updated_at=updated))
     if row.result == 'failed':
         error = wire.ErrorEnvelope.model_validate_json(row.error_json) if row.error_json else wire.ErrorEnvelope(wire.ActionInvalidError(code='action_invalid', message='Действие не выполнено', details=wire.ActionInvalidErrorDetails(reason='command_failed'), diagnostic_id=None, command_id=command_id))
-        return wire.CommandReceipt(wire.CommandReceiptFailed(id=command_id, context=stored_context, outcome='failed', updated_at=updated, error=error))
-    return wire.CommandReceipt(wire.CommandReceiptPending(id=command_id, context=stored_context, outcome='pending', updated_at=updated))
+        return wire.CommandReceipt(wire.CommandReceiptFailed(id=command_id, context=saved_context, outcome='failed', updated_at=updated, error=error))
+    return wire.CommandReceipt(wire.CommandReceiptPending(id=command_id, context=saved_context, outcome='pending', updated_at=updated))
 
 
 def register(app: FastAPI, runtime: Runtime) -> None:
@@ -149,7 +154,7 @@ def action_error(error: ActionError, context: wire.CommandContext, identity: str
     if error.kind == 'missing' and isinstance(value, wire.CommandCompleteFeed):
         resource = wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=value.feed_id))
         return ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), details=wire.ResourceNotFoundErrorDetails(resource=resource), diagnostic_id=None, command_id=command_id)))
-    if error.kind == 'missing' and isinstance(value, (wire.CommandViewed, wire.CommandRegenerate, wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandRestoreFilter, wire.CommandCompleteFolder)):
+    if error.kind == 'missing' and isinstance(value, (wire.CommandViewed, wire.CommandRegenerate, wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandCompleteFolder)):
         resource = wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=value.folder_id) if isinstance(value, wire.CommandCompleteFolder) else wire.MaterialResource(kind='material', material_id=value.material_id))
         return ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), details=wire.ResourceNotFoundErrorDetails(resource=resource), diagnostic_id=None, command_id=command_id)))
     if isinstance(value, wire.CommandAddFeed) and error.code == 'verification_expired':
@@ -165,40 +170,6 @@ def action_error(error: ActionError, context: wire.CommandContext, identity: str
     return ApiError(400, wire.ErrorEnvelope(wire.ActionInvalidError(code='action_invalid', message=str(error.detail), details=wire.ActionInvalidErrorDetails(reason='invalid_state'), diagnostic_id=None, command_id=command_id)))
 
 
-def legacy_context(identity: str) -> wire.CommandContext | None:
-    """Read-only projection of the v1/v2 journal. New routes supply typed context."""
-    method, separator, rest = identity.partition(':')
-    if not separator:
-        return None
-    path, _, field = rest.partition(':')
-    parts = path.strip('/').split('/')
-    data: dict[str, object]
-    if len(parts) == 4 and parts[:2] == ['api', 'settings']:
-        data = {'operation': 'settings_patch', 'target': {'scope': parts[2], 'owner': parts[3]}, 'keys': [field] if field else []}
-    elif parts[:2] == ['api', 'processors'] and len(parts) >= 3:
-        data = {'operation': ('codex' if parts[2] == 'codex' else 'processor') + ('_save' if method == 'PUT' else '_check')}
-    elif path == '/api/stop':
-        data = {'operation': 'stop'}
-    elif path == '/api/collect':
-        data = {'operation': 'collect', 'target': {'scope': 'all'}}
-    elif path == '/api/youtube':
-        data = {'operation': 'youtube_configure'}
-    elif parts[:2] == ['api', 'feeds'] and len(parts) == 3:
-        data = {'operation': 'remove_feed' if method == 'DELETE' else 'feed_patch', 'feed_id': parts[2]}
-        if method != 'DELETE':
-            data['fields'] = [field] if field else []
-    elif parts[:2] == ['api', 'materials'] and len(parts) >= 4:
-        operation = {'viewed':'viewed','regenerate':'regenerate','retry':'retry_material','restore':'restore_filter'}.get(parts[3])
-        if operation is None:
-            return None
-        data = {'operation':operation, 'material_id':parts[2]}
-    else:
-        return None
-    from pydantic import ValidationError
-    try:
-        return wire.CommandContext.model_validate(data)
-    except ValidationError:
-        return None
 
 
 def canonical_context(context: wire.CommandContext) -> wire.CommandContext:

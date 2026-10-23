@@ -3,7 +3,7 @@ import json
 
 import httpx
 
-from oko.collection.rss import RSSSource
+from oko.collection.rss_adapter import RSSAdapter
 
 
 def page(ids, links='', atom=False):
@@ -14,15 +14,15 @@ def page(ids, links='', atom=False):
         f'<item><guid>{n}</guid><title>News {n}</title><link>https://source.test/post/{n}</link><pubDate>Wed, 01 Oct 2025 12:00:00 GMT</pubDate><description>Excerpt {n}</description></item>' for n in ids) + '</channel></rss>'
 
 
-async def walk(reply, *, selection=None, stop_after=None):
-    source = RSSSource('https://source.test/feed', 7, httpx.MockTransport(reply))
-    source.initial_history = selection or dict(mode='count', count=200, run='fixture')
-    cursor, publications = None, []
-    for expected in range(1, 1002):
-        result = await source.discover(cursor)
-        cursor = result.cursor
-        assert json.loads(cursor)['history_requests'] == expected
+async def walk(reply, *, count=200):
+    adapter=RSSAdapter(httpx.MockTransport(reply))
+    feed=await adapter.resolve_feed('https://source.test/feed')
+    cursor=await adapter.cursor_before(feed.reference,feed.latest_cursor,count-1)
+    publications=[]
+    for _ in range(1002):
+        result=await adapter.discover(feed.reference,cursor,50)
+        cursor=result.next_cursor
         publications.extend(result.publications)
-        if result.continuation is None or expected == stop_after:
-            return result, publications
-    raise AssertionError('RSS walk exceeded its 1000-request budget')
+        if not result.has_more:
+            return result,publications
+    raise AssertionError('RSS walk exceeded its publication-page budget')

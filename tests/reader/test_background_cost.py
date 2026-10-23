@@ -1,3 +1,4 @@
+from tests.support.source import publication_packet
 """Cost and freshness observed through HTTP while the real reader loop runs."""
 import time
 from fastapi.testclient import TestClient
@@ -18,8 +19,8 @@ def library(root, count):
             title=f'Channel {n}', folder=f'Folder {n}', verification='synthetic'))['id']
         store.enqueue_discovery(feed)
         job = store.next_job(0, feeds=[feed])
-        store.discovered([Publication(str(i), f'https://example.org/{n}/{i}', i,
-            teaser=Material(f'Video {i}', '', captions='not_requested', description='Synthetic'))
+        store.discovered([publication_packet(Publication(str(i), f'https://example.org/{n}/{i}', i,
+            teaser=Material(f'Video {i}', 'Useful source text', description='Synthetic')))
             for i in range(count)], '{}', job, feed)
     store.db.close()
 
@@ -48,6 +49,8 @@ def test_feed_settings_preserve_other_accepted_filters(tmp_path):
     calls = []
     app = create_app(tmp_path, token='test', api_only=True, ai_transport=transport(calls))
     with TestClient(app, headers=HEADERS) as client:
+        from tests.support.presence import presence
+        presence(client,'reader')
         assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Keep useful text'}).status_code == 200
         cards = wait_for(client, lambda: (v if len(v := client.get('/api/v3/cards').json()) == 4 and all(c['filter']['attempt']['state'] == 'ready' for c in v) else None))
@@ -104,46 +107,6 @@ def test_pending_dispatch_ignores_completed_archive_and_keeps_priorities(tmp_pat
     store.db.close()
 
 
-@pytest.mark.parametrize('interrupted', [False, True])
-def test_legacy_filter_upgrade_keeps_result_and_origin_without_model_call(tmp_path, interrupted):
-    import hashlib
-    import json
-    from tests.support.filters import FilterSource, transport, setup_filters
-    from tests.support.reader import wait_for
-
-    calls = []
-    options = dict(token='test', api_only=True, source=FilterSource(), ai_transport=transport(calls))
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        setup_filters(client)
-        cards = wait_for(client, lambda: (v if len(v := client.get('/api/v3/cards').json()) == 2 and all(c['filter']['attempt']['state'] == 'ready' for c in v) else None))
-        identity = cards[0]['id']
-        accepted = client.get('/api/v3/materials/' + identity).json()['filter']['result']
-    store = Store(tmp_path, lambda _: None)
-    feed = store.item_feed(identity)
-    settings = store.subscriptions.effective('feed', feed)
-    settings['feed']['telegram_topic'] = None
-    # Persisted filter format of base938018e, independent of the new v2 inputs.
-    signature = hashlib.sha256(json.dumps([store.content_version(identity), settings,
-        store.settings_version(), store.processor_config().model_dump()], sort_keys=True).encode()).hexdigest()
-    path = store.path(identity).parent / 'filter.md'
-    raw, text = path.read_text().split('\n\n', 1)
-    header = json.loads(raw)
-    header['signature'] = signature
-    path.write_text(json.dumps(header) + '\n\n' + text)
-    with store.db:
-        store.db.execute('UPDATE filter_inputs SET signature=? WHERE item=?', (signature, identity))
-    if interrupted:
-        def fault(point):
-            if point == 'after_filter_move':
-                raise OSError('Interrupted signature upgrade')
-        store.fault = fault
-        with pytest.raises(OSError, match='Interrupted signature upgrade'):
-            store.processing.recover()
-    store.db.close()
-    calls.clear()
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/v3/materials/' + identity).json()['filter']['result'] == accepted
-        assert not [r for r in calls if r.url.path == '/v1/chat/completions']
 
 
 def test_progress_writes_do_not_rebuild_source_configuration(tmp_path):

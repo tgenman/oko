@@ -92,7 +92,7 @@ def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
         heartbeat(client)
         eventually(lambda: len(captions.calls) == 1 and any(m['source'].get('captions') == 'available' for m in materials(client)))
         add(client, 'https://rss.test/feed')
-        eventually(lambda: any(m['content'].get('text') == 'Независимый текст' for m in materials(client)))
+        eventually(lambda: any('Независимый текст' in m['content'].get('text','') for m in materials(client)))
         assert len(captions.calls) == 1
         saved = next(m for m in materials(client) if m['source'].get('captions') == 'available')
         client.post('/api/v3/materials/' + saved['id'] + '/retry')
@@ -109,8 +109,8 @@ def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
 @pytest.mark.parametrize('publication_pipeline',[False,True])
 def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publication_pipeline):
     if publication_pipeline:
-        from tests.support.publication_pipeline import migrated_root
-        tmp_path=migrated_root(tmp_path)
+        from tests.support.publication_pipeline import publication_root
+        tmp_path=publication_root(tmp_path)
     clock = Clock()
     captions = Captions(clock, [CaptionsBlocked(), 'После паузы', 'Следующий'])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
@@ -152,7 +152,7 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publicat
         eventually(lambda: len(captions.calls) == 3)
 
 
-def test_exhausted_blocked_material_can_be_retried_by_manual_refresh(tmp_path):
+def test_repeated_blocks_keep_retrying_after_three_attempts(tmp_path):
     clock = Clock()
     captions = Captions(clock, [CaptionsBlocked(), CaptionsBlocked(), CaptionsBlocked(), 'Успех'])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
@@ -162,8 +162,6 @@ def test_exhausted_blocked_material_can_be_retried_by_manual_refresh(tmp_path):
             eventually(lambda: len(captions.calls) == count and client.get('/api/v3/youtube').json()['strikes'] == count)
             assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + delay
             clock.advance(delay)
-        item = eventually(lambda:next((m for m in materials(client) if m['source']['captions']=='error' and not m['content']['loading']),None))
-        client.post('/api/v3/collect')
         eventually(lambda: materials(client)[0]['source'].get('captions') == 'available')
         assert len(captions.calls) == 4
 
@@ -177,29 +175,30 @@ def test_retry_after_and_backoff_cap(tmp_path):
         for count, delay in enumerate((30000, 1800, 3600, 7200, 14400, 21600, 21600), 1):
             eventually(lambda: len(captions.calls) == count and datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + delay)
             item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
-            # Explicit cycles let the test exercise the global cap beyond the per-item budget.
+            # Explicit retries cannot bypass the shared provider deadline.
             client.post('/api/v3/materials/' + item['id'] + '/retry')
             clock.advance(delay)
 
 
 @pytest.mark.parametrize('outcome,state', [(None, 'unavailable'), (SourceError('Сетевой сбой'), 'error')])
-def test_missing_and_network_failure_do_not_pause_or_automatically_retry(tmp_path, outcome, state):
+def test_missing_and_network_failure_keep_their_own_retry_policy(tmp_path, outcome, state):
     clock = Clock()
-    captions = Captions(clock, [outcome, 'Другой материал'])
+    captions = Captions(clock, [outcome, 'Другой материал', 'Повторный текст'])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
         add(client)
         add(client, 'UC' + 'b' * 22)
         heartbeat(client)
-        eventually(lambda: any(m['source'].get('captions') == state for m in materials(client)))
+        eventually(lambda: len(captions.calls)==1 and any(m['source'].get('captions') == state and not m['content']['loading'] for m in materials(client)))
         assert not (client.get('/api/v3/youtube').json()['admission']=='paused')
         clock.advance(10)
         eventually(lambda: len(captions.calls) == 2)
         clock.advance(1000)
-        # Automatic discovery leaves the terminal attempt alone. Manual refresh retries it.
-        time.sleep(.2)
-        assert len(captions.calls) == 2
-        client.post('/api/v3/collect')
+        if state=='unavailable':
+            time.sleep(.2)
+            assert len(captions.calls)==2
+            client.post('/api/v3/collect')
         eventually(lambda:len(captions.calls)==3)
+        assert not (client.get('/api/v3/youtube').json()['admission']=='paused')
 
 
 def test_proxy_configuration_redacts_preserves_and_clears_secrets(tmp_path):
@@ -261,7 +260,7 @@ def test_proxy_change_rejects_late_block_and_prevents_overlapping_calls(tmp_path
             release.set()
             time.sleep(.1)
             clock.advance(1)
-            eventually(lambda: materials(client)[0]['content'].get('text') == 'Новое подключение')
+            eventually(lambda: 'Новое подключение' in materials(client)[0]['content'].get('text',''))
             assert not (client.get('/api/v3/youtube').json()['admission']=='paused')
     finally:
         release.set()
@@ -273,13 +272,15 @@ def test_viewed_waiting_material_and_closed_reader_do_not_resume(tmp_path):
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
         add(client)
         heartbeat(client)
-        item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
+        item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and m['source'].get('captions') == 'error' and not m['content']['loading']), None))
         close_presence(client, 'reader')
         clock.advance(900)
         time.sleep(.1)
         assert len(captions.calls) == 1
+        client.put('/api/v3/power',json={'enabled':False})
         client.post('/api/v3/materials/' + item['id'] + '/viewed')
         heartbeat(client)
         time.sleep(.1)
+        assert client.get('/api/v3/materials/'+item['id']).status_code==404
         assert client.get('/api/v3/cards').json() == []
         assert len(captions.calls) == 1

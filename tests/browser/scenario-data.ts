@@ -1,4 +1,4 @@
-// Test-owned synthetic scenario inputs, including historical persisted facts.
+// Compact synthetic scenario inputs for current reader packets.
 // These are not HTTP contracts; actual responses validate against canonical v3.
 
 
@@ -96,10 +96,6 @@ export type Card = {
      * Originals
      */
     originals?: boolean;
-    /**
-     * Previous
-     */
-    previous?: Array<Previous>;
     /**
      * Provenance
      */
@@ -253,10 +249,6 @@ export type Feed = {
      */
     kind: 'demo' | 'rss' | 'telegram' | 'youtube' | 'unresolved';
     /**
-     * Legacy Since
-     */
-    legacy_since?: number | null;
-    /**
      * Original Urls
      */
     original_urls?: Array<string>;
@@ -322,10 +314,6 @@ export type Filter = {
      * Removed
      */
     removed: Array<string>;
-    /**
-     * Restored
-     */
-    restored: boolean;
     /**
      * Status
      */
@@ -688,10 +676,6 @@ export type Material = {
      */
     originals?: boolean;
     /**
-     * Previous
-     */
-    previous?: Array<Previous>;
-    /**
      * Provenance
      */
     provenance?: UnknownProvenance | CodexProvenance | LocalProvenance | null;
@@ -764,24 +748,6 @@ export type Point = {
      * Text
      */
     text: string;
-};
-
-/**
- * Previous
- */
-export type Previous = {
-    /**
-     * Number
-     */
-    number?: number;
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Version
-     */
-    version?: string;
 };
 
 /**
@@ -1067,10 +1033,6 @@ export type SubscriptionFeed = {
      */
     kind: 'demo' | 'rss' | 'telegram' | 'youtube' | 'unresolved';
     /**
-     * Legacy Since
-     */
-    legacy_since?: number | null;
-    /**
      * Original Urls
      */
     original_urls?: Array<string>;
@@ -1163,36 +1125,6 @@ export type UnknownProvenance = {
      * Model
      */
     model: null;
-};
-
-/**
- * Version
- */
-export type Version = {
-    /**
-     * Attachments
-     */
-    attachments: Array<Attachment>;
-    /**
-     * Full
-     */
-    full: boolean;
-    /**
-     * Images
-     */
-    images: Array<string>;
-    /**
-     * Reason
-     */
-    reason: string;
-    /**
-     * Text
-     */
-    text: string;
-    /**
-     * Title
-     */
-    title: string;
 };
 
 /**

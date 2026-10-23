@@ -4,7 +4,7 @@ import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
-test('migrated publication shows latest text and media without stored history', {timeout:30000}, async t=>{
+test('publication shows latest text and media without stored history', {timeout:30000}, async t=>{
   const r=await productionReader(t,{publicationPipeline:true});
   await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
   await r.openReader();
@@ -26,7 +26,7 @@ test('migrated publication shows latest text and media without stored history', 
   await expect(r.page.locator('#versions')).toBeHidden();
   const current=await r.api(`materials/${id}`);
   assert.equal(current.availability,'available');
-  if(current.availability==='available') assert.deepEqual(current.content.previous_versions,[]);
+  if(current.availability==='available') assert.equal('previous_versions' in current.content,false);
   await r.page.screenshot({path:artifactPath('latest-publication-desktop.png')});
   await r.page.setViewportSize({width:390,height:844});
   await r.page.locator('#text').scrollIntoViewIfNeeded();

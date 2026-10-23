@@ -1,7 +1,7 @@
 """Selective, versioned reading over the same Runtime and Store owners."""
 from collections.abc import Callable
 from oko.collection.external_media import saved_external
-from oko.collection.telegram.reading import saved_telegraph
+from oko.collection.telegram.reading import saved_preview
 import sqlite3
 import json
 from typing import Any
@@ -15,7 +15,7 @@ from oko.reader.composition import snippet, telegram_title
 from oko.reader.runtime import Runtime
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage import material_read, publication_links
-from oko.storage.reading import reading_snapshot, stable_reader_time, reader_now, saved_document
+from oko.storage.reading import reading_snapshot, stable_reader_time, reader_now
 
 
 def _state(status: str | None, error: str | None = None) -> str:
@@ -46,7 +46,7 @@ class VersionedReading:
         filtered=store.filters.read(identity)
         description=header.get('description','')
         preview=description or text
-        if filtered['status']=='done' and not filtered['restored']:
+        if filtered['status']=='done':
             for _ in range(1 if description else 2):
                 for fragment in filtered['removed']:
                     preview=preview.replace(fragment,'')
@@ -54,15 +54,14 @@ class VersionedReading:
         title=header['title']
         if settings['feed']['kind']=='telegram' and settings['feed'].get('transport')!='rss':
             title=telegram_title(header,text)
-        folder=store.path(identity).parent
-        image=next(iter(sorted(folder.glob('image-*'))),None)
+        image=None
         attachment=next((a for a in header.get('attachments',[]) if a['kind']=='image'),None)
         jobs={r['kind']:r for r in store.db.execute("SELECT kind,status,error FROM jobs WHERE item=? AND kind IN ('filter','theses')",(identity,))}
         theses=jobs.get('theses')
         theses_state=_state(theses['status'] if theses else 'pending',theses['error'] if theses else None) if store.processing.theses.signature(identity) else 'disabled'
         result.update(title=title,snippet=snippet(preview),availability='available',hidden=bool(filtered['hidden']),
             filter_state=_state(filtered['status'],filtered.get('error')),theses_state=theses_state,
-            changed=row['platform'] is None and bool(store.versions.previous(identity)),revision_id=store.content_version(identity),
+            changed=bool(header.get('changed')),revision_id=store.content_version(identity),
             loading=bool(store.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",(identity,reader_now(store.clock()))).fetchone()),
             preview_url=header.get('_media_urls',{}).get(image.name,f'/api/v3/materials/{identity}/images/{image.name}') if image else header.get('_media_urls',{}).get(attachment['name'],f"/api/v3/materials/{identity}/media/{attachment.get('media_id',attachment['name'])}") if attachment else None)
         result['loading'] = result['loading'] or row['platform'] is not None and store.media.loading(identity)
@@ -99,26 +98,24 @@ class VersionedReading:
         full=header.get('full',True) and (not header.get('members') or set(header['members'])==set(json.loads(row['members'])))
         from oko.reader.reading_v3 import completeness
         external = saved_external(header,f'/api/v3/materials/{identity}')
-        linked=saved_telegraph(header,f'/api/v3/materials/{identity}')
+        linked=saved_preview(header)
         if row['platform']=='telegram':
             linked=publication_links.reading(store,identity,store.publications.original(identity)[1]) or linked
         return dict(data,availability='available',content=dict(availability='available',linked_content=linked,post_web_unavailable=external['post_web_unavailable'],text=text,description=header.get('description',''),reply_preview=header.get('reply_preview'),
             completeness=completeness(full,header.get('reason',''),external['external_only'],external['post_web_unavailable']).model_dump(mode='json'),loading=loading,
-            changed=row['platform'] is None and bool(store.versions.previous(identity)),source_deleted=store.versions.deleted(identity),
-            revision_id=store.content_version(identity),version=store.versions.number(identity)))
+            changed=bool(header.get('changed')),source_deleted=store.publications.source_deleted(identity),
+            revision_id=store.content_version(identity),version=1))
 
     def media(self, identity: str) -> dict[str, Any]:
         store=self.runtime.require_store()
         row=material_read.item(store.db,identity)
         if not row or not row['complete']:
-            return dict(revision_id=None,images=[],attachments=[],previous_versions=[])
-        path=store.path(identity)
+            return dict(revision_id=None,images=[],attachments=[])
         header,_=store.original(identity)
         external = saved_external(header,f'/api/v3/materials/{identity}')
         return dict(post_web_unavailable=external['post_web_unavailable'],external_attachments=external['external_attachments'],revision_id=store.content_version(identity),
-            images=[] if store.publications.owns(identity) else [f'/api/v3/materials/{identity}/images/{p.name}' for p in sorted(path.parent.glob('image-*'))],
-            attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{identity}/media/{a.get('media_id',a['name'])}"),kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])],
-            previous_versions=[])
+            images=[],
+            attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{identity}/media/{a.get('media_id',a['name'])}"),kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])])
 
     def navigation(self) -> dict[str, Any]:
         store=self.runtime.require_store()

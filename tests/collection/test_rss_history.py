@@ -30,9 +30,9 @@ def test_rss_atom_walk_reaches_200_and_keeps_deferred_archive_with_relative_link
         assert not path.endswith('should-not-load')
         return httpx.Response(200, text='<article>Full article</article>')
     result, publications = asyncio.run(walk(reply))
-    progress = json.loads(result.cursor)
-    assert [p.id for p in publications] == [str(n) for n in range(200, 0, -1)]
-    assert progress['stop_reason'] == 'count_reached'
+    assert [json.loads(p.metadata.reference.key.external_id)[1] for p in publications] == [str(n) for n in range(1,201)]
+    assert not result.has_more
+    assert not any(issue.code=='history-shortfall' for issue in result.issues)
     assert calls['/pages/empty'] == calls['/pages/second'] == calls['/archive/first'] == 1
 
 
@@ -46,9 +46,7 @@ def test_1000_page_budget_is_visible_even_when_empty_pages_continue():
         discovery.append(number)
         return httpx.Response(200, text=page([], f'<atom:link rel="next" href="/pages/{number+1}"/>'))
     result, publications = asyncio.run(walk(reply))
-    progress = json.loads(result.cursor)
-    assert progress['stop_reason'] == 'page_limit'
-    assert progress['history_requests'] == 1000
+    assert any(issue.code=='rss-page-limit' for issue in result.issues)
     assert publications == []
     assert discovery == list(range(2,1001))
 
@@ -70,7 +68,5 @@ def test_redirect_to_other_visited_branch_cannot_exceed_1000_page_budget():
             return httpx.Response(200, text=page([], links))
         return httpx.Response(200, text=page([]))
     result, publications = asyncio.run(walk(reply))
-    progress = json.loads(result.cursor)
-    assert progress['stop_reason'] == 'page_limit'
-    assert progress['history_requests'] == 1000
+    assert any(issue.code=='rss-page-limit' for issue in result.issues)
     assert '/must-not-load' not in calls

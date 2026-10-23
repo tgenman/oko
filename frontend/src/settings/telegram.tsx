@@ -12,7 +12,6 @@ export function accessLabel(access:TelegramAccess):string {
  switch(access.kind){
  case 'web':return 'Web Access · @'+access.username;
  case 'client':return roleLabel(access.role)+' · '+access.account_user_id;
- case 'legacy_client':return 'Previous account · '+access.alias+' · profile mapping required';
  case 'unconfigured':return 'Connection required · '+access.source_locator;
  }
 }
@@ -29,7 +28,6 @@ function duplicateOwners(error:unknown):ExistingTelegramFeed[] {
   let access:TelegramAccess;
   if(a.kind==='web'&&'username'in a&&typeof a.username==='string'&&'preview_url'in a&&typeof a.preview_url==='string')access={kind:'web',username:a.username,preview_url:a.preview_url};
   else if(a.kind==='client'&&'role'in a&&(a.role==='personal'||a.role==='collection')&&'account_user_id'in a&&typeof a.account_user_id==='string'&&'peer_id'in a&&typeof a.peer_id==='string')access={kind:'client',role:a.role,account_user_id:a.account_user_id,peer_id:a.peer_id};
-  else if(a.kind==='legacy_client'&&'alias'in a&&typeof a.alias==='string'&&'source_locator'in a&&typeof a.source_locator==='string'&&'peer_id'in a&&(a.peer_id===null||typeof a.peer_id==='string'))access={kind:'legacy_client',alias:a.alias,source_locator:a.source_locator,peer_id:a.peer_id};
   else if(a.kind==='unconfigured'&&'source_locator'in a&&typeof a.source_locator==='string')access={kind:'unconfigured',source_locator:a.source_locator};
   else return [];
   result.push({feed_id:row.feed_id,title:row.title,access});

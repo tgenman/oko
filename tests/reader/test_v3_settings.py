@@ -1,4 +1,4 @@
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
@@ -118,17 +118,6 @@ def test_delayed_server_result_wins_over_observation(tmp_path):
         assert client.get('/api/v3/commands/delayed').json()['outcome'] == 'succeeded'
 
 
-def test_legacy_receipts_and_diagnostics_remain_readable(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        assert client.patch('/api/v3/settings/oko/global', json={'theses': False}, headers={'X-Oko-Action': 'legacy'}).status_code == 200
-        client.post('/api/v3/diagnostics', json={'source': 'old client', 'message': 'old error'})
-    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        receipt = client.get('/api/v3/commands/legacy').json()
-        assert receipt['outcome'] == 'succeeded'
-        assert receipt['context']['operation'] == 'settings_patch'
-        reply = client.get('/api/v3/diagnostics')
-        assert reply.status_code == 200, reply.text
-        assert reply.json()['groups'][0]['message'] == 'old error'
 
 
 def test_diagnostic_persistence_failure_is_explicit(tmp_path):
@@ -160,18 +149,8 @@ def test_failed_edit_can_be_discarded_without_undoing_saved_configuration(tmp_pa
         assert client.get('/api/v3/processors/codex').json()['configuration'] == config
 
 
-def test_context_field_order_and_legacy_processor_are_preserved(tmp_path):
-    from oko.storage.store import Store
-    from oko.subscriptions.subscriptions import Overrides
-    saved = Store(tmp_path, lambda _: None)
-    saved.subscriptions.update_settings('oko','global',Overrides(processor='historical-choice'))
-    saved.db.close()
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
-        assert client.patch('/api/v3/settings/oko/global', json={'processor': 'historical-choice'}).status_code == 422
-        reply = client.get('/api/v3/settings/oko/global')
-        assert reply.status_code == 200, reply.text
-        assert reply.json()['effective']['processor']['value'] == {'kind': 'legacy', 'value': 'historical-choice'}
-        assert reply.json()['overrides']['processor'] == {'kind': 'legacy', 'value': 'historical-choice'}
+def test_context_field_order_is_preserved(tmp_path):
+    with TestClient(create_app(tmp_path,token='test',api_only=True,source=DemoSource()),headers=HEADERS) as client:
         assert client.patch('/api/v3/settings/oko/global', json={'theses': False}).status_code == 200
         response = client.patch('/api/v3/feeds/demo', json={'public_ai': False, 'importance': 'high'}, headers={'X-Oko-Action': 'feed-order'})
         assert response.status_code == 200, response.text
@@ -192,24 +171,6 @@ def test_concurrent_reuse_of_correlation_cannot_change_context(tmp_path):
         assert client.get('/api/v3/commands/shared').json()['outcome'] == 'succeeded'
 
 
-def test_imported_telegram_without_access_stays_unconfigured_and_patch_is_atomic(tmp_path):
-    saved_sources(tmp_path, [('https://t.me/example_channel', 'Saved', 'Без папки')])
-    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        imported = client.get('/api/v3/subscriptions')
-        assert imported.status_code == 200, imported.text
-        feed = imported.json()['feeds'][0]
-        path = '/api/v3/settings/feed/' + feed['id']
-        response = client.get(path)
-        assert response.status_code == 200, response.text
-        assert response.json()['feed']['access'] == {'kind': 'unconfigured', 'source_locator': 'telegram:example_channel'}
-        assert response.json()['feed']['connection'] == 'needs_connection'
-        for patch in ({'account': 'another'}, {'transport': 'telegram'}, {'access': {'kind': 'web'}}):
-            response = client.patch('/api/v3/feeds/' + feed['id'], json={**patch, 'importance': 'high'})
-            assert response.status_code == 409, response.text
-            assert response.json()['code'] == 'access_immutable'
-        response = client.patch('/api/v3/feeds/' + feed['id'], json={'auto_read': True, 'importance': 'high'})
-        assert response.status_code == 400
-        assert client.get(path).json()['feed']['importance'] == 'normal'
 
 
 def test_late_diagnostic_for_viewed_material_is_forgotten(tmp_path):
@@ -228,7 +189,7 @@ def test_late_diagnostic_for_viewed_material_is_forgotten(tmp_path):
         assert 'private synthetic material text' not in client.get('/api/v3/diagnostics').text
 
 
-def test_receipt_keeps_confirmed_outcome_of_retired_operation(tmp_path):
+def test_unknown_persisted_command_context_is_not_executed(tmp_path):
     from oko.storage.store import Store
     store=Store(tmp_path, lambda _:None)
     store.problems.action_started('old-import', dict(identity='POST:/api/import:', title='Import', objects=[], action=None), 1.0)
@@ -237,13 +198,12 @@ def test_receipt_keeps_confirmed_outcome_of_retired_operation(tmp_path):
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
         reply = client.get('/api/v3/commands/old-import')
         assert reply.status_code == 200, reply.text
-        assert reply.json()['outcome'] == 'succeeded'
-        assert reply.json()['context'] == {'operation': 'legacy', 'name': 'import_subscriptions'}
-        assert client.post('/api/v3/command-observations', json={'id': 'old-import', 'context': reply.json()['context'], 'result': 'unknown'}).status_code == 422
+        assert reply.json() == {'id':'old-import','outcome':'unknown'}
+        assert client.post('/api/v3/command-observations', json={'id': 'old-import', 'context': {'operation':'restore_filter','material_id':'post'}, 'result': 'unknown'}).status_code == 422
 
 
 def test_feed_settings_preserve_configured_history_on_read_and_patch(tmp_path):
-    saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=synthetic', 'History', 'Без папки')])
+    configured_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa', 'History', 'Без папки')],history=False)
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
         result = client.get('/api/v3/subscriptions')
         identity = result.json()['feeds'][0]['id']

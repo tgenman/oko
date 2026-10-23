@@ -57,9 +57,8 @@ def test_web_video_size_limit_preserves_cover_and_real_cover_failure(tmp_path):
         assert content['external_attachments'][0]['poster_url'] is None
         assert content['external_attachments'][0]['restriction']=='size_limit'
         assert content['completeness']['reason']!='external_attachment'
-        assert client.get('/api/v3/status').json()['problems']['count']==0
-        assert 'HTTP 503' in content['linked_content']['post_text']
-        assert 'https://t.me/fixture/11' in content['linked_content']['post_text']
+        assert client.get('/api/v3/status').json()['problems']['count']>0
+        assert 'HTTP 503' in content['completeness']['message']
 
 
 def test_external_metadata_changes_keep_old_version_context_without_false_updated(tmp_path):
@@ -90,7 +89,7 @@ def test_external_metadata_changes_keep_old_version_context_without_false_update
             if not third['loading'] and third['text'].startswith('Edited own text'):break
             time.sleep(.02)
         assert third['changed'] is True
-        assert third['previous_versions']==[]
+        assert 'previous_versions' not in third
         assert client.get('/api/v3/status').json()['problems']['count']==0
 
 
@@ -131,9 +130,8 @@ def test_real_download_failures_are_not_reclassified_as_external(tmp_path,failur
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0]
         content=client.get('/api/v3/materials/'+card['id']).json()['content']
-        assert (client.get('/api/v3/status').json()['problems']['count']==0) == (failure in (403, 'timeout'))
-        if failure in (403, 'timeout'):
-            assert 'https://t.me/fixture/11' in content['linked_content']['post_text']
+        assert client.get('/api/v3/status').json()['problems']['count']>0
+        assert 'Own text' in content['text']
         assert content['completeness']['reason']!='external_attachment'
         assert all(a['source_url']=='https://t.me/fixture/11' for a in content['external_attachments'])
 

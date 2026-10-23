@@ -1,5 +1,4 @@
 """Production reader assembled with synthetic external defaults for tests."""
-import inspect
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
@@ -84,8 +83,9 @@ def create_app(root: Path, **options: Any) -> FastAPI:
                     rss_transport=RejectTransport(), ai_transport=RejectTransport())
     if options.get('rss_transport') is not None and options.get('youtube_history') is None:
         defaults['youtube_history']=AtomHistory(options['rss_transport'])
-    if 'youtube_history' not in inspect.signature(production_app).parameters:
-        defaults.pop('youtube_history')
     # None also means use the synthetic default, just like production assembly.
     defaults.update({key: value for key, value in options.items() if value is not None})
+    if defaults.get('source') is not None:
+        from tests.support.source import StructuredSource
+        defaults['source']=StructuredSource(defaults['source'])
     return production_app(root, **defaults)

@@ -1,4 +1,4 @@
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.v3 import TestClient
 from oko.collection.demo import DemoSource
 from oko.reader.generated import models as wire
@@ -59,17 +59,17 @@ def test_reading_errors_are_typed_and_queries_strict(tmp_path):
 
 
 def test_versions_all_media_and_receipt_survive_until_explicit_viewed(tmp_path):
-    from oko.collection.contracts import Material, Publication, Image, Attachment
+    from oko.collection.contracts import Publication
+    from tests.support.source import SyntheticMaterial,Image,Attachment
     from tests.support.reader import wait_for
 
     class Source:
-        fetch_requirements = FetchRequirements()
         changes = None
         revision = 1
         async def discover(self, cursor):
-            return DiscoveryResult(tuple([Publication('post', 'https://example.org/post', 100)]), str(self.revision))
-        async def fetch(self, publication, resources=FetchResources()):
-            return FetchResult(Material('Version ' + str(self.revision), 'Text ' + str(self.revision),
+            return DiscoveryResult(tuple([] if cursor else [Publication('post', 'https://example.org/post', 100)]), str(self.revision))
+        async def fetch(self, publication):
+            return FetchResult(SyntheticMaterial('Version ' + str(self.revision), 'Text ' + str(self.revision),
                 full=self.revision > 1, reason='incomplete' if self.revision == 1 else '',
                 images=(Image('image-1.png', b'image'),),
                 attachments=tuple(Attachment(f'media-{i}.bin', kind.encode(), kind, 'application/octet-stream') for i, kind in enumerate(['image', 'video', 'audio', 'circle', 'file']))))
@@ -83,12 +83,12 @@ def test_versions_all_media_and_receipt_survive_until_explicit_viewed(tmp_path):
         source.revision = 2
         response = client.post(f'/api/v3/materials/{item}/retry', headers={'X-Oko-Action':'fetch-again'})
         assert response.status_code == 200, response.text
-        current = wait_for(client, lambda: (v if (v := client.get(f'/api/v3/materials/{item}').json())['content']['text'] == 'Text 2' else None))
+        current = wait_for(client, lambda: (v if (v := client.get(f'/api/v3/materials/{item}').json())['content']['text'] == 'Text 2' and not v['content']['loading'] else None))
         content = current['content']
-        assert content['changed'] and content['previous_versions']==[]
+        assert content['changed'] and 'previous_versions' not in content
         urls = []
         for material in [content]:
-            assert [a['kind'] for a in material['attachments']] == ['image','video','audio','circle','file']
+            assert [a['kind'] for a in material['attachments']] == ['image','image','video','audio','circle','file']
             urls += material['images'] + [a['url'] for a in material['attachments']]
         for url in urls:
             response = client.get(url)
@@ -109,11 +109,10 @@ def test_pending_unknown_dates_and_completion_do_not_admit_late_fetch(tmp_path):
     from tests.support.reader import wait_for
 
     class Source:
-        fetch_requirements = FetchRequirements()
         changes = None
         async def discover(self, cursor):
             return DiscoveryResult(tuple([] if cursor else [Publication('pending','https://example.org/pending',0,published_known=False)]), '1')
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             await asyncio.Event().wait()
             return FetchResult(Material('Never accepted','late'))
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=Source()), headers=HEADERS) as client:
@@ -189,13 +188,16 @@ def test_waiting_reasons_and_previous_theses_during_failed_regeneration(tmp_path
         item = setup_reader(client, theses=False)
         path = '/api/v3/materials/' + item
         client.patch('/api/v3/settings/oko/global', json={'theses':True,'processor':'llamacpp'})
+        clock.now+=1
         state = wait_for(client, lambda: (s if (s := client.get(path).json()['theses'])['attempt']['state'] == 'waiting' else None))
         assert state['attempt']['reason'] == 'processor_not_configured'
         assert state['attempt']['retry_at'] is not None
         client.put('/api/v3/processors/llamacpp', json={'endpoint':'https://remote.example.org','model':'local:latest','local_execution':True})
+        clock.now+=1
         state = wait_for(client, lambda: (s if (s := client.get(path).json()['theses'])['attempt'].get('reason') == 'public_ai_not_allowed' else None))
         assert state['result'] is None
         client.put('/api/v3/processors/llamacpp', json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        clock.now+=1
         accepted = wait_for(client, lambda: client.get(path).json()['theses']['result'])
         wait_for(client, lambda: all(c['theses']['result'] for c in client.get('/api/v3/cards').json()))
         blocked[0] = True
@@ -212,7 +214,7 @@ def test_waiting_reasons_and_previous_theses_during_failed_regeneration(tmp_path
         assert state['attempt']['reason'] == 'retry_scheduled'
         blocked[0] = True
         fail[0] = False
-        clock.now += 31
+        clock.now += 61
         try:
             running = wait_for(client, lambda: (s if (s := client.get(path).json()['theses'])['attempt']['state'] == 'running' else None))
             assert running['result'] == accepted

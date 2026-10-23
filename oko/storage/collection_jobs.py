@@ -9,19 +9,20 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 if TYPE_CHECKING:
     from oko.storage.store import Store, Job
 
-_TARGET = "(kind='download_media' OR (kind IN ('fetch','filter','theses') AND item IN (SELECT id FROM items WHERE platform IS NOT NULL)))"
+_TARGET = "kind IN ('discover','fetch','filter','theses','download_media')"
 
 
-def interrupt(store: 'Store', feeds: set[str] | None = None) -> None:
+def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = True) -> None:
     initial = store.subscriptions.retry_settings()['initial_seconds']
     for row in store.db.execute("SELECT * FROM jobs WHERE status='running' AND "+_TARGET).fetchall():
         owner = store.media.owner(row['item']) if row['kind']=='download_media' else row['item']
         feed = store.db.execute('SELECT feed_id FROM items WHERE id=?', (owner,)).fetchone()
-        if feeds is not None and (feed is None or feed[0] not in feeds):
+        if feeds is not None and (row['item'] not in feeds if row['kind']=='discover' else feed is None or feed[0] not in feeds):
             continue
-        until = max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay']))
+        until = (max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay'])) if backoff
+            else row['retry_at'] if row['wait_scope'] else None)
         store.db.execute("UPDATE jobs SET status='pending',generation=generation+1,retry_at=?,next=? WHERE id=?",
-            (until,store.clock()+max(0,until-store.wall_clock()),row['id']))
+            (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
 
 
 def recover(store: 'Store') -> None:

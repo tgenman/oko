@@ -4,13 +4,12 @@ import time
 
 from fastapi.testclient import TestClient
 
-from oko.collection.contracts import DiscoveryResult, SourceObservation, FetchRequirements
+from oko.collection.contracts import DiscoveryResult, SourceObservation
 from tests.support.app import create_app
 from tests.support.reader import HEADERS, Clock
 
 
 class CollectionProbe:
-    fetch_requirements = FetchRequirements()
     changes = None
 
     def __init__(self):
@@ -23,7 +22,7 @@ class CollectionProbe:
             self.condition.notify_all()
         return DiscoveryResult((), str(len(self.rounds)), SourceObservation())
 
-    async def fetch(self, publication, resources):
+    async def fetch(self, publication):
         raise AssertionError('No publications in this scenario')
 
     def reached(self, count):

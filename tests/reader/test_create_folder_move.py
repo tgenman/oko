@@ -6,13 +6,13 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
 from tests.support.app import create_app
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 
 
 def test_create_and_move_preserves_identity_content_settings_and_survives_restart(tmp_path):
-    saved_sources(tmp_path, [('https://a.test/feed', 'Alpha', 'Old'), ('https://b.test/feed', 'Beta', 'Other')])
+    configured_sources(tmp_path, [('https://a.test/feed', 'Alpha', 'Old'), ('https://b.test/feed', 'Beta', 'Other')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         before = client.get('/api/v3/subscriptions').json()
         alpha, beta = before['feeds']
@@ -36,7 +36,7 @@ def test_create_and_move_preserves_identity_content_settings_and_survives_restar
 
 
 def test_invalid_create_move_never_leaves_an_empty_folder_or_moves_a_feed(tmp_path):
-    saved_sources(tmp_path, [('https://a.test/feed', 'Alpha', 'Old')])
+    configured_sources(tmp_path, [('https://a.test/feed', 'Alpha', 'Old')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         before = client.get('/api/v3/subscriptions').json()
         feed = before['feeds'][0]

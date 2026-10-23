@@ -24,10 +24,9 @@ const presentation:Record<Problem['code'],{section:Section;title:string}>={
  duplicate_source:{section:'action',title:'Source Already Connected'},
  profile_in_use:{section:'action',title:'Cannot Replace an Account in Use'},
  profile_account_conflict:{section:'action',title:'Same Account Assigned to Both Roles'},
- legacy_problem:{section:'object',title:'Saved Problem'},
 };
 export const section=(problem:Problem):Section=>presentation[problem.code]?.section||'object';
-export const problemTitle=(problem:Problem)=>problem.code==='command_failed'&&problem.message.trim()?serviceText(problem.message):problem.code==='legacy_problem'?problem.title||presentation.legacy_problem.title:problem.code==='processor_not_configured'&&problem.affected.some(r=>r.kind==='processor'&&r.processor_id==='codex')?'No Codex Model Selected':presentation[problem.code]?.title||problem.title;
+export const problemTitle=(problem:Problem)=>problem.code==='command_failed'&&problem.message.trim()?serviceText(problem.message):problem.code==='processor_not_configured'&&problem.affected.some(r=>r.kind==='processor'&&r.processor_id==='codex')?'No Codex Model Selected':presentation[problem.code]?.title||problem.title;
 export const isNavigation=(intent:RecoveryIntent)=>['configure_processor','configure_telegram_profile','change_setting','connect_source','inspect_materials'].includes(intent.kind);
 export function recoveryLabel(intent:RecoveryIntent):string {
  switch(intent.kind){

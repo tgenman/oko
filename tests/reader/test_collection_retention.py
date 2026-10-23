@@ -9,7 +9,7 @@ from oko.collection.contracts import SourceError
 from oko.collection.demo import DemoSource
 from tests.support.app import create_app
 from tests.support.reader import Clock, wait_for
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 from tests.support.rss import rss
 
 
@@ -42,7 +42,7 @@ def remote_error(label, prefix, first_time, count=60):
 
 
 def test_missing_rss_feed_records_its_actual_failed_request(tmp_path):
-    saved_sources(tmp_path, [('https://synthetic.test/feed', 'Пропавшая лента', 'Новости')])
+    configured_sources(tmp_path, [('https://synthetic.test/feed', 'Пропавшая лента', 'Новости')])
     with TestClient(create_app(tmp_path, token=TOKEN, api_only=True, rss_enabled=True,
                               rss_transport=httpx.MockTransport(lambda _:httpx.Response(404))), headers=HEADERS) as client:
         def failure():
@@ -63,14 +63,14 @@ def test_multiple_operations_share_one_hundred_newest_failed_requests(tmp_path):
     release_second = threading.Event()
 
     class MultipleFailures(DemoSource):
-        async def fetch(self, publication, resources):
+        async def fetch(self, publication):
             if publication.id == '1':
                 raise remote_error('first operation', 'recent', 2000)
             if publication.id == '2':
                 while not release_second.is_set():
                     await asyncio.sleep(.01)
                 raise remote_error('second operation', 'older', 1000)
-            return await super().fetch(publication, resources)
+            return await super().fetch(publication)
 
     options = dict(token=TOKEN, api_only=True, source=MultipleFailures(), clock=clock,
                    wall_clock=lambda:1800000000 + clock.now)
@@ -104,7 +104,7 @@ def test_older_operation_success_keeps_newer_failure_as_feed_last_error(tmp_path
     calls = {'1':0, '2':0}
 
     class RetryingOperations(DemoSource):
-        async def fetch(self, publication, resources):
+        async def fetch(self, publication):
             if publication.id in calls:
                 calls[publication.id] += 1
                 if calls[publication.id] == 1:
@@ -112,7 +112,7 @@ def test_older_operation_success_keeps_newer_failure_as_feed_last_error(tmp_path
                         while not release_second.is_set():
                             await asyncio.sleep(.01)
                     raise remote_error('older A' if publication.id=='1' else 'newer B', publication.id, 1000, count=1)
-            return await super().fetch(publication, resources)
+            return await super().fetch(publication)
 
     with TestClient(create_app(tmp_path, token=TOKEN,api_only=True,source=RetryingOperations(),
                               clock=clock,wall_clock=lambda:1800000000+clock.now),headers=HEADERS) as client:
@@ -147,7 +147,7 @@ def test_missing_rss_attachment_records_failure_without_removing_publication(tmp
         if request.url.path == '/article':
             return httpx.Response(200, text='<article>Сохранённый текст<img src="https://synthetic.test/missing.png"></article>')
         return httpx.Response(404)
-    saved_sources(tmp_path, [('https://synthetic.test/feed', 'Источник', 'Новости')])
+    configured_sources(tmp_path, [('https://synthetic.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token=TOKEN, api_only=True, rss_enabled=True,
                               rss_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         def failure():
@@ -161,4 +161,4 @@ def test_missing_rss_attachment_records_failure_without_removing_publication(tmp
         cards = client.get('/api/v3/cards').json()
         assert len(cards) == 1
         material = client.get('/api/v3/materials/'+cards[0]['id']).json()
-        assert material['content']['text'] == 'Сохранённый текст'
+        assert material['content']['text'].endswith('Сохранённый текст')

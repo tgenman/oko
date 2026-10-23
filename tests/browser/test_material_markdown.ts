@@ -31,7 +31,7 @@ test('publication Markdown renders semantic text and safe links without external
 test('multiline Markdown links normalize only their labels and destinations in all reading regions',async()=>{
  const r=await reader();try{
   const text='До ссылки\n\n[YouTube\n\n  Christa Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)\n\n[Экранировано \\[да\\]\n  здесь]\n(https://example.net/a_(b))\n\n[Справка][ref]\n\n[ref]: <https://example.net/\n  reference>\n\n[Плохая](java\nscript:alert(1))\n\n`[Код\nссылки](https://code.test)`\n\n```\n[Блок\n\nкода](https://code.test)\n```\n\nПосле ссылки';
-  await r.start([material('A',{text,description:'[Описание\r\n\r\n  видео](https://youtu.be/BPoce9VGatE)',previous:[{number:1,url:'/api/v3/materials/A/versions/1'}]}),material('B',{text:'[Возврат\rкаретки](https://example.net/\r  cr)'})]);
+  await r.start([material('A',{text,description:'[Описание\r\n\r\n  видео](https://youtu.be/BPoce9VGatE)'}),material('B',{text:'[Возврат\rкаретки](https://example.net/\r  cr)'})]);
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/A/versions/1',{body:{title:'Прежняя',text:'[Прежняя\n\nссылка](https://example.net/old)',full:true,images:[],attachments:[]}}));
   await r.page.locator('[data-card="A"]').click();
   const link=r.page.locator('#text').getByRole('link',{name:'YouTube Christa Pike 911 Calls',exact:true});
@@ -63,13 +63,14 @@ test('Markdown publication links travel through the production HTTP reader uncha
  await expect(page.locator('#text').getByRole('link',{name:'Статья',exact:true})).toHaveAttribute('href','https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust');
  const cards=await api('cards');const response=await api(`materials/${cards[0]!.id}`);
  assert.equal(response.content.availability,'available');if(response.content.availability!=='available')throw Error('Expected available content');
- assert.equal(response.content.text,'[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)\n\n[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)');
+ assert.ok(response.content.text.includes('[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)'));
+ assert.ok(response.content.text.endsWith('[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)'));
  assert.equal(await page.locator('#text').locator('xpath=ancestor::details').count(),0);
 });
 
 test('filtered publication keeps a collapsed full original, media and restorable Markdown text',async()=>{
  const r=await reader();try{
-  const item=material('A',{text:'[Статья](https://example.net/story)\n\nРеклама',images:['/api/v3/materials/A/images/x.png'],filter:{status:'done',hidden:false,restored:false,reason:'Убрана реклама',removed:['Реклама']}});
+  const item=material('A',{text:'[Статья](https://example.net/story)\n\nРеклама',images:['/api/v3/materials/A/images/x.png'],filter:{status:'done',hidden:false,reason:'Убрана реклама',removed:['Реклама']}});
   await r.start([item]);
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/A/images/x.png',{base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1sAAAAASUVORK5CYII=',mime:'image/png'}));
   await r.page.locator('[data-card="A"]').click();

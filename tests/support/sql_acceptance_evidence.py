@@ -1,3 +1,4 @@
+from tests.support.source import publication_packet
 """Reproduce synthetic background/scaling and archived SQLite plan evidence."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -56,11 +57,11 @@ def background_evidence():
        queries=[];s.db.set_trace_callback(queries.append);call();s.db.set_trace_callback(None);return len(queries)
       idle=cost(s.processing.sync)
       viewed=cost(lambda:s.viewed(items[0]))
-      
+
       with s.db:s.db.execute("UPDATE jobs SET status='pending',next=0 WHERE kind='discover' AND item=?",(feeds[0],))
       job=s.next_job(s.clock(),feeds=[feeds[0]],include_deletions=False)
       assert job and job.kind=='discover'
-      changed=cost(lambda:s.discovered([Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested'))],'{}',job,feeds[0]))
+      changed=cost(lambda:s.discovered([publication_packet(Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested')))],'{}',job,feeds[0]))
       output['background'].append(dict(total=count*4,idle_processing_sql=idle,viewed_store_sql=viewed,new_publication_transaction_sql=changed))
       s.db.close()
     for count in [4,20]:

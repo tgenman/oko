@@ -17,7 +17,7 @@ class ReadTelegram(Telegram):
         self.acks = []
         self.history = [dict(id=i, date=time.time()-60, text=f'Сообщение {i}', group=None, media=None) for i in (11, 29)]
     async def page(self, account, peer, after, since):
-        return dict(messages=[m for m in self.history if m['date'] >= since and m['id'] > after], more=False)
+        return dict(messages=await self.messages(account,peer,[m['id'] for m in self.history if m['date'] >= since and m['id'] > after]), more=False)
     async def messages(self, account, peer, ids):
         return [m for m in self.history if m['id'] in ids]
     async def read_state(self, account, peer, since):
@@ -230,27 +230,6 @@ def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
         network.release.set()
 
 
-def test_legacy_viewed_tombstone_retains_right_to_confirm(tmp_path):
-    network = ReadTelegram()
-    kwargs = dict(token='test', telegram_client=network)
-    with TestClient(create_app(tmp_path, **kwargs), headers=H) as client:
-        presence(client, 'test')
-        connect(client)
-        cards = settled(client, 2)
-        later = next(c for c in cards if [int(identity) for identity in c['source']['message_ids']] == [29])['id']
-        client.post('/api/v3/materials/' + later + '/viewed')
-    # Fixture models a store created before the read queue existed.
-    with database(tmp_path) as db:
-        db.executescript("DROP TABLE telegram_read_members; DROP TABLE telegram_read_state; DELETE FROM jobs WHERE kind='read';")
-    with TestClient(create_app(tmp_path, **kwargs), headers=H) as client:
-        presence(client, 'test')
-        status = wait_for(client, lambda s: any(r.get('pending') == 1 and r.get('waiting') for r in s['telegram_reads']))
-        assert network.acks == []
-        assert client.get('/api/v3/materials/' + later).status_code == 404
-        earlier = settled(client)[0]['id']
-        client.post('/api/v3/materials/' + earlier + '/viewed')
-        wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s['telegram_reads']))
-        assert network.acks == [29]
 
 
 def test_large_initial_history_is_confirmed_in_verified_pages(tmp_path):
@@ -297,11 +276,14 @@ def test_complete_early_post_is_auto_confirmed_before_loading_later_post(tmp_pat
         started = threading.Event()
         release = threading.Event()
         async def messages(self, account, peer, ids):
-            if ids == [29]:
-                self.started.set()
-                while not self.release.is_set():
-                    await asyncio.sleep(.01)
-            return await super().messages(account, peer, ids)
+            rows=await super().messages(account,peer,ids)
+            return [dict(row,media=dict(kind='image',mime='image/jpeg',extension='jpg')) if row['id']==29 else row for row in rows]
+        async def download(self, account, peer, id):
+            assert id==29
+            self.started.set()
+            while not self.release.is_set():
+                await asyncio.sleep(.01)
+            return b'late-image'
     network = SlowLater()
     later = network.history.pop()
     try:

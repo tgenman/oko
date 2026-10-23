@@ -1,6 +1,6 @@
 """Domain problem/recovery contracts at the reader HTTP boundary."""
 from tests.support.storage import database
-from oko.collection.contracts import DiscoveryResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult
 import json
 import pytest
 
@@ -29,13 +29,12 @@ def test_live_model_producer_has_domain_code_and_recovery_without_server_navigat
 
 
 class Unavailable:
-    fetch_requirements = FetchRequirements()
     changes = None
     failure_code='fetch:UnexpectedExternalException'
     async def discover(self,cursor):
         return DiscoveryResult(tuple([Publication('one','https://source.test/one',1800000000)]), 'one')
 
-    async def fetch(self,publication, resources=FetchResources()):
+    async def fetch(self,publication):
         raise SourceError('Saved source reason',code=self.failure_code)
 
 
@@ -67,21 +66,6 @@ def test_remote_exception_projection_keeps_domain_code_and_material_recovery(ext
     assert projected['recovery']==[{'kind':'retry_material','material_ids':['fixture-item']}]
 
 
-def test_historical_reconnect_is_preserved_without_fabricated_command(tmp_path):
-    from oko.storage.store import Store
-    store=Store(tmp_path,lambda _:None)
-    body=dict(code='source-reconnect',section='action',title='Old identity',consequence='Original consequence',next_step='Original reason',reason='Original diagnostic cause',objects=[],action={'kind':'feed-settings','id':'old','page':'reconnect'},state='current',next_at=None)
-    with store.db:
-        store.db.execute('INSERT INTO reader_problems VALUES (?,?,?,?,?,?,?)',('saved-problem','historical-source','background',json.dumps(body),1800000000,1800000010,'resolved'))
-    store.db.close()
-    with TestClient(create_app(tmp_path,token='test',api_only=True,wall_clock=lambda:1800000020),headers=HEADERS) as client:
-        p=next(p for p in client.get('/api/v3/status').json()['problems']['recent'] if p['id']=='saved-problem')
-        assert p['code']=='legacy_problem' and p['raw_code']=='source-reconnect'
-        assert p['recovery']==[]
-        assert p['created_at']=='2027-01-15T08:00:00Z'
-        assert p['finished_at']=='2027-01-15T08:00:10Z'
-        assert p['consequence']=='Original consequence'
-        assert p['message']=='Original diagnostic cause'
 
 
 def test_collection_recovery_target_is_admitted_and_only_schedules_that_feed(tmp_path):
@@ -137,21 +121,6 @@ def test_typed_conflict_recovery_never_proposes_reconnecting_an_existing_binding
         assert not any(r['kind']=='connect_source' for r in conflict['recovery'])
 
 
-def test_unmapped_legacy_alias_has_no_role_and_deletion_finishes_it_as_irrelevant(tmp_path):
-    from tests.support.subscriptions import saved_sources
-    saved_sources(tmp_path,[('https://t.me/fixture','Legacy','Saved')])
-    with database(tmp_path) as db:
-        db.execute("UPDATE feeds SET transport='telegram',connection='connected',telegram_account='old-alias',telegram_peer=-10042")
-    with TestClient(create_app(tmp_path,token='test',api_only=True),headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        p=next(p for p in client.get('/api/v3/status').json()['problems']['current'] if p['code']=='profile_not_configured')
-        assert p['recovery']==[]
-        assert all(r['kind']=='feed' for r in p['affected'])
-        feed=p['affected'][0]['feed_id']
-        assert client.delete('/api/v3/feeds/'+feed).status_code==200
-        finished=wait_for(client,lambda:next((r for r in client.get('/api/v3/status').json()['problems']['recent'] if r['id']==p['id']),None))
-        assert finished['outcome']=='irrelevant'
-        assert finished['created_at']==p['created_at']
 
 
 def test_unknown_collection_outcome_never_offers_a_mutating_recovery(tmp_path):

@@ -1,6 +1,6 @@
 """Public web collection through the reader, without any Telegram configuration."""
 from tests.support.telegram import configure_fast_web
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 import time
 
 import httpx
@@ -129,7 +129,7 @@ def test_media_completion_is_not_author_edit_but_changed_known_bytes_are(tmp_pat
     async def response(request):
         if request.url.host == 'cdn.example':
             return httpx.Response(503) if phase[0]==0 else httpx.Response(200,content=b'first' if phase[0]<3 else b'changed')
-        photo = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo?signature='+str(phase[0])+'\')"></a>'
+        photo = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+('photo-edited' if phase[0]>=3 else 'photo')+'?signature='+str(phase[0])+'\')"></a>'
         return httpx.Response(200,text=page([(11,'Photo'+photo)]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
                     headers={'Authorization':'Bearer test'}) as client:
@@ -151,8 +151,9 @@ def test_media_completion_is_not_author_edit_but_changed_known_bytes_are(tmp_pat
         settled(client)
         loaded = client.get('/api/v3/materials/'+identity).json()
         assert (loaded['content']['completeness']['state']=='complete') is True
-        assert loaded['content']['revision_id'] != failed['content']['revision_id']
-        assert loaded['content']['previous_versions'] == []
+        assert loaded['content']['revision_id'] == failed['content']['revision_id']
+        assert loaded['content']['changed'] is False
+        assert 'previous_versions' not in loaded['content']
         name = loaded['content']['attachments'][0]['url'].split('/')[-1]
         phase[0] = 2
         client.post('/api/v3/materials/'+identity+'/retry')
@@ -165,7 +166,7 @@ def test_media_completion_is_not_author_edit_but_changed_known_bytes_are(tmp_pat
         settled(client)
         changed = client.get('/api/v3/materials/'+identity).json()
         assert changed['content']['revision_id'] != loaded['content']['revision_id']
-        assert len(changed['content']['previous_versions']) == 0
+        assert 'previous_versions' not in changed['content']
 
 
 def test_media_redirect_cannot_reach_a_local_service(tmp_path):
@@ -276,7 +277,7 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
             raise AssertionError('Oversized failed refresh was hidden')
         current = client.get('/api/v3/materials/'+original['id']).json()
         assert client.get(current['content']['attachments'][0]['url']).content == b'known-file'
-        assert current['content']['previous_versions'] == [] and current['content']['revision_id']==original['content']['revision_id']
+        assert 'previous_versions' not in current['content'] and current['content']['revision_id']==original['content']['revision_id']
         assert any('200 МиБ' in str(problem) for problem in state['problems']['current'])
         assert any(intent['kind']=='retry_material' for p in state['problems']['current'] for intent in p['recovery'])
         from tests.support.reader import wait_for
@@ -345,38 +346,11 @@ def test_html_quotes_poll_voice_sticker_and_unavailable_document_are_preserved(t
         assert 'Quoted text' not in material['content']['text']
         assert 'https://t.me/source' in material['content']['text']
         assert (material['content']['completeness']['state']=='complete') is False
-        assert 'Видео не предоставлено' in material['content']['completeness'].get('message','') and 'Файл документа не предоставлен' in material['content']['completeness'].get('message','')
+        assert material['content']['completeness']['reason']=='external_attachment'
+        assert {a['kind'] for a in material['content']['external_attachments']}=={'video','document'}
         assert sorted(a['kind'] for a in material['content']['attachments'])==['audio','image','image']
 
 
-def test_store_rejects_unowned_staged_file_from_source(tmp_path):
-    import hashlib
-    from oko.collection.contracts import Publication, Material, Attachment, StagedPayload
-    foreign = tmp_path/'foreign.bin'
-    foreign.write_bytes(b'foreign-fixture')
-    class BadSource:
-        fetch_requirements = FetchRequirements()
-        changes = None
-        async def discover(self,cursor):
-            return DiscoveryResult(tuple([Publication('1','https://example.org/1',time.time(),Material('Preview','Preview'))]), '{"after":1}')
-        async def fetch(self,publication, resources=FetchResources()):
-            return FetchResult(Material('Untrusted','Untrusted',attachments=(Attachment('media-1.bin',
-                StagedPayload(foreign,foreign.stat().st_size,hashlib.sha256(foreign.read_bytes()).hexdigest()),'file','application/octet-stream'),)))
-    with TestClient(create_app(tmp_path,token='test',api_only=True,source=BadSource()),
-                    headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        deadline = time.monotonic()+2
-        while time.monotonic()<deadline:
-            if 'Ошибка сбора' in [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]:
-                break
-            time.sleep(.02)
-        else:
-            raise AssertionError('Unowned payload was not rejected')
-        cards = client.get('/api/v3/cards').json()
-        material = client.get('/api/v3/materials/'+cards[0]['id']).json()
-        assert material['content']['text']=='Preview' and not material['content']['attachments']
-        assert client.get('/api/v3/materials/'+cards[0]['id']+'/media/media-1.bin').status_code==404
-    assert foreign.read_bytes()==b'foreign-fixture'
 
 
 def test_retry_and_save_do_not_read_all_retained_media_into_ram(tmp_path,monkeypatch):
@@ -427,8 +401,8 @@ def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync
 
 
 def test_malformed_web_record_does_not_discard_valid_neighbor_and_is_diagnosed(tmp_path):
-    from tests.support.publication_pipeline import migrated_root
-    tmp_path=migrated_root(tmp_path)
+    from tests.support.publication_pipeline import publication_root
+    tmp_path=publication_root(tmp_path)
     html = page([(11, 'Valid text'), (12, 'Broken identity')]).replace('data-post="fixture/12"', 'data-post="broken"')
     with TestClient(create_app(tmp_path, token='test', api_only=True,
             rss_transport=httpx.MockTransport(lambda request: httpx.Response(200, text=html))),

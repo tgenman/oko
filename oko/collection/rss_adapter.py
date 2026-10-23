@@ -28,13 +28,13 @@ def publication_reference(feed: str, identity: str, url: str) -> ExternalReferen
     return ExternalReference(ExternalKey(Platform.rss,_encode([feed,identity])),url or feed)
 
 
-def legacy_cursor(feed: str, identities: list[str]) -> str:
-    return _encode(dict(feed=normalized(feed),keys=list(dict.fromkeys(identities)),position=len(set(identities)),done=True))
 
 
 class RSSAdapter:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.downloader = Downloader(transport)
+        self._windows: dict[str,tuple[list[Entry],list[AdapterIssue]]]={}
+        self.descriptions: dict[str,str | None]={}
 
     async def _read(self, url: str) -> tuple[bytes, str]:
         try:
@@ -65,9 +65,16 @@ class RSSAdapter:
                 if len(visited) >= 1000:
                     issues.append(AdapterIssue('rss-page-limit', 'Достигнут предел 1000 страниц RSS', AdapterErrorKind.notice))
                     break
-                raw, base = await self._read(current)
+                try:
+                    raw, base = await self._read(current)
+                except AdapterException as error:
+                    if not visited:
+                        raise
+                    issues.append(AdapterIssue('rss-history-request-failed',error.issue.message,AdapterErrorKind.notice))
+                    break
                 if not visited:
                     first = raw
+                    self.descriptions[url]=feed_description(raw)
                 visited.add(current)
                 visited.add(base)
                 diagnostics: list[str] = []
@@ -85,12 +92,28 @@ class RSSAdapter:
                     positions=list(batch)
                     if len(positions)-positions.index(before[0])-1 >= before[1]:
                         break
-                links = continuation_links(raw, base)
-                pending.extend(target for targets in links.values() for target in targets
-                               if target not in visited and target not in pending)
-            return first, list(batch.values()), issues
-        except SourceError as error:
-            raise failure(error, scope='rss:'+url) from error
+                try:
+                    links = continuation_links(raw, base)
+                except (SourceError,ValueError) as error:
+                    issues.append(AdapterIssue('rss-history-request-failed',error.label if isinstance(error,SourceError) else 'Неверная ссылка продолжения RSS',AdapterErrorKind.notice))
+                    break
+                if any(len(targets)>1 for targets in links.values()):
+                    issues.append(AdapterIssue('rss-history-ambiguous','Несколько ссылок продолжения RSS',AdapterErrorKind.notice))
+                    break
+                if any(target in visited for target in links['next']):
+                    issues.append(AdapterIssue('rss-history-cycle','Повторная ссылка в истории RSS',AdapterErrorKind.notice))
+                following=[target for target in links['next'] if target not in visited and target not in pending]
+                pending=following+pending
+                pending.extend(target for target in links['prev-archive'] if target not in visited and target not in pending)
+            values=list(batch.values())
+            dates=[entry.publication.published for entry in values]
+            if any(not entry.publication.published_known for entry in values) or dates!=sorted(dates,reverse=True):
+                from oko.collection.rss_history import ORDER_WARNING
+                issues.append(AdapterIssue('rss-order-uncertain',ORDER_WARNING,AdapterErrorKind.notice))
+            return first, values, issues
+        except (SourceError,ValueError) as error:
+            issue=error if isinstance(error,SourceError) else SourceError('Некорректные данные RSS',code='rss-invalid-data',retryable=False)
+            raise failure(issue, scope='rss:'+url) from error
 
     @staticmethod
     def _state(feed: ExternalReference, cursor: str) -> dict[str, Any]:
@@ -145,7 +168,8 @@ class RSSAdapter:
     async def resolve_feed(self, url: str) -> FeedMetadata:
         try:
             url = normalized(url)
-            raw, batch, _ = await self._window(url,archives=False)
+            raw, batch, issues = await self._window(url,archives=False)
+            self._windows[url]=(batch,issues)
             return FeedMetadata(ExternalReference(ExternalKey(Platform.rss, url), url),
                 feed_title(raw), feed_description(raw) or '',
                 _encode({'feed': url, 'keys': [e.publication.id for e in reversed(batch)],
@@ -157,12 +181,22 @@ class RSSAdapter:
         state = self._state(feed, cursor)
         if offset < 0:
             raise ValueError('offset must be non-negative')
+        if not state['keys']:
+            _,batch,issues=await self._window(feed.url)
+            self._windows[feed.url]=(batch,issues)
+            state['keys']=[entry.publication.id for entry in reversed(batch)]
+            state['position']=max(0,len(batch)-1)
         if offset > state['position'] and state['keys']:
             position=min(state['position'],len(state['keys'])-1)
             anchor=state['keys'][position]
-            _,batch,_=await self._window(feed.url,before=(anchor,offset-(state['position']-position)))
-            keys=[entry.publication.id for entry in reversed(batch)]
+            _,batch,issues=await self._window(feed.url,before=(anchor,offset-(state['position']-position)))
+            self._windows[feed.url]=(batch,issues)
             upper=state['keys'][-1]
+            upper_entry=next((entry for entry in batch if entry.publication.id==upper),None)
+            if upper_entry and upper_entry.publication.published_known:
+                batch=[entry for entry in batch if entry.publication.id in state['keys'] or not entry.publication.published_known or entry.publication.published<=upper_entry.publication.published]
+                self._windows[feed.url]=(batch,issues)
+            keys=[entry.publication.id for entry in reversed(batch)]
             if anchor in keys and upper in keys:
                 state['position']=keys.index(anchor)+(state['position']-position)
                 state['keys']=keys[:keys.index(upper)+1]
@@ -175,7 +209,13 @@ class RSSAdapter:
         if limit <= 0:
             raise ValueError('limit must be positive')
         wanted=set(state['keys'][state['position']:state['position']+limit])
-        _, entries_, issues = await self._window(feed.url,archives=not state['done'],wanted=wanted if not state['done'] else None)
+        cached=self._windows.get(feed.url)
+        if not state['done'] and cached is not None and wanted <= {entry.publication.id for entry in cached[0]}:
+            entries_,previous_issues=cached
+            issues=list(previous_issues)
+        else:
+            _,entries_,issues=await self._window(feed.url,archives=not state['done'],wanted=wanted if not state['done'] else None)
+            self._windows[feed.url]=(entries_,issues)
         batch = {e.publication.id: e for e in entries_}
         if state['done']:
             state = {'feed': feed.url, 'keys': list(reversed(batch)), 'position': 0, 'done': False}

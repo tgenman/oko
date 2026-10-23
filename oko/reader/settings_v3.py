@@ -16,10 +16,7 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.E
         return wire.SettingOrigin.model_validate({'scope': level, **({'owner': identity} if level != 'default' else {})})
 
     def processor(value: str) -> wire.StoredProcessorSelection:
-        try:
-            return wire.StoredProcessorSelection.model_validate(value)
-        except ValueError:
-            return wire.StoredProcessorSelection(wire.LegacyProcessorSelection(kind='legacy', value=value))
+        return wire.StoredProcessorSelection.model_validate(value)
 
     effective = value.effective
     values = wire.EffectiveSettingsValues(

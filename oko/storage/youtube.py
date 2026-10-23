@@ -25,8 +25,6 @@ class YouTubeAccess:
               id INTEGER PRIMARY KEY CHECK(id=1), next_at REAL DEFAULT 0,
               blocked_until REAL DEFAULT 0, strikes INTEGER DEFAULT 0);
             INSERT OR IGNORE INTO youtube_access(id) VALUES (1);
-            CREATE TABLE IF NOT EXISTS youtube_attempts (
-              item TEXT PRIMARY KEY, attempts INTEGER DEFAULT 0, terminal INTEGER DEFAULT 0);
         ''')
 
     @reading_value
@@ -67,31 +65,19 @@ class YouTubeAccess:
         row = self._limits()
         return float(max(row['next_at'], row['blocked_until']))
 
-    def terminal(self, item: str) -> bool:
-        row = self.db.execute('SELECT terminal,attempts FROM youtube_attempts WHERE item=?', (item,)).fetchone()
-        return bool(row and (row['terminal'] or row['attempts'] >= 3))
-
-    def start(self, item: str, wall: float) -> None:
+    def start(self, wall: float) -> None:
         with self.db:
             self.db.execute('UPDATE youtube_access SET next_at=? WHERE id=1', (wall + self.interval,))
-            self.db.execute('INSERT INTO youtube_attempts(item,attempts) VALUES (?,1) ON CONFLICT(item) DO UPDATE SET attempts=attempts+1', (item,))
 
-    def blocked(self, job: 'Job', wall: float, retry_after: float) -> bool:
-        """Record the shared pause; return whether the material may retry."""
+    def blocked(self, wall: float, retry_after: float) -> None:
         with self.db:
             strikes = min(6, self.db.execute('SELECT strikes FROM youtube_access WHERE id=1').fetchone()[0] + 1)
             until = wall + max(min(900 * 2 ** (strikes - 1), 21600), retry_after)
             self.db.execute('UPDATE youtube_access SET strikes=?,blocked_until=? WHERE id=1', (strikes, until))
-            return not self.terminal(job.item)
 
-    def completed(self, item: str, success: bool) -> None:
+    def completed(self) -> None:
         with self.db:
-            self.db.execute('UPDATE youtube_attempts SET terminal=1 WHERE item=?', (item,))
-            if success:
-                self.db.execute('UPDATE youtube_access SET strikes=0,blocked_until=0 WHERE id=1')
-
-    def reset(self, item: str) -> None:
-        self.db.execute('DELETE FROM youtube_attempts WHERE item=?', (item,))
+            self.db.execute('UPDATE youtube_access SET strikes=0,blocked_until=0 WHERE id=1')
 
     def defer(self, job: 'Job', now: float, delay: float, reason: str, *, blocked: bool = False) -> None:
         with self.db:

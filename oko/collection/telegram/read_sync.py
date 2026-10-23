@@ -25,8 +25,6 @@ class ReadSync:
         self.store = store
         self._configuration: int | None = None
         store.db.executescript('''
-        CREATE TABLE IF NOT EXISTS telegram_read_topics (
-          feed TEXT, topic INTEGER, confirmed INTEGER, PRIMARY KEY(feed,topic));
         CREATE TABLE IF NOT EXISTS telegram_read_members (
           feed TEXT, member INTEGER, eligible INTEGER DEFAULT 0, reason TEXT, missing INTEGER DEFAULT 0,
           PRIMARY KEY(feed,member));
@@ -40,7 +38,7 @@ class ReadSync:
                 store.db.execute('ALTER TABLE telegram_read_members ADD COLUMN missing INTEGER DEFAULT 0')
 
     def recover(self) -> None:
-        """Import legacy tombstones once on startup, never in ordinary polling."""
+        """Reconcile current channel read eligibility on startup."""
         db = self.store.db
         with db:
             db.execute('CREATE TABLE IF NOT EXISTS telegram_read_dirty (feed TEXT PRIMARY KEY)')
@@ -54,20 +52,12 @@ class ReadSync:
             CREATE TRIGGER IF NOT EXISTS telegram_read_item_changed AFTER UPDATE OF complete,members,viewed ON items
               WHEN NEW.complete IS NOT OLD.complete OR NEW.members IS NOT OLD.members OR NEW.viewed IS NOT OLD.viewed
               BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed_id) ON CONFLICT(feed) DO NOTHING; END;
-            CREATE TRIGGER IF NOT EXISTS telegram_read_version_added AFTER INSERT ON content_current
-              BEGIN INSERT INTO telegram_read_dirty SELECT feed_id FROM items WHERE id=NEW.item
-                ON CONFLICT(feed) DO NOTHING; END;
-            CREATE TRIGGER IF NOT EXISTS telegram_read_version_changed AFTER UPDATE ON content_current
-              BEGIN INSERT INTO telegram_read_dirty SELECT feed_id FROM items WHERE id=NEW.item
-                ON CONFLICT(feed) DO NOTHING; END;
             CREATE TRIGGER IF NOT EXISTS telegram_read_initial_added AFTER INSERT ON telegram_read_state
               BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
             CREATE TRIGGER IF NOT EXISTS telegram_read_initial_changed AFTER UPDATE OF initial,since ON telegram_read_state
               WHEN NEW.initial IS NOT OLD.initial OR NEW.since IS NOT OLD.since
               BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
             """)
-            for row in db.execute("SELECT feed_id,members FROM items WHERE viewed=1 AND members!='[]'").fetchall():
-                self.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
         self.sync()
 
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:
@@ -188,13 +178,7 @@ class ReadSync:
         row = self.store.db.execute('SELECT confirmed FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
         return int(row[0] or 0) if row else 0
 
-    def topic_confirmed(self, feed: str, topic: int) -> int:
-        row = self.store.db.execute('SELECT confirmed FROM telegram_read_topics WHERE feed=? AND topic=?', (feed, topic)).fetchone()
-        return int(row[0]) if row else 0
 
-    def topic_completed(self, feed: str, topic: int, confirmed: int) -> None:
-        with self.store.db:
-            self.store.db.execute("INSERT INTO telegram_read_topics VALUES (?,?,?) ON CONFLICT(feed,topic) DO UPDATE SET confirmed=MAX(confirmed,excluded.confirmed)", (feed, topic, confirmed))
 
     def completed(self, job: 'Job', plan: ReadPlan, confirmed: int, now: float) -> None:
         with self.store.db:

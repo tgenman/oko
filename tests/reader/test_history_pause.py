@@ -34,7 +34,7 @@ def test_removed_pause_preserves_history_snapshot_across_restart_and_fetches_new
         return TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
     with reader() as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history=selection).json()['id']
-        wait_history(client, feed, lambda h: h['progress']['loaded'] == 1)
+        wait_history(client, feed, lambda h: h['progress']['loaded'] == 3)
         result = client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':True})
         assert result.status_code == 409, result.text
     blocked = False
@@ -67,7 +67,7 @@ def test_telegram_history_resumes_album_snapshot_after_restart_without_manual_pa
     with reader() as client:
         presence(client, 'reader')
         feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=4))))['id']
-        wait_history(client, feed, lambda h: h['progress']['available'] == 2)
+        wait_history(client, feed, lambda h: h['progress']['available'] == 4)
         assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':True}).status_code == 409
     archive.blocked = False
     archive.rows.append(dict(id=7, date=1759350007, text='new', group=None, media=None))
@@ -85,27 +85,6 @@ def test_telegram_history_resumes_album_snapshot_after_restart_without_manual_pa
         assert len(client.get('/api/v3/cards').json()) == 5
 
 
-def test_telegram_pause_before_snapshot_can_initialize_live_cursor():
-    from tests.support.telegram_history import Archive
-    from oko.collection.telegram.source import TelegramSource
-    import json
-    async def scenario():
-        archive = Archive()
-        source = TelegramSource(archive, 'fixture', -1001234567890, 1)
-        source.initial_history = dict(mode='count',count=20,since=None,paused=True)
-        outcome = await source.discover(None)
-        items, cursor = outcome.publications, outcome.cursor
-        assert not items
-        assert json.loads(cursor)['position']['upper'] == 6
-        archive.rows.append(dict(id=7,date=1759350007,text='new',group=None,media=None))
-        outcome = await source.discover(cursor)
-        items, cursor = outcome.publications, outcome.cursor
-        assert [p.members for p in items] == [(7,)]
-        source.initial_history['paused'] = False
-        outcome = await source.discover(cursor)
-        items, cursor = outcome.publications, outcome.cursor
-        assert {p.members for p in items} == {(6,), (4,5)}
-    asyncio.run(scenario())
 
 
 def test_youtube_history_continues_after_restart_without_changing_selection(tmp_path):
@@ -124,7 +103,7 @@ def test_youtube_history_continues_after_restart_without_changing_selection(tmp_
         return TestClient(create_app(tmp_path,token='test',rss_enabled=True,rss_transport=httpx.MockTransport(reply),youtube_history=History(['abcdefghijk','lmnopqrstuv']),youtube_captions=NoCaptions(),clock=lambda:clock[0],wall_clock=lambda:clock[0],lease=60),headers=HEADERS)
     with reader() as client:
         feed=add(client,verify(client,YOUTUBE),initial_history=dict(mode='count',count=2)).json()['id']
-        wait_history(client,feed,lambda h:h['progress']['loaded']==1)
+        wait_history(client,feed,lambda h:h['progress']['available']==2)
         assert client.patch('/api/v3/feeds/'+feed+'/history',json={'paused':True}).status_code==409
     blocked=False
     clock[0] += 10

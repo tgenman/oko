@@ -24,8 +24,7 @@ class LongPost(Telegram):
 
 
 @pytest.mark.parametrize('access', ['client', 'web'])
-@pytest.mark.parametrize('legacy', [False, True])
-def test_full_telegram_heading_in_list_and_opened_material(tmp_path, access, legacy):
+def test_full_telegram_heading_in_list_and_opened_material(tmp_path, access):
     raw = page([(11, f'<a href="{URL}">Bloomberg</a>: ' + 'Полный заголовок новости ' * 12 + 'конец заголовка<br><br>Следующий абзац публикации.')])
     options = dict(token='test', api_only=True, telegram_client=LongPost(),
                    rss_transport=httpx.MockTransport(lambda request: httpx.Response(200, text=raw)))
@@ -39,20 +38,6 @@ def test_full_telegram_heading_in_list_and_opened_material(tmp_path, access, leg
         card = settled(client)[0]
         identity = card['id']
         version = client.get('/api/v3/materials/' + identity).json()['content']['version']
-    path = tmp_path / 'content' / identity / str(version) / 'original.md'
-    header, text = path.read_text().split('\n\n', 1)
-    metadata = json.loads(header)
-    if legacy:
-        metadata['title'] = FIRST_LINE[:160]
-        # Historical web copies predate structured reply extraction. Keep the
-        # fixture's format consistent with its truncated legacy heading.
-        metadata.pop('reply_preview', None)
-        if 'source_manifest' in metadata:
-            metadata['source_manifest']['post'].pop('reply_preview', None)
-        path.write_text(json.dumps(metadata) + '\n\n' + text)
-    else:
-        assert metadata['title'] == FIRST_LINE
-    before = path.read_bytes()
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
         card = client.get('/api/v3/cards').json()[0]
         material = client.get('/api/v3/materials/' + identity).json()
@@ -60,4 +45,3 @@ def test_full_telegram_heading_in_list_and_opened_material(tmp_path, access, leg
         assert material['title'] == FIRST_LINE
         assert material['content']['text'] == TEXT
         assert not card['changed']
-    assert path.read_bytes() == before

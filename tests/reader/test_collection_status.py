@@ -124,17 +124,17 @@ def test_bare_session_secret_never_enters_collection_diagnostics(tmp_path):
     assert secret.encode() not in (tmp_path/'state.sqlite').read_bytes()
 
 
-def test_confirmed_publication_removal_does_not_keep_collection_unfinished(tmp_path):
+def test_confirmed_publication_unavailability_is_terminal_and_visible(tmp_path):
     from oko.collection.contracts import SourceDeleted
 
     class RemovedSource(DemoSource):
-        async def fetch(self, publication, resources):
+        async def fetch(self, publication):
             raise SourceDeleted()
 
     with TestClient(create_app(tmp_path,token='test',source=RemovedSource(),api_only=True),headers=HEADERS) as client:
         wait_for(client,lambda: len(client.get('/api/v3/cards').json()) == 3)
         def complete():
             value = client.get('/api/v3/collection-status').json()
-            return value if all(s['state']=='complete' for s in value['sources']) else None
+            return value if all(s['state']=='error' for s in value['sources']) else None
         state = wait_for(client,complete)
-        assert state['counts']['error'] == 0
+        assert state['counts']['error'] == 1

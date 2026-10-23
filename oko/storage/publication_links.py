@@ -4,9 +4,17 @@ from typing import Any, TYPE_CHECKING
 from uuid import uuid4
 
 from oko.collection.adapters import ExternalReference
+from oko.storage.reading import reading_value
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
+
+
+@reading_value
+def children(store: 'Store',item: str) -> list[Any]:
+    return store.db.execute('''SELECT i.*,j.error AS fetch_error FROM publication_links l
+        JOIN items i ON i.id=l.target_publication_id LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
+        WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY l.rowid''',(item,)).fetchall()
 
 
 def sync(store: 'Store', item: str, references: tuple[ExternalReference,...]) -> bool:
@@ -55,8 +63,9 @@ def feedless(store: 'Store', item: str) -> bool:
 
 def text(store: 'Store', item: str) -> str:
     sections=[]
-    for row in store.db.execute('''SELECT i.* FROM publication_links l JOIN items i ON i.id=l.target_publication_id
-            WHERE l.source_publication_id=? AND i.viewed=0 AND i.complete=1 ORDER BY i.discovered_at,i.id''',(item,)):
+    for row in children(store,item):
+        if not row['complete']:
+            continue
         content=json.loads(row['content'])
         body='\n\n'.join(block['text'] for block in content.get('blocks',[]) if block['type'] in ('text','quote') and block.get('text'))
         if body:
@@ -82,11 +91,9 @@ def prune(store: 'Store', candidates: set[str]) -> None:
     for row in rows:
         item=row['id']
         store.publications.forget(item,prune=False)
-        store.versions.forget(item)
+        store.db.execute('DELETE FROM source_deleted WHERE item=?',(item,))
         store.filters.forget(item)
-        store.youtube.reset(item)
         store.db.execute('DELETE FROM thesis_inputs WHERE item=?',(item,))
-        store.db.execute('DELETE FROM retained_theses WHERE item=?',(item,))
         store.db.execute('UPDATE items SET viewed=1,complete=0 WHERE id=?',(item,))
         store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'",(item,))
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0",(item,))
@@ -96,13 +103,12 @@ def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str
     from copy import deepcopy
     result=deepcopy(header)
     reasons=[result['reason']] if result.get('reason') else []
-    for row in store.db.execute('''SELECT i.id,i.url,i.complete,i.content,j.error FROM publication_links l
-            JOIN items i ON i.id=l.target_publication_id LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
-            WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)):
+    for row in children(store,item):
         if not row['complete']:
-            reasons.append('Связанная статья недоступна: '+row['error'] if row['error'] else 'Связанная статья ещё не загружена')
+            reasons.append('Связанная статья недоступна: '+row['fetch_error'] if row['fetch_error'] else 'Связанная статья ещё не загружена')
             continue
         article=json.loads(row['content']).get('extra',{}).get('_reader',{})
+        result['changed']=bool(result.get('changed') or article.get('changed'))
         if article.get('reason'):
             reasons.append(article['reason'])
         result.setdefault('attachments',[]).extend(article.get('attachments',[]))
@@ -115,18 +121,19 @@ def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str
 def retry(store: 'Store', item: str) -> None:
     for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,)).fetchall():
         store.enqueue_fetch(row[0])
-        store.media.retry(row[0])
+        store.db.execute("UPDATE jobs SET manual_once=1 WHERE kind='fetch' AND item=?",(row[0],))
+        store.media.retry(row[0],revalidate_ready=False)
 
 
 def reading(store: 'Store', item: str, post: str) -> dict[str,Any] | None:
     articles=[]
-    for row in store.db.execute('''SELECT i.*,j.error FROM publication_links l JOIN items i ON i.id=l.target_publication_id
-            LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
-            WHERE l.source_publication_id=? AND i.viewed=0 AND i.platform='telegraph' ORDER BY i.discovered_at,i.id''',(item,)):
+    for row in children(store,item):
+        if row['platform']!='telegraph':
+            continue
         content=json.loads(row['content'])
         header=content.get('extra',{}).get('_reader',{})
         body='\n\n'.join(block.get('text','') for block in content.get('blocks',[]) if block['type'] in ('text','quote'))
         articles.append(dict(source_url=row['url'],title=row['title'] or 'Telegraph',text=body,
-            error=row['error'] or header.get('reason') or None,
+            error=row['fetch_error'] or header.get('reason') or None,
             media_urls=list(header.get('_media_urls',{}).values())))
     return dict(post_text=post,articles=articles) if articles else None

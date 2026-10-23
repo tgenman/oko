@@ -93,12 +93,12 @@ class ReadingComposition:
                 material.pop('linked_content', None)
                 preview = description or text
                 filtered = material.get('filter', {})
-                if not description and filtered.get('status') == 'done' and not filtered['restored']:
+                if not description and filtered.get('status') == 'done':
                     # Preserve the existing preview of display_text followed by
                     # its final fragment pass, including joined boundaries.
                     for fragment in filtered['removed']:
                         preview = preview.replace(fragment, '')
-                if filtered.get('status') == 'done' and not filtered['restored']:
+                if filtered.get('status') == 'done':
                     for fragment in filtered['removed']:
                         preview = preview.replace(fragment, '')
                 cards.append(dict(material, feed_id=owner_id, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))

@@ -4,7 +4,7 @@ import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
-test('Telegraph is separate from its post and failed resources keep inline links and reasons through HTTP',async t=>{
+test('Telegraph is separate from its post and failed resources keep separate reasons through HTTP',async t=>{
  const r=await productionReader(t);
  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
  await r.openReader();
@@ -14,15 +14,13 @@ test('Telegraph is separate from its post and failed resources keep inline links
  await r.page.locator('[data-card]').click();
  const post=r.page.locator('#text .telegram-post'),articles=r.page.locator('#text .telegraph-article');
  await expect(post).toContainText('Текст поста');
- await expect(post).toContainText('HTTP 503');
  await expect(post.getByRole('link',{name:'Недоступная статья',exact:true})).toHaveAttribute('href','https://telegra.ph/MissingArticle');
  await expect(articles).toHaveCount(2);
  await expect(articles.first()).toContainText('Статья по ссылке · Telegraph');
  await expect(articles.first()).toContainText('Текст до изображения.');
- await expect(articles.first().locator('.publication-load-error')).toContainText('HTTP 403');
- await expect(post.locator('.publication-load-error')).toContainText('HTTP 503');
+ await expect(articles.first().locator('.telegraph-error')).toContainText('HTTP 403');
+ await expect(articles.nth(1).locator('.telegraph-error')).toContainText('HTTP 503');
  await expect(articles.first()).toContainText('Текст после изображения.');
- await expect(articles.first().getByRole('link',{name:'https://broken-image.example/unavailable.png',exact:true})).toHaveAttribute('href','https://broken-image.example/unavailable.png');
  await expect(post).not.toContainText('Текст до изображения.');
  await expect(articles.first()).toContainText('Конец статьи Telegraph');
  await expect(articles.first().locator('img')).toHaveCount(0);

@@ -106,13 +106,11 @@ class EffectiveValues(WireModel):
     theses: Theses
 
 class Filter(WireModel):
-    can_restore: StrictBool = True
     model_config = ConfigDict(extra='forbid')
     error: StrictStr | None | MISSING = Field(default=MISSING, title='Error')
     hidden: StrictBool = Field(..., title='Hidden')
     reason: StrictStr = Field(..., title='Reason')
     removed: list[StrictStr] = Field(..., title='Removed')
-    restored: StrictBool = Field(..., title='Restored')
     status: Literal['off', 'pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
 
 class Folder(WireModel):
@@ -133,7 +131,6 @@ class InitialHistoryStatus(WireModel):
     cancelled: StrictBool | MISSING = Field(default=MISSING, title='Cancelled')
     count: StrictInt | None = Field(..., title='Count')
     count_text: StrictStr | None = Field(..., title='Count Text')
-    date: StrictStr | None = Field(..., title='Date')
     discovery_error: StrictStr | None | MISSING = Field(default=MISSING, title='Discovery Error')
     discovery_retry_at: StrictFloat | None | MISSING = Field(default=MISSING, title='Discovery Retry At')
     errors: list[HistoryError] = Field(..., title='Errors')
@@ -141,7 +138,7 @@ class InitialHistoryStatus(WireModel):
     frozen: StrictBool = Field(..., title='Frozen')
     incomplete: StrictInt = Field(..., title='Incomplete')
     loaded: StrictInt = Field(..., title='Loaded')
-    mode: Literal['count', 'date'] = Field(..., title='Mode')
+    mode: Literal['count'] = Field(..., title='Mode')
     paused: StrictBool = Field(..., title='Paused')
     requests: StrictInt | MISSING = Field(default=MISSING, title='Requests')
     resume: StrictInt | MISSING = Field(default=MISSING, title='Resume')
@@ -151,7 +148,6 @@ class InitialHistoryStatus(WireModel):
     since: StrictFloat | None = Field(..., title='Since')
     stop_reason: StrictStr | None | MISSING = MISSING
     state: Literal['pending', 'loading', 'done', 'selecting', 'paused', 'waiting', 'cancelled'] = Field(..., title='State')
-    timezone: StrictStr = Field(..., title='Timezone')
     unavailable: StrictInt = Field(..., title='Unavailable')
     viewed: StrictInt = Field(..., title='Viewed')
     waiting: StrictBool | MISSING = Field(default=MISSING, title='Waiting')
@@ -169,11 +165,6 @@ class LocalProvenance(WireModel):
     model: StrictStr | None = Field(..., title='Model')
     processor: StrictStr = Field(..., pattern='^(?!codex$).+', title='Processor')
 
-class Previous(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    number: StrictInt | MISSING = Field(default=MISSING, title='Number')
-    url: StrictStr = Field(..., title='Url')
-    version: StrictStr | MISSING = Field(default=MISSING, title='Version')
 
 class ProblemObject(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -253,19 +244,6 @@ class LinkedContent(WireModel):
     articles: list[LinkedArticle]
 
 
-class Version(WireModel):
-    linked_content: LinkedContent | None = None
-    external_attachments: list[ExternalAttachment] = Field(default_factory=list)
-    external_only: bool = False
-    post_web_unavailable: bool = False
-    reply_preview: ReplyPreview | None = None
-    model_config = ConfigDict(extra='forbid')
-    attachments: list[Attachment] = Field(..., title='Attachments')
-    full: StrictBool = Field(..., title='Full')
-    images: list[StrictStr] = Field(..., title='Images')
-    reason: StrictStr = Field(..., title='Reason')
-    text: StrictStr = Field(..., title='Text')
-    title: StrictStr = Field(..., title='Title')
 
 class YouTube(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -300,14 +278,13 @@ class History(WireModel):
     cancelled: StrictBool | MISSING = Field(default=MISSING, title='Cancelled')
     count: StrictInt | None = Field(..., title='Count')
     count_text: StrictStr | None = Field(..., title='Count Text')
-    date: StrictStr | None = Field(..., title='Date')
     discovery_error: StrictStr | None | MISSING = Field(default=MISSING, title='Discovery Error')
     discovery_retry_at: StrictFloat | None | MISSING = Field(default=MISSING, title='Discovery Retry At')
     errors: list[HistoryError] = Field(..., title='Errors')
     frozen: StrictBool = Field(..., title='Frozen')
     incomplete: StrictInt = Field(..., title='Incomplete')
     loaded: StrictInt = Field(..., title='Loaded')
-    mode: Literal['count', 'date'] = Field(..., title='Mode')
+    mode: Literal['count'] = Field(..., title='Mode')
     paused: StrictBool = Field(..., title='Paused')
     requests: StrictInt | MISSING = Field(default=MISSING, title='Requests')
     resume: StrictInt | MISSING = Field(default=MISSING, title='Resume')
@@ -317,7 +294,6 @@ class History(WireModel):
     since: StrictFloat | None = Field(..., title='Since')
     stop_reason: StrictStr | None | MISSING = MISSING
     state: Literal['pending', 'loading', 'done', 'selecting', 'paused', 'waiting', 'cancelled'] = Field(..., title='State')
-    timezone: StrictStr = Field(..., title='Timezone')
     unavailable: StrictInt = Field(..., title='Unavailable')
     viewed: StrictInt = Field(..., title='Viewed')
     waiting: StrictBool | MISSING = Field(default=MISSING, title='Waiting')
@@ -384,7 +360,6 @@ class SubscriptionFeed(WireModel):
     initial_days: StrictInt | MISSING = Field(default=MISSING, title='Initial Days')
     initial_history: History | None | MISSING = MISSING
     kind: Literal['demo', 'rss', 'telegram', 'youtube', 'unresolved'] = Field(..., title='Kind')
-    legacy_since: StrictFloat | None | MISSING = Field(default=MISSING, title='Legacy Since')
     original_urls: list[StrictStr] | MISSING = Field(default=MISSING, title='Original Urls')
     public_ai: StrictBool | None | MISSING = Field(default=MISSING, title='Public Ai')
     read_history: StrictBool | None | MISSING = Field(default=MISSING, title='Read History')
@@ -419,7 +394,6 @@ class Card(WireModel):
     loading: StrictBool | MISSING = Field(default=MISSING, title='Loading')
     members: list[StrictInt] | MISSING = Field(default=MISSING, title='Members')
     originals: StrictBool | MISSING = Field(default=MISSING, title='Originals')
-    previous: list[Previous] | MISSING = Field(default=MISSING, title='Previous')
     provenance: UnknownProvenance | CodexProvenance | LocalProvenance | None | MISSING = Field(default=MISSING, title='Provenance')
     published: StrictFloat = Field(..., title='Published')
     published_known: StrictBool = Field(..., title='Published Known')
@@ -452,7 +426,6 @@ class Feed(WireModel):
     initial_days: StrictInt | MISSING = Field(default=MISSING, title='Initial Days')
     initial_history: History | None | MISSING = MISSING
     kind: Literal['demo', 'rss', 'telegram', 'youtube', 'unresolved'] = Field(..., title='Kind')
-    legacy_since: StrictFloat | None | MISSING = Field(default=MISSING, title='Legacy Since')
     original_urls: list[StrictStr] | MISSING = Field(default=MISSING, title='Original Urls')
     public_ai: StrictBool | None | MISSING = Field(default=MISSING, title='Public Ai')
     read_history: StrictBool | None | MISSING = Field(default=MISSING, title='Read History')
@@ -495,7 +468,6 @@ class Material(WireModel):
     loading: StrictBool | MISSING = Field(default=MISSING, title='Loading')
     members: list[StrictInt] | MISSING = Field(default=MISSING, title='Members')
     originals: StrictBool | MISSING = Field(default=MISSING, title='Originals')
-    previous: list[Previous] | MISSING = Field(default=MISSING, title='Previous')
     provenance: UnknownProvenance | CodexProvenance | LocalProvenance | None | MISSING = Field(default=MISSING, title='Provenance')
     published: StrictFloat = Field(..., title='Published')
     published_known: StrictBool | MISSING = Field(default=MISSING, title='Published Known')

@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-23",
+  "base": "9ae1b5053a6716ac8e426b0fb7070bf76c9b92f5",
+  "tested_tree": "99715258fbb00cc8191da28d6cf84a331b33a9e2",
+  "duration_seconds": 160.35,
+  "suites": {
+    "contracts": "PASS (0.56s)",
+    "tooling-types": "PASS (1.09s)",
+    "syntax": "PASS (0.58s)",
+    "lint": "PASS (0.59s)",
+    "types": "PASS (2.22s)",
+    "browser-types": "PASS (1.58s)",
+    "build": "PASS (8.33s)",
+    "http": "PASS (2.30s)",
+    "browser": "PASS (136.30s)",
+    "diff": "PASS (0.39s)",
+    "python-tests": "PASS (141.34s)",
+    "entrypoint": "PASS (0.60s)",
+    "tool-tests": "PASS (120.43s)"
+  },
+  "python": {
+    "passed": 1000,
+    "functional": 829,
+    "tools": 162,
+    "http": 9
+  },
+  "browser": {
+    "passed": 334,
+    "skipped": 2,
+    "failed": 0
+  },
+  "limitations": [
+    "Synthetic sources/models and temporary SQLite/files only",
+    "Two browser scenarios remain skipped at the user request of 2026-10-15",
+    "Running installation and backups were not changed"
+  ]
+}

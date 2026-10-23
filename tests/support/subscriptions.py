@@ -27,16 +27,18 @@ def add_sources(client, rows):
     return client.get('/api/v3/subscriptions')
 
 
-def saved_sources(root: Path, rows):
-    """Initialize an old saved subscription before the app starts; no import API."""
+def configured_sources(root: Path,rows, *, history=True):
+    """Closed current subscription fixtures; no network verification is performed."""
     from oko.storage.store import Store
-    from oko.subscriptions.subscriptions import identify, key
-    store = Store(root, lambda _:None)
-    with store.db:
+    from oko.subscriptions.subscriptions import AddFeed
+    from oko.subscriptions.history import InitialHistory
+    store=Store(root,lambda _:None)
+    try:
         for url,title,folder in rows:
-            identity,kind,connection=identify(url)
-            folder_id=key('folder:'+folder)
-            store.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)',(folder_id,folder,len(store.subscriptions.folders())))
-            store.db.execute('INSERT OR IGNORE INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport) VALUES (?,?,?,?,?,?,?,?)',
-                (key(identity),identity,title,kind,folder_id,json.dumps([url]),connection,kind if kind in ('rss','youtube') else None))
-    store.db.close()
+            store.subscriptions.add_feed(AddFeed(url=url,title=title,folder=folder,verification='synthetic',initial_history=InitialHistory(count=1 if 'youtube.com' in url else 20)))
+        if not history:
+            with store.db:
+                store.db.execute('DELETE FROM initial_history')
+        store.publications.sync_feeds([feed['id'] for feed in store.subscriptions.feeds()])
+    finally:
+        store.db.close()

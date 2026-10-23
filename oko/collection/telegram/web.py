@@ -18,7 +18,7 @@ from bs4.element import NavigableString, Tag
 import httpx
 from oko.collection import request_observation as observation
 
-from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, DownloadStage, Attachment, SourceManifest, ResourceManifest, ExternalMedia, ReplyPreview
+from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, SourceManifest, ResourceManifest, ExternalMedia, ReplyPreview
 from oko.collection.telegram.contracts import TelegramPublication, ExpectedMedia
 from oko.collection.telegram.media import Downloader
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalReference, ExternalKey, Platform
@@ -373,37 +373,3 @@ class WebTelegram:
         else:
             progress = dict(catchup_upper=upper,catchup_before=page.next_before)
         return dict(messages=self.rows(posts),more=not reached,next_after=max(after,upper) if reached else after,position=progress)
-
-    async def fetch(self, publication: Publication, staging: DownloadStage | None = None) -> Material:
-        page,_ = await load(self.username,max(publication.members)+1,self.transport)
-        post = next((p for p in page.posts if p.publication.id==publication.id or set(p.publication.members).intersection(publication.members)),None)
-        if post is None:
-            raise SourceDeleted()
-        teaser = post.publication.teaser
-        assert teaser
-        assert teaser.source_manifest
-        if teaser.source_manifest.post_web_unavailable and post.text.strip():
-            from oko.collection.telegram.preview import fragment
-            preview, error = await fragment(self.username, publication.id, self.transport, staging)
-            previous = publication.teaser.source_manifest if publication.teaser else None
-            if error and previous and previous.preview_fragment:
-                preview = previous.preview_fragment
-            manifest = teaser.source_manifest.model_copy(update={'preview_fragment':preview, 'preview_error':error})
-            text = '\n\n'.join(part for part in (post.text, preview) if part)
-            headline = next((line.strip(' \t\r\u2063\u200b\ufeff') for line in preview.splitlines() if any(char.isalnum() for char in line)), '')
-            title = headline if len(headline) <= 140 else headline[:140].rstrip() + '…'
-            return Material(title or 'Фрагмент предпросмотра Telegram недоступен',
-                text, False, 'Сохранён фрагмент предпросмотра; полная публикация недоступна для веб-просмотра' if preview else 'Фрагмент предпросмотра недоступен; откройте пост в Telegram',
-                members=post.publication.members, source_manifest=manifest)
-        collected = await Downloader(self.transport).collect(post.media,teaser.source_manifest.resources,publication.teaser,staging)
-        partial = bool(collected.error and collected.error.code == 'media-unavailable'
-                       and (post.text.strip() or collected.attachments))
-        manifest = teaser.source_manifest.model_copy(update={'resources':collected.resources, 'download_partial':partial})
-        warnings = [resource.reason for resource in collected.resources if resource.reason]
-        reasons = list(collected.reasons)
-        previous_manifest = publication.teaser.source_manifest if publication.teaser else None
-        if previous_manifest and previous_manifest.post!=manifest.post:
-            reasons.extend(warnings)
-        return Material(teaser.title,post.text,not partial and not manifest.post_web_unavailable and not reasons and not any(r.status=='external' for r in collected.resources),'; '.join(dict.fromkeys([*reasons,*warnings])),
-                        members=post.publication.members,attachments=collected.attachments,
-                        description=teaser.description,source_manifest=manifest,collection_error=None if partial else collected.error,reply_preview=teaser.reply_preview)

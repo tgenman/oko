@@ -75,9 +75,11 @@ def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
     from oko.collection.demo import DemoSource
     from tests.support.reader import wait_for
     entered, released = threading.Event(), threading.Event()
+    entered_items=[]
     class Held(Models):
         async def complete(self, prompt, schema, directory, choice):
             self.inputs.append(choice.model)
+            entered_items.append(json.loads(prompt.split('\n',1)[1])['sources'][0]['id'])
             entered.set()
             while not released.is_set():
                 await asyncio.sleep(.01)
@@ -90,6 +92,7 @@ def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
         assert entered.wait(2)
+        item=entered_items[0]  # Assert provenance for the request actually held by the fixture.
         try:
             assert client.put('/api/v3/processors/codex',json=configuration('test-large','high')).status_code==200
         finally:

@@ -77,7 +77,7 @@ def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(t
         second = wait_for(client,lambda: m if (m:=client.get(url).json())['theses']['result'] and m['theses']['result']['points'][0]['text']=='Summary CONTEXT_TWO' else None)
         assert second['content']['revision_id'] != first['content']['revision_id']
         assert len(calls) == count+2
-        assert second['content']['previous_versions']==[]
+        assert 'previous_versions' not in second['content']
         count = len(calls)
         client.post(url+'/retry')
         wait_for(client,lambda: not client.get(url).json()['content']['loading'])
@@ -143,48 +143,3 @@ def test_ai_can_process_reply_without_own_text_but_skips_metadata_only(tmp_path,
         wait_for(client,lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
         assert len(tasks)==expected_calls
         assert all(task['sources'][0]['text']=='' and task['sources'][0]['reply_preview']['text']==fragment for task in tasks)
-
-
-def test_legacy_copy_can_be_processed_offline_then_reloaded_without_losing_history(tmp_path):
-    import json
-    from oko.collection.contracts import Material,Publication,DiscoveryResult,FetchResult,FetchRequirements,FetchResources,ReplyPreview,SourceError
-    from tests.support.models import model_transport
-    from tests.support.presence import presence
-    from tests.support.reader import wait_for
-    class LegacySource:
-        fetch_requirements=FetchRequirements()
-        changes=None
-        offline=False
-        structured=False
-        fetches=0
-        async def discover(self,cursor):
-            return DiscoveryResult((Publication('1','https://t.me/fixture/11',1800000000),) if cursor is None else (), '1')
-        async def fetch(self,publication,resources=FetchResources()):
-            self.fetches+=1
-            if self.offline: raise SourceError('Synthetic source unavailable')
-            return FetchResult(Material('Own text' if self.structured else '> [Author', 'Own text' if self.structured else '> [Author\n\nQuoted legacy text](https://t.me/fixture/10)\n\nOwn text', reply_preview=ReplyPreview(author='Author',text='Quoted legacy text',source_url='https://t.me/fixture/10') if self.structured else None))
-    source=LegacySource()
-    calls=[]
-    options=dict(token='test',api_only=True,source=source,ai_transport=model_transport(calls))
-    with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        client.patch('/api/v3/settings/oko/global',json=dict(theses=False,prompt_filters=''))
-        card=settled(client)[0]
-        url='/api/v3/materials/'+card['id']
-        original=client.get(url).json()
-        assert original['content']['reply_preview'] is None
-        source.offline=True
-        fetches=source.fetches
-        client.put('/api/v3/processors/llamacpp',json=dict(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
-        client.patch('/api/v3/settings/oko/global',json=dict(processor='llamacpp',theses=True))
-        presence(client,'reader')
-        wait_for(client,lambda: client.get(url).json()['theses']['result'])
-        task=json.loads(json.loads(next(c for c in calls if c.url.path=='/v1/chat/completions').content)['messages'][1]['content'])
-        assert 'Quoted legacy text' in task['sources'][0]['text'] and 'Own text' in task['sources'][0]['text']
-        assert source.fetches==fetches
-        source.offline=False
-        source.structured=True
-        client.post(url+'/retry')
-        fixed=wait_for(client,lambda: m if (m:=client.get(url).json())['content']['reply_preview'] else None)
-        assert fixed['content']['text']=='Own text'
-        assert fixed['content']['previous_versions']==[]

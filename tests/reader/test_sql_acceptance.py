@@ -57,8 +57,8 @@ def test_selected_cost_does_not_move_to_files_or_json(tmp_path):
         with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,root) as measure:
             response,cost=measure.request('selected','GET','/api/v3/cards',params={'feed':feeds[0]})
             assert len(response.json())==26
-            assert cost['content_opens']==26
-            assert len(measure.files)==26
+            assert cost['content_opens']==0
+            assert len(measure.files)==0
             results.append(cost)
     for key in ['sql','content_opens','content_stats','read_bytes','json_loads','json_input_bytes']:
         assert results[1][key]<=results[0][key]+2,(key,results)

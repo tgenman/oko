@@ -9,13 +9,13 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
   const r=await reader();try{
    await r.page.setViewportSize({width,height:900});
    const points={points:[{text:'Основной тезис синтетического материала',sources:[{id:'plain',url:'https://example.org/plain'}]}]};
-   const source=material('source',{previous:[{url:'/api/v3/materials/source/versions/1'}]});
+   const source=material('source',{});
    await r.start([
     material('plain',{title:'We Finally Know More About Humanity’s First Civilization',text:'Сохранённый текст публикации.\n\n'+('Читаем без изменения вёрстки. '.repeat(20)),published:1801991220}),
     material('video',{title:'Видео с недоступными субтитрами',captions:'unavailable',full:false,reason:'YouTube ограничил получение субтитров',description:'Описание видео\n\n'+('Текст и длинная ссылка https://example.org/'+'example/'.repeat(12)+'\n').repeat(3),text:''}),
     material('theses',{theses:points,provenance:{processor:'codex',model:'synthetic',reasoning_effort:'high',fast:false}}),
-    material('hidden',{filter:{status:'done',hidden:true,restored:false,reason:'Синтетический фильтр',removed:[]}}),
-    material('media',{images:['/api/v3/image'],previous:[{url:'/api/v3/materials/source/versions/1'}]}),
+    material('hidden',{filter:{status:'done',hidden:true,reason:'Синтетический фильтр',removed:[]}}),
+    material('media',{images:['/api/v3/image']}),
     material('pending'),material('failed')
    ]);
    await r.page.evaluate(()=>{
@@ -26,7 +26,6 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     t.replies.set('/api/v3/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
     t.replies.set('/api/v3/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
     t.replies.set('/api/v3/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
-    t.replies.set('/api/v3/materials/source/versions/1',{body:{title:'Previous Version',text:'Ранее сохранённый текст',full:true,reason:'',images:[],attachments:[]}});
     t.held.set('/api/v3/materials/pending',true);
     t.replies.set('/api/v3/materials/failed',{status:503,body:{detail:'Синтетическая ошибка открытия'}});
    });

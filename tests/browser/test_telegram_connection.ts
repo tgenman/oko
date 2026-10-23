@@ -42,9 +42,9 @@ test('Telegram client requires verified selected role; duplicate popup describes
   await expect(r.page.locator('#telegram-auto')).not.toBeChecked();
   await r.page.locator('#telegram-add').click();
   await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/telegram/connect'));
-  await r.page.evaluate(()=>readerTransport.release('/api/v3/telegram/connect',{code:'duplicate_source',message:'Уже добавлен',details:{existing_feeds:[{feed_id:'old',title:'Канал',access:{kind:'legacy_client',alias:'old-account',source_locator:'@channel',peer_id:null}},{feed_id:'other',title:'Другой владелец',access:{kind:'client',role:'personal',account_user_id:'9007199254740993',peer_id:'-10042'}}]}},409));
+  await r.page.evaluate(()=>readerTransport.release('/api/v3/telegram/connect',{code:'duplicate_source',message:'Уже добавлен',details:{existing_feeds:[{feed_id:'old',title:'Канал',access:{kind:'web',preview_url:'https://t.me/s/channel',username:'channel'}},{feed_id:'other',title:'Другой владелец',access:{kind:'client',role:'personal',account_user_id:'9007199254740993',peer_id:'-10042'}}]}},409));
   await expect(r.page.getByRole('dialog',{name:'Source already added'})).toBeVisible();
-  await expect(r.page.locator('#telegram-duplicate')).toContainText('old-account');
+  await expect(r.page.locator('#telegram-duplicate')).toContainText('Web');
   await expect(r.page.locator('#telegram-duplicate')).toContainText('Personal Account');
   await expect(r.page.locator('#telegram-duplicate')).toContainText('Open feed settings');
   await r.page.locator('#telegram-duplicate-close').click();
@@ -76,27 +76,6 @@ test('successful Telegram connect clears only the submitted draft after its menu
   await r.page.locator('#add-open').click();await r.page.locator('#add-telegram-tab').click();
   await expect(r.page.locator('#telegram-peer')).toHaveValue('');
   await expect(r.page.locator('#feeds-dialog')).not.toBeVisible();
-  assert.deepEqual(r.errors,[]);
- }finally{await r.close();}
-});
-
-test('legacy Telegram feed shows the saved alias and profile mapping without a reconnection form',async()=>{
- const r=await reader();try{
-  const base=await r.api('v3/settings/oko/global');
-  if(!base||typeof base!=='object')throw new Error('Missing HTTP settings snapshot');
-  await r.start([]);
-  await r.page.evaluate(snapshot=>{
-   const common={id:'legacy',identity:'telegram-peer:old-account:-10042',title:'Старый канал',kind:'telegram',folder_id:'f',importance:'normal',initial_days:1,public_ai:false,original_urls:['@channel']};
-   readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Прежние'}],feeds:[{...common,connection:'needs_profile_confirmation',access:{kind:'legacy_client',alias:'old-account',source_locator:'@channel',peer_id:'-10042'},history:{state:'absent',legacy_since:null}}]}});
-   readerTransport.replies.set('/api/v3/settings/feed/legacy',{body:{...snapshot,scope:'feed',owner:'legacy',feed:{...common,connection:'needs_profile_confirmation',access:{kind:'legacy_client',alias:'old-account',source_locator:'@channel',peer_id:'-10042'},history:{state:'absent',legacy_since:null}}}});
-  },base);
-  await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/legacy"]').click();
-  await r.page.getByRole('button',{name:'Connection and Options',exact:true}).click();
-  await expect(r.page.locator('#feed-options')).toContainText('old-account');
-  await expect(r.page.locator('#feed-options')).toContainText('Change Channel Access');
-  await expect(r.page.locator('#reconnect-connection')).toHaveCount(0);
-  await r.page.getByRole('button',{name:'Configure Telegram Profiles',exact:true}).click();
-  await expect(r.page.locator('[data-settings-page="telegram-profiles"]')).toBeVisible();
   assert.deepEqual(r.errors,[]);
  }finally{await r.close();}
 });

@@ -16,7 +16,7 @@ function harness(fail=false){
   const owner=path.split('/')[1]!;
   if(path.startsWith('oko/'))return {scope:'oko',owner:'global',effective,overrides:{}};
   if(path.startsWith('folder/'))return {scope:'folder',owner,effective,overrides:{}};
-  return {scope:'feed',owner,effective,overrides:{},feed:{id:owner,title:owner,identity:owner,kind:'rss',transport:'rss',connection:'ready',folder_id:'folder',importance:'normal',initial_days:1,original_urls:['https://source.test/feed'],public_ai:false,history:{state:'absent',legacy_since:null}}};
+  return {scope:'feed',owner,effective,overrides:{},feed:{id:owner,title:owner,identity:owner,kind:'rss',transport:'rss',connection:'ready',folder_id:'folder',importance:'normal',initial_days:1,original_urls:['https://source.test/feed'],public_ai:false,history:{state:'absent'}}};
  }
  const api=createReaderApi({token:'synthetic',origin:'http://oko.test',fetch:async(url,options)=>{
   const path=String(url),method=options?.method||'GET';let body:unknown;

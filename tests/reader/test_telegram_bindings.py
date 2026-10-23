@@ -120,71 +120,10 @@ def test_session_substitution_blocks_collection_and_same_person_recovers(tmp_pat
         assert client.post('/api/v3/telegram/connect', json=body).status_code == 200
 
 
-def legacy_feeds(root, *, topics=False, accounts=('one', 'two', 'three')):
-    """A pre-upgrade database: helpers never run an account or migrate a user."""
-    from oko.storage.store import Store
-    from oko.subscriptions.subscriptions import key
-    from oko.collection.contracts import Material, Publication
-    store = Store(root, lambda _: None)
-    result = []
-    for account in accounts:
-        identity = f'telegram-peer:{account}:-1001234567890' + (':topic:20' if topics else '')
-        feed = dict(id=key(identity))
-        with store.db:
-            store.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,0)', (key('folder:Old'),'Old'))
-            store.db.execute("""INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,
-                telegram_peer,telegram_account,telegram_username,telegram_topic,auto_read)
-                VALUES (?,?,?,'telegram',?,?,'connected','telegram',?,?,?,?,0)""",
-                (feed['id'], identity, account, key('folder:Old'), '["@shared"]', -1001234567890, account, 'shared', 20 if topics else None))
-        result.append(feed['id'])
-        store.enqueue_discovery(feed['id'])
-        job = store.next_job(0, feeds=[feed['id']])
-        store.discovered([Publication('11', 'https://t.me/shared/11', 1., Material('Saved', account))], '{"since":0,"after":11}', job, feed['id'], 'telegram')
-    store.db.close()
-    return result
 
 
-def test_legacy_aliases_all_claim_owners_and_saved_material_survive_until_explicit_mapping(tmp_path):
-    ids = legacy_feeds(tmp_path)
-    tg = Accounts()
-    tg.users['three'] = 333
-    clock = [1800000000.]
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg, wall_clock=lambda: clock[0]), headers=HEADERS) as client:
-        feeds = client.get('/api/v3/subscriptions').json()['feeds']
-        assert [feed['id'] for feed in feeds] == ids
-        assert [feed['access']['alias'] for feed in feeds] == ['one', 'two', 'three']
-        assert all(feed['connection'] == 'needs_profile_confirmation' for feed in feeds)
-        assert {client.get('/api/v3/materials/'+card['id']).json()['content']['text'] for card in client.get('/api/v3/cards').json()} == {'one','two','three'}
-        duplicate = client.post('/api/v3/telegram/connect', json={'source_locator':'https://telegram.me/s/SHARED/11', 'folder':'New'})
-        assert duplicate.status_code == 409
-        assert {f['feed_id'] for f in duplicate.json()['details']['existing_feeds']} == set(ids)
-        assert client.get('/api/v3/settings/feed/'+ids[0]).json()['activity']['modified'] is None
-        clock[0] += 10
-        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
-        feeds = client.get('/api/v3/subscriptions').json()['feeds']
-        assert feeds[0]['id'] == ids[0] and feeds[0]['access']['kind'] == 'client'
-        assert {f['access']['alias'] for f in feeds[1:]} == {'two','three'}
-        assert len(client.get('/api/v3/telegram/profiles').json()['configurations']) == 3
-
-        from datetime import datetime, timezone
-        modified = datetime.fromtimestamp(clock[0], timezone.utc).isoformat().replace('+00:00', 'Z')
-        assert client.get('/api/v3/settings/feed/'+ids[0]).json()['activity']['modified'] == modified
-        assert client.get('/api/v3/settings/feed/'+ids[1]).json()['activity']['modified'] is None
-        clock[0] += 10
-        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
-        assert client.get('/api/v3/settings/feed/'+ids[0]).json()['activity']['modified'] == modified
 
 
-def test_unexpected_topic_migration_refuses_before_database_changes(tmp_path):
-    import hashlib
-    legacy_feeds(tmp_path, topics=True)
-    path = tmp_path/'state.sqlite'
-    before = hashlib.sha256(path.read_bytes()).hexdigest()
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()), headers=HEADERS) as client:
-        state = client.get('/api/v3/status').json()
-        assert state['runtime_state'] == 'unavailable'
-        assert state['problems']['current'][0]['code'] == 'storage_unavailable'
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
 
 
 def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
@@ -320,14 +259,15 @@ def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
                 except asyncio.CancelledError:
                     pass
             return b'late video'
-    try:
-        with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Late()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Late()), headers=HEADERS) as client:
+        try:
             client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
             body = dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})
             old_feed = client.post('/api/v3/telegram/connect', json=body).json()['feed_id']
             assert started.wait(2)
             old_material = client.get('/api/v3/cards').json()[0]['id']
             assert client.delete('/api/v3/feeds/'+old_feed).status_code == 200
+            release.set()
             for _ in range(100):
                 if not client.get('/api/v3/subscriptions').json()['feeds']: break
                 time.sleep(.02)
@@ -341,20 +281,10 @@ def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
             assert client.get('/api/v3/materials/'+old_material).status_code == 404
             assert not (tmp_path/'content'/old_material).exists()
             assert not (tmp_path/'staging'/old_material).exists()
-    finally:
-        release.set()
+        finally:
+            release.set()
 
 
-def test_legacy_adoption_cannot_replace_unknown_original_person_with_another_profile(tmp_path):
-    feed = legacy_feeds(tmp_path, accounts=('one',))[0]
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()), headers=HEADERS) as client:
-        before = client.get('/api/v3/subscriptions').json()
-        assert client.put('/api/v3/telegram/profiles/collection', json={'configuration_ref':'two'}).status_code == 200
-        response = client.post('/api/v3/telegram/connect', json=dict(source_locator='-1001234567890',access={'kind':'client','profile':'collection'},folder='Other',auto_read=False))
-        assert response.status_code == 409
-        assert client.get('/api/v3/subscriptions').json() == before
-        material = client.get('/api/v3/cards').json()[0]['id']
-        assert client.get('/api/v3/materials/'+material).json()['content']['text'] == 'one'
 
 
 def test_confirmed_alias_cannot_be_reassigned_to_another_peer(tmp_path):

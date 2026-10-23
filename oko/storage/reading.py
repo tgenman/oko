@@ -7,7 +7,6 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
-import json
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar, cast
 
@@ -46,12 +45,6 @@ def reading_value(read: Callable[P, R]) -> Callable[P, R]:
 @reading_value
 def saved_bytes(path: 'Path') -> bytes:
     return path.read_bytes()
-
-
-@reading_value
-def saved_document(path: 'Path') -> tuple[dict[str, Any], str]:
-    header, text = saved_bytes(path).decode('utf-8').split('\n\n', 1)
-    return json.loads(header), text
 
 
 _clock: ContextVar[tuple[float, float, float] | None] = ContextVar('reader_clock', default=None)

@@ -126,7 +126,7 @@ def test_rss_source_bridge_keeps_adapter_keys_and_ready_content_across_pages():
     assert [p.teaser.text for p in page.publications]==['First','Second']
     assert all(p.adapter_reference.key.platform==Platform.rss for p in page.publications)
     assert all(p.teaser.adapter_content.needs_fetch is False for p in page.publications)
-    assert page.continuation is None and page.observation.description==''
+    assert page.continuation is None and page.observation.description is None
     replay=asyncio.run(source.discover(page.cursor))
     assert [p.adapter_reference for p in replay.publications]==[p.adapter_reference for p in page.publications]
 
@@ -161,10 +161,11 @@ def test_latest_rss_metadata_does_not_fetch_history_until_the_offset_needs_it():
     adapter=RSSAdapter(httpx.MockTransport(respond))
     feed=asyncio.run(adapter.resolve_feed('https://rss.example/feed'))
     page=asyncio.run(adapter.discover(feed.reference,feed.latest_cursor,1))
-    assert len(page.publications)==1 and calls==['/feed','/feed']
-    with pytest.raises(AdapterException) as caught:
-        asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,10))
-    assert caught.value.issue.kind==AdapterErrorKind.temporary
+    assert len(page.publications)==1 and calls==['/feed']
+    cursor=asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,10))
+    partial=asyncio.run(adapter.discover(feed.reference,cursor,10))
+    assert len(partial.publications)==2
+    assert any(issue.code=='rss-history-request-failed' for issue in partial.issues)
     assert calls[-1]=='/archive'
 
 
@@ -197,3 +198,17 @@ def test_invalid_rss_permalink_keeps_a_known_guid_and_healthy_records():
     assert [value.content['blocks'][0]['text'] for value in page.publications]==['Good','Usable excerpt']
     assert page.publications[1].metadata.reference.url=='https://rss.example/feed'
     assert any(issue.code=='rss-invalid-link' for issue in page.issues)
+
+
+def test_deeper_archive_keeps_known_ids_with_non_monotonic_dates():
+    def entry(key, year):
+        return f'<item><guid>{key}</guid><description>{key}</description><pubDate>Wed, 01 Jan {year} 00:00:00 GMT</pubDate></item>'
+    def reply(request):
+        body=entry('C',2019) if request.url.path=='/archive' else entry('A',2020)+entry('B',2025)+'<atom:link rel="next" href="/archive"/>'
+        return httpx.Response(200,text='<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel>'+body+'</channel></rss>')
+    adapter=RSSAdapter(httpx.MockTransport(reply))
+    feed=asyncio.run(adapter.resolve_feed('https://rss.example/feed'))
+    start=asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,2))
+    values=asyncio.run(adapter.discover(feed.reference,start,10))
+    assert [json.loads(value.metadata.reference.key.external_id)[1] for value in values.publications]==['C','B','A']
+    assert any(issue.code=='rss-order-uncertain' for issue in values.issues)
