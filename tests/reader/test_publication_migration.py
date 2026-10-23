@@ -165,6 +165,8 @@ def test_migration_reports_global_key_conflict_and_publishes_no_partial_storage(
     # must report it rather than choose one of these independent copies.
     with sqlite3.connect(source/'state.sqlite') as db:
         db.create_function('oko_reader_time', 0, lambda: 0.)
+        db.create_function('oko_memberships_changed',1,lambda _:None)
+        db.create_function('oko_folder_memberships_changed',1,lambda _:None)
         db.execute("UPDATE items SET url='https://t.me/first/11'")
     before = snapshot(source)
     report = migrate_publications(source, destination)

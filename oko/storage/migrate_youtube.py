@@ -37,6 +37,9 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
                     results['theses']=dict(file=accepted[1].read_text())
             try:
                 reference=video_reference(row['source_id'].split(':',1)[1])
+                from oko.storage.migrate_shared import merge
+                if merge(store,item,reference,report):
+                    continue
                 with store.db:
                     store.publications.identify(item,reference)
             except (sqlite3.IntegrityError,ValueError,AdapterException) as error:
@@ -93,7 +96,7 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
                 store.publications.configure_feed(feed['id'])
             current=store.db.execute('SELECT platform,external_id FROM feeds WHERE id=?',(feed['id'],)).fetchone()
             history=legacy.get('youtube_history',{})
-            chosen=[row[0] for row in store.db.execute('SELECT external_id FROM items WHERE feed_id=? AND platform=\'youtube\' ORDER BY published,id',(feed['id'],))]
+            chosen=[row[0] for row in store.db.execute('SELECT i.external_id FROM items i JOIN feed_publications f ON f.publication_id=i.id WHERE f.feed_id=? AND i.platform=\'youtube\' ORDER BY i.published,i.id',(feed['id'],))]
             position_cursor=legacy_cursor(feed_reference(feed['original_urls'][0]),legacy,selection,chosen)
             complete=not history or history.get('complete',False)
             cursor=dict(youtube_adapter=position_cursor,run=selection.get('run','initial'),

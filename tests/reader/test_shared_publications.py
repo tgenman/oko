@@ -16,7 +16,7 @@ from tests.support.models import model_transport
 def shared(tmp_path):
     root=migrated_root(tmp_path)
     def response(request):
-        return httpx.Response(200,text=feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+        return httpx.Response(200,text=feed_xml().replace(VIDEO,'lmnopqrstuv') if any(value.endswith('c'*22) for value in request.url.params.values()) else feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
     class Captions:
         async def fetch(self,video):
             return 'Shared captions'
@@ -132,3 +132,108 @@ def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_pa
         card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
         assert client.get('/api/v3/materials/'+card['id']).json()['content']['text']=='Post 4'
         assert len(client.get('/api/v3/cards').json())==1
+
+
+def test_shared_media_download_continues_after_its_original_feed_is_deleted(tmp_path):
+    import asyncio,threading
+    root=migrated_root(tmp_path)
+    started,release=threading.Event(),threading.Event()
+    async def response(request):
+        if request.url.path=='/feeds/videos.xml':
+            return httpx.Response(200,text=feed_xml())
+        started.set()
+        while not release.is_set():
+            await asyncio.sleep(.01)
+        return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+    with TestClient(create_app(root,token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        try:
+            presence(client,'reader')
+            client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+            for channel in (CHANNEL,'UC'+'b'*22):
+                add_sources(client,[('https://www.youtube.com/feeds/videos.xml?channel_id='+channel,channel,'Inbox')])
+            assert started.wait(3)
+            wait_for(client,lambda:all(f['count']==1 for f in client.get('/api/v3/reading-composition').json()['feeds']))
+            card=client.get('/api/v3/cards').json()[0]
+            assert client.delete('/api/v3/feeds/'+card['feed_id']).status_code==200
+            release.set()
+            material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] else None))
+            assert client.get(material['content']['attachments'][0]['url']).content==PNG
+        finally:
+            release.set()
+
+
+def test_shared_card_owner_and_importance_order_match_full_and_selective_http(shared):
+    client,feeds,_,_=shared
+    item=client.get('/api/v3/cards').json()[0]
+    primary=item['feed_id']
+    secondary=next(f for f in feeds if f['id']!=primary)
+    client.patch('/api/v3/feeds/'+secondary['id'],json={'importance':'high'})
+    result=add_sources(client,[('https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'c'*22,'Third','Folder 1')])
+    third=next(f for f in result.json()['feeds'] if f['title']=='Third')
+    client.patch('/api/v3/feeds/'+third['id'],json={'importance':'elevated','folder_id':secondary['folder_id']})
+    wait_for(client,lambda:len(client.get('/api/v3/cards').json())==2)
+    options={'target':{'scope':'folder','folder_id':secondary['folder_id']},'sort':'importance','show_hidden':False}
+    request={'kind':'list','options':options,'known_version':None,'known_cards':{}}
+    def compare():
+        full=client.get('/api/v3/cards',params={'folder':secondary['folder_id'],'sort':'importance'}).json()
+        frame=client.post('/api/v3/reading/check',json={'storage_id':None,'resources':[request]}).json()
+        listing=next(r for r in frame['resources'] if r['kind']=='list')
+        assert listing['data']['ids']==[c['id'] for c in full]
+        cards={r['id']:r['data'] for r in frame['resources'] if r['kind']=='card'}
+        for card in full:
+            assert cards[card['id']]['feed_id']==card['feed_id']
+        return listing
+    before=compare()
+    client.patch('/api/v3/feeds/'+primary,json={'importance':'high'})
+    after=compare()
+    assert before['data']['ids']!=after['data']['ids'] and before['version']!=after['version']
+
+
+def test_offline_migration_merges_only_proven_same_external_keys(tmp_path):
+    from oko.storage.migration import migrate_publications
+    source=tmp_path/'legacy'
+    def response(request):
+        return httpx.Response(200,text=feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+    options=dict(token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(source,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+        for channel in (CHANNEL,'UC'+'b'*22):
+            add_sources(client,[('https://www.youtube.com/feeds/videos.xml?channel_id='+channel,channel,'Inbox')])
+        old=wait_for(client,lambda:(cards if len(cards:=client.get('/api/v3/cards').json())==2 and all(c['availability']=='available' for c in cards) else None))
+    report=migrate_publications(source,tmp_path/'converted')
+    assert report['success'],report
+    mappings=[m for m in report['publications'] if m['old_id'] in {c['id'] for c in old}]
+    assert len(mappings)==2 and len({m['new_id'] for m in mappings})==1
+    with TestClient(create_app(tmp_path/'converted'/'storage',**options),headers=HEADERS) as client:
+        cards=client.get('/api/v3/cards').json()
+        assert len(cards)==1
+        assert [f['count'] for f in client.get('/api/v3/reading-composition').json()['feeds']]==[1,1]
+
+
+def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(tmp_path):
+    from oko.storage.store import Store
+    from tests.support.telegram import Telegram,connect_request
+    root=migrated_root(tmp_path)
+    options=dict(token='test',api_only=True,telegram_client=Telegram())
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+        connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
+        item=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))['id']
+    # Synthetic pre-existing graph. New adapters only add direct article links;
+    # old/corrupt cycles still must not keep an unreachable local file alive.
+    store=Store(root,lambda _:None)
+    try:
+        with store.db:
+            for identity in ('cycle-a','cycle-b'):
+                store.db.execute("INSERT INTO items(id,source_id,url,feed_id,platform,external_id) VALUES (?,?,?,NULL,'other_web',?)",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
+            store.db.executemany('INSERT INTO publication_links VALUES (?,?)',[(item,'cycle-a'),('cycle-a','cycle-b'),('cycle-b','cycle-a')])
+    finally:
+        store.db.close()
+    cached=root/'media'/'cycle-a'/'file';cached.parent.mkdir(parents=True);cached.write_bytes(b'Unneeded cycle data')
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
+        assert not cached.exists()
+        assert client.get('/api/v3/materials/'+item).status_code==404

@@ -686,13 +686,14 @@ class Store:
         with self.db:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
                 return False
-            changed_feeds = {row[0] for member in members for row in self.db.execute('SELECT feed_id FROM reading_memberships WHERE publication_id=?', (member,))}
+            memberships={member:[r[0] for r in self.db.execute('SELECT m.feed_id FROM reading_memberships m JOIN items i ON i.id=m.publication_id WHERE m.publication_id=? AND i.viewed=0',(member,))] for member in members}
+            changed_feeds = {feed for feeds in memberships.values() for feed in feeds}
             for feed in changed_feeds:
                 self.subscriptions.details.record(feed, 'marked_read')
             self.problems.forget_materials(affected, self.wall_clock())
             for member in members:
                 row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
-                for feed in [r[0] for r in self.db.execute('SELECT feed_id FROM reading_memberships WHERE publication_id=?',(member,))]:
+                for feed in memberships[member]:
                     self.read_sync.eligible(feed,json.loads(row['members']),'viewed')
                 if self.publications.owns(member):
                     self.db.execute('DELETE FROM feed_publications WHERE publication_id=?',(member,))
@@ -705,8 +706,6 @@ class Store:
                 self.filters.forget(member)
                 self.youtube.reset(member)
                 self.versions.forget(member)
-                if self.publications.owns(member):
-                    self.publications.forget(member)
                 self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (member,))
                 self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))
                 self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (member,))
@@ -726,6 +725,7 @@ class Store:
                 self.db.execute('UPDATE items SET feed_id=? WHERE id=?',(remaining[0] if remaining else feed,item))
                 if remaining:
                     self.db.execute("UPDATE jobs SET status=CASE WHEN status='running' THEN 'pending' ELSE status END,generation=generation+1 WHERE item=? AND kind IN ('fetch','filter','theses')",(item,))
+                    self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE kind='download_media' AND status='running' AND item IN (SELECT id FROM media_files WHERE publication_id=?)",(item,))
             publication_links.prune(self,set(shared))
             for item in shared:
                 self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND feed_id=? AND viewed=0',(item,feed))

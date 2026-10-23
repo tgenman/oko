@@ -69,7 +69,7 @@ class ReadingComposition:
 
     @reading_snapshot()
     def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
-        feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds(feed, folder=folder)}
+        feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds()}
         where, parameters = ['i.viewed=0'], []
         if feed is not None:
             where.append('EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id AND m.feed_id=?)')
@@ -81,10 +81,7 @@ class ReadingComposition:
                                       + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
         cards = []
         for row in rows:
-            owners=[r[0] for r in self._store.db.execute('SELECT feed_id FROM reading_memberships WHERE publication_id=? ORDER BY feed_id',(row['id'],)) if r[0] in feeds]
-            if not owners:
-                continue
-            owner_id=row['feed_id'] if row['feed_id'] in owners else owners[0]
+            owner_id=row['feed_id']
             material = self._store.saved_publication(row)
             if material:
                 material = _reading_heading(material, feeds[owner_id], self._store.original(row['id'])[0] if material['complete'] else {})
