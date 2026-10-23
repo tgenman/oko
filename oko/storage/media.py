@@ -13,7 +13,7 @@ from typing import Any, TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
 from oko.storage.reading import reading_value
-from oko.storage import collection_jobs
+from oko.storage import collection_jobs, publication_links
 
 if TYPE_CHECKING:
     from typing_extensions import Buffer
@@ -178,6 +178,7 @@ class MediaFiles:
             store.finish(job)
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
             store.read_versions.media_changed(download.publication_id)
+            publication_links.notify_parents(store,download.publication_id)
             store.fault('before_media_commit')
         store.fault('after_media_commit')
         store.publications.recover(download.publication_id)

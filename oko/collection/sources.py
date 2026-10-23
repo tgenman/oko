@@ -8,6 +8,9 @@ import httpx
 from oko.collection.contracts import Source
 from oko.collection.adapters import PublicationAdapter
 from oko.collection.rss import RSSSource
+from oko.collection.rss_compatibility import RSSAdapterSource
+from oko.collection.web_adapter import WebAdapter
+from oko.collection.web_compatibility import WebArticleSource
 from oko.collection.telegram.source import TelegramClient, TelegramSource
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.compatibility import TelegramWebSource
@@ -83,7 +86,8 @@ class Sources:
                     self._telegram, access.account, access.peer, config.initial_days, access.username,
                     http_transport=self._telegram_transport)
             elif config.transport == 'rss' and self._rss_enabled:
-                source = previous if isinstance(previous, RSSSource) else RSSSource(config.url, config.initial_days, self._transport)
+                source_type = RSSAdapterSource if config.independent_media else RSSSource
+                source = previous if type(previous) is source_type else source_type(config.url, config.initial_days, self._transport)
             else:
                 continue
             active.add(config.feed)
@@ -116,6 +120,11 @@ class Sources:
         source = self.sources.get(feed)
         return source.adapter if isinstance(source, TelegramSource) else None
 
+    def article_source(self) -> WebArticleSource:
+        return WebArticleSource(WebAdapter(self._transport))
+
     def publication_adapter(self, feed: str) -> PublicationAdapter | None:
         source = self.sources.get(feed)
+        if isinstance(source,RSSAdapterSource):
+            return source.publication_adapter()
         return source.publication_adapter() if isinstance(source, TelegramWebSource) and source.independent_media else None

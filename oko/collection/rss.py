@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 from oko.collection import request_observation as observation
+from oko.collection.adapters import MediaReference
 from oko.collection.contracts import Material, Publication, Image, SourceError, SourceDeleted, DiscoveryResult, FetchResult, FetchResources, FetchRequirements, SourceObservation
 
 
@@ -73,6 +74,7 @@ class Entry:
     publication: Publication
     title: str
     excerpt: str
+    media: tuple[MediaReference, ...] = ()
 
 
 def feed_title(raw: bytes) -> str:
@@ -106,7 +108,7 @@ def feed_description(raw: bytes) -> str | None:
     return RSSSource.excerpt(''.join(node.itertext())) if node is not None else None
 
 
-def entries(raw: bytes, base: str) -> list[Entry]:
+def entries(raw: bytes, base: str, *, strict: bool = False, diagnostics: list[str] | None = None) -> list[Entry]:
     if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():
         raise SourceError('Неподдерживаемый XML источника')
     try:
@@ -141,13 +143,20 @@ def entries(raw: bytes, base: str) -> list[Entry]:
             if local(child.tag) == 'link' and child.get('rel', 'alternate') == 'alternate' and child.get('href'):
                 link = child.get('href', '')
                 break
-        if not link:
+        identity = value('guid') or value('id')
+        if not link and not (strict and identity):
+            if strict and diagnostics is not None:
+                diagnostics.append('rss-missing-key')
             continue
         try:
-            url = normalized(urljoin(entry_base, link))
+            url = normalized(urljoin(entry_base, link)) if link else ''
         except SourceError:
             record_caught('rss.entries')
-            continue
+            if not strict or not identity:
+                if strict and diagnostics is not None:
+                    diagnostics.append('rss-missing-key')
+                continue
+            url = ''
         date = value('pubDate') or value('published') or value('updated') or value('date')
         known = True
         try:
@@ -157,10 +166,34 @@ def entries(raw: bytes, base: str) -> list[Entry]:
             # Unknown date cannot justify excluding an otherwise new publication.
             stamp, known = 0., False
         identity = value('guid') or value('id') or url
-        result.append(Entry(Publication(identity, url, stamp, published_known=known), value('title') or 'Без заголовка',
+        media: list[MediaReference] = []
+        if strict:
+            for child in node:
+                if not (local(child.tag) == 'enclosure' or local(child.tag) == 'link' and child.get('rel') == 'enclosure'):
+                    continue
+                locator = child.get('url') or child.get('href')
+                if not locator:
+                    continue
+                try:
+                    locator = normalized(urljoin(entry_base, locator))
+                except SourceError:
+                    continue
+                length = child.get('length', '')
+                size = int(length) if length.isascii() and length.isdecimal() else None
+                media.append(MediaReference('rss:enclosure:'+str(len(media)), locator, '', child.get('type'), size))
+        result.append(Entry(Publication(identity, url, stamp, published_known=known), value('title') or ('' if strict else 'Без заголовка'),
                             markup('description') or markup('summary') or markup('encoded') or markup('content')
                             or next((''.join(c.itertext()).strip() for c in node.iter()
-                                     if c.tag == '{http://search.yahoo.com/mrss/}description'), '')))
+                                     if c.tag == '{http://search.yahoo.com/mrss/}description'), ''), tuple(media)))
+    if strict:
+        unique: dict[str, Entry] = {}
+        for entry in result:
+            prior = unique.get(entry.publication.id)
+            if prior is not None and prior != entry:
+                raise SourceError('Разные записи RSS имеют один внешний ID',
+                                  code='rss-identity-conflict', retryable=False)
+            unique[entry.publication.id] = entry
+        return list(unique.values())
     counts: dict[str, int] = {}
     for entry in result:
         counts[entry.publication.id] = counts.get(entry.publication.id, 0) + 1

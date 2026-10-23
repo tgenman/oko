@@ -128,7 +128,8 @@ class PublicationTheses:
         if settings['feed']['kind'] == 'youtube':
             text = material['text']
             version = hashlib.sha256(text.encode()).hexdigest()
-        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text, reply_preview=material.get('reply_preview')),), settings_version=version_settings, prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        sources=publication_input.sources(self.store,job.item,'theses') if self.store.publications.owns(job.item) else (InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text, reply_preview=material.get('reply_preview')),)
+        request = ProcessingRequest(sources=sources, settings_version=version_settings, prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, public_ai
 
     def retry(self, item: str) -> bool:
@@ -159,8 +160,9 @@ class PublicationTheses:
             metadata=json.loads(row['processing_metadata']).get('summary',{})
             if metadata.get('signature',metadata.get('input_hash'))==self.signature(item) and metadata:
                 value=json.loads(row['summarized_content'])
-                url=self.store.db.execute('SELECT url FROM items WHERE id=?',(item,)).fetchone()[0]
-                return dict(points=[dict(text=p['text'],sources=[dict(id=identity,url=url) for identity in p['source_publication_ids']]) for p in value['points']])
+                identities={identity for point in value['points'] for identity in point['source_publication_ids']}
+                urls={identity:self.store.db.execute('SELECT url FROM items WHERE id=?',(identity,)).fetchone()[0] for identity in identities}
+                return dict(points=[dict(text=p['text'],sources=[dict(id=identity,url=urls[identity]) for identity in p['source_publication_ids']]) for p in value['points']])
             return None
         accepted = self._accepted(item)
         return accepted[0] if accepted else None
