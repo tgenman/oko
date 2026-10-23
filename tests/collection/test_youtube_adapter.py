@@ -170,3 +170,14 @@ def test_repeat_window_keeps_initial_count_and_only_admits_new_or_selected_video
     videos.insert(0,'v0000000004')
     repeat=asyncio.run(adapter.discover(feed.reference,initial.next_cursor,10))
     assert [p.metadata.reference.key.external_id for p in repeat.publications]==['v0000000003','v0000000004']
+
+
+def test_empty_atom_window_can_still_select_available_metadata_history():
+    from tests.support.youtube import History
+    history=History([VIDEO])
+    adapter=YouTubeAdapter(Captions(),httpx.MockTransport(lambda _:httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom"/>')),history)
+    feed=asyncio.run(adapter.resolve_feed('https://www.youtube.com/feeds/videos.xml?channel_id='+CHANNEL))
+    cursor=asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,2))
+    page=asyncio.run(adapter.discover(feed.reference,cursor,10))
+    assert [p.metadata.reference.key.external_id for p in page.publications]==[VIDEO]
+    assert any(issue.code=='history-shortfall' for issue in page.issues)

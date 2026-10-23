@@ -6,7 +6,7 @@ import sqlite3
 from typing import Any,TYPE_CHECKING
 
 from oko.collection.adapters import AdapterException,MediaReference,PublicationContent,PublicationMetadata
-from oko.collection.youtube.adapter import video_reference
+from oko.collection.youtube.adapter import video_reference,feed_reference,legacy_cursor
 from oko.reviews import publication_input
 from oko.storage.reading import saved_document
 
@@ -94,15 +94,9 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
             current=store.db.execute('SELECT platform,external_id FROM feeds WHERE id=?',(feed['id'],)).fetchone()
             history=legacy.get('youtube_history',{})
             chosen=[row[0] for row in store.db.execute('SELECT external_id FROM items WHERE feed_id=? AND platform=\'youtube\' ORDER BY published,id',(feed['id'],))]
-            excluded=[key.removeprefix('yt:video:') for key in history.get('baseline',legacy.get('baseline',[])) if key.removeprefix('yt:video:') not in chosen]
-            position_state=dict(channel=current[1],keys=chosen,position=len(chosen),done=True,excluded=excluded)
+            position_cursor=legacy_cursor(feed_reference(feed['original_urls'][0]),legacy,selection,chosen)
             complete=not history or history.get('complete',False)
-            if history and not complete:
-                anchor=history.get('state',{}).get('anchors',{}).get('UU')
-                count=selection.get('count') or 1
-                position_state.update(keys=[anchor] if anchor else [],position=0,done=False,history=history.get('state',{}),
-                    history_count=count,provider_count=count,history_position=anchor,history_offset=count-1,locating=True)
-            cursor=dict(youtube_adapter=json.dumps(position_state),run=selection.get('run','initial'),
+            cursor=dict(youtube_adapter=position_cursor,run=selection.get('run','initial'),
                 count=selection.get('count') or 1,locating=False,initial_complete=complete,scan_complete=complete)
             with store.db:
                 store.db.execute('UPDATE feeds SET cursor=? WHERE id=?',(json.dumps(cursor),feed['id']))

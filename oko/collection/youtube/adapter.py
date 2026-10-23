@@ -40,6 +40,19 @@ def _encode(state: dict[str,Any]) -> str:
     return json.dumps(state,separators=(',',':'),ensure_ascii=False)
 
 
+def legacy_cursor(feed: ExternalReference, legacy: dict[str,Any], selection: dict[str,Any], chosen: list[str]) -> str:
+    """Translate a saved metadata selection offline; callers keep the result opaque."""
+    history=legacy.get('youtube_history',{})
+    excluded=[key.removeprefix('yt:video:') for key in history.get('baseline',legacy.get('baseline',[])) if key.removeprefix('yt:video:') not in chosen]
+    state: dict[str,Any]=dict(channel=feed.key.external_id,keys=chosen,position=len(chosen),done=True,excluded=excluded)
+    if history and not history.get('complete',False):
+        anchor=history.get('state',{}).get('anchors',{}).get('UU')
+        count=selection.get('count') or 1
+        state.update(keys=[anchor] if anchor else [],position=0,done=False,history=history.get('state',{}),
+            history_count=count,provider_count=count,history_position=anchor,history_offset=count-1 if anchor else count,locating=True)
+    return _encode(state)
+
+
 class YouTubeAdapter:
     def __init__(self, captions: CaptionsClient, transport: httpx.AsyncBaseTransport | None = None,
                  history: HistoryClient | None = None) -> None:
@@ -140,14 +153,22 @@ class YouTubeAdapter:
     async def resolve_feed(self, url: str) -> FeedMetadata:
         feed=feed_reference(url)
         keys=await self._window(feed)
-        return FeedMetadata(feed,'','',_encode(dict(channel=feed.key.external_id,keys=keys,
+        state=dict(channel=feed.key.external_id,keys=keys,
             position=max(0,len(keys)-1),done=False,excluded=keys,metadata=self._metadata(keys),
-            anchors={**self.anchors,**({'UU':keys[-1]} if keys else {})})))
+            anchors={**self.anchors,**({'UU':keys[-1]} if keys else {})})
+        if not keys:
+            state.update(history_count=1,history_position=None,history_offset=1,locating=True)
+            await self._history(feed,state)
+        return FeedMetadata(feed,'','',_encode(state))
 
     async def cursor_before(self, feed: ExternalReference, cursor: str, offset: int) -> str:
         state=self._state(feed,cursor)
         if offset<0:
             raise ValueError('offset must be non-negative')
+        if not state['keys']:
+            state.update(history_count=offset+1,history_position=None,history_offset=offset+1,locating=True)
+            await self._history(feed,state)
+            return _encode(state)
         if offset>state['position'] and state['keys']:
             state.update(history_count=offset+len(state['keys'])-state['position'],
                 history_position=state['keys'][state['position']] if state['position']<len(state['keys']) else None,

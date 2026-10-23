@@ -37,5 +37,8 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
  await r.page.screenshot({path:artifactPath(`youtube-${initial}-captions-before-cover.png`)});
  await r.setMediaState('ready');
  await expect.poll(async()=>{const m=await r.api(`materials/${card.id}`);return 'attachments' in m.content && m.content.attachments.some(a=>a.kind==='image');}).toBe(true);
+ await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
+ await expect(r.page.locator('#text')).toContainText('Raw YouTube captions.');
+ await expect(r.page.locator('#theses li')).toHaveCount(1);
  await r.page.screenshot({path:artifactPath(`youtube-${initial}-complete.png`)});
 });
