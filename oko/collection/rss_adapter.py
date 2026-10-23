@@ -91,10 +91,10 @@ class RSSAdapter:
                 AdapterErrorKind.permanent)) from error
 
     @staticmethod
-    def _value(feed: str, entry: Entry) -> PublicationContent:
+    def _parsed_value(feed: str, entry: Entry) -> PublicationContent:
         pub = entry.publication
         # A record without a permalink opens its real feed; this is not an article link.
-        ref = ExternalReference(ExternalKey(Platform.rss, _encode([feed, pub.id])), pub.url or feed)
+        metadata=RSSAdapter._metadata(feed,entry)
         content = _Content(pub.url or feed)
         soup = BeautifulSoup(entry.excerpt, 'html.parser')
         for child in soup.children:
@@ -106,9 +106,21 @@ class RSSAdapter:
             content.blocks.append(dict(type='media', ref={'$media': media.key},
                                        role=kind if kind in ('image', 'video', 'audio') else 'attachment'))
         linked = (reference(pub.url),) if pub.url else ()
-        return PublicationContent(PublicationMetadata(ref, entry.title,
-            datetime.fromtimestamp(pub.published, timezone.utc) if pub.published_known else None),
+        return PublicationContent(metadata,
             {'blocks': content.blocks, 'extra': {}}, tuple(content.media), linked)
+
+    @staticmethod
+    def _metadata(feed: str, entry: Entry) -> PublicationMetadata:
+        pub=entry.publication
+        return PublicationMetadata(ExternalReference(ExternalKey(Platform.rss,_encode([feed,pub.id])),pub.url or feed),
+            entry.title,datetime.fromtimestamp(pub.published,timezone.utc) if pub.published_known else None)
+
+    @staticmethod
+    def _value(feed: str, entry: Entry) -> PublicationContent:
+        try:
+            return RSSAdapter._parsed_value(feed,entry)
+        except SourceError as error:
+            raise failure(error,RSSAdapter._metadata(feed,entry).reference,scope='rss:'+feed) from error
 
     async def resolve_feed(self, url: str) -> FeedMetadata:
         try:
@@ -138,7 +150,16 @@ class RSSAdapter:
         if state['done']:
             state = {'feed': feed.url, 'keys': list(reversed(batch)), 'position': 0, 'done': False}
         keys = state['keys'][state['position']:state['position']+limit]
-        values = tuple(self._value(feed.url, batch[key]) for key in keys if key in batch)
+        publications=[]
+        for key in keys:
+            if key not in batch:
+                continue
+            try:
+                publications.append(self._value(feed.url,batch[key]))
+            except AdapterException as error:
+                publications.append(PublicationContent(self._metadata(feed.url,batch[key]),
+                    needs_fetch=True,issues=(error.issue,)))
+        values=tuple(publications)
         if any(key not in batch for key in keys):
             issues.append(AdapterIssue('rss-window-changed', 'Часть записей исчезла из доступного окна RSS', AdapterErrorKind.notice))
         state['position'] += len(keys)

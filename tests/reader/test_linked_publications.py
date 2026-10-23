@@ -239,3 +239,43 @@ def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_p
         missing[0]=False
         client.post('/api/v3/materials/'+card['id']+'/retry')
         wait_for(client,lambda:'Retrieved article' in client.get('/api/v3/materials/'+card['id']).json()['content']['text'])
+
+
+def test_empty_rss_excerpt_waits_for_article_then_processes_its_actual_input(tmp_path):
+    import asyncio
+    import threading
+    import json
+    from tests.support.models import model_transport
+    from tests.support.reader import wait_for
+    root=migrated_root(tmp_path)
+    release=threading.Event()
+    calls=[]
+    native=model_transport([])
+    def model(request):
+        if request.url.path!='/v1/chat/completions':
+            return native.handler(request)
+        task=json.loads(json.loads(request.content)['messages'][1]['content'])
+        calls.append(task)
+        result={'points':[{'text':source['text'],'sources':[{'id':source['id'],'url':source['url']}]} for source in task['sources'] if source['text'].strip()]}
+        return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(result)}}]})
+    async def response(request):
+        if request.url.host=='web.example':
+            while not release.is_set():
+                await asyncio.sleep(.01)
+            return httpx.Response(200,text='<article>Actual article text</article>')
+        return httpx.Response(200,text='<rss><channel><item><guid>entry</guid><link>https://web.example/article</link></item></channel></rss>')
+    with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
+            rss_transport=httpx.MockTransport(response),ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True})
+            import_feed(client)
+            presence(client,'rss')
+            card=wait_cards(client)[0]
+            assert not calls and card['theses']['result'] is None
+            release.set()
+            updated=wait_for(client,lambda:(value if (value:=client.get('/api/v3/materials/'+card['id']).json())['theses']['result'] and value['theses']['result']['points'] else None))
+            assert updated['theses']['result']['points'][0]['text']=='Actual article text'
+            assert len(calls)==1
+        finally:
+            release.set()

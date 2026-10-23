@@ -58,8 +58,11 @@ class _Content:
         self.text=[]
 
     def address(self, value: Any) -> str | None:
-        address=urljoin(self.base,value) if isinstance(value,str) else ''
-        return address if urlsplit(address).scheme in ('http','https') else None
+        try:
+            address=urljoin(self.base,value) if isinstance(value,str) else ''
+            return address if urlsplit(address).scheme in ('http','https') else None
+        except ValueError as error:
+            raise SourceError('Некорректная ссылка в содержимом',code='invalid-content-link',retryable=False) from error
 
     def file(self, url: str, role: str, *, name: str = '', mime: str | None = None, caption: str = '') -> None:
         self.flush()

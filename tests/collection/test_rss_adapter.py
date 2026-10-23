@@ -128,3 +128,21 @@ def test_rss_source_bridge_keeps_adapter_keys_and_ready_content_across_pages():
     assert page.continuation is None and page.observation.description==''
     replay=asyncio.run(source.discover(page.cursor))
     assert [p.adapter_reference for p in replay.publications]==[p.adapter_reference for p in page.publications]
+
+
+def test_malformed_record_keeps_its_key_and_does_not_drop_healthy_peers():
+    from oko.collection.adapters import AdapterErrorKind, AdapterException
+    import pytest
+    raw='<rss><channel><item><guid>bad</guid><description><![CDATA[<a href="https://[bad/">Bad</a>]]></description></item><item><guid>good</guid><description>Good</description></item></channel></rss>'
+    adapter=RSSAdapter(httpx.MockTransport(lambda _:httpx.Response(200,text=raw)))
+    feed=asyncio.run(adapter.resolve_feed('https://rss.example/feed'))
+    cursor=asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,1))
+    page=asyncio.run(adapter.discover(feed.reference,cursor,10))
+    assert len(page.publications)==2
+    good,bad=page.publications
+    assert good.content['blocks'][0]['text']=='Good' and not good.needs_fetch
+    assert json.loads(bad.metadata.reference.key.external_id)[1]=='bad' and bad.needs_fetch
+    assert bad.issues[0].kind==AdapterErrorKind.permanent
+    with pytest.raises(AdapterException) as caught:
+        asyncio.run(adapter.fetch(bad.metadata.reference))
+    assert caught.value.issue.kind==AdapterErrorKind.permanent

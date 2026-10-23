@@ -61,6 +61,13 @@ def awaiting_input(content: dict[str, Any]) -> bool:
     return manifest.get('preview_fragment') is not None or bool(manifest.get('post_web_unavailable') and not any(block.get('text','').strip() for block in blocks(content)))
 
 
+def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) -> bool:
+    if any(block.get('text','').strip() for block in blocks(selected)):
+        return False
+    return store.db.execute('''SELECT 1 FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+        WHERE l.source_publication_id=? AND i.viewed=0 AND i.complete=0 LIMIT 1''',(item,)).fetchone() is not None
+
+
 def live_settings(store: 'Store', item: str) -> dict[str, Any]:
     feed=store.item_feed(item)
     current=store.subscriptions.effective('feed',feed,details=False)
@@ -83,7 +90,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not values['theses']:
         return None
     selected_content=content(store,item)
-    if awaiting_input(selected_content):
+    if awaiting_input(selected_content) or awaiting_linked_input(store,item,selected_content):
         return None
     selected=blocks(selected_content)
     if kind=='theses':

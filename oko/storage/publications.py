@@ -349,7 +349,9 @@ class Publications:
         row=self.store.db.execute('SELECT * FROM items WHERE id=? AND platform IS NOT NULL AND viewed=0 AND complete=1',(item,)).fetchone()
         if not row or row['content']=='{}':
             return
-        content=json.loads(row['content'])
+        content=publication_input.content(self.store,item)
+        if publication_input.awaiting_linked_input(self.store,item,content):
+            return
         if any(block.get('text','').strip() for block in publication_input.blocks(content)):
             return
         header=content['extra'].get('_reader',{})
@@ -386,7 +388,8 @@ class Publications:
         if row['feed_id'] is None:
             self.store.db.execute("UPDATE items SET status='ready' WHERE id=?",(item,))
             return
-        if publication_input.awaiting_input(json.loads(row['content'])):
+        selected=publication_input.content(self.store,item)
+        if publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
             self.store.db.execute("UPDATE items SET status='pending_collection' WHERE id=?",(item,))
             return
         filtered = self.store.filters.read(item)
