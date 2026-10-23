@@ -57,6 +57,15 @@ class WorkSummary:
 
 class Store:
     """SQLite owns lifecycle and migrated publications; files hold local media."""
+    def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
+                               auto_read: bool | None) -> dict[str,Any]:
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            result=self.subscriptions.telegram.change_access(feed,binding,info,auto_read,self.subscriptions)
+            self.publications.configure_feed(feed)
+            self.publications.changed_adapter(feed)
+        return result
+
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic) -> None:
         self.root, self.fault = root, fault
         self.wall_clock = wall_clock

@@ -989,11 +989,7 @@ class Runtime:
                 if current.subscriptions.telegram.binding(feed_id)!=previous:
                     raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Привязка изменилась во время проверки; повторите действие')
                 try:
-                    with current.db:
-                        current.db.execute('BEGIN IMMEDIATE')
-                        result=current.subscriptions.telegram.change_access(feed_id,binding,info,auto_read,current.subscriptions)
-                        current.publications.configure_feed(feed_id)
-                        current.publications.changed_adapter(feed_id)
+                    result=current.change_telegram_access(feed_id,binding,info,auto_read)
                 except sqlite3.IntegrityError:
                     raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Внешний ключ уже принадлежит другому фиду') from None
                 await self._cancel({feed_id})

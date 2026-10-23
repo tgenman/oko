@@ -152,3 +152,30 @@ def test_new_native_album_requests_metadata_retry_until_publication_settles():
     value=asyncio.run(adapter.fetch(ref))
     assert value.needs_fetch
     assert any(issue.code=='telegram-album-pending' and issue.kind==AdapterErrorKind.temporary for issue in value.issues)
+
+
+def test_latest_service_message_does_not_hide_latest_publication():
+    from oko.collection.telegram.client_adapter import TelegramClientAdapter,decode
+    class Client(Telegram):
+        async def page(self,*args):
+            return dict(messages=[dict(id=12,date=time.time()-60,text='',service=True,media=None,group=None),
+                dict(id=11,date=time.time()-60,text='Latest',media=None,group=None)],more=False)
+    adapter=TelegramClientAdapter(Client(),'fixture',-1001234567890)
+    metadata=asyncio.run(adapter.resolve_feed('-1001234567890'))
+    state=decode(adapter.peer,metadata.latest_cursor)
+    assert state['start']==11 and state['upper']==12
+    cursor=asyncio.run(adapter.cursor_before(metadata.reference,metadata.latest_cursor,0))
+    page=asyncio.run(adapter.discover(metadata.reference,cursor,1))
+    assert [p.content['blocks'][0]['text'] for p in page.publications]==['Latest']
+
+
+def test_media_preserves_original_name_and_unknown_name_is_empty():
+    from oko.collection.telegram.client_adapter import TelegramClientAdapter
+    from oko.collection.telegram.client_adapter import publication_reference
+    class Client(Telegram):
+        async def messages(self,*args):
+            return [dict(id=n,date=time.time()-60,text='',group=77,media=dict(
+                kind='file',mime='application/pdf',extension='pdf',**extra)) for n,extra in [(11,{}),(12,{'name':'Report.pdf'})]]
+    adapter=TelegramClientAdapter(Client(),'fixture',-1001234567890)
+    value=asyncio.run(adapter.fetch(publication_reference(adapter.peer,11)))
+    assert [m.name for m in value.media]==['','Report.pdf']

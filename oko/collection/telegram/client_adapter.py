@@ -21,6 +21,13 @@ def publication_reference(peer: int, message: int, username: str | None = None) 
     return ExternalReference(ExternalKey(Platform.telegram,url),url)
 
 
+def media_reference(peer: int, message: int, publication: ExternalReference, name: str = '',
+                    mime_type: str | None = None, size_bytes: int | None = None,
+                    resource_identity: str | None = None) -> MediaReference:
+    locator=json.dumps(dict(peer=peer,message=message,publication_key=publication.key.external_id),separators=(',',':'))
+    return MediaReference('telegram-client:'+str(peer)+':'+str(message),locator,name,mime_type,size_bytes,resource_identity)
+
+
 def failure(error: SourceError, publication: ExternalReference | None = None,
             media_key: str | None = None, scope: str = '') -> AdapterException:
     if error.remote_type=='ChangedMedia':
@@ -96,9 +103,8 @@ class TelegramClientAdapter:
             if item['kind']=='unsupported':
                 issues.append(AdapterIssue('media-unsupported','Тип вложения пока не поддерживается',AdapterErrorKind.unavailable,reference,key))
                 continue
-            locator=json.dumps(dict(peer=self.peer,message=row['id'],publication_key=reference.key.external_id),separators=(',',':'))
             name='media-'+str(row['id'])+'.'+item['extension']
-            media.append(MediaReference(key,locator,name,item['mime'],item.get('size'),item.get('identity')))
+            media.append(media_reference(self.peer,row['id'],reference,item.get('name',''),item['mime'],item.get('size'),item.get('identity')))
             blocks.append(dict(type='media',role='attachment' if item['kind']=='file' else item['kind'],ref={'$media':key}))
             resources.append(dict(key=key,origin='telegram:'+str(self.peer)+'/'+str(row['id']),order=len(resources),
                 name=name,kind=item['kind'],mime=item['mime'],status='missing'))
@@ -120,8 +126,10 @@ class TelegramClientAdapter:
             await self._resolve()
             self._head=await self.client.history_page(self.account,self.peer,0,0,0)
             upper=self._head['upper']
+            groups=await self._window(0,upper,1) if upper else []
+            start=max(row['id'] for row in groups[-1]) if groups else 0
             reference=ExternalReference(ExternalKey(Platform.telegram,str(self.peer)),self._url())
-            return FeedMetadata(reference,self.info.get('title',''),self.info.get('description',''),encode(self.peer,upper,upper) if upper else '')
+            return FeedMetadata(reference,self.info.get('title',''),self.info.get('description',''),encode(self.peer,start,upper) if groups else '')
         except SourceError as error:
             raise failure(error,scope='telegram:client:'+self.account) from error
 

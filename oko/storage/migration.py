@@ -158,7 +158,8 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                 if native and material.source_manifest:
                     from dataclasses import replace
                     from datetime import datetime,timezone
-                    from oko.collection.adapters import MediaReference,PublicationContent,PublicationMetadata
+                    from oko.collection.adapters import PublicationContent,PublicationMetadata
+                    from oko.collection.telegram.client_adapter import media_reference
                     from oko.collection.web_adapter import reference as article_reference
                     from oko.collection.telegram.telegraph import direct_articles
                     refs=[]
@@ -166,7 +167,7 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                         if not resource.key.startswith('telegram-client:'+str(feed['telegram_peer'])+':'):
                             continue
                         message=int(resource.key.rsplit(':',1)[-1])
-                        refs.append(MediaReference(resource.key,json.dumps(dict(peer=feed['telegram_peer'],message=message,publication_key=ref.key.external_id)),resource.name,resource.mime))
+                        refs.append(media_reference(feed['telegram_peer'],message,ref,mime_type=resource.mime))
                     value=PublicationContent(PublicationMetadata(ref,material.title,
                         datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),
                         dict(extra=dict(telegram=dict(members=list(material.members)))),tuple(refs),

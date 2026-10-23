@@ -82,6 +82,7 @@ def record(msg: Any) -> dict[str, Any]:
     elif msg.media and type(msg.media).__name__ != 'MessageMediaWebPage':
         media = dict(kind='unsupported', mime='application/octet-stream', extension='bin')
     if media is not None:
+        media['name']=getattr(getattr(msg,'file',None),'name',None) or ''
         original=msg.photo or msg.document
         identity=getattr(original,'id',None)
         if identity is not None:

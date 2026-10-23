@@ -46,7 +46,7 @@ test('Telegram client requires verified selected role; duplicate popup describes
   await expect(r.page.getByRole('dialog',{name:'Source already added'})).toBeVisible();
   await expect(r.page.locator('#telegram-duplicate')).toContainText('old-account');
   await expect(r.page.locator('#telegram-duplicate')).toContainText('Personal Account');
-  await expect(r.page.locator('#telegram-duplicate')).toContainText('delete');
+  await expect(r.page.locator('#telegram-duplicate')).toContainText('Open feed settings');
   await r.page.locator('#telegram-duplicate-close').click();
   await expect(r.page.locator('#telegram-peer')).toHaveValue('@channel');
   assert.deepEqual(r.errors,[]);
@@ -93,7 +93,7 @@ test('legacy Telegram feed shows the saved alias and profile mapping without a r
   await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/legacy"]').click();
   await r.page.getByRole('button',{name:'Connection and Options',exact:true}).click();
   await expect(r.page.locator('#feed-options')).toContainText('old-account');
-  await expect(r.page.locator('#feed-options')).not.toContainText('Personal Account');
+  await expect(r.page.locator('#feed-options')).toContainText('Change Channel Access');
   await expect(r.page.locator('#reconnect-connection')).toHaveCount(0);
   await r.page.getByRole('button',{name:'Configure Telegram Profiles',exact:true}).click();
   await expect(r.page.locator('[data-settings-page="telegram-profiles"]')).toBeVisible();
