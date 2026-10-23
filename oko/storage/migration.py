@@ -123,8 +123,11 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
         namespace='telegram' if native else 'telegram-web'
         cursor = store.cursor(feed['id'], namespace) or ''
         if native:
-            from oko.collection.telegram.client_compatibility import legacy_cursor
+            from oko.collection.telegram.client_channel_source import legacy_cursor
             cursor=legacy_cursor(cursor,feed['telegram_peer'],feed['initial_history'] or {})
+        else:
+            from oko.collection.telegram.adapter import legacy_cursor as web_cursor
+            cursor=web_cursor(cursor,feed['initial_history'] or {})
         try:
             with store.db:
                 store.publications.configure_feed(feed['id'],migrate_legacy=True)
@@ -193,7 +196,8 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                         dict(extra=dict(telegram=dict(members=list(material.members)))),tuple(refs),
                         tuple(article_reference(url) for url in direct_articles(str(material.source_manifest.post.get('text',material.text)))))
                     material=replace(material,adapter_content=value)
-                prepared = store.publications.prepare(item, material, store.path(item).parent)
+                from oko.storage.migrate_document import prepare as prepare_legacy
+                prepared = prepare_legacy(store,item,material,store.path(item).parent)
                 # Capture only results accepted against the current input by the
                 # existing processors. File presence alone never establishes this.
                 current_text='\n\n'.join(b['text'] for b in publication_input.blocks(prepared[0]) if b['type']=='text')

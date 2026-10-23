@@ -219,83 +219,23 @@ class Publications:
             plans[publication.id]=plan
         return plans
 
-    def prepare(self, item: str, material: Material, directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Prepare durable files outside the accepting transaction."""
+    def prepare(self, item: str, material: Material, directory: Path) -> tuple[dict[str,Any],list[dict[str,Any]]]:
+        """Convert the common adapter description; media bytes remain independent."""
         directory.mkdir(parents=True,exist_ok=True)
-        header: dict[str,Any]=dict(title=material.title,full=material.full,reason=material.reason,members=list(material.members),captions=material.captions,
-            attachments=[dict(name=a.name,kind=a.kind,mime=a.mime) for a in material.attachments])
-        if material.description:
-            header['description']=material.description
-        if material.source_manifest:
-            header['source_manifest']=material.source_manifest.model_dump(mode='json')
-        if material.reply_preview:
-            header['reply_preview']=material.reply_preview.model_dump()
-        text=material.text
-        if material.adapter_content and material.adapter_content.metadata.reference.key.platform.value != 'telegram':
-            return self._prepare_adapter(item, material, header, directory)
-        manifest=material.source_manifest
-        if manifest and manifest.articles and manifest.preview_fragment is None:
-            text='\n\n'.join(part for part in [str(manifest.post.get('text','')),*[article.text for article in manifest.articles if article.text is not None]] if part)
-        blocks: list[dict[str, Any]] = [dict(type='text', role='body', text=text)]
-        if material.description:
-            blocks.append(dict(type='text', role='description', text=material.description))
-        if material.reply_preview:
-            reply = material.reply_preview
-            blocks.append(dict(type='quote', text=reply.text, author=reply.author, source_url=reply.source_url))
-        known = {r['resource_key']: dict(r) for r in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (item,))}
-        resources = {r.name: r for r in material.source_manifest.resources} if material.source_manifest else {}
-        references = {r.key: r for r in material.adapter_content.media} if material.adapter_content else {}
-        media: list[dict[str, Any]] = []
-        names = list(dict.fromkeys([*resources, *[p.name for p in sorted(directory.iterdir()) if p.name.startswith(('media-', 'image-'))]]))
-        attachments = {a.name: a for a in material.attachments}
-        for name in names:
-            resource = resources.get(name)
-            if resource and resource.external:
-                blocks.append(dict(type='external_media', kind=resource.external.kind, url=resource.external.source_url))
-                continue
-            key = resource.key if resource else name
-            path = directory/name
-            old = known.get(key)
-            ref = references.get(key)
-            same = bool(old and path.is_file() and old['storage_key'] and (self.store.root/old['storage_key']).is_file()
-                        and self.store.versions.file_digest(path) == self.store.versions.file_digest(self.store.root/old['storage_key']))
-            if ref and ref.resource_identity and old and old['resource_identity'] == ref.resource_identity:
-                same = True
-            identity = old['id'] if same and old else str(uuid4())
-            storage_key = 'media/'+item+'/'+identity if path.is_file() else None
-            if same and old and old['status']=='ready' and old['storage_key'] and (self.store.root/old['storage_key']).is_file():
-                storage_key = old['storage_key']
-                if not path.is_file():
-                    os.link(self.store.root/storage_key, path)
-            if storage_key and not same:
-                destination = self.store.root/storage_key
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                pending = destination.with_suffix('.tmp')
-                with path.open('rb') as source, pending.open('wb') as output:
-                    shutil.copyfileobj(source, output)
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(pending, destination)
-                self.store.versions._fsync(destination.parent)
-                self.store.versions._fsync(destination.parent.parent)
-            attachment = attachments.get(name)
-            kind = resource.kind if resource else attachment.kind if attachment else 'image'
-            media.append(dict(id=identity, publication_id=item, resource_key=key,
-                source_locator=ref.locator if ref else old['source_locator'] if same and old else resource.source_url or '' if resource else '', name=ref.name if ref else old['name'] if old else name,
-                mime_type=ref.mime_type if ref else resource.mime if resource else attachment.mime if attachment else None,
-                size_bytes=path.stat().st_size if path.is_file() else ref.size_bytes if ref else None, storage_key=storage_key,
-                status='ready' if storage_key else 'pending_download' if ref else 'unavailable',
-                reason=old['reason'] if same and old and not storage_key else resource.reason or '' if resource else '', resource_identity=ref.resource_identity if ref else old['resource_identity'] if same and old else None))
-            blocks.append(dict(type='media', role='attachment' if kind=='file' else kind, media_id=identity))
-        extra = deepcopy(material.adapter_content.content.get('extra', {})) if material.adapter_content else {}
-        # Temporary header for the old HTTP/processor projection, removed when
-        # those consumers read blocks directly. It never owns body text/files.
-        extra['_links'] = [dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in material.adapter_content.linked_publications] if material.adapter_content else []
-        extra['_reader'] = header
-        extra['_collection_reason'] = '' if header.get('reason', '').startswith('Вложения ещё не загружены') else header.get('reason', '')
-        content = dict(blocks=blocks, extra=extra)
-        self.store.media.project_header(content, media)
-        return content, media
+        from oko.storage.publication_document import header as reading_header
+        header=reading_header(material)
+        if material.adapter_content and 'blocks' in material.adapter_content.content:
+            return self._prepare_adapter(item,material,header,directory)
+        row=self.store.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()
+        if row and row[0]!='{}':
+            content=json.loads(row[0])
+            content['extra'].update(_reader=header,_collection_reason=material.reason)
+            if material.adapter_content:
+                content['extra']['_links']=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in material.adapter_content.linked_publications]
+            media=[dict(r) for r in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,))]
+            self.store.media.project_header(content,media)
+            return content,media
+        raise ValueError('Publication adapter did not return structured content')
 
     def _prepare_adapter(self, item: str, material: Material, header: dict[str,Any], directory: Path) -> tuple[dict[str,Any],list[dict[str,Any]]]:
         value=material.adapter_content
@@ -345,7 +285,7 @@ class Publications:
         for block in content.get('blocks',[]):
             if block['type']=='media':
                 block['media_id']=identities[block.pop('ref')['$media']]
-        content.setdefault('extra',{}).update(_reader=header,_collection_reason='',
+        content.setdefault('extra',{}).update(_reader=header,_collection_reason='' if youtube is not None or header.get('reason','').startswith('Вложения ещё не загружены') else header.get('reason',''),
             _links=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in value.linked_publications])
         self.store.media.project_header(content,media)
         text='\n\n'.join(block.get('text','') for block in content['blocks'] if block['type']=='text' and block.get('role')=='body')

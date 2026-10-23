@@ -1,4 +1,4 @@
-"""Temporary reader projection of the common YouTube adapter."""
+"""Common reader projection of the common YouTube adapter."""
 from dataclasses import replace
 import json
 from typing import Any

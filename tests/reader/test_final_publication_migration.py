@@ -149,3 +149,42 @@ def test_repeating_offline_copy_preserves_already_canonical_cursor_and_content(t
     with TestClient(create_app(destination/'storage',**options),headers=HEADERS) as client:
         assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Preserved canonical text'
         assert [c['id'] for c in client.get('/api/v3/cards').json()]==[item]
+
+
+def test_new_cli_store_uses_canonical_publication_pipeline(tmp_path):
+    from tests.support.processes import launch,connect,cleanup
+    from uuid import UUID
+    process=launch(tmp_path,api_only=True,web_media=True)
+    try:
+        with connect(tmp_path,process) as client:
+            client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'','telegram_http_rps':10})
+            result=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox','initial_history':{'mode':'count','count':'1'}})
+            assert result.status_code==200,result.text
+            card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
+            UUID(card['id'])
+            material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] else None))
+            UUID(material['content']['attachments'][0]['url'].rsplit('/',1)[-1])
+            client.post('/api/v3/stop')
+        assert process.wait(timeout=5)==0
+    finally:
+        cleanup(process)
+
+
+def test_cli_requires_offline_copy_before_opening_populated_legacy_store(tmp_path):
+    from oko.storage.store import Store
+    from oko.subscriptions.subscriptions import AddFeed
+    from tests.support.processes import launch,cleanup
+    import hashlib
+    store=Store(tmp_path,lambda _:None)
+    try:
+        store.subscriptions.add_feed(AddFeed(url='https://source.test/feed',verification='fixture',title='Saved',folder='Inbox'))
+    finally:
+        store.db.close()
+    before=hashlib.sha256((tmp_path/'state.sqlite').read_bytes()).hexdigest()
+    process=launch(tmp_path,api_only=True)
+    try:
+        assert process.wait(timeout=5)==1
+        assert 'офлайн-перенос' in process.log_path.read_text()
+        assert hashlib.sha256((tmp_path/'state.sqlite').read_bytes()).hexdigest()==before
+    finally:
+        cleanup(process)

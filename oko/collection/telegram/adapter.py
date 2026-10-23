@@ -79,6 +79,26 @@ def decode(cursor: str) -> dict[str, Any]:
             'Несовместимый курсор Telegram', AdapterErrorKind.permanent)) from None
 
 
+def legacy_cursor(cursor: str, selection: dict[str,Any]) -> str:
+    """Translate a stopped old reader boundary without changing its selection."""
+    if not cursor:
+        return ''
+    from oko.collection.telegram.contracts import HistoryEnvelope
+    previous=HistoryEnvelope.decode(cursor,adapter='web')
+    if 'adapter_cursor' in previous.position:
+        return cursor
+    position=previous.position
+    after=position.get('after',0)
+    upper=position.get('upper',after) or after
+    if type(after) is not int or type(upper) is not int or after<0 or upper<0:
+        raise ValueError('Invalid legacy Telegram web boundary')
+    complete=previous.selection.scan_complete or bool(selection.get('cancelled'))
+    bound=max(after,upper)
+    token=encode(bound+1,bound,done=True) if complete else encode(upper,upper)
+    return previous.model_copy(update={'position':dict(adapter_cursor=token,run=selection.get('run','initial'),
+        locating=not complete,observed_after=after)}).encode()
+
+
 def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> PublicationContent:
     publication = post.publication
     teaser = publication.teaser

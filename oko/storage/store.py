@@ -553,16 +553,12 @@ class Store:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         if row and row['platform'] is not None:
             header, text = (self.publications.original(item) if row['content']!='{}' else saved_document(self.path(item))) if row['complete'] else ({},'')
-            files = self.db.execute("SELECT * FROM media_files WHERE publication_id=? AND status='ready'", (item,)).fetchall()
-            kinds = {a['media_id']:a['kind'] for a in header.get('attachments', []) if 'media_id' in a}
-            retained = tuple(Attachment(self.media.projection_name(media), self._retained_payload(self.root/media['storage_key'], staging),
-                kinds.get(media['id'],'file'), media['mime_type'] or 'application/octet-stream') for media in files if (self.root/media['storage_key']).is_file())
             refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
                 for m in self.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,)) if m['source_locator'])
             last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
                 header.get('title',''),datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),media=refs,
                 linked_publications=tuple(ExternalReference(ExternalKey(Platform(target['platform']),target['external_id']),target['url']) for target in self.db.execute('SELECT i.* FROM publication_links l JOIN items i ON i.id=l.target_publication_id WHERE l.source_publication_id=?',(item,))))
-            teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),attachments=retained,
+            teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
                 source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
                 reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None,adapter_content=last_description) if row['complete'] else None

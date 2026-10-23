@@ -1,4 +1,4 @@
-"""Temporary reader projection around the common RSS adapter, without persistence."""
+"""RSS metadata delivery through the common adapter, without persistence."""
 from typing import Any
 import json
 
