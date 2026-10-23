@@ -40,13 +40,28 @@ export function Editor({owner}:{owner:MenusOwner}){
  <div id="setting-fields"><Page owner={owner} name="home" title={feed?undefined:'Settings'}>
  {result&&result.scope==='oko'&&owner.feedRefresh&&<div className="settings-group"><Link owner={owner} title="Feed Refresh Interval" page="field/feed_refresh_minutes" value={owner.feedRefresh.value+' min'} color="green" symbol="↻"/></div>}
  {result&&result.scope==='oko'&&owner.telegramHttp&&<div className="settings-group"><Link owner={owner} title="Telegram Request Limit" page="field/telegram_http_rps" value={owner.telegramHttp.value+' req/s'} color="green" symbol="⇄"/></div>}
+ {result&&result.scope==='oko'&&<div className="settings-group"><Link owner={owner} title="Retry Delays" page="retry-delays" color="green" symbol="↻"/></div>}
  {feed&&<FeedDetails key={feed.id} owner={owner} feed={feedResult?.feed||feed} activity={feedResult?.activity}/>}
  {feed&&result&&<div className="settings-group"><Link owner={owner} title="Connection and Options" page="feed-connection" color="gray" symbol="▣"/></div>}
  {result&&<><h3 className="settings-group-title">Items</h3><div className="settings-group">{groups.map(([name,title,keys,color,symbol])=><Link key={name} owner={owner} title={title} page={name} color={color} symbol={symbol} value={name==='filters'?(result.effective.prompt_filters.value?'Configured':'Disabled'):name==='processor'?fieldValue(keys[0]!,result.effective[keys[0]!].value):''}/>)}</div></>}
  </Page>
  {result&&groups.map(([name,title,keys])=><Page key={name} owner={owner} name={name} title={title}><div className="settings-group">{keys.map(key=><Link key={key} owner={owner} title={fields[key][0]} value={fieldValue(key,result.effective[key].value)} page={'field/'+key}/>)}{name==='reading'&&<Link owner={owner} title="Summary Prompt" page="field/prompt_theses"/>}</div></Page>)}
  {result&&(Object.keys(fields)as FieldName[]).map(field=><Field key={path+'/'+field} owner={owner} path={path} field={field} result={result}/>)}
+ {result&&result.scope==='oko'&&<RetryFields owner={owner} path={path}/>}
  </div></div>;
+}
+function RetryFields({owner,path}:{owner:MenusOwner;path:string}){
+ const definitions=[['retry_initial_seconds','initial_seconds','Initial Retry Delay',60],['retry_max_seconds','max_seconds','Maximum Retry Delay',3600]] as const;
+ return <><Page owner={owner} name="retry-delays" title="Retry Delays"><div className="settings-group">{definitions.map(([field,key,title])=><Link key={field} owner={owner} title={title} page={'retry/'+field} value={owner.retries?owner.retries[key]+' s':''}/>)}</div><p>Temporary failures retry with an increasing delay. Waits requested by a source remain in effect.</p></Page>
+ {definitions.map(([field,key,title,defaultValue])=>{
+  const id='setting-'+field,value=owner.retries?.[key],draft=owner.draft(path),raw=String(id in draft?draft[id]:value??''),busy=owner.saving.has(path+'/'+field);
+  const save=(reset=false)=>{const number=reset?null:Number(raw);const body:SettingsPatch=field==='retry_initial_seconds'?{retry_initial_seconds:number}:{retry_max_seconds:number};void owner.updateRetry(field,body,raw);};
+  return <Page key={field} owner={owner} name={'retry/'+field} title={title}>{value===undefined?<p>Loading…</p>:<form className="setting-row settings-group" onSubmit={event=>{event.preventDefault();if(event.currentTarget.reportValidity())save();}}>
+  <label className="settings-control">Delay (seconds)<input id={id} type="number" min={1} max={86400} step={1} required value={raw} onChange={event=>owner.edit(path,id,event.target.value)}/></label>
+  <small>Default: {defaultValue} seconds. Maximum delay must be at least the initial delay.</small>
+  <button type="submit" className="settings-action" disabled={busy}>Save</button><button type="button" className="settings-action" disabled={busy} onClick={()=>save(true)}>Reset</button><button type="button" className="settings-action" onClick={()=>void owner.discardField(path,field)}>Discard Change</button>
+  </form>}</Page>;
+ })}</>;
 }
 function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefined}){
  const [confirm,setConfirm]=useState(false);if(!feed)return null;

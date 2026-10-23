@@ -9,10 +9,10 @@ import hashlib
 import json
 from typing import Any, Literal, cast
 
-from oko.collection.adapters import AdapterException, PublicationContent
+from oko.collection.adapters import AdapterException, AdapterErrorKind, PublicationContent
 from oko.collection.contracts import (
     DownloadStage, StagedPayload, SourceError, SourceManifest, Material,
-    Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview,
+    Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview, Attachment,
 )
 from oko.collection.telegram.adapter import TelegramWebAdapter, reference, publication_reference
 from oko.collection.telegram.contracts import HistoryEnvelope, HistorySelection, ExpectedMedia
@@ -23,14 +23,41 @@ from oko.collection.telegram.telegraph import enrich
 
 def source_error(error: AdapterException) -> SourceError:
     if isinstance(error.__cause__, SourceError):
+        error.__cause__.adapter_issue = error.issue
         return error.__cause__
-    return SourceError(error.issue.message, code=error.issue.code,
+    result = SourceError(error.issue.message, code=error.issue.code,
                        retryable=error.issue.kind.value in ('temporary', 'source_wait'))
+    result.adapter_issue = error.issue
+    return result
 
 
 def material(value: PublicationContent, previous: Material | None = None) -> Material:
     extra = value.content['extra']['telegram']
     manifest = SourceManifest.model_validate_json(json.dumps(extra['manifest']))
+    retained_attachments: tuple[Attachment, ...] = ()
+    if previous and previous.source_manifest and manifest.articles:
+        old_articles = {a.url:a for a in previous.source_manifest.articles}
+        old_resources = {r.key:r for r in previous.source_manifest.resources}
+        articles = []
+        resources = list(manifest.resources)
+        retained_names = set()
+        retained_keys = set()
+        for article in manifest.articles:
+            old = old_articles.get(article.url)
+            if article.text is None and old and old.text is not None:
+                article = old.model_copy(update={'reason':article.reason})
+                for key in old.resource_keys:
+                    if key in old_resources:
+                        resource = old_resources[key]
+                        resources.append(resource)
+                        retained_names.add(resource.name)
+                        retained_keys.add(key)
+            articles.append(article)
+        retained_attachments = tuple(a for a in previous.attachments if a.name in retained_names)
+        manifest = manifest.model_copy(update={'articles':tuple(articles),'resources':tuple(resources)})
+        if previous.adapter_content:
+            present = {r.key for r in value.media}
+            value = replace(value,media=value.media+tuple(r for r in previous.adapter_content.media if r.key in retained_keys and r.key not in present))
     if manifest.preview_error and previous and previous.source_manifest and previous.source_manifest.preview_fragment:
         manifest = manifest.model_copy(update={'preview_fragment': previous.source_manifest.preview_fragment})
     reply = manifest.post.get('reply_preview')
@@ -43,8 +70,18 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
         text = '\n\n'.join(part for part in (text, preview) if part)
         reason = ('Сохранён фрагмент предпросмотра; полная публикация недоступна для веб-просмотра'
                   if preview else 'Фрагмент предпросмотра недоступен; откройте пост в Telegram')
+    if manifest.preview_fragment is None and manifest.articles:
+        sections = [text]
+        for article in manifest.articles:
+            if article.text is not None:
+                sections.append('---\n\n# '+(article.title or 'Telegraph')+'\n\nИсходник: '+article.url+'\n\n'+article.text)
+            else:
+                sections.append('Telegraph: '+article.url+'\nСтатья ещё не сохранена.')
+        text = '\n\n'.join(sections)
+        reason = '; '.join(value for value in dict.fromkeys([reason,*[article.reason for article in manifest.articles]]) if value)
     return Material(title, text, False, reason,
                     members=tuple(extra['members']), description=extra['description'],
+                    attachments=retained_attachments,
                     source_manifest=manifest,
                     reply_preview=ReplyPreview.model_validate(reply) if reply else None, adapter_content=value)
 
@@ -59,18 +96,26 @@ def legacy(value: PublicationContent) -> Publication:
 
 
 class _Downloads(Downloader):
-    def __init__(self, adapter: TelegramWebAdapter, value: PublicationContent) -> None:
+    def __init__(self, adapter: TelegramWebAdapter, value: PublicationContent, previous: Material | None = None) -> None:
         super().__init__(adapter.transport)
         self.adapter, self.value = adapter, value
+        names = {r['key']:r['name'] for r in value.content['extra']['telegram']['manifest']['resources']}
+        if previous and previous.source_manifest:
+            names.update({r.key:r.name for r in previous.source_manifest.resources})
+        self.by_name = {names[r.key]:r for r in value.media}
 
     async def download(self, url: str, stage: DownloadStage, name: str) -> StagedPayload:
         if not stage.admitted():
             raise asyncio.CancelledError
-        media = next(item for item in self.value.media if item.locator == url and item.name == name)
+        media = self.by_name[name]
+        if media.locator != url:
+            raise ValueError('Legacy media locator does not match the adapter descriptor')
         target = stage.path / ('incoming-'+name)
         try:
             with target.open('wb') as output:
                 await self.adapter.download_media(self.value.metadata.reference, media, output)
+            if not target.stat().st_size:
+                raise SourceError('Пустое вложение')
             if not stage.admitted():
                 raise asyncio.CancelledError
             digest = hashlib.sha256()
@@ -87,9 +132,11 @@ class _Downloads(Downloader):
 
 class TelegramWebSource(TelegramSource):
     """Use the external API while keeping old storage/HTTP presentation working."""
-    def _api(self) -> TelegramWebAdapter:
+    independent_media = False
+
+    def publication_adapter(self) -> TelegramWebAdapter:
         if not hasattr(self, '_publication_adapter'):
-            self._publication_adapter = TelegramWebAdapter(self.http_transport)
+            self._publication_adapter = TelegramWebAdapter(self.http_transport,linked_descriptions=self.independent_media)
         return self._publication_adapter
 
     async def discover(self, cursor: str | None) -> DiscoveryResult:
@@ -101,7 +148,7 @@ class TelegramWebSource(TelegramSource):
             previous_result = await super().discover(cursor)
             return replace(previous_result, publications=tuple(replace(p, adapter_reference=publication_reference(p.url)) for p in previous_result.publications))
         assert self.username
-        api = self._api()
+        api = self.publication_adapter()
         feed = reference('https://t.me/s/'+self.username)
         state: dict[str, Any] = dict(previous.position) if previous else {}
         observations: tuple[Publication, ...] = ()
@@ -153,7 +200,7 @@ class TelegramWebSource(TelegramSource):
         stage = resources.staging
         if stage and not stage.admitted():
             raise asyncio.CancelledError
-        api = self._api()
+        api = self.publication_adapter()
         try:
             value = await api.fetch(reference(publication.url))
         except AdapterException as error:
@@ -161,6 +208,15 @@ class TelegramWebSource(TelegramSource):
         if value.needs_fetch:
             raise SourceError('Не удалось разобрать публикацию Telegram', code='malformed_publication', retryable=False)
         teaser = material(value, publication.teaser)
+        if self.independent_media:
+            # The canonical store saves descriptions and schedules each file.
+            # Linked-article collection is separated in #94.
+            # A failed file cannot stop retries of unfinished article metadata.
+            issues = [issue for issue in value.issues if issue.media_key is None and issue.kind!=AdapterErrorKind.notice]
+            priority = {AdapterErrorKind.source_wait:3,AdapterErrorKind.temporary:2}
+            issue = max(issues,key=lambda issue:(priority.get(issue.kind,1),issue.retry_at.timestamp() if issue.retry_at else 0),default=None)
+            partial_error = source_error(AdapterException(issue)) if issue else None
+            return FetchResult(replace(teaser, full=not value.media and not teaser.reason,collection_error=partial_error), self.observation())
         manifest = teaser.source_manifest
         assert manifest
         if manifest.post_web_unavailable and str(manifest.post['text']).strip():
@@ -169,7 +225,7 @@ class TelegramWebSource(TelegramSource):
         expected = tuple(ExpectedMedia(r.key, 'photo' if r.kind=='image' else
             'document' if r.kind=='file' else cast(Literal['photo', 'video', 'audio', 'document', 'unsupported'], r.kind), by_key[r.key].locator if r.key in by_key else None,
             r.name, r.mime, reason=r.reason, external=r.external) for r in manifest.resources)
-        collected = await _Downloads(api, value).collect(expected, manifest.resources, publication.teaser, stage)
+        collected = await _Downloads(api, value, publication.teaser).collect(expected, manifest.resources, publication.teaser, stage)
         partial = bool(collected.error and collected.error.code == 'media-unavailable'
                        and (teaser.text.strip() or collected.attachments))
         manifest = manifest.model_copy(update={'resources': collected.resources, 'download_partial': partial})

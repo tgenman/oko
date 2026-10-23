@@ -36,5 +36,5 @@ def saved_external(header: dict[str, Any], base: str) -> dict[str, Any]:
             continue
         poster = resources.get(media.poster_key or '')
         attachments.append(dict(media.model_dump(exclude={'poster_key'}),
-            poster_url=base+'/media/'+poster.name if poster and poster.status=='loaded' else None))
+            poster_url=header.get('_media_urls',{}).get(poster.name,base+'/media/'+poster.name) if poster and poster.status=='loaded' else None))
     return dict(external_attachments=attachments,external_only=external_only(manifest),post_web_unavailable=bool(manifest and manifest.post_web_unavailable and manifest.preview_fragment is None))

@@ -85,7 +85,14 @@ class Problems:
             groups[identity]['objects'].append(dict(kind='feed',id=saved_feed['id']))
         youtube = self.store.youtube.status(now)
         read_states = {state['feed_id']: state for state in self.store.read_sync.statuses()}
-        jobs = self.db.execute("SELECT jobs.*,items.feed_id,items.viewed FROM jobs LEFT JOIN items ON items.id=jobs.item WHERE (jobs.status IN ('pending','running') OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL)) AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)").fetchall()
+        jobs = self.db.execute("""SELECT jobs.*,coalesce(items.feed_id,media_owner.feed_id) AS feed_id,
+            coalesce(items.viewed,media_owner.viewed) AS viewed,coalesce(m.publication_id,jobs.item) AS affected_item
+            FROM jobs LEFT JOIN items ON items.id=jobs.item
+            LEFT JOIN media_files m ON jobs.kind='download_media' AND m.id=jobs.item
+            LEFT JOIN items media_owner ON media_owner.id=m.publication_id
+            WHERE (jobs.status IN ('pending','running','failed','unavailable') OR
+                (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL))
+            AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)""").fetchall()
         for job in jobs:
             code = job['problem_code']
             if code in ('codex-choice', 'ai-permission'):
@@ -107,17 +114,17 @@ class Problems:
             if code == 'processor-config':
                 identity = 'processor:configuration'
             settings_action = code in ('processor-config', 'ai-permission')
-            obj = dict(kind='feed' if job['kind'] in ('discover', 'read', 'feed-delete') else 'material', id=feed if job['kind'] in ('discover', 'read', 'feed-delete') else job['item'])
+            obj = dict(kind='feed' if job['kind'] in ('discover', 'read', 'feed-delete') else 'material', id=feed if job['kind'] in ('discover', 'read', 'feed-delete') else job['affected_item'])
             if identity not in groups:
                 kind = job['kind']
-                title = {'feed-delete':'Удаление фида не завершено', 'fetch':'Не удалось загрузить материал', 'discover':'Не удалось обновить источник',
+                title = {'feed-delete':'Удаление фида не завершено', 'fetch':'Не удалось загрузить материал', 'download_media':'Не удалось загрузить вложение', 'discover':'Не удалось обновить источник',
                          'read':'Не удалось подтвердить чтение в Telegram', 'delete':'Удаление не завершено'}.get(kind, 'Не удалось обработать материал')
                 if settings_action:
                     title = 'Требуется настройка обработчика'
                 action = None
                 groups[identity] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
                     consequence='Сохранённое содержимое остаётся доступным.' if kind not in ('delete','feed-delete') else 'Око продолжает попытки удаления.',
-                    next_step='Повторите загрузку вручную.' if job['status']=='done' else 'Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
+                    next_step='Повторите загрузку вручную.' if job['status'] in ('done','failed') else 'Проверьте доступность источника.' if job['status']=='unavailable' else 'Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
                     objects=[],action=action,operation='producer:'+kind,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
                 if kind != 'delete' and job['error']:
                     groups[identity]['reason'] = job['error']

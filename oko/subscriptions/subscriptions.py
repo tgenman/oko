@@ -37,6 +37,8 @@ class Overrides(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     feed_refresh_minutes: int | None = Field(default=None, ge=1, le=1440)
     telegram_http_rps: float | None = Field(default=None, ge=.1, le=10, allow_inf_nan=False)
+    retry_initial_seconds: int | None = Field(default=None, ge=1, le=86400)
+    retry_max_seconds: int | None = Field(default=None, ge=1, le=86400)
     originals: bool | None = None
     theses: bool | None = None
     prompt_theses: str | None = Field(default=None, max_length=20000)
@@ -64,6 +66,7 @@ class FeedPatch(BaseModel):
 
 
 DEFAULT_FEED_REFRESH_MINUTES = 15
+GLOBAL_SERVICE_SETTINGS = frozenset(('feed_refresh_minutes', 'telegram_http_rps', 'retry_initial_seconds', 'retry_max_seconds'))
 
 
 DEFAULTS: dict[str, Any] = dict(
@@ -316,6 +319,22 @@ class Subscriptions:
         return dict(value=float(json.loads(row['value'])) if row else 2.,
                     origin=dict(scope='oko', owner='global') if row else dict(scope='default'))
 
+    def retry_settings(self) -> dict[str, int]:
+        values = dict(initial_seconds=60, max_seconds=3600)
+        for row in self.db.execute("SELECT field,value FROM settings WHERE scope='oko' AND owner='global' AND field IN ('retry_initial_seconds','retry_max_seconds')"):
+            values[row['field'].removeprefix('retry_')] = int(json.loads(row['value']))
+        return values
+
+    def validate_retry_settings(self, patch: dict[str, Any]) -> None:
+        effective = self.retry_settings()
+        defaults = dict(initial_seconds=60, max_seconds=3600)
+        for name in ('initial_seconds','max_seconds'):
+            if 'retry_'+name in patch:
+                value = patch['retry_'+name]
+                effective[name] = defaults[name] if value is None else value
+        if effective['initial_seconds'] > effective['max_seconds']:
+            raise ValueError('Максимальная задержка должна быть не меньше начальной')
+
     @reading_value
     def _settings(self, scope: str, owner: str) -> list[sqlite3.Row]:
         return material_read.settings(self.db,scope,owner)
@@ -353,6 +372,7 @@ class Subscriptions:
 
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> dict[str, Any]:
         self.check_owner(scope, owner)
+        self.validate_retry_settings(patch.model_dump(exclude_unset=True))
         with self.db:
             before = list(self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=? ORDER BY field', (scope, owner)))
             for field, value in patch.model_dump(exclude_unset=True).items():

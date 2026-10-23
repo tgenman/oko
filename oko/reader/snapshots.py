@@ -160,8 +160,8 @@ class Job(WireModel):
     model_config = ConfigDict(extra='forbid')
     count: StrictInt = Field(..., title='Count')
     error: StrictStr | None = Field(..., title='Error')
-    kind: Literal['discover', 'fetch', 'theses', 'filter', 'delete', 'read'] = Field(..., title='Kind')
-    status: Literal['pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
+    kind: Literal['discover', 'fetch', 'download_media', 'theses', 'filter', 'delete', 'read'] = Field(..., title='Kind')
+    status: Literal['pending', 'running', 'done', 'cancelled', 'failed', 'unavailable'] = Field(..., title='Status')
 
 class LocalProvenance(WireModel):
     model_config = ConfigDict(extra='forbid', regex_engine='python-re')

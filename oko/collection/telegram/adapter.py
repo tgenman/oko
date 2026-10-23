@@ -2,6 +2,7 @@
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone, timedelta
+from copy import deepcopy
 import json
 import re
 from typing import Any, BinaryIO
@@ -14,7 +15,8 @@ from oko.collection.adapters import (
     ExternalReference, FeedMetadata, MediaReference, Platform, PublicationContent,
     PublicationMetadata,
 )
-from oko.collection.contracts import SourceDeleted, SourceDeferred, SourceError
+from oko.collection.contracts import SourceDeleted, SourceDeferred, SourceError, ArticleManifest
+from oko.collection.telegram.telegraph import direct_articles, describe
 from oko.collection.telegram.contracts import TelegramPublication
 from oko.collection.telegram.media import Downloader
 from oko.collection.telegram.web import load, WebPage
@@ -78,7 +80,7 @@ def decode(cursor: str) -> dict[str, Any]:
             'Несовместимый курсор Telegram', AdapterErrorKind.permanent)) from None
 
 
-def content(post: TelegramPublication) -> PublicationContent:
+def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> PublicationContent:
     publication = post.publication
     teaser = publication.teaser
     if teaser is None:
@@ -94,7 +96,7 @@ def content(post: TelegramPublication) -> PublicationContent:
     issues = []
     for item, resource in zip(post.media, teaser.source_manifest.resources):
         if item.url:
-            media.append(MediaReference(item.id, item.url, item.name, item.mime, item.size))
+            media.append(MediaReference(item.id, item.url, item.original_name, item.mime, item.size, resource_identity(item.url)))
             blocks.append(dict(type='media', ref={'$media': item.id}, role='attachment' if resource.kind=='file' else resource.kind))
         elif item.external:
             blocks.append(dict(type='external_media', kind=item.external.kind, url=item.external.source_url))
@@ -105,7 +107,7 @@ def content(post: TelegramPublication) -> PublicationContent:
         datetime.fromtimestamp(publication.published, timezone.utc) if publication.published_known else None),
         dict(blocks=blocks, extra=dict(telegram=dict(members=list(publication.members),
             description=teaser.description, manifest=teaser.source_manifest.model_dump(mode='json')))),
-        tuple(media), needs_fetch=bool(teaser.source_manifest.post_web_unavailable and post.text.strip()), issues=tuple(issues))
+        tuple(media), needs_fetch=bool(teaser.source_manifest.post_web_unavailable and post.text.strip() or linked_descriptions and direct_articles(post.text)), issues=tuple(issues))
 
 
 def resource_identity(locator: str) -> str:
@@ -116,8 +118,9 @@ def resource_identity(locator: str) -> str:
 
 
 class TelegramWebAdapter:
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, *, linked_descriptions: bool = False) -> None:
         self.transport = transport
+        self.linked_descriptions = linked_descriptions
         self._head: tuple[str, int, WebPage] | None = None
 
     async def resolve_feed(self, url: str) -> FeedMetadata:
@@ -193,7 +196,7 @@ class TelegramWebAdapter:
         selected = posts[:limit]
         more = len(posts) > limit
         start = max(selected[-1].publication.members)+1 if selected else state['upper']+1
-        return DiscoveryPage(tuple(content(p) for p in selected), encode(start, state['upper'], done=not more), more, issues)
+        return DiscoveryPage(tuple(content(p,linked_descriptions=self.linked_descriptions) for p in selected), encode(start, state['upper'], done=not more), more, issues)
 
     async def fetch(self, publication: ExternalReference) -> PublicationContent:
         name = username(publication)
@@ -208,8 +211,8 @@ class TelegramWebAdapter:
         post = next((p for p in page.posts if identity in p.publication.members or int(p.publication.id) == identity), None)
         if post is None:
             raise failure(SourceDeleted(), publication)
-        value = content(post)
-        if value.needs_fetch and post.publication.teaser:
+        value = content(post,linked_descriptions=self.linked_descriptions)
+        if value.needs_fetch and post.publication.teaser and post.publication.teaser.source_manifest and post.publication.teaser.source_manifest.post_web_unavailable:
             from oko.collection.telegram.preview import fragment
             try:
                 preview, preview_error = await fragment(name, post.publication.id, self.transport, None)
@@ -220,18 +223,47 @@ class TelegramWebAdapter:
             if preview:
                 value.content['blocks'].append(dict(type='text', role='body', text=preview))
             value = replace(value, needs_fetch=False)
+        if self.linked_descriptions and value.content:
+            body = deepcopy(value.content)
+            manifest = body['extra']['telegram']['manifest']
+            if manifest.get('preview_fragment') is None:
+                media_refs = list(value.media)
+                articles = []
+                issues = list(value.issues)
+                for url in direct_articles(str(manifest['post'].get('text',''))):
+                    try:
+                        article, expected, resources = await describe(url,self.transport)
+                        offset = len(manifest['resources'])
+                        manifest['resources'].extend(r.model_copy(update={'order':offset+i}).model_dump(mode='json') for i,r in enumerate(resources))
+                        for resource in expected:
+                            if resource.url:
+                                media_refs.append(MediaReference(resource.id,resource.url,resource.original_name,resource.mime,resource.size,resource_identity(resource.url)))
+                                body['blocks'].append(dict(type='media',ref={'$media':resource.id},role='image' if resource.kind=='photo' else 'attachment' if resource.kind=='document' else resource.kind))
+                        if article.text is not None:
+                            body['blocks'].append(dict(type='text',role='body',text=article.text))
+                    except SourceError as error:
+                        article = ArticleManifest(url=url,reason=error.label)
+                        issues.append(replace(failure(error,publication).issue,scope='telegraph:'+url))
+                    articles.append(article.model_dump(mode='json'))
+                manifest['articles'] = articles
+                value = replace(value,content=body,media=tuple(media_refs),needs_fetch=False,issues=tuple(issues))
         return value
 
     async def download_media(self, publication: ExternalReference, media: MediaReference,
                              output: BinaryIO) -> MediaReference:
         current = await self.fetch(publication)
         actual = next((item for item in current.media if item.key == media.key), None)
-        if actual is None or actual.name != media.name or resource_identity(actual.locator) != resource_identity(media.locator):
+        if actual is None:
+            for issue in current.issues:
+                if issue.scope and issue.scope.startswith('telegraph:') and media.key.startswith(issue.scope+':'):
+                    raise AdapterException(replace(issue,publication=publication,media_key=media.key))
+        if actual is None or resource_identity(actual.locator) != resource_identity(media.locator):
             raise AdapterException(AdapterIssue('media_changed', 'Вложение изменилось',
                 AdapterErrorKind.media_changed, publication, media.key))
         try:
             async with asyncio.timeout(180):
-                size, _ = await Downloader(self.transport).write(actual.locator, output)
+                size, _ = await Downloader(self.transport).write(actual.locator, output,
+                    allow_empty=actual.mime_type is None or actual.mime_type.startswith(('application/','text/')))
         except SourceError as error:
             raise failure(error, publication, media.key, 'telegram:media:'+urlsplit(actual.locator).netloc) from error
         except TimeoutError as error:

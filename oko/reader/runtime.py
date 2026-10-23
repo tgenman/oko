@@ -23,6 +23,7 @@ from oko.collection.rss import RSSSource, feed_title, normalized
 from oko.collection.sources import Sources, SourceSettings, TelegramAccess
 from oko.collection.contracts import FetchResources, SourceError, SourceDeleted, SourceSkipped, SourceDeferred, DownloadStage
 from oko.collection.contracts import Source
+from oko.collection.adapters import AdapterException, AdapterErrorKind, AdapterIssue
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
@@ -34,7 +35,7 @@ from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
-from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, FolderConflict, identify
+from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, FolderConflict, identify, GLOBAL_SERVICE_SETTINGS
 from oko.collection.youtube.source import LocalCaptions
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -152,6 +153,7 @@ class Runtime:
         self._sources = self._collection.sources
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
+        self._last_media_cleanup = clock()
         self._completions: dict[str, tuple[tuple[str, str], FolderContents | None]] = {}
         self._feed_checks: dict[str, str] = {}
         self._stop_requested = asyncio.Event()
@@ -165,6 +167,7 @@ class Runtime:
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=self._wall_clock())
         self._viewed_ids: list[str] = []
         self._lanes: dict[str, asyncio.Task[None]] = {}
+        self._media_job: Job | None = None
         self._account_retry: dict[int, float] = {}
         self._restored_wait_feeds: set[str] = set()
         self._lane_feeds: dict[str, str] = {}
@@ -218,6 +221,8 @@ class Runtime:
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
             cancelled_feeds = {self._lane_feeds[lane] for lane in lanes if lane in self._lane_feeds}
             tasks = [self._lanes.pop(lane) for lane in lanes]
+            if 'media' in lanes:
+                self._media_job = None
             if self._ai and (feeds is None or self._ai_feed in feeds):
                 tasks.append(self._ai)
                 self._ai = None
@@ -230,19 +235,7 @@ class Runtime:
                         if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
                             self.diagnostics.capture(error, 'Завершение фоновой задачи')
                 else:
-                    self._detached.add(task)
-                    if task is ai_task:
-                        self._detached_ai.add(task)
-
-                    def completed(finished: asyncio.Task[None]) -> None:
-                        self._detached.discard(finished)
-                        self._detached_ai.discard(finished)
-                        if not finished.cancelled():
-                            error = finished.exception()
-                            if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
-                                self.diagnostics.capture(error, 'Завершение отсоединённой задачи')
-
-                    task.add_done_callback(completed)
+                    self._detach_task(task, ai=task is ai_task)
             if self._telegram_client:
                 if feeds is None or (tasks and not isinstance(self._telegram_client, LocalTelegram)):
                     await self._telegram_client.close()
@@ -253,6 +246,19 @@ class Runtime:
         finally:
             if feeds is None:
                 self._cancelling -= 1
+
+    def _detach_task(self, task: asyncio.Task[None], *, ai: bool = False) -> None:
+        self._detached.add(task)
+        if ai:
+            self._detached_ai.add(task)
+        def completed(finished: asyncio.Task[None]) -> None:
+            self._detached.discard(finished)
+            self._detached_ai.discard(finished)
+            if not finished.cancelled():
+                error = finished.exception()
+                if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
+                    self.diagnostics.capture(error, 'Завершение отсоединённой задачи')
+        task.add_done_callback(completed)
 
     def _sync_sources(self) -> None:
         if not self._store:
@@ -277,7 +283,8 @@ class Runtime:
                 access = TelegramAccess('client', feed.get('telegram_username'), feed.get('telegram_account'), feed.get('telegram_peer'))
             settings.append(SourceSettings(feed['id'], feed['transport'], feed['original_urls'][0],
                 feed['initial_days'], feed['initial_history'], feed['connection'] == 'deleting', access,
-                self._store.subscriptions.youtube_theses(feed['id']) if feed['transport'] == 'youtube' else False))
+                self._store.subscriptions.youtube_theses(feed['id']) if feed['transport'] == 'youtube' else False,
+                self._store.publications.feed(feed['id'])))
         updates = self._collection.configure(settings)
         for identity in updates.created:
             self._store.enqueue_discovery(identity)
@@ -682,7 +689,7 @@ class Runtime:
                 previous = current.subscriptions.effective(scope, owner)
                 result = current.subscriptions.update_settings(scope, owner, body)
                 self._collection_interval = current.subscriptions.feed_refresh_minutes() * 60
-                if body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'} and result != previous:
+                if body.model_fields_set - GLOBAL_SERVICE_SETTINGS and result != previous:
                     current.settings_changed(scope, owner)
                     affected = None if scope == 'oko' else {f['id'] for f in current.subscriptions.feeds(owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
                     await self._cancel(affected)
@@ -1129,6 +1136,9 @@ class Runtime:
             await self._execute_observed(job, capture)
 
     async def _execute_observed(self, job: Job, capture: Capture) -> None:
+        if job.kind == 'download_media':
+            await self._execute_media(job)
+            return
         diagnostic_materials.set((job.item,) if job.kind in ('fetch','delete') else ())
         capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
@@ -1234,7 +1244,9 @@ class Runtime:
                     else:
                         code = job.kind + ':' + type(error).__name__
                     label = self.diagnostics.clean(label) if self.diagnostics else label
-                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,terminal=isinstance(error, SourceError) and not error.retryable)
+                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
+                        terminal=isinstance(error, SourceError) and not error.retryable or job.kind=='fetch' and current.publications.owns(job.item) and isinstance(error,(ValueError,sqlite3.IntegrityError)),
+                        issue=error.adapter_issue if isinstance(error,SourceError) else None)
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):
@@ -1247,6 +1259,36 @@ class Runtime:
                 del self._collection_active[job.id]
             if staging:
                 shutil.rmtree(staging.path,ignore_errors=True)
+
+    async def _execute_media(self, job: Job) -> None:
+        async with self._actions:
+            current = self._store
+            if not current or not self._live() or not current.valid(job):
+                return
+            download = current.media.begin(job)
+            if download is None:
+                current.finish(job)
+                return
+            adapter = self._collection.publication_adapter(current.item_feed(job.item))
+        try:
+            if adapter is None:
+                raise ValueError('Publication adapter unavailable')
+            with download.temporary.open('wb') as output:
+                actual = await adapter.download_media(download.publication, download.media, output)
+            async with self._actions:
+                if self._store is current and self._live() and current.valid(job):
+                    current.media.complete(job, download, actual)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            async with self._actions:
+                if self._store is current and self._live() and current.valid(job):
+                    issue = error.issue if isinstance(error, AdapterException) else AdapterIssue('media-download',
+                        'Не удалось сохранить вложение' if isinstance(error,OSError) else 'Нарушен контракт медиа',
+                        AdapterErrorKind.temporary if isinstance(error,OSError) else AdapterErrorKind.permanent)
+                    current.media.failed(job, issue)
+        finally:
+            current.media.release(download)
 
     async def run(self) -> None:
         journal_context = active_journal.set(self.diagnostics)
@@ -1280,6 +1322,9 @@ class Runtime:
                             self._stop_requested.set()
                             break
                     elif self._store:
+                        if now-self._last_media_cleanup>=3600:
+                            self._store.media.cleanup()
+                            self._last_media_cleanup=now
                         if now - self._ai_sync >= .5:
                             self._store.read_sync.sync()
                             self._store.processing.sync()
@@ -1298,19 +1343,29 @@ class Runtime:
                                 self._store.enqueue_discovery(feed)
                             self._last_collection = now
                         state = self._store.status()
-                        for lane in ('common', 'personal', 'collection'):
+                        for lane in ('common', 'personal', 'collection', 'media'):
                             task = self._lanes.get(lane)
+                            if lane=='media' and task and not task.done() and self._media_job and not self._store.valid(self._media_job):
+                                task.cancel()
+                                self._detach_task(task)
+                                del self._lanes[lane]
+                                self._media_job = None
+                                task = None
                             if task and task.done():
                                 await task
                                 del self._lanes[lane]
-                            profile = self._store.subscriptions.telegram.profile(lane) if lane != 'common' else None
+                                if lane=='media':
+                                    self._media_job = None
+                            profile = self._store.subscriptions.telegram.profile(lane) if lane in ('personal','collection') else None
                             ready_at = self._account_retry.get(profile['user_id'], 0) if profile else 0
                             if lane in self._lanes or now < ready_at:
                                 continue
-                            feeds = [feed for feed in self._sources if self._lane(feed) == lane]
+                            feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if lane=='media' else [feed for feed in self._sources if self._lane(feed) == lane]
                             job = self._store.next_job(now, deleting_only=state['deleting'] or not feeds,
-                                                       feeds=feeds, include_deletions=lane == 'common')
+                                                       feeds=feeds, include_deletions=lane == 'common', media_only=lane=='media')
                             if job:
+                                if lane=='media':
+                                    self._media_job = job
                                 self._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self._store.item_feed(job.item)
                                 self._lanes[lane] = asyncio.create_task(self._execute(job))
                 await asyncio.sleep(.02)

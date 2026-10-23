@@ -268,6 +268,12 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:
         identity(item)
         current = runtime.require_store()
+        if number is None and current.publications.owns(item):
+            value = current.media.file(item,name) if kind=='media' else None
+            if value is None:
+                raise ApiError(404, wire.ErrorEnvelope(wire.MediaUnavailableError(code='media_unavailable', message='Вложение недоступно', details=wire.MediaUnavailableErrorDetails(material_id=identity(item), name=name), command_id=None, diagnostic_id=None)))
+            path,mime = value
+            return Response(path.read_bytes(),media_type=mime,headers={'Content-Disposition':'inline'})
         raw = current.versions.read(item, number) if number is not None else current.material(item)
         material = facts.Version.model_validate(raw) if number is not None and raw else facts.Material.model_validate(raw) if raw else None
         images = material.images if material and isinstance(material.images, list) else []

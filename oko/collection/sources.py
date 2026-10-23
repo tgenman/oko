@@ -6,6 +6,7 @@ from typing import Any, Literal
 import httpx
 
 from oko.collection.contracts import Source
+from oko.collection.adapters import PublicationAdapter
 from oko.collection.rss import RSSSource
 from oko.collection.telegram.source import TelegramClient, TelegramSource
 from oko.collection.telegram.web import WebTelegram
@@ -33,6 +34,7 @@ class SourceSettings:
     deleting: bool = False
     telegram: TelegramAccess | None = None
     want_captions: bool = False
+    independent_media: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,8 @@ class Sources:
             source.initial_history = deepcopy(config.initial_history)
             if isinstance(source, YouTubeSource):
                 source.want_captions = config.want_captions
+            if isinstance(source, TelegramWebSource):
+                source.independent_media = config.independent_media
             self.sources[config.feed] = source
             self._settings[config.feed] = config
         for identity in set(self.sources) - active:
@@ -111,3 +115,7 @@ class Sources:
     def telegram_access(self, feed: str) -> Literal['web', 'client'] | None:
         source = self.sources.get(feed)
         return source.adapter if isinstance(source, TelegramSource) else None
+
+    def publication_adapter(self, feed: str) -> PublicationAdapter | None:
+        source = self.sources.get(feed)
+        return source.publication_adapter() if isinstance(source, TelegramWebSource) and source.independent_media else None

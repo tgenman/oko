@@ -64,7 +64,8 @@ class VersionedReading:
             filter_state=_state(filtered['status'],filtered.get('error')),theses_state=theses_state,
             changed=bool(store.versions.previous(identity)),revision_id=store.content_version(identity),
             loading=bool(store.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",(identity,reader_now(store.clock()))).fetchone()),
-            preview_url=f'/api/v3/materials/{identity}/images/{image.name}' if image else f"/api/v3/materials/{identity}/media/{attachment['name']}" if attachment else None)
+            preview_url=header.get('_media_urls',{}).get(image.name,f'/api/v3/materials/{identity}/images/{image.name}') if image else f"/api/v3/materials/{identity}/media/{attachment.get('media_id',attachment['name'])}" if attachment else None)
+        result['loading'] = result['loading'] or row['platform'] is not None and store.media.loading(identity)
         external = saved_external(header,f'/api/v3/materials/{identity}')
         result['post_web_unavailable'] = external['post_web_unavailable']
         result['external_attachment_kinds'] = list(dict.fromkeys(a['kind'] for a in external['external_attachments']))
@@ -88,6 +89,7 @@ class VersionedReading:
         settings=store.subscriptions.effective('feed',row['feed_id'],details=False)
         job=material_read.jobs(store.db,identity).get('fetch')
         loading=bool(job and (job['status']=='running' or job['status']=='pending' and (not row['complete'] or job['next']<=reader_now(store.clock()))))
+        loading=loading or row['platform'] is not None and store.media.loading(identity)
         title=header.get('title','Материал загружается')
         if feed['kind']=='telegram' and feed['transport']!='rss' and row['complete']:title=telegram_title(header,text)
         data=dict(id=identity,title=title,feed_id=row['feed_id'],published_at=project.timestamp(row['published']).root if row['published_known'] else None,
@@ -111,8 +113,8 @@ class VersionedReading:
         header,_=store.original(identity)
         external = saved_external(header,f'/api/v3/materials/{identity}')
         return dict(post_web_unavailable=external['post_web_unavailable'],external_attachments=external['external_attachments'],revision_id=store.content_version(identity),
-            images=[f'/api/v3/materials/{identity}/images/{p.name}' for p in sorted(path.parent.glob('image-*'))],
-            attachments=[dict(url=f"/api/v3/materials/{identity}/media/{a['name']}",kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])],
+            images=[] if store.publications.owns(identity) else [f'/api/v3/materials/{identity}/images/{p.name}' for p in sorted(path.parent.glob('image-*'))],
+            attachments=[dict(url=f"/api/v3/materials/{identity}/media/{a.get('media_id',a['name'])}",kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])],
             previous_versions=[dict(number=v['number'],revision_id=v['version'],url=v['url']) for v in store.versions.previous(identity)])
 
     def navigation(self) -> dict[str, Any]:

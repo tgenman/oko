@@ -42,6 +42,7 @@ class ExpectedMedia:
     size: int | None = None
     reason: str | None = None
     external: ExternalMedia | None = None
+    original_name: str = ''
 
 
 @dataclass(frozen=True)
