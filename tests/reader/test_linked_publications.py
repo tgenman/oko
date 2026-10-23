@@ -71,6 +71,7 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             release.set()
             value=wait_for(client,lambda:(value if 'Article body' in (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['text'] else None))
             assert 'Own excerpt' in value['content']['text']
+            assert value['content']['revision_id']!=card['revision_id']
             assert len(client.get('/api/v3/cards').json())==1
             with sqlite3.connect(root/'state.sqlite') as db:
                 linked=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(card['id'],)).fetchone()[0]
@@ -279,3 +280,49 @@ def test_empty_rss_excerpt_waits_for_article_then_processes_its_actual_input(tmp
             assert len(calls)==1
         finally:
             release.set()
+
+
+def test_explicit_rss_replay_can_collect_a_previously_read_record_again(tmp_path):
+    from tests.support.reader import wait_for
+    root=migrated_root(tmp_path)
+    def response(request):
+        return httpx.Response(200,text='<rss><channel><item><guid>entry</guid><description>Again</description></item></channel></rss>')
+    with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
+                              rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        import_feed(client)
+        presence(client,'rss')
+        card=wait_cards(client)[0]
+        client.post('/api/v3/materials/'+card['id']+'/viewed')
+        wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        assert client.get('/api/v3/cards').json()==[]
+        client.post('/api/v3/collect')
+        replayed=wait_cards(client)[0]
+        assert replayed['id']!=card['id']
+        assert client.get('/api/v3/materials/'+replayed['id']).json()['content']['text']=='Again'
+
+
+def test_restricted_telegram_retains_own_source_without_copying_article_into_it(tmp_path):
+    import json
+    import sqlite3
+    from tests.support.telegram import configure_fast_web
+    from tests.support.telegram_web import page,mark_post_unavailable
+    from tests.support.reader import wait_for
+    root=migrated_root(tmp_path)
+    restricted=[False]
+    def response(request):
+        if request.url.host=='api.telegra.ph':
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Separate article text']}]}})
+        html=page([(11,'' if restricted[0] else 'Own post <a href="https://telegra.ph/Fixture">Article</a>')])
+        return httpx.Response(200,text=mark_post_unavailable(html,'fixture/11') if restricted[0] else html)
+    with TestClient(create_app(root,token='test-token',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        card=wait_cards(client)[0]
+        wait_for(client,lambda:'Separate article text' in client.get('/api/v3/materials/'+card['id']).json()['content']['text'])
+        restricted[0]=True
+        client.post('/api/v3/materials/'+card['id']+'/retry')
+        wait_for(client,lambda:client.get('/api/v3/materials/'+card['id']).json()['content']['post_web_unavailable'])
+        with sqlite3.connect(root/'state.sqlite') as db:
+            own=json.loads(db.execute('SELECT content FROM items WHERE id=?',(card['id'],)).fetchone()[0])
+            assert all('Separate article text' not in block.get('text','') for block in own['blocks'])
+        assert 'Separate article text' in client.get('/api/v3/materials/'+card['id']).json()['content']['text']

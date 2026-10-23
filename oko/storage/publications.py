@@ -54,7 +54,8 @@ class Publications:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         db = store.db
-        if db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
+        self.active=db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone() is not None
+        if self.active:
             from oko.storage.publication_schema import remove_feed_url_key
             remove_feed_url_key(db)
         with db:
@@ -242,14 +243,23 @@ class Publications:
         content=deepcopy(value.content)
         media=[]
         identities={}
+        known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,))}
         for ref in value.media:
-            identity=str(uuid4())
+            previous=known.get(ref.key)
+            unchanged=bool(previous and (
+                ref.resource_identity is not None and ref.resource_identity==previous['resource_identity']
+                or previous['status']=='pending_download' and previous['source_locator']==ref.locator
+                and previous['name']==ref.name and previous['mime_type']==ref.mime_type and previous['size_bytes']==ref.size_bytes))
+            identity=previous['id'] if previous and unchanged else str(uuid4())
             if ref.key in identities:
                 raise ValueError('Duplicate adapter media key')
             identities[ref.key]=identity
+            ready=bool(unchanged and previous and previous['status']=='ready' and previous['storage_key'] and (self.store.root/previous['storage_key']).is_file())
             media.append(dict(id=identity,publication_id=item,resource_key=ref.key,source_locator=ref.locator,
-                name=ref.name,mime_type=ref.mime_type,size_bytes=ref.size_bytes,storage_key=None,
-                status='pending_download',reason='',resource_identity=ref.resource_identity))
+                name=ref.name,mime_type=ref.mime_type or (previous['mime_type'] if ready and previous else None),
+                size_bytes=previous['size_bytes'] if ready and previous else ref.size_bytes,
+                storage_key=previous['storage_key'] if ready and previous else None,
+                status='ready' if ready else 'pending_download',reason='',resource_identity=ref.resource_identity))
         for block in content.get('blocks',[]):
             if block['type']=='media':
                 block['media_id']=identities[block.pop('ref')['$media']]
@@ -266,10 +276,10 @@ class Publications:
         store = self.store
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
-        publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links))
+        links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links))
         old = store.db.execute('SELECT content FROM items WHERE id=?', (item,)).fetchone()
         previous = json.loads(old['content'])
-        same = publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
+        same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         content['extra']['_input_hash'] = fingerprint
         store.db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         for row in media:

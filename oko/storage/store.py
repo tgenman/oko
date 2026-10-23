@@ -522,7 +522,7 @@ class Store:
     def publication(self, item: str, staging: DownloadStage | None = None) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         if row and row['platform'] is not None:
-            header, text = self.original(item) if row['complete'] else ({},'')
+            header, text = saved_document(self.path(item)) if row['complete'] else ({},'')
             files = self.db.execute("SELECT * FROM media_files WHERE publication_id=? AND status='ready'", (item,)).fetchall()
             kinds = {a['media_id']:a['kind'] for a in header.get('attachments', []) if 'media_id' in a}
             retained = tuple(Attachment(self.media.projection_name(media), self._retained_payload(self.root/media['storage_key'], staging),
@@ -725,6 +725,7 @@ class Store:
         with self.db:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
+            self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL AND (platform='rss' OR feed_id IS NULL)",(job.item,))
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind in ('fetch','filter','theses') and self.publications.owns(job.item):
@@ -925,7 +926,14 @@ class Store:
         self.processing.sync()
 
     def content_version(self, item: str) -> str:
-        return self.versions.version(item)
+        version=self.versions.version(item)
+        if self.publications.active:
+            linked=self.db.execute('''SELECT i.id,i.complete,v.fingerprint FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+                LEFT JOIN content_current c ON c.item=i.id LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
+                WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()
+            if linked:
+                return hashlib.sha256(json.dumps([version,[tuple(row) for row in linked]]).encode()).hexdigest()
+        return version
 
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
         if not want_captions:

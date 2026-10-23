@@ -35,9 +35,12 @@ class RSSAdapter:
                         raise SourceError('Превышен размер RSS', retryable=False)
                 return bytes(raw), str(response.url)
         except SourceError as error:
+            if error.code=='media-unavailable':
+                error.label,error.code='Не удалось загрузить RSS','rss-unavailable'
             raise failure(error, scope='rss:'+url) from error
 
-    async def _window(self, url: str) -> tuple[bytes, list[Entry], list[AdapterIssue]]:
+    async def _window(self, url: str, *, archives: bool = True, wanted: set[str] | None = None,
+                      before: tuple[str,int] | None = None) -> tuple[bytes, list[Entry], list[AdapterIssue]]:
         pending = [url]
         visited: set[str] = set()
         batch: dict[str, Entry] = {}
@@ -65,6 +68,12 @@ class RSSAdapter:
                     batch[entry.publication.id] = entry
                 issues.extend(AdapterIssue(code, 'Запись RSS без внешнего ключа пропущена', AdapterErrorKind.notice)
                               for code in diagnostics)
+                if not archives or wanted is not None and wanted <= batch.keys():
+                    break
+                if before and before[0] in batch:
+                    positions=list(batch)
+                    if len(positions)-positions.index(before[0])-1 >= before[1]:
+                        break
                 links = continuation_links(raw, base)
                 pending.extend(target for targets in links.values() for target in targets
                                if target not in visited and target not in pending)
@@ -75,7 +84,7 @@ class RSSAdapter:
     @staticmethod
     def _state(feed: ExternalReference, cursor: str) -> dict[str, Any]:
         try:
-            state = json.loads(cursor)
+            state = json.loads(cursor) if cursor else dict(feed=feed.url,keys=[],position=0,done=True)
             if (feed.key != ExternalKey(Platform.rss, normalized(feed.url))
                     or not isinstance(state, dict) or state.get('feed') != feed.url
                     or not isinstance(state.get('keys'), list)
@@ -125,7 +134,7 @@ class RSSAdapter:
     async def resolve_feed(self, url: str) -> FeedMetadata:
         try:
             url = normalized(url)
-            raw, batch, _ = await self._window(url)
+            raw, batch, _ = await self._window(url,archives=False)
             return FeedMetadata(ExternalReference(ExternalKey(Platform.rss, url), url),
                 feed_title(raw), feed_description(raw) or '',
                 _encode({'feed': url, 'keys': [e.publication.id for e in reversed(batch)],
@@ -137,6 +146,15 @@ class RSSAdapter:
         state = self._state(feed, cursor)
         if offset < 0:
             raise ValueError('offset must be non-negative')
+        if offset > state['position'] and state['keys']:
+            position=min(state['position'],len(state['keys'])-1)
+            anchor=state['keys'][position]
+            _,batch,_=await self._window(feed.url,before=(anchor,offset-(state['position']-position)))
+            keys=[entry.publication.id for entry in reversed(batch)]
+            upper=state['keys'][-1]
+            if anchor in keys and upper in keys:
+                state['position']=keys.index(anchor)+(state['position']-position)
+                state['keys']=keys[:keys.index(upper)+1]
         state['shortfall'] = max(0, offset-state['position'])
         state['position'] = max(0, state['position']-offset)
         return _encode(state)
@@ -145,7 +163,8 @@ class RSSAdapter:
         state = self._state(feed, cursor)
         if limit <= 0:
             raise ValueError('limit must be positive')
-        _, entries_, issues = await self._window(feed.url)
+        wanted=set(state['keys'][state['position']:state['position']+limit])
+        _, entries_, issues = await self._window(feed.url,archives=not state['done'],wanted=wanted if not state['done'] else None)
         batch = {e.publication.id: e for e in entries_}
         if state['done']:
             state = {'feed': feed.url, 'keys': list(reversed(batch)), 'position': 0, 'done': False}
@@ -179,7 +198,7 @@ class RSSAdapter:
         except (ValueError, TypeError, SourceError) as error:
             raise AdapterException(AdapterIssue('invalid-reference', 'Недопустимый внешний ключ RSS',
                 AdapterErrorKind.permanent, publication)) from error
-        _, batch, _ = await self._window(feed)
+        _, batch, _ = await self._window(feed,wanted={identity})
         match = next((e for e in batch if e.publication.id == identity), None)
         if match is None:
             raise AdapterException(AdapterIssue('rss-entry-unavailable', 'Запись отсутствует в доступном RSS',
@@ -188,7 +207,6 @@ class RSSAdapter:
 
     async def download_media(self, publication: ExternalReference, media: MediaReference,
                              output: BinaryIO) -> MediaReference:
-        from dataclasses import replace
         value = await self.fetch(publication)
         current = next((item for item in value.media if item.key == media.key), None)
         if current is None or current.locator != media.locator:
@@ -197,7 +215,6 @@ class RSSAdapter:
         try:
             attachment = any(block.get('ref') == {'$media': media.key} and block.get('role') == 'attachment'
                              for block in value.content['blocks'])
-            size, _ = await self.downloader.write(current.locator, output, allow_empty=attachment)
-            return replace(current, size_bytes=size)
+            return await self.downloader.write_media(current,output,allow_empty=attachment)
         except SourceError as error:
             raise failure(error, publication, media.key, scope='rss:'+publication.key.external_id) from error

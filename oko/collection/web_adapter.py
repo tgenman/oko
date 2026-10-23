@@ -1,5 +1,4 @@
 """Feedless web/Telegraph publications. Files are described, never eagerly saved."""
-from dataclasses import replace
 from html import escape
 import re
 from typing import Any,BinaryIO
@@ -161,6 +160,8 @@ class WebAdapter:
             return PublicationContent(PublicationMetadata(publication,title.get_text(' ',strip=True) if title else '',None),
                 dict(blocks=content.blocks,extra={}),tuple(content.media))
         except SourceError as error:
+            if error.code=='media-unavailable':
+                error.label,error.code='Не удалось загрузить статью','article-unavailable'
             cause=error.__cause__
             if isinstance(cause,httpx.HTTPStatusError) and cause.response.status_code in (404,410):
                 error=SourceDeleted()
@@ -173,7 +174,6 @@ class WebAdapter:
             raise AdapterException(AdapterIssue('media_changed','Ресурс статьи изменился',AdapterErrorKind.media_changed,publication,media.key))
         attachment=any(block.get('ref')=={'$media':media.key} and block.get('role')=='attachment' for block in current.content['blocks'])
         try:
-            size,_=await Downloader(self.transport).write(actual.locator,output,allow_empty=attachment)
-            return replace(actual,size_bytes=size)
+            return await Downloader(self.transport).write_media(actual,output,allow_empty=attachment)
         except SourceError as error:
             raise failure(error,publication,media.key,'web:media:'+urlsplit(actual.locator).netloc) from error

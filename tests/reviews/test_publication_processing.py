@@ -271,7 +271,7 @@ def test_article_retrieval_error_is_not_sent_as_publication_text(tmp_path):
         assert all('Telegraph:' not in call['sources'][0]['text'] for call in calls)
         broken[0]=False
         client.post('/api/v3/materials/'+card['id']+'/retry')
-        wait_for(client,lambda:any('Retrieved article' in call['sources'][0]['text'] for call in calls))
+        wait_for(client,lambda:any('Retrieved article' in source['text'] for call in calls for source in call['sources']))
 
 
 @pytest.mark.parametrize('invalid',['quote_removal','unknown_reference'])

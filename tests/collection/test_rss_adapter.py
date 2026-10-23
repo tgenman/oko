@@ -27,6 +27,7 @@ def test_rss_discovery_is_ready_and_links_a_separate_article_without_fetching_it
     assert article.key.platform==Platform.other_web and article.key.external_id=='https://web.example/article'
     assert not page.has_more and set(calls)=={'https://rss.example/feed'}
     assert asyncio.run(adapter.fetch(value.metadata.reference))==value
+    assert len(asyncio.run(adapter.discover(feed.reference,'',10)).publications)==1
 
 
 def test_rss_identity_accepts_guid_without_url_and_reports_missing_key_and_collisions():
@@ -74,7 +75,7 @@ def test_rss_archive_window_is_inclusive_old_to_new_and_survives_restart():
     assert [json.loads(p.metadata.reference.key.external_id)[1] for p in second.publications]==['3']
     assert not second.has_more
     replay=asyncio.run(adapter.discover(feed.reference,second.next_cursor,10))
-    assert [json.loads(p.metadata.reference.key.external_id)[1] for p in replay.publications]==['1','2','3','4']
+    assert [json.loads(p.metadata.reference.key.external_id)[1] for p in replay.publications]==['2','3','4']
     assert not replay.has_more
 
 
@@ -146,3 +147,22 @@ def test_malformed_record_keeps_its_key_and_does_not_drop_healthy_peers():
     with pytest.raises(AdapterException) as caught:
         asyncio.run(adapter.fetch(bad.metadata.reference))
     assert caught.value.issue.kind==AdapterErrorKind.permanent
+
+
+def test_latest_rss_metadata_does_not_fetch_history_until_the_offset_needs_it():
+    from oko.collection.adapters import AdapterException, AdapterErrorKind
+    import pytest
+    calls=[]
+    def respond(request):
+        calls.append(request.url.path)
+        if request.url.path=='/archive':
+            return httpx.Response(503)
+        return httpx.Response(200,text='<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel><item><guid>2</guid></item><item><guid>1</guid></item><atom:link rel="next" href="/archive"/></channel></rss>')
+    adapter=RSSAdapter(httpx.MockTransport(respond))
+    feed=asyncio.run(adapter.resolve_feed('https://rss.example/feed'))
+    page=asyncio.run(adapter.discover(feed.reference,feed.latest_cursor,1))
+    assert len(page.publications)==1 and calls==['/feed','/feed']
+    with pytest.raises(AdapterException) as caught:
+        asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,10))
+    assert caught.value.issue.kind==AdapterErrorKind.temporary
+    assert calls[-1]=='/archive'

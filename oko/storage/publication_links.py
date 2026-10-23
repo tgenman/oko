@@ -9,10 +9,10 @@ if TYPE_CHECKING:
     from oko.storage.store import Store
 
 
-def sync(store: 'Store', item: str, references: tuple[ExternalReference,...]) -> None:
+def sync(store: 'Store', item: str, references: tuple[ExternalReference,...]) -> bool:
     owner=store.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone()
     if owner['feed_id'] is None:
-        return
+        return False
     targets=[]
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
@@ -38,6 +38,11 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...]) ->
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id=?',(item,))
     store.db.executemany('INSERT OR IGNORE INTO publication_links VALUES (?,?)',[(item,target) for target in targets])
     prune(store,previous-set(targets))
+    changed=previous!=set(targets)
+    if changed:
+        store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(item,))
+        store.read_versions.linked_changed(item)
+    return changed
 
 
 def feedless(store: 'Store', item: str) -> bool:
@@ -58,7 +63,7 @@ def text(store: 'Store', item: str) -> str:
 def notify_parents(store: 'Store', item: str) -> None:
     for row in store.db.execute('SELECT source_publication_id FROM publication_links WHERE target_publication_id=?',(item,)).fetchall():
         store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(row[0],))
-        store.read_versions.media_changed(row[0])
+        store.read_versions.linked_changed(row[0])
 
 
 def prune(store: 'Store', candidates: set[str]) -> None:

@@ -45,7 +45,7 @@ def test_web_media_stream_and_changed_locator():
     current=['a']
     def respond(request):
         if request.url.path.endswith('.png'):
-            return httpx.Response(200,content=b'image',headers={'content-type':'image/png'})
+            return httpx.Response(200,content=b'image',headers={'content-type':'image/png','content-disposition':'attachment; filename=original.png'})
         return httpx.Response(200,text='<article><p>Text</p><img src="/'+current[0]+'.png"></article>')
     adapter=WebAdapter(httpx.MockTransport(respond))
     ref=reference('https://web.example/post')
@@ -53,6 +53,7 @@ def test_web_media_stream_and_changed_locator():
     output=BytesIO()
     actual=asyncio.run(adapter.download_media(ref,value.media[0],output))
     assert output.getvalue()==b'image' and actual.size_bytes==5
+    assert actual.mime_type=='image/png' and actual.name=='original.png'
     current[0]='b'
     with pytest.raises(AdapterException) as caught:
         asyncio.run(adapter.download_media(ref,value.media[0],BytesIO()))
@@ -64,3 +65,12 @@ def test_web_missing_article_has_a_typed_unavailable_error():
     with pytest.raises(AdapterException) as caught:
         asyncio.run(adapter.fetch(reference('https://web.example/missing')))
     assert caught.value.issue.kind==AdapterErrorKind.unavailable
+
+
+def test_web_failure_describes_article_and_keeps_source_wait_metadata():
+    adapter=WebAdapter(httpx.MockTransport(lambda _:httpx.Response(429,headers={'retry-after':'120'})))
+    with pytest.raises(AdapterException) as caught:
+        asyncio.run(adapter.fetch(reference('https://web.example/limited')))
+    issue=caught.value.issue
+    assert issue.kind==AdapterErrorKind.source_wait and issue.retry_at is not None
+    assert issue.scope=='web:web.example' and issue.message=='Не удалось загрузить статью'
