@@ -2591,6 +2591,11 @@ export type ResourceNotFoundErrorDetails = {
     resource: AffectedResource;
 };
 
+export type RetrySettings = {
+    initial_seconds: number;
+    max_seconds: number;
+};
+
 export type RetryingProblem = {
     affected: Array<AffectedResource>;
     code: ProblemCode;
@@ -2717,6 +2722,14 @@ export type SettingsPatch = {
     processor?: ProcessorSelection | null;
     prompt_filters?: string | null;
     prompt_theses?: string | null;
+    /**
+     * Global initial delay for temporary pipeline failures, seconds. Null resets to 60.
+     */
+    retry_initial_seconds?: number | null;
+    /**
+     * Global maximum exponential retry delay, seconds. Must not be lower than the effective initial delay. Null resets to 3600. Source waits are preserved.
+     */
+    retry_max_seconds?: number | null;
     /**
      * Global Oko setting only; requests per second for Telegram HTML and each media origin. Null resets to 2. Forced waits are preserved.
      */
@@ -5851,6 +5864,43 @@ export type FeedRefreshSettingsResponses = {
 };
 
 export type FeedRefreshSettingsResponse = FeedRefreshSettingsResponses[keyof FeedRefreshSettingsResponses];
+
+export type RetrySettingsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v3/settings/retries';
+};
+
+export type RetrySettingsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type RetrySettingsError = RetrySettingsErrors[keyof RetrySettingsErrors];
+
+export type RetrySettingsResponses = {
+    /**
+     * Read effective settings and explicit overrides. Scope is oko/folder/feed; oko requires owner global, folder/feed require an existing resource. Feed metadata exists only in the feed snapshot.
+     */
+    200: RetrySettings;
+};
+
+export type RetrySettingsResponse = RetrySettingsResponses[keyof RetrySettingsResponses];
 
 export type TelegramHttpSettingsData = {
     body?: never;

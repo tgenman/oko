@@ -141,9 +141,11 @@ class Store:
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
+            self.media.interrupt()
             self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
             self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
             self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
+        self.media.recover_jobs()
         self.versions = Versions(self)
         self.publications.recover()
         self.versions.recover()
@@ -394,6 +396,7 @@ class Store:
             return False
         with self.db:
             self.youtube.reset(item)
+            self.media.retry(item)
             self.db.execute("UPDATE jobs SET status='pending',manual_once=0,next=CASE WHEN problem_code LIKE '%FloodWaitError' THEN next ELSE 0 END,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (item,))
         return True
 
@@ -462,7 +465,7 @@ class Store:
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
     def finish(self, job: Job) -> None:
-        self.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL,manual_once=0 WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
+        self.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL,manual_once=0,retry_at=NULL,retry_delay=0,wait_scope=NULL WHERE id=? AND generation=? AND status='running'", (job.id, job.generation))
 
     def valid(self, job: Job) -> bool:
         row = self.db.execute('SELECT status,generation,kind,item FROM jobs WHERE id=?', (job.id,)).fetchone()
@@ -694,6 +697,7 @@ class Store:
             selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})) OR item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.feed_id IN ({placeholders})))"
             params = (*feeds, *feeds, *feeds)
         with self.db:
+            self.media.interrupt(feeds)
             self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
             self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
 
@@ -752,7 +756,9 @@ class Store:
 
     def work_summary(self) -> list[WorkSummary]:
         rows = self.db.execute("""SELECT jobs.kind,jobs.status,jobs.problem_code,count(*) AS count,
-            CASE WHEN jobs.kind IN ('discover','read','feed-delete') THEN NULLIF(jobs.item,'') ELSE items.feed_id END AS feed,
+            CASE WHEN jobs.kind IN ('discover','read','feed-delete') THEN NULLIF(jobs.item,'')
+                WHEN jobs.kind='download_media' THEN (SELECT i.feed_id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE m.id=jobs.item)
+                ELSE items.feed_id END AS feed,
             min(jobs.next) AS next,sum(jobs.error IS NOT NULL) AS errors
             FROM jobs LEFT JOIN items ON items.id=jobs.item
             WHERE jobs.status IN ('pending','running')

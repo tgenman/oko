@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.reader.runtime import Runtime
-from oko.subscriptions.subscriptions import Overrides
+from oko.subscriptions.subscriptions import Overrides, GLOBAL_SERVICE_SETTINGS
 
 
 def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.EffectiveSettings, binding: dict[str, object] | None = None, activity: wire.FeedActivity | None = None) -> wire.EffectiveSettingsSnapshot:
@@ -86,6 +86,10 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     async def telegram_http_settings() -> wire.EffectiveTelegramHttpRps:
         return wire.EffectiveTelegramHttpRps.model_validate(runtime.require_store().subscriptions.telegram_http_settings())
 
+    @router.get('/api/v3/settings/retries', response_model=wire.RetrySettings)
+    async def retry_settings() -> wire.RetrySettings:
+        return wire.RetrySettings.model_validate(runtime.require_store().subscriptions.retry_settings())
+
     @router.get('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def settings(scope: Literal['oko', 'folder', 'feed'], owner: str) -> wire.EffectiveSettingsSnapshot:
         target(scope, owner)
@@ -94,8 +98,20 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.patch('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def patch(request: Request, scope: Literal['oko', 'folder', 'feed'], owner: str, body: wire.SettingsPatch) -> wire.EffectiveSettingsSnapshot:
         from oko.reader.commands_v3 import track
-        context = wire.CommandContext(wire.CommandSettingsPatch(operation='settings_patch', target=target(scope, owner), keys=[wire.SettingKey.model_validate(key) for key in sorted(body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'})]))
+        context = wire.CommandContext(wire.CommandSettingsPatch(operation='settings_patch', target=target(scope, owner), keys=[wire.SettingKey.model_validate(key) for key in sorted(body.model_fields_set - GLOBAL_SERVICE_SETTINGS)]))
         async with track(runtime, request, context):
+            retry_keys = {'retry_initial_seconds', 'retry_max_seconds'} & body.model_fields_set
+            if retry_keys and scope != 'oko':
+                raise ApiError(400, wire.ErrorEnvelope(wire.SettingScopeInvalidError(
+                    code='setting_scope_invalid', message='Задержки повторов задаются только в Настройках Око',
+                    details=wire.SettingScopeInvalidErrorDetails(reason='retry_settings_are_global_only'),
+                    diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
+            if retry_keys:
+                try:
+                    runtime.require_store().subscriptions.validate_retry_settings(body.model_dump(exclude_unset=True))
+                except ValueError:
+                    from oko.reader.api_v3 import invalid
+                    raise ApiError(422, invalid('body', 'retry_max_seconds')) from None
             if scope != 'oko' and 'feed_refresh_minutes' in body.model_fields_set:
                 raise ApiError(400, wire.ErrorEnvelope(wire.SettingScopeInvalidError(
                     code='setting_scope_invalid', message='Интервал обновления задаётся только в Настройках Око',
@@ -131,7 +147,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             from oko.reader.api_v3 import invalid
             raise ApiError(422, invalid('body', 'title'))
         feed = facts.SubscriptionFeed.model_validate(runtime.require_store().subscriptions.feeds(identity)[0])
-        context = wire.CommandContext(wire.CommandFeedPatch(operation='feed_patch', feed_id=wire.FeedId(identity), fields=[wire.FeedField.model_validate(key) for key in sorted(body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'})]))
+        context = wire.CommandContext(wire.CommandFeedPatch(operation='feed_patch', feed_id=wire.FeedId(identity), fields=[wire.FeedField.model_validate(key) for key in sorted(body.model_fields_set - GLOBAL_SERVICE_SETTINGS)]))
         async with track(runtime, request, context):
             if feed.kind == 'telegram' and 'transport' in body.model_fields_set:
                 raise ApiError(409, wire.ErrorEnvelope(wire.AccessImmutableError(code='access_immutable', message='Способ доступа Telegram нельзя менять настройкой фида', details=wire.AccessImmutableErrorDetails(feed_id=wire.FeedId(identity)), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))

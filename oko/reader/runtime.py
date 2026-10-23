@@ -23,7 +23,7 @@ from oko.collection.rss import RSSSource, feed_title, normalized
 from oko.collection.sources import Sources, SourceSettings, TelegramAccess
 from oko.collection.contracts import FetchResources, SourceError, SourceDeleted, SourceSkipped, SourceDeferred, DownloadStage
 from oko.collection.contracts import Source
-from oko.collection.adapters import AdapterException
+from oko.collection.adapters import AdapterException, AdapterErrorKind, AdapterIssue
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
@@ -35,7 +35,7 @@ from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource, ConnectTelegram
-from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, FolderConflict, identify
+from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, FolderConflict, identify, GLOBAL_SERVICE_SETTINGS
 from oko.collection.youtube.source import LocalCaptions
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -684,7 +684,7 @@ class Runtime:
                 previous = current.subscriptions.effective(scope, owner)
                 result = current.subscriptions.update_settings(scope, owner, body)
                 self._collection_interval = current.subscriptions.feed_refresh_minutes() * 60
-                if body.model_fields_set - {'feed_refresh_minutes', 'telegram_http_rps'} and result != previous:
+                if body.model_fields_set - GLOBAL_SERVICE_SETTINGS and result != previous:
                     current.settings_changed(scope, owner)
                     affected = None if scope == 'oko' else {f['id'] for f in current.subscriptions.feeds(owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
                     await self._cancel(affected)
@@ -1276,8 +1276,10 @@ class Runtime:
         except Exception as error:
             async with self._actions:
                 if self._store is current and self._live() and current.valid(job):
-                    current.retry(job, self._clock(), str(error), 60,
-                                  code=error.issue.code if isinstance(error, AdapterException) else 'media-download')
+                    issue = error.issue if isinstance(error, AdapterException) else AdapterIssue('media-download',
+                        'Не удалось сохранить вложение' if isinstance(error,OSError) else 'Нарушен контракт медиа',
+                        AdapterErrorKind.temporary if isinstance(error,OSError) else AdapterErrorKind.permanent)
+                    current.media.failed(job, issue)
         finally:
             current.media.release(download)
 

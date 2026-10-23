@@ -196,7 +196,7 @@ class Publications:
                 mime_type=resource.mime if resource else attachment.mime if attachment else None,
                 size_bytes=path.stat().st_size if path.is_file() else ref.size_bytes if ref else None, storage_key=storage_key,
                 status='ready' if storage_key else 'pending_download' if ref else 'unavailable',
-                reason=resource.reason or '' if resource else '', resource_identity=ref.resource_identity if ref else None))
+                reason=old['reason'] if same and old and not storage_key else resource.reason or '' if resource else '', resource_identity=ref.resource_identity if ref else None))
             blocks.append(dict(type='media', role='attachment' if kind=='file' else kind, media_id=identity))
         extra = deepcopy(material.adapter_content.content.get('extra', {})) if material.adapter_content else {}
         # Temporary header for the old HTTP/processor projection, removed when

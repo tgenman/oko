@@ -39,7 +39,7 @@ Schema 2020-12, включая форматы. `null` и `false` считают�
 
 ## Единственный API v3
 
-57 предметных операций обслуживается через `/api/v3`. Прежние unversioned `/api` и `/api/...` после Host/Origin/bearer проверок возвращают `410 api_version_removed`; команды не исполняются, перенаправлений и SPA fallback нет. Переходные SDK/DTO v2, их генерация и `baseline.json` удалены. Исторический semantic mapping сохранён в [дизайне перехода](../.scratch/independent-api/contract-design.md), а текущий контракт — единственный источник wire-моделей.
+64 предметных операций обслуживается через `/api/v3`. Прежние unversioned `/api` и `/api/...` после Host/Origin/bearer проверок возвращают `410 api_version_removed`; команды не исполняются, перенаправлений и SPA fallback нет. Переходные SDK/DTO v2, их генерация и `baseline.json` удалены. Исторический semantic mapping сохранён в [дизайне перехода](../.scratch/independent-api/contract-design.md), а текущий контракт — единственный источник wire-моделей.
 
 `oko/reader/snapshots.py` валидирует внутренние снимки Store/Runtime, включая исторические необязательные поля. Это не HTTP-контракт и не второй API. На границе используются только generated v3 models. Исторические receipts и проблемы читаются без разрушительной миграции; старые UI-действия не исполняются.
 

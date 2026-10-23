@@ -7,7 +7,7 @@ from pathlib import Path
 import secrets
 from typing import Any, TYPE_CHECKING
 
-from oko.collection.adapters import ExternalKey, ExternalReference, MediaReference, Platform
+from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
 from oko.storage.reading import reading_value
 
 if TYPE_CHECKING:
@@ -27,6 +27,34 @@ class MediaFiles:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self.active_paths: set[Path] = set()
+        columns = {row['name'] for row in store.db.execute('PRAGMA table_info(jobs)')}
+        with store.db:
+            for name, declaration in (('retry_at','REAL'), ('retry_delay','REAL NOT NULL DEFAULT 0'), ('wait_scope','TEXT')):
+                if name not in columns:
+                    store.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {declaration}')
+
+    _target = "(kind='download_media' OR (kind='fetch' AND item IN (SELECT id FROM items WHERE platform IS NOT NULL)))"
+
+    def interrupt(self, feeds: set[str] | None = None) -> None:
+        """Caller owns the cancellation/startup transaction."""
+        store = self.store
+        initial = store.subscriptions.retry_settings()['initial_seconds']
+        for row in store.db.execute("SELECT * FROM jobs WHERE status='running' AND "+self._target).fetchall():
+            owner = self.owner(row['item']) if row['kind']=='download_media' else row['item']
+            feed = store.db.execute('SELECT feed_id FROM items WHERE id=?', (owner,)).fetchone()
+            if feeds is not None and (feed is None or feed[0] not in feeds):
+                continue
+            delay = max(initial, row['retry_delay'])
+            until = max(row['retry_at'] or 0, store.wall_clock()+delay)
+            store.db.execute("UPDATE jobs SET status='pending',generation=generation+1,retry_at=?,next=? WHERE id=?",
+                (until, store.clock()+max(0,until-store.wall_clock()),row['id']))
+
+    def recover_jobs(self) -> None:
+        with self.store.db:
+            self.interrupt()
+            for row in self.store.db.execute("SELECT id,retry_at FROM jobs WHERE status='pending' AND "+self._target).fetchall():
+                self.store.db.execute('UPDATE jobs SET next=? WHERE id=?',
+                    (self.store.clock()+max(0,row['retry_at']-self.store.wall_clock()) if row['retry_at'] else 0,row['id']))
 
     def project_header(self, content: dict[str, Any], media: list[dict[str, Any]]) -> None:
         header = content['extra']['_reader']
@@ -55,14 +83,27 @@ class MediaFiles:
 
     def schedule(self, item: str) -> None:
         db = self.store.db
-        db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1 WHERE kind='download_media'
-            AND status IN ('pending','running') AND item NOT IN (SELECT id FROM media_files)""")
+        db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL WHERE kind='download_media'
+            AND status IN ('pending','running','failed','unavailable') AND item NOT IN (SELECT id FROM media_files)""")
         for row in db.execute("SELECT id FROM media_files WHERE publication_id=? AND status='pending_download'", (item,)).fetchall():
             db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('download_media',?)", (row['id'],))
 
     def owner(self, media: str) -> str | None:
         row = self.store.db.execute('SELECT publication_id FROM media_files WHERE id=?', (media,)).fetchone()
         return str(row[0]) if row else None
+
+    def retry(self, item: str) -> None:
+        """Manual retry preserves source deadlines and the accumulated backoff."""
+        store = self.store
+        rows = store.db.execute("""SELECT j.* FROM jobs j JOIN media_files m ON m.id=j.item
+            WHERE m.publication_id=? AND j.kind='download_media' AND j.status IN ('failed','unavailable','pending')""", (item,)).fetchall()
+        for row in rows:
+            waiting = bool(row['wait_scope'] and row['retry_at'] and row['retry_at']>store.wall_clock())
+            store.db.execute("""UPDATE jobs SET status='pending',generation=generation+1,next=?,retry_at=?,
+                error=?,problem_code=? WHERE id=?""", (row['next'] if waiting else 0, row['retry_at'] if waiting else None,
+                row['error'] if waiting else None,row['problem_code'] if waiting else None,row['id']))
+            if not waiting:
+                store.db.execute("UPDATE media_files SET status='pending_download',reason='' WHERE id=?", (row['item'],))
 
     @reading_value
     def loading(self, item: str) -> bool:
@@ -124,3 +165,39 @@ class MediaFiles:
     def release(self, download: MediaDownload) -> None:
         self.active_paths.difference_update((download.temporary, download.final))
         download.temporary.unlink(missing_ok=True)
+
+    def failed(self, job: 'Job', issue: AdapterIssue) -> None:
+        store = self.store
+        if not store.valid(job):
+            return
+        owner = self.owner(job.item) if job.kind=='download_media' else job.item
+        row = store.db.execute('SELECT retry_delay FROM jobs WHERE id=?', (job.id,)).fetchone()
+        settings = store.subscriptions.retry_settings()
+        delay = min(settings['max_seconds'], max(settings['initial_seconds'], row['retry_delay']*2))
+        temporary = issue.kind in (AdapterErrorKind.temporary, AdapterErrorKind.source_wait)
+        status = 'pending' if temporary else 'unavailable' if issue.kind==AdapterErrorKind.unavailable else 'failed'
+        until = max(store.wall_clock()+delay, issue.retry_at.timestamp() if issue.retry_at else 0) if temporary else None
+        content = None
+        if owner and job.kind=='download_media':
+            publication = store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0', (owner,)).fetchone()
+            if publication:
+                content = json.loads(publication['content'])
+                media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (owner,))]
+                for value in media:
+                    if value['id']==job.item:
+                        value.update(reason=issue.message,status='unavailable' if status=='unavailable' else 'pending_download')
+                self.project_header(content,media)
+        with store.db:
+            if not store.valid(job):
+                return
+            store.db.execute('''UPDATE jobs SET status=?,next=?,retry_at=?,retry_delay=?,wait_scope=?,error=?,problem_code=?
+                WHERE id=? AND generation=?''', (status, store.clock()+max(0,until-store.wall_clock()) if until else 0,
+                until,delay,issue.scope,issue.message,issue.code,job.id,job.generation))
+            if content is not None:
+                assert owner is not None
+                store.db.execute('UPDATE media_files SET reason=?,status=? WHERE id=?',
+                    (issue.message,'unavailable' if status=='unavailable' else 'pending_download',job.item))
+                store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),owner))
+                store.read_versions.media_changed(owner)
+        if content is not None:
+            store.publications.recover(owner)

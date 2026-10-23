@@ -962,6 +962,12 @@ class RequestInvalidErrorDetails(WireModel):
     violations: list[FieldViolation] = Field(..., min_length=1)
 
 
+class RetrySettings(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    initial_seconds: StrictInt = Field(..., ge=1, le=86400)
+    max_seconds: StrictInt = Field(..., ge=1, le=86400)
+
+
 class RevisionId(RootModel[StrictStr]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictStr = Field(..., examples=["example"], min_length=1)
@@ -1052,6 +1058,26 @@ class PromptTheses(RootModel[StrictStr]):
     root: StrictStr = Field(..., max_length=20000)
 
 
+class RetryInitialSeconds(RootModel[StrictInt]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictInt = Field(
+        ...,
+        description="Global initial delay for temporary pipeline failures, seconds. Null resets to 60.",
+        ge=1,
+        le=86400,
+    )
+
+
+class RetryMaxSeconds(RootModel[StrictInt]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictInt = Field(
+        ...,
+        description="Global maximum exponential retry delay, seconds. Must not be lower than the effective initial delay. Null resets to 3600. Source waits are preserved.",
+        ge=1,
+        le=86400,
+    )
+
+
 class TelegramHttpRps(RootModel[StrictFloat]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictFloat = Field(
@@ -1072,6 +1098,14 @@ class SettingsPatch(WireModel):
     processor: ProcessorSelection | None | MISSING = MISSING
     prompt_filters: PromptFilters | None | MISSING = MISSING
     prompt_theses: PromptTheses | None | MISSING = MISSING
+    retry_initial_seconds: RetryInitialSeconds | None | MISSING = Field(
+        default=MISSING,
+        description="Global initial delay for temporary pipeline failures, seconds. Null resets to 60.",
+    )
+    retry_max_seconds: RetryMaxSeconds | None | MISSING = Field(
+        default=MISSING,
+        description="Global maximum exponential retry delay, seconds. Must not be lower than the effective initial delay. Null resets to 3600. Source waits are preserved.",
+    )
     telegram_http_rps: TelegramHttpRps | None | MISSING = Field(
         default=MISSING,
         description="Global Oko setting only; requests per second for Telegram HTML and each media origin. Null resets to 2. Forced waits are preserved.",
