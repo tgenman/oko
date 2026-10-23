@@ -53,6 +53,8 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
             complete = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
             assert client.get(complete['content']['attachments'][0]['url']).content == b'new-photo'
             assert complete['content']['completeness']['state'] == 'complete'
+            assert complete['content']['attachments'][0]['url'] != old['content']['attachments'][0]['url']
+            assert client.get(old['content']['attachments'][0]['url']).status_code == 404
             assert complete['content']['previous_versions'] == []
         finally:
             release.set()
@@ -230,3 +232,70 @@ def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
         assert deadline() is not None and deadline()>=before-.1
         assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
         assert len(denied)==1
+
+
+def test_media_urls_and_publication_media_ids_follow_source_order(tmp_path):
+    import json
+    import sqlite3
+    root=migrated_root(tmp_path)
+    def response(request):
+        if request.url.host=='cdn.example':
+            return httpx.Response(200,content=request.url.path.strip('/').encode(),headers={'content-type':'image/jpeg'})
+        photos=''.join('<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+name+'\')"></a>' for name in ('one','two','three'))
+        return httpx.Response(200,text=page([(11,'Ordered photos'+photos)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+        attachments=client.get('/api/v3/materials/'+item).json()['content']['attachments']
+        assert [client.get(value['url']).content for value in attachments]==[b'one',b'two',b'three']
+        with sqlite3.connect(root/'state.sqlite') as db:
+            media_ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id=?',(item,)).fetchone()[0])
+        assert [value['url'].rsplit('/',1)[1] for value in attachments]==media_ids
+
+
+def test_changed_resource_refreshes_description_before_downloading_new_bytes(tmp_path):
+    root=migrated_root(tmp_path)
+    bounded=[0]
+    downloads=[]
+    def response(request):
+        if request.url.host=='cdn.example':
+            downloads.append(request.url.path)
+            return httpx.Response(200,content=request.url.path.encode(),headers={'content-type':'image/jpeg'})
+        if request.url.params.get('before'):
+            bounded[0]+=1
+        # Resolve/discover observes A; the media precheck sees B.
+        current='b' if bounded[0]>=1 else 'a'
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+current+'.jpg\')"></a>'
+        return httpx.Response(200,text=page([(11,'Text '+current+photo)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
+        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['text']=='Text b' and m['content']['attachments'] else None))
+        assert client.get(ready['content']['attachments'][0]['url']).content==b'/b.jpg'
+        assert downloads==['/b.jpg']
+
+
+def test_refreshed_signature_keeps_the_media_id_and_existing_bytes(tmp_path):
+    root=migrated_root(tmp_path)
+    signature=['first']
+    downloads=[]
+    def response(request):
+        if request.url.host=='cdn.example':
+            downloads.append(str(request.url))
+            return httpx.Response(200,content=b'unchanged',headers={'content-type':'image/jpeg'})
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg?signature='+signature[0]+'\')"></a>'
+        return httpx.Response(200,text=page([(11,'Unchanged text'+photo)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+        before=client.get('/api/v3/materials/'+item).json()['content']['attachments'][0]['url']
+        signature[0]='second'
+        client.post('/api/v3/materials/'+item+'/retry')
+        settled(client)
+        after=client.get('/api/v3/materials/'+item).json()['content']['attachments'][0]['url']
+        assert before==after
+        assert client.get(after).content==b'unchanged'
+        assert len(downloads)==1

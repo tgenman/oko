@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
+from uuid import UUID
 from typing import Any, TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
@@ -62,24 +64,50 @@ class MediaFiles:
         by_key = {row['resource_key']: row for row in media}
         previous_attachments = {value['name']:value for value in header.get('attachments', [])}
         roles = {b['media_id']: b['role'] for b in content['blocks'] if b['type']=='media'}
+        order = {identity:index for index,identity in enumerate(roles)}
+        media = sorted(media,key=lambda row:order.get(row['id'],len(order)))
         header['attachments'] = []
         for resource in resources:
             row = by_key.get(resource['key'])
             if row is None:
                 continue
             ready = row['status']=='ready'
+            resource['name'] = self.projection_name(row)
             resource.update(status='loaded' if ready else 'missing' if row['status']=='pending_download' else 'unsupported', reason=row['reason'])
             if ready:
                 resource['sha256'] = self.store.versions.file_digest(self.store.root/row['storage_key'])
+        header['_media_urls'] = {}
         for row in media:
-            if row['status']=='ready' and not row['name'].startswith('image-'):
+            if row['status']=='ready':
                 role = roles.get(row['id'], 'attachment')
-                kind = previous_attachments.get(row['name'], {}).get('kind') or ('file' if role=='attachment' else role)
-                header['attachments'].append(dict(name=row['name'],kind=kind,mime=row['mime_type'] or 'application/octet-stream'))
+                kind = previous_attachments.get(row['name'], {}).get('kind') or {'attachment':'file','subtitles':'file','cover':'image'}.get(role,role)
+                name = self.projection_name(row)
+                header['attachments'].append(dict(name=name,media_id=row['id'],kind=kind,mime=row['mime_type'] or 'application/octet-stream'))
+                header['_media_urls'][name] = self.url(row['publication_id'],row['id'])
         base = content['extra'].get('_collection_reason', header.get('reason', ''))
         waiting = [row['reason'] or 'Вложение загружается' for row in media if row['status']!='ready']
         header['reason'] = '; '.join(dict.fromkeys(([base] if base else [])+waiting))
         header['full'] = not header['reason'] and not any(r.get('external') for r in resources) and not header.get('source_manifest', {}).get('post_web_unavailable')
+
+    @staticmethod
+    def url(item: str, media: str) -> str:
+        return f'/api/v3/materials/{item}/media/{media}'
+
+    @staticmethod
+    def projection_name(row: Any) -> str:
+        suffix = Path(row['name']).suffix.lower()
+        if not re.fullmatch(r'\.[a-z0-9]{1,8}', suffix):
+            suffix = {'image/jpeg':'.jpg','image/png':'.png','video/mp4':'.mp4','audio/mpeg':'.mp3'}.get(row['mime_type'],'.bin')
+        return 'media-'+str(UUID(row['id']).int)+suffix
+
+    def file(self, item: str, media: str) -> tuple[Path, str] | None:
+        row = self.store.db.execute('''SELECT m.* FROM media_files m JOIN items i ON i.id=m.publication_id
+            WHERE m.id=? AND m.publication_id=? AND i.viewed=0 AND m.status='ready' ''', (media,item)).fetchone()
+        if row and row['storage_key']:
+            path = self.store.root/row['storage_key']
+            if path.is_file():
+                return path, row['mime_type'] or 'application/octet-stream'
+        return None
 
     def schedule(self, item: str) -> None:
         db = self.store.db
@@ -156,6 +184,7 @@ class MediaFiles:
                 (str(download.final.relative_to(store.root)),size,actual.locator,actual.mime_type,job.item))
             store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),download.publication_id))
             store.finish(job)
+            store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
             store.read_versions.media_changed(download.publication_id)
             store.fault('before_media_commit')
         store.fault('after_media_commit')
@@ -175,7 +204,8 @@ class MediaFiles:
         settings = store.subscriptions.retry_settings()
         delay = min(settings['max_seconds'], max(settings['initial_seconds'], row['retry_delay']*2))
         temporary = issue.kind in (AdapterErrorKind.temporary, AdapterErrorKind.source_wait)
-        status = 'pending' if temporary else 'unavailable' if issue.kind==AdapterErrorKind.unavailable else 'failed'
+        changed = job.kind=='download_media' and issue.kind==AdapterErrorKind.media_changed
+        status = 'cancelled' if changed else 'pending' if temporary else 'unavailable' if issue.kind==AdapterErrorKind.unavailable else 'failed'
         until = max(store.wall_clock()+delay, issue.retry_at.timestamp() if issue.retry_at else 0) if temporary else None
         content = None
         if owner and job.kind=='download_media':
@@ -185,19 +215,22 @@ class MediaFiles:
                 media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (owner,))]
                 for value in media:
                     if value['id']==job.item:
-                        value.update(reason=issue.message,status='unavailable' if status=='unavailable' else 'pending_download')
+                        value.update(reason=issue.message,status='unavailable' if status=='unavailable' or changed else 'pending_download')
                 self.project_header(content,media)
         with store.db:
             if not store.valid(job):
                 return
             store.db.execute('''UPDATE jobs SET status=?,next=?,retry_at=?,retry_delay=?,wait_scope=?,error=?,problem_code=?
                 WHERE id=? AND generation=?''', (status, store.clock()+max(0,until-store.wall_clock()) if until else 0,
-                until,delay,issue.scope,issue.message,issue.code,job.id,job.generation))
+                until,delay,issue.scope,None if changed else issue.message,None if changed else issue.code,job.id,job.generation))
+            if changed and owner:
+                store.enqueue_fetch(owner)
             if content is not None:
                 assert owner is not None
                 store.db.execute('UPDATE media_files SET reason=?,status=? WHERE id=?',
-                    (issue.message,'unavailable' if status=='unavailable' else 'pending_download',job.item))
+                    (issue.message,'unavailable' if status=='unavailable' or changed else 'pending_download',job.item))
                 store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),owner))
+                store.subscriptions.history.saved(owner,False)
                 store.read_versions.media_changed(owner)
         if content is not None:
             store.publications.recover(owner)

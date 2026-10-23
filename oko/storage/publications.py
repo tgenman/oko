@@ -157,10 +157,9 @@ class Publications:
         resources = {r.name: r for r in material.source_manifest.resources} if material.source_manifest else {}
         references = {r.key: r for r in material.adapter_content.media} if material.adapter_content else {}
         media: list[dict[str, Any]] = []
-        names = {p.name for p in directory.iterdir() if p.name.startswith(('media-', 'image-'))}
-        names.update(resources)
+        names = list(dict.fromkeys([*resources, *[p.name for p in sorted(directory.iterdir()) if p.name.startswith(('media-', 'image-'))]]))
         attachments = {a.name: a for a in material.attachments}
-        for name in sorted(names):
+        for name in names:
             resource = resources.get(name)
             if resource and resource.external:
                 blocks.append(dict(type='external_media', kind=resource.external.kind, url=resource.external.source_url))
@@ -171,7 +170,7 @@ class Publications:
             ref = references.get(key)
             same = bool(old and path.is_file() and old['storage_key'] and (self.store.root/old['storage_key']).is_file()
                         and self.store.versions.file_digest(path) == self.store.versions.file_digest(self.store.root/old['storage_key']))
-            if ref and ref.resource_identity and old and old['resource_identity'] == ref.resource_identity and old['name'] == name:
+            if ref and ref.resource_identity and old and old['resource_identity'] == ref.resource_identity and old['name'] == ref.name:
                 same = True
             identity = old['id'] if same and old else str(uuid4())
             storage_key = 'media/'+item+'/'+identity if path.is_file() else None
@@ -192,11 +191,11 @@ class Publications:
             attachment = attachments.get(name)
             kind = resource.kind if resource else attachment.kind if attachment else 'image'
             media.append(dict(id=identity, publication_id=item, resource_key=key,
-                source_locator=ref.locator if ref else resource.source_url or '' if resource else '', name=name,
+                source_locator=ref.locator if ref else old['source_locator'] if same and old else resource.source_url or '' if resource else '', name=ref.name if ref else old['name'] if old else name,
                 mime_type=resource.mime if resource else attachment.mime if attachment else None,
                 size_bytes=path.stat().st_size if path.is_file() else ref.size_bytes if ref else None, storage_key=storage_key,
                 status='ready' if storage_key else 'pending_download' if ref else 'unavailable',
-                reason=old['reason'] if same and old and not storage_key else resource.reason or '' if resource else '', resource_identity=ref.resource_identity if ref else None))
+                reason=old['reason'] if same and old and not storage_key else resource.reason or '' if resource else '', resource_identity=ref.resource_identity if ref else old['resource_identity'] if same and old else None))
             blocks.append(dict(type='media', role='attachment' if kind=='file' else kind, media_id=identity))
         extra = deepcopy(material.adapter_content.content.get('extra', {})) if material.adapter_content else {}
         # Temporary header for the old HTTP/processor projection, removed when
@@ -239,14 +238,19 @@ class Publications:
             header = content['extra']['_reader']
             text = '\n\n'.join(b['text'] for b in content['blocks'] if b['type']=='text' and b['role']=='body')
             store.versions._write(directory/'original.md', (json.dumps(header, ensure_ascii=False)+'\n\n'+text).encode())
+            wanted = set()
             for media in store.db.execute("SELECT * FROM media_files WHERE publication_id=? AND status='ready'", (row['id'],)):
                 saved = store.root/media['storage_key']
                 if saved.is_file():
-                    target = directory/media['name']
+                    target = directory/store.media.projection_name(media)
+                    wanted.add(target.name)
                     if target.exists() and os.path.samefile(saved,target):
                         continue
                     target.unlink(missing_ok=True)
                     os.link(saved,target)
+            for path in directory.iterdir():
+                if path.name.startswith(('media-','image-')) and path.name not in wanted:
+                    path.unlink()
             metadata = json.loads(row['processing_metadata'])
             for kind, result in metadata.get('_legacy', {}).items():
                 store.versions._write(directory/(kind+'.md'), result['file'].encode())

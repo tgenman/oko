@@ -90,7 +90,7 @@ def saved_telegraph(header: dict[str, Any], base: str) -> dict[str, Any] | None:
             marker = {'image': '[Изображение статьи]', 'video': '[Видео статьи]', 'audio': '[Аудио статьи]'}.get(resource.kind)
             replacement = ''
             if resource.status == 'loaded':
-                media_urls.append(base + '/media/' + resource.name)
+                media_urls.append(header.get('_media_urls',{}).get(resource.name,base + '/media/' + resource.name))
             elif resource.source_url:
                 url = resource.source_url.replace('<', '%3C').replace('>', '%3E')
                 replacement = '\n\n' + error_block(url, resource.reason or 'Не удалось загрузить вложение') + '\n\n'

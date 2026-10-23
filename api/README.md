@@ -18,6 +18,11 @@ Bundle содержит те же локальные references, без внеш
 
 Проверки проходят через команду bundle и существующий HTTP interface: `tests/api/test_contract.py`. Они используют временные хранилища и синтетические adapters.
 
+Для публикаций нового пайплайна `name` в `GET /api/v3/materials/{item}/media/{name}`
+содержит неизменяемый MediaFile.id. Замена ресурса меняет ID и URL; прежний адрес
+не выдаёт байты нового файла. На прежнем пути хранения остаются имена файлов.
+Неготовое или удалённое медиа отвечает `404 media_unavailable`.
+
 ## Изменения контракта
 
 `validate`, `bundle`, `npm run api:generate` и `npm run api:check` требуют непустые
