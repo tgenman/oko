@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, JsonValue, Field
 
 if TYPE_CHECKING:
-    from oko.collection.adapters import PublicationContent, ExternalReference
+    from oko.collection.adapters import PublicationContent, ExternalReference, AdapterIssue
 
 
 @dataclass(frozen=True)
@@ -216,6 +216,7 @@ class SourceError(Exception):
         self.remote_type = self.remote_message = self.remote_location = ''
         self.request_failures: list[dict[str, Any]] = []
         self.request_failure_count = 0
+        self.adapter_issue: 'AdapterIssue | None' = None
 
     @classmethod
     def from_worker(cls, label: str, details: dict[str, Any], delay: float = 60) -> 'SourceError':

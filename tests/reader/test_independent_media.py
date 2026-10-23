@@ -177,3 +177,56 @@ def test_permanent_file_failure_waits_for_manual_retry(tmp_path):
         ready = wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
         assert client.get(ready['content']['attachments'][0]['url']).content==b'manually-retried'
         assert len(calls)==2
+
+
+def test_publication_fetch_uses_configured_retry_delay_and_keeps_saved_text(tmp_path):
+    import time
+    from datetime import datetime
+    root = migrated_root(tmp_path)
+    fail = [False]
+    def response(request):
+        return httpx.Response(503) if fail[0] else httpx.Response(200,text=page([(11,'Saved text')]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':600,'retry_max_seconds':2400})
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+        fail[0]=True
+        client.post('/api/v3/materials/'+item+'/retry')
+        def waiting():
+            state = client.get('/api/v3/status').json()
+            return state if any(w['phase']=='waiting' and w.get('retry_at') for w in state['work']) else None
+        state=wait_for(client,waiting)
+        deadline=next(datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp() for w in state['work'] if w['phase']=='waiting' and w.get('retry_at'))
+        assert deadline-time.time() > 550
+        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+
+
+def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
+    from datetime import datetime
+    root=migrated_root(tmp_path)
+    limited=[False]
+    denied=[]
+    def response(request):
+        if limited[0]:
+            denied.append(str(request.url))
+            return httpx.Response(429,headers={'Retry-After':'120'})
+        return httpx.Response(200,text=page([(11,'Saved text')]))
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':2})
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+        limited[0]=True
+        client.post('/api/v3/materials/'+item+'/retry')
+        def deadline():
+            state=client.get('/api/v3/status').json()
+            dates=[datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp() for w in state['work'] if w['phase']=='waiting' and w.get('retry_at')]
+            return max(dates) if dates else None
+        before=wait_for(client,deadline)
+        assert len(denied)==1
+        client.post('/api/v3/materials/'+item+'/retry')
+        assert deadline() is not None and deadline()>=before-.1
+        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+        assert len(denied)==1

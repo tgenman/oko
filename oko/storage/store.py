@@ -1,4 +1,5 @@
 from oko.collection.external_media import saved_external, expected_incomplete, telegraph_partial
+from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 from oko.collection.telegram.reading import saved_telegraph
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read
@@ -397,7 +398,11 @@ class Store:
         with self.db:
             self.youtube.reset(item)
             self.media.retry(item)
-            self.db.execute("UPDATE jobs SET status='pending',manual_once=0,next=CASE WHEN problem_code LIKE '%FloodWaitError' THEN next ELSE 0 END,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (item,))
+            self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('fetch',?)", (item,))
+            self.db.execute("""UPDATE jobs SET status='pending',manual_once=0,next=CASE
+                WHEN problem_code LIKE '%FloodWaitError' OR (wait_scope IS NOT NULL AND retry_at>?) THEN next ELSE 0 END,
+                error=CASE WHEN wait_scope IS NOT NULL AND retry_at>? THEN error ELSE NULL END,
+                generation=generation+1 WHERE kind='fetch' AND item=?""", (self.wall_clock(),self.wall_clock(),item))
         return True
 
     @reading_value
@@ -673,7 +678,11 @@ class Store:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
 
-    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False) -> None:
+    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
+        if job.kind=='fetch' and self.publications.owns(job.item):
+            self.media.failed(job, issue or AdapterIssue(code or 'fetch-failed', error,
+                AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
+            return
         with self.db:
             if job.kind == 'fetch':
                 self._record_fetch_failure(job, error, code or job.kind, 0 if code == 'ai-permission' else now+delay,

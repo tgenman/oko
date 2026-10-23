@@ -1239,7 +1239,9 @@ class Runtime:
                     else:
                         code = job.kind + ':' + type(error).__name__
                     label = self.diagnostics.clean(label) if self.diagnostics else label
-                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,terminal=isinstance(error, SourceError) and not error.retryable)
+                    current.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
+                        terminal=isinstance(error, SourceError) and not error.retryable or job.kind=='fetch' and current.publications.owns(job.item) and isinstance(error,(ValueError,sqlite3.IntegrityError)),
+                        issue=error.adapter_issue if isinstance(error,SourceError) else None)
                     if job.kind == 'read':
                         current.read_sync.failed(feed, label)
                     elif isinstance(error, SourceError):
