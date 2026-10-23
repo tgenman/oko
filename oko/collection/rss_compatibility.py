@@ -7,7 +7,7 @@ from oko.collection.contracts import (DiscoveryResult, FetchResources, FetchResu
     Publication, SourceError, SourceObservation)
 from oko.collection.rss import RSSSource
 from oko.collection.rss_adapter import RSSAdapter
-from oko.collection.telegram.compatibility import source_error
+from oko.collection.adapter_errors import source_error
 
 
 def material(value: PublicationContent) -> Material:
@@ -34,16 +34,24 @@ class RSSAdapterSource(RSSSource):
     async def discover(self, cursor: str | None) -> DiscoveryResult:
         api=self.publication_adapter()
         state: dict[str,Any]=json.loads(cursor) if cursor else {}
+        selection=self.initial_history or {}
+        run=selection.get('run','initial')
         try:
-            if 'rss_adapter' not in state:
+            if selection.get('cancelled') and not state.get('initial_complete',False):
+                state.update(rss_adapter='',run=run,initial_complete=True,locating=False,scan_complete=True,history_enroll=[])
+                return DiscoveryResult((),json.dumps(state),SourceObservation(description=self.description))
+            if selection.get('paused') and not state.get('initial_complete',False):
+                return DiscoveryResult((),cursor or json.dumps(state),SourceObservation(description=self.description))
+            if 'rss_adapter' not in state or state.get('run')!=run:
                 metadata=await api.resolve_feed(self.url)
                 self.description=metadata.description
-                state=dict(rss_adapter=metadata.latest_cursor,locating=True,description=self.description)
+                state=dict(rss_adapter=metadata.latest_cursor,locating=True,description=self.description,
+                           run=run,count=selection.get('count') or 1)
                 return DiscoveryResult((),json.dumps(state),SourceObservation(description=self.description),continuation=.1)
             self.description=state.get('description','')
             metadata_ref=ExternalReference(ExternalKey(Platform.rss,self.url),self.url)
             if state.get('locating'):
-                count=(self.initial_history.get('count') or 1) if self.initial_history else 1
+                count=state['count']
                 state['rss_adapter']=await api.cursor_before(metadata_ref,state['rss_adapter'],count-1)
                 state['locating']=False
             page=await api.discover(metadata_ref,state['rss_adapter'],50)

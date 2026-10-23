@@ -326,3 +326,76 @@ def test_restricted_telegram_retains_own_source_without_copying_article_into_it(
             own=json.loads(db.execute('SELECT content FROM items WHERE id=?',(card['id'],)).fetchone()[0])
             assert all('Separate article text' not in block.get('text','') for block in own['blocks'])
         assert 'Separate article text' in client.get('/api/v3/materials/'+card['id']).json()['content']['text']
+
+
+def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path):
+    import asyncio
+    import threading
+    import sqlite3
+    from tests.support.reader import wait_for
+    root=migrated_root(tmp_path)
+    started,release,returned=threading.Event(),threading.Event(),threading.Event()
+    async def response(request):
+        if request.url.host=='web.example':
+            started.set()
+            while not release.is_set():
+                try:
+                    await asyncio.sleep(.01)
+                except asyncio.CancelledError:
+                    pass
+            returned.set()
+            return httpx.Response(200,text='<article>Late article must not survive</article>')
+        return httpx.Response(200,text='<rss><channel><item><guid>entry</guid><link>https://web.example/article</link><description>Own excerpt</description></item></channel></rss>')
+    with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
+                              rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        try:
+            import_feed(client)
+            presence(client,'rss')
+            card=wait_cards(client)[0]
+            assert started.wait(3)
+            client.post('/api/v3/materials/'+card['id']+'/viewed')
+            release.set()
+            assert returned.wait(3)
+            wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+            assert client.get('/api/v3/cards').json()==[]
+            with sqlite3.connect(root/'state.sqlite') as db:
+                assert not db.execute('SELECT 1 FROM publication_links').fetchone()
+                assert not db.execute("SELECT 1 FROM items WHERE content LIKE '%Late article must not survive%'").fetchone()
+                assert not db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND status IN ('pending','running')").fetchone()
+        finally:
+            release.set()
+
+
+def test_article_host_wait_blocks_new_jobs_across_restart_but_not_other_hosts(tmp_path):
+    from tests.support.reader import wait_for
+    from tests.support.subscriptions import add_source
+    root=migrated_root(tmp_path)
+    calls=[]
+    def response(request):
+        if request.url.host=='feeds.example':
+            name=request.url.path.strip('/')
+            host='other.example' if name=='other' else 'blocked.example'
+            return httpx.Response(200,text=f'<rss><channel><item><guid>{name}</guid><link>https://{host}/{name}</link><description>Own excerpt {name}</description></item></channel></rss>')
+        calls.append(str(request.url))
+        if request.url.host=='blocked.example':
+            return httpx.Response(429,headers={'retry-after':'3600'})
+        return httpx.Response(200,text='<article>Other host works</article>')
+    options=dict(token='test-token',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        add_source(client,'https://feeds.example/first','First','News')
+        presence(client,'rss')
+        first=wait_cards(client)[0]
+        wait_for(client,lambda:'недоступна' in client.get('/api/v3/materials/'+first['id']).json()['content']['completeness'].get('message',''))
+        add_source(client,'https://feeds.example/second','Second','News')
+        add_source(client,'https://feeds.example/other','Other','News')
+        cards=wait_cards(client,3)
+        other=next(card for card in cards if card['feed_title']=='Other')
+        wait_for(client,lambda:'Other host works' in client.get('/api/v3/materials/'+other['id']).json()['content']['text'])
+        assert calls==['https://blocked.example/first','https://other.example/other']
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        add_source(client,'https://feeds.example/third','Third','News')
+        presence(client,'rss')
+        wait_cards(client,4)
+        third=next(card for card in client.get('/api/v3/cards').json() if card['feed_title']=='Third')
+        wait_for(client,lambda:'недоступна' in client.get('/api/v3/materials/'+third['id']).json()['content']['completeness'].get('message',''))
+        assert calls==['https://blocked.example/first','https://other.example/other']

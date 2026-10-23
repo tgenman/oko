@@ -19,3 +19,13 @@ def failure(error: SourceError, publication: ExternalReference | None = None,
         wait_scope=getattr(error,'scope',scope)
         retry_at=datetime.now(timezone.utc)+timedelta(seconds=error.delay)
     return AdapterException(AdapterIssue(error.code or 'source_unavailable',error.label,kind,publication,media_key,wait_scope,retry_at))
+
+
+def source_error(error: AdapterException) -> SourceError:
+    if isinstance(error.__cause__, SourceError):
+        error.__cause__.adapter_issue = error.issue
+        return error.__cause__
+    result = SourceError(error.issue.message, code=error.issue.code,
+                       retryable=error.issue.kind.value in ('temporary', 'source_wait'))
+    result.adapter_issue = error.issue
+    return result

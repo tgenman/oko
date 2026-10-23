@@ -367,6 +367,15 @@ class Store:
                 self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
             self.finish(job)
 
+    def source_http_until(self, scope: str) -> float:
+        row=self.db.execute('SELECT value FROM state WHERE key=?',('source-http:'+scope,)).fetchone()
+        return float(row[0]) if row else 0.
+
+    def source_http_wait(self, scope: str, until: float) -> None:
+        with self.db:
+            self.db.execute('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                            ('source-http:'+scope,str(until)))
+
     def telegram_http_state(self, group: str) -> dict[str, Any]:
         row = self.db.execute('SELECT value FROM state WHERE key=?', ('telegram-http:'+group,)).fetchone()
         return json.loads(row[0]) if row else {}
@@ -411,8 +420,9 @@ class Store:
     def retry_material(self, item: str) -> bool:
         if not self._has_unviewed(item):
             return False
-        with self.db:
-            publication_links.retry(self,item)
+        if self.publications.active:
+            with self.db:
+                publication_links.retry(self,item)
         with self.db:
             self.youtube.reset(item)
             self.media.retry(item)
@@ -725,7 +735,8 @@ class Store:
         with self.db:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
-            self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL AND (platform='rss' OR feed_id IS NULL)",(job.item,))
+            if self.publications.active:
+                self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL AND (platform='rss' OR feed_id IS NULL)",(job.item,))
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind in ('fetch','filter','theses') and self.publications.owns(job.item):
@@ -763,7 +774,7 @@ class Store:
     @reading_value
     def original(self, item: str) -> tuple[dict[str, Any], str]:
         header,text=saved_document(self.path(item))
-        if self.publications.owns(item):
+        if self.publications.active:
             header=publication_links.project_header(self,item,header)
             article_text=publication_links.text(self,item)
             if article_text:

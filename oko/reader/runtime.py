@@ -30,6 +30,7 @@ from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex_status
 from oko.reviews.coordination import PreparedWork
 from oko.reader.telegram_http import TelegramHTTP
+from oko.reader.source_http import SourceHTTP
 from oko.reader.composition import FolderContents
 from oko.storage.media import MediaOutput
 from oko.storage.store import Job, Store
@@ -151,8 +152,11 @@ class Runtime:
             self._save_telegram_http_wait,
             lambda: self._live() and not self._cancelling, lambda: self._epoch,
             lambda: float(self.require_store().subscriptions.telegram_http_settings()['value']))
+        self._source_http=SourceHTTP(rss_transport,wall_clock,
+            lambda scope:self.require_store().source_http_until(scope),self._save_source_http_wait,
+            lambda:self._live() and not self._cancelling,lambda:self._epoch)
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport, telegram_client,
-                                   self._youtube_captions, self._youtube_history, self._telegram_http)
+                                   self._youtube_captions, self._youtube_history, self._telegram_http,self._source_http)
         self._sources = self._collection.sources
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
@@ -184,6 +188,16 @@ class Runtime:
         self._reader_advanced = float('-inf')
         if isinstance(telegram_client, LocalTelegram):
             telegram_client.allowed = lambda: self._live() and not self._cancelling
+
+    async def _save_source_http_wait(self, scope: str, server_delay: float | None, generation: int) -> float:
+        async with self._actions:
+            if not self._live() or self._cancelling or generation!=self._epoch:
+                raise asyncio.CancelledError
+            current=self.require_store()
+            delay=max(current.subscriptions.retry_settings()['initial_seconds'],server_delay or 0)
+            until=max(current.source_http_until(scope),self._wall_clock()+delay)
+            current.source_http_wait(scope,until)
+            return until
 
     async def _save_telegram_http_wait(self, group: str, server_delay: float | None, generation: int) -> float:
         async with self._actions:
@@ -1405,6 +1419,7 @@ class Runtime:
                     self._store.db.close()
                     self._store = None
                 self._closed = True
+            await self._source_http.close()
             await self._telegram_http.close()
             self._shutdown()
             active_journal.reset(journal_context)

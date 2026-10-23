@@ -10,6 +10,7 @@ import json
 from typing import Any, Literal, cast
 
 from oko.collection.adapters import AdapterException, AdapterErrorKind, PublicationContent
+from oko.collection.adapter_errors import source_error as source_error
 from oko.collection.contracts import (
     DownloadStage, StagedPayload, SourceError, SourceManifest, Material,
     Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview, Attachment,
@@ -19,16 +20,6 @@ from oko.collection.telegram.contracts import HistoryEnvelope, HistorySelection,
 from oko.collection.telegram.media import Downloader
 from oko.collection.telegram.source import TelegramSource
 from oko.collection.telegram.telegraph import enrich
-
-
-def source_error(error: AdapterException) -> SourceError:
-    if isinstance(error.__cause__, SourceError):
-        error.__cause__.adapter_issue = error.issue
-        return error.__cause__
-    result = SourceError(error.issue.message, code=error.issue.code,
-                       retryable=error.issue.kind.value in ('temporary', 'source_wait'))
-    result.adapter_issue = error.issue
-    return result
 
 
 def material(value: PublicationContent, previous: Material | None = None) -> Material:

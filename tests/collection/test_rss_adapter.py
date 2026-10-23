@@ -166,3 +166,23 @@ def test_latest_rss_metadata_does_not_fetch_history_until_the_offset_needs_it():
         asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,10))
     assert caught.value.issue.kind==AdapterErrorKind.temporary
     assert calls[-1]=='/archive'
+
+
+def test_new_rss_history_run_freezes_its_count_and_resolves_an_archive_offset():
+    from oko.collection.rss_compatibility import RSSAdapterSource
+    def respond(request):
+        text=('<item><guid>one</guid><description>One</description></item>' if request.url.path=='/archive' else
+              '<item><guid>two</guid><description>Two</description></item><atom:link rel="next" href="/archive"/>')
+        return httpx.Response(200,text='<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel>'+text+'</channel></rss>')
+    source=RSSAdapterSource('https://rss.example/feed',1,httpx.MockTransport(respond))
+    source.initial_history={'mode':'count','count':1,'run':'first'}
+    boundary=asyncio.run(source.discover(None))
+    first=asyncio.run(source.discover(boundary.cursor))
+    assert [p.teaser.text for p in first.publications]==['Two']
+    source.initial_history={'mode':'count','count':2,'run':'second'}
+    boundary=asyncio.run(source.discover(first.cursor))
+    assert boundary.publications==() and boundary.continuation is not None
+    # The already admitted pass keeps its selection even if live settings move.
+    source.initial_history={'mode':'count','count':1,'run':'second'}
+    second=asyncio.run(source.discover(boundary.cursor))
+    assert [p.teaser.text for p in second.publications]==['One','Two']
