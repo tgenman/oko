@@ -52,9 +52,10 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         value = body.root
         history = selection(value.initial_history) if isinstance(value.initial_history, wire.HistorySelection) else InitialHistory()
         role = value.access.profile.root if isinstance(value, wire.TelegramClientConnectRequest) else None
-        auto_read = value.auto_read if isinstance(value, wire.TelegramClientConnectRequest) else False
+        auto_read = value.auto_read if isinstance(value, wire.TelegramClientConnectRequest) and 'auto_read' in value.model_fields_set else None
+        feed_id=value.feed_id.root if isinstance(value.feed_id,wire.FeedId) else None
         async with operation(request, dict(operation='telegram_connect')):
-            result = await runtime.connect_telegram_binding(value.source_locator, value.folder, history, role, auto_read)
+            result = await runtime.connect_telegram_binding(value.source_locator, value.folder, history, role, auto_read,feed_id)
             binding = runtime.require_store().subscriptions.telegram.binding(result['id'])
             return wire.TelegramConnectResult(feed_id=wire.FeedId(result['id']), access=wire.TelegramConfirmedAccess.model_validate(binding))
 

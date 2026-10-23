@@ -24,8 +24,8 @@ def test_readding_telegram_opens_existing_without_changing_history_or_settings(t
         assert response.status_code == 409, response.text
         assert client.get('/api/v3/subscriptions').json() == before
         configured = connect_request(client, json={**body, 'feed_id': first['id'], 'auto_read': True})
-        assert configured.status_code == 422
-        assert configured.json()['code'] == 'request_invalid'
+        assert configured.status_code == 409
+        assert configured.json()['code'] == 'access_immutable'
         assert client.get('/api/v3/subscriptions').json() == before
 
 

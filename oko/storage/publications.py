@@ -89,7 +89,7 @@ class Publications:
         return self.store.db.execute('SELECT 1 FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone() is not None
 
     def feed(self, feed: str) -> bool:
-        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','rss_adapter','youtube_adapter')", (feed,)).fetchone() is not None
+        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','telegram_client_adapter','rss_adapter','youtube_adapter')", (feed,)).fetchone() is not None
 
     def sync_feeds(self, feeds: list[str]) -> None:
         if self.store.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
@@ -97,13 +97,13 @@ class Publications:
                 for feed in feeds:
                     self.configure_feed(feed)
 
-    def configure_feed(self, feed: str) -> None:
+    def configure_feed(self, feed: str, *, migrate_legacy: bool = False) -> None:
         store = self.store
         row = store.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
         binding = store.subscriptions.telegram.binding(feed)
         if row and row['transport'] in ('rss','youtube'):
             # Existing legacy RSS rows are converted by the final offline migration.
-            if store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():
+            if not migrate_legacy and store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():
                 return
             from oko.collection.rss import normalized
             url=normalized(json.loads(row['original_urls'])[0])
@@ -118,6 +118,20 @@ class Publications:
             store.db.execute('''UPDATE feeds SET platform=?,external_id=?,url=?,description=?,created_at=?,
                 adapter=?,config='{}',interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
                 (platform,external_id,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),adapter,
+                 store.subscriptions.feed_refresh_minutes()*60,
+                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
+                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))
+            return
+        if row and binding and binding['kind']=='client' and json.loads(row['config']).get('source_kind')=='channel':
+            if not migrate_legacy and store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():
+                return
+            config={**json.loads(row['config']),**binding}
+            url='https://t.me/'+row['telegram_username'] if row['telegram_username'] else 'https://t.me/c/'+str(-row['telegram_peer']-1000000000000)
+            details=store.subscriptions.details.snapshot(feed)
+            effective=store.subscriptions.effective('feed',feed)['effective']
+            store.db.execute('''UPDATE feeds SET platform='telegram',external_id=?,url=?,description=?,created_at=?,
+                adapter='telegram_client_adapter',config=?,interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
+                (str(row['telegram_peer']),url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),json.dumps(config),
                  store.subscriptions.feed_refresh_minutes()*60,
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))
@@ -137,10 +151,31 @@ class Publications:
 
     def identify(self, item: str, ref: ExternalReference) -> None:
         row = self.store.db.execute('SELECT * FROM items WHERE id=?', (item,)).fetchone()
-        self.store.db.execute('''UPDATE items SET platform=?,external_id=?,published_at=?,discovered_at=COALESCE(discovered_at,?) WHERE id=?''',
-            (ref.key.platform.value, ref.key.external_id, row['published'] if row['published_known'] else None,
+        self.store.db.execute('''UPDATE items SET platform=?,external_id=?,url=?,published_at=?,discovered_at=COALESCE(discovered_at,?) WHERE id=?''',
+            (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))
         self.store.db.execute('INSERT OR IGNORE INTO feed_publications VALUES (?,?)', (row['feed_id'], item))
+
+    def changed_adapter(self, feed: str) -> None:
+        """Invalidate old opaque descriptions atomically with a binding change."""
+        db=self.store.db
+        db.execute("UPDATE feeds SET cursor='' WHERE id=?",(feed,))
+        for namespace in ('telegram','telegram-web'):
+            db.execute('DELETE FROM state WHERE key=?',(self.store.cursor_key(feed,namespace),))
+        db.execute('''UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL,
+            retry_at=NULL,retry_delay=0,wait_scope=NULL,next=0
+            WHERE kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.feed_id=?)''',(feed,))
+        db.execute('''UPDATE media_files SET status='unavailable',reason='Обновляется описание вложения после смены доступа'
+            WHERE status!='ready' AND publication_id IN (SELECT id FROM items WHERE feed_id=? AND viewed=0)''',(feed,))
+        db.execute('DELETE FROM source_deleted WHERE item IN (SELECT id FROM items WHERE feed_id=?)',(feed,))
+        db.execute('''INSERT INTO jobs(kind,item) SELECT 'fetch',id FROM items WHERE feed_id=? AND viewed=0
+            ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0,
+            retry_at=NULL,retry_delay=0,wait_scope=NULL,error=NULL,problem_code=NULL''',(feed,))
+        db.execute("UPDATE items SET status='pending_collection' WHERE feed_id=? AND viewed=0",(feed,))
+        db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='read' AND item=?",(feed,))
+        db.execute('DELETE FROM telegram_read_state WHERE feed=?',(feed,))
+        db.execute('DELETE FROM telegram_read_topics WHERE feed=?',(feed,))
+        self.store.enqueue_discovery(feed)
 
     def plan(self, feed: str, publications: list[Publication]) -> dict[str, DiscoveryProjection]:
         """Prepare cache output before the short page acceptance transaction."""
@@ -164,9 +199,14 @@ class Publications:
                 continue
             item=existing[0]['id'] if existing else str(uuid4())
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
-            current=self.store.db.execute('SELECT viewed FROM items WHERE id=?',(item,)).fetchone() if existing else None
-            refresh=bool(ref.key.platform.value in ('rss','youtube') and current and not current['viewed']
-                and publication.teaser and publication.teaser.adapter_content and not publication.teaser.adapter_content.needs_fetch)
+            current=self.store.db.execute('SELECT viewed,members FROM items WHERE id=?',(item,)).fetchone() if existing else None
+            described=publication.teaser.adapter_content if publication.teaser else None
+            album_changed=bool(current and described and ref.key.platform.value=='telegram'
+                and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
+                and set(publication.members)!=set(json.loads(current['members']))
+                and set(json.loads(current['members'])).issubset(publication.members))
+            refresh=bool(current and not current['viewed'] and described and
+                (ref.key.platform.value in ('rss','youtube') and not described.needs_fetch or album_changed))
             if publication.teaser and (not existing or refresh):
                 plan.version=self.store.versions.prepare(item,publication.teaser)
                 plan.content=self.prepare(item,publication.teaser,self.store.versions.path(item,plan.version[0]).parent)

@@ -1,7 +1,7 @@
 import {serviceText} from '../service-text';
 import {useState} from 'react';
 import * as sdk from '../api/generated/sdk.gen';
-import type {TelegramAccess,TelegramProfiles as Profiles,TelegramRole,ExistingTelegramFeed} from '../api/generated/types.gen';
+import type {TelegramAccess,TelegramProfiles as Profiles,TelegramRole,ExistingTelegramFeed,SubscriptionFeed} from '../api/generated/types.gen';
 import {ReaderError} from '../api/errors';
 import {MenusOwner,message} from './owner';
 import {useOwner,Page} from './editor';
@@ -55,7 +55,7 @@ export function Telegram({owner}:{owner:MenusOwner}){
  useOwner(owner);const[state]=useState(()=>new TelegramOwner(owner));const edit=(effect:()=>void)=>{effect();state.status='';state.change();};const disabled=owner.stopped||state.busy;
  const available=state.access==='web'||state.profiles?.[state.access].state==='ready';
  return <div role="tabpanel" aria-labelledby="add-telegram-tab" id="telegram-connection" hidden={owner.tab!=='telegram'}>
- <p>The entire group is collected. The access method is fixed for the feed. Web access does not mark Telegram messages as read.</p>
+ <p>The entire group is collected. Channel access can be changed explicitly in feed settings. Web access does not mark Telegram messages as read.</p>
  <label>Access Method<select id="telegram-access" disabled={disabled} value={state.access} onChange={e=>edit(()=>{const value=e.target.value;state.access=value==='personal'||value==='collection'?value:'web';state.auto=false;})}><option value="web">Web Access</option><option value="personal">Personal Account</option><option value="collection">Collection Account</option></select></label>
  {state.access!=='web'&&<p>{available?'Profile verified':'First configure and verify this profile in Oko Settings → Telegram.'}</p>}
  <form onSubmit={e=>{e.preventDefault();void state.connect();}}>
@@ -65,8 +65,27 @@ export function Telegram({owner}:{owner:MenusOwner}){
  <label hidden={state.access==='web'}><input id="telegram-auto" type="checkbox" disabled={disabled||state.access==='web'} checked={state.auto} onChange={e=>edit(()=>{state.auto=e.target.checked;})}/>Mark as read after fully saving</label>
  <button id="telegram-add" disabled={disabled||!available||!state.peer.trim()||!(state.folder||state.newFolder).trim()}>{state.busy?'Connecting…':'Connect Source'}</button>
  <p id="telegram-message" role="status">{state.status}</p></form>
- {state.duplicates.length>0&&<dialog id="telegram-duplicate" aria-label="Source already added" ref={node=>{if(node&&!node.open)node.showModal();}} onCancel={()=>{state.duplicates=[];state.change();}}><h2>Source already added</h2>{state.duplicates.map(feed=><p key={feed.feed_id}>{feed.title}: {accessLabel(feed.access)}</p>)}<p>To choose another access method, delete the existing feed and add the source again. Deletion clears local items and settings.</p><button id="telegram-duplicate-close" onClick={()=>{state.duplicates=[];state.change();}}>Close</button></dialog>}
+ {state.duplicates.length>0&&<dialog id="telegram-duplicate" aria-label="Source already added" ref={node=>{if(node&&!node.open)node.showModal();}} onCancel={()=>{state.duplicates=[];state.change();}}><h2>Source already added</h2>{state.duplicates.map(feed=><p key={feed.feed_id}>{feed.title}: {accessLabel(feed.access)}</p>)}<p>Open feed settings to change channel access while keeping saved publications and settings.</p><button id="telegram-duplicate-close" onClick={()=>{state.duplicates=[];state.change();}}>Close</button></dialog>}
  </div>;
+}
+export function TelegramAccessEditor({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed}){
+ const current=feed.kind==='telegram'&&feed.access.kind==='client'?feed.access.role:'web';
+ const original=feed.kind==='telegram'&&feed.access.kind==='web'?'@'+feed.access.username:feed.original_urls[0]||'';
+ const [access,setAccess]=useState<'web'|TelegramRole>(current),[source,setSource]=useState(original),[busy,setBusy]=useState(false),[status,setStatus]=useState('');
+ const change=async()=>{
+  if(busy||!owner.workAllowed||owner.stopped)return;
+  const context=owner.operations.capture();setBusy(true);setStatus('Checking source identity…');
+  try{
+   const body={feed_id:feed.id,source_locator:source.trim(),folder:owner.subscriptions.folders.find(f=>f.id===feed.folder_id)?.title||'Inbox'};
+   await owner.api.command({operation:'telegram_connect'},headers=>sdk.telegramConnect({headers,client:owner.api.client,body:access==='web'?{...body,access:{kind:'web'}}:{...body,access:{kind:'client',profile:access}}}));
+   owner.needsRefresh.add('feed/'+feed.id);await owner.refresh();
+   await context.commit(()=>owner.loadSettings());context.commit(()=>setStatus('Access changed. Saved publications and settings kept.'));
+  }catch(error){context.commit(()=>setStatus(message(error)));}finally{setBusy(false);}
+ };
+ return <fieldset disabled={busy||!owner.workAllowed||owner.stopped}><legend>Change Channel Access</legend><p>Oko verifies the same source before switching. Saved publications and settings are kept.</p>
+ <label>Access Method<select id="feed-telegram-access" value={access} onChange={e=>{setAccess(e.target.value==='personal'||e.target.value==='collection'?e.target.value:'web');setStatus('');}}><option value="web">Web Access</option><option value="personal">Personal Account</option><option value="collection">Collection Account</option></select></label>
+ <label>Source Address<input id="feed-telegram-source" value={source} onChange={e=>{setSource(e.target.value);setStatus('');}} required maxLength={4000}/></label>
+ <button id="feed-telegram-change" disabled={!source.trim()||access===current&&source===original} onClick={()=>void change()}>Change Access</button><p id="feed-telegram-status" role="status">{status}</p></fieldset>;
 }
 class ProfilesOwner {
  data:Profiles|null=null;choices:Partial<Record<TelegramRole,string>>={};busy=new Set<TelegramRole>();status='';

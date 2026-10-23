@@ -125,7 +125,7 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publicat
             return False
         eventually(paused)
         item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
-        assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + 900
+        assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == captions.calls[0][1] + 900
         client.post('/api/v3/materials/' + item['id'] + '/retry')
         client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
         add(client, 'https://rss.test/feed')

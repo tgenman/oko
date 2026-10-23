@@ -133,16 +133,19 @@ class SourceIdentity:
     usernames: tuple[str, ...]
     avatar_present: bool = False
     avatar: str | None = None
+    kind: str | None = None
 
     @classmethod
     def from_info(cls, info: dict[str, Any] | None) -> 'SourceIdentity | None':
         if info is None:
             return None
         return cls(info.get('peer'), info.get('username'), tuple(info.get('usernames', ())),
-                   'avatar' in info, info.get('avatar'))
+                   'avatar' in info, info.get('avatar'), info.get('kind'))
 
     def as_info(self) -> dict[str, Any]:
         value: dict[str, Any] = dict(peer=self.peer, username=self.username, usernames=list(self.usernames))
+        if self.kind is not None:
+            value['kind']=self.kind
         if self.avatar_present:
             value['avatar'] = self.avatar
         return value

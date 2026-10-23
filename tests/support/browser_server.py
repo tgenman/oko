@@ -29,9 +29,25 @@ class BrowserTelegram(Telegram):
         return {'one': 9007199254740993, 'two': 202}[account]
 
     async def info(self, account, peer):
+        if peer in ('@switchfixture',-1001234567899):
+            return dict(peer=-1001234567899,username='switchfixture',title='Switch channel',kind='channel',forum=False)
         result = await super().info(account, peer)
         result['peer'] = -100101 if str(peer).lstrip('@') == 'personal' else -100202
         return result
+
+    async def page(self,account,peer,after,since):
+        if peer==-1001234567899:
+            return dict(messages=[dict(id=11,date=datetime.now(timezone.utc).timestamp()-60,text='Client original',group=None,
+                media=dict(kind='image',mime='image/png',extension='png'))],more=False,gap=None)
+        return await super().page(account,peer,after,since)
+
+    async def messages(self,account,peer,ids):
+        if peer==-1001234567899:
+            return (await self.page(account,peer,0,0))['messages']
+        return await super().messages(account,peer,ids)
+
+    async def download(self,account,peer,id):
+        return PNG if peer==-1001234567899 else await super().download(account,peer,id)
 
     async def history_page(self, account, peer, upper, before, since):
         result = await self.page(account, peer, 0, since)
@@ -120,6 +136,8 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
                 raise SourceError('Synthetic caption error')
             return 'Raw YouTube captions.' if state=='ready' else None
     async def external(request):
+        if request.url.host=='t.me' and '/switchfixture' in request.url.path:
+            return httpx.Response(200,text=page([(11,'Web original')]).replace('fixture/','switchfixture/'))
         if youtube_state() and request.url.host=='www.youtube.com':
             return httpx.Response(200,text=feed_xml())
         if youtube_state() and request.url.host=='i.ytimg.com':
