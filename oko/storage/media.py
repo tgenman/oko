@@ -8,12 +8,12 @@ import json
 import os
 from pathlib import Path
 import secrets
-from uuid import UUID
+from uuid import UUID,uuid4
 from typing import Any, TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
 from oko.storage.reading import reading_value
-from oko.storage import collection_jobs, publication_links
+from oko.storage import collection_jobs, publication_links, youtube_media
 
 if TYPE_CHECKING:
     from typing_extensions import Buffer
@@ -104,6 +104,7 @@ class MediaFiles:
         db = self.store.db
         db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL WHERE kind='download_media'
             AND status IN ('pending','running','failed','unavailable') AND item NOT IN (SELECT id FROM media_files)""")
+        db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE kind='download_media' AND status IN ('pending','running') AND item IN (SELECT id FROM media_files WHERE publication_id=? AND status='unavailable')",(item,))
         for row in db.execute("SELECT id FROM media_files WHERE publication_id=? AND status='pending_download'", (item,)).fetchall():
             db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('download_media',?)", (row['id'],))
 
@@ -124,6 +125,24 @@ class MediaFiles:
             if not waiting:
                 store.db.execute("UPDATE media_files SET status='pending_download',reason='' WHERE id=?", (row['item'],))
 
+        row=store.db.execute("SELECT content FROM items WHERE id=? AND platform='youtube'",(item,)).fetchone()
+        if row:
+            content=json.loads(row['content'])
+            caption=youtube_media.subtitle_id(content)
+            if caption and content['extra']['youtube'].get('captions')!='not_requested':
+                resource=store.db.execute('SELECT status FROM media_files WHERE id=?',(caption,)).fetchone()
+                if resource and resource['status'] in ('ready','unavailable'):
+                    store.db.execute("""INSERT INTO jobs(kind,item,manual_once) VALUES ('download_media',?,1)
+                        ON CONFLICT(kind,item) DO UPDATE SET status='pending',manual_once=1,generation=generation+1,
+                        next=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>? THEN jobs.next ELSE 0 END,
+                        retry_at=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>? THEN jobs.retry_at ELSE NULL END""",
+                        (caption,store.wall_clock(),store.wall_clock()))
+                    if resource['status']=='unavailable':
+                        store.db.execute("UPDATE media_files SET status='pending_download',reason='' WHERE id=?",(caption,))
+                        content['extra']['youtube']['captions']='pending'
+                        store.db.execute('UPDATE items SET content=? WHERE id=?',(json.dumps(content,ensure_ascii=False),item))
+                        store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(item,))
+
     @reading_value
     def loading(self, item: str) -> bool:
         return self.store.db.execute("""SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item
@@ -133,12 +152,12 @@ class MediaFiles:
     def begin(self, job: 'Job') -> MediaDownload | None:
         store = self.store
         row = store.db.execute('''SELECT m.*,i.platform,i.external_id,i.url FROM media_files m JOIN items i ON i.id=m.publication_id
-            WHERE m.id=? AND i.viewed=0 AND m.status='pending_download' ''', (job.item,)).fetchone()
+            WHERE m.id=? AND i.viewed=0 AND (m.status='pending_download' OR m.status='ready' AND EXISTS (SELECT 1 FROM jobs WHERE id=? AND manual_once=1)) ''', (job.item,job.id)).fetchone()
         if not store.valid(job) or row is None:
             return None
         temporary = store.root/'staging'/'_media'/(str(job.id)+'-'+str(job.generation)+'-'+secrets.token_hex(8))
         temporary.parent.mkdir(parents=True, exist_ok=True)
-        final = store.root/'media'/row['publication_id']/row['id']
+        final = store.root/'media'/row['publication_id']/(str(uuid4()) if row['status']=='ready' else row['id'])
         self.active_paths.update((temporary, final))
         return MediaDownload(row['publication_id'], ExternalReference(ExternalKey(Platform(row['platform']), row['external_id']), row['url']),
             MediaReference(row['resource_key'], row['source_locator'], row['name'], row['mime_type'], row['size_bytes'], row['resource_identity']), temporary, final)
@@ -152,12 +171,21 @@ class MediaFiles:
         size = download.temporary.stat().st_size
         if actual.size_bytes is not None and actual.size_bytes != size:
             raise ValueError('Media adapter returned a different size')
+        previous=store.db.execute('SELECT * FROM media_files WHERE id=?',(job.item,)).fetchone()
+        same=bool(download.final.name!=job.item and previous and previous['storage_key']
+            and (store.root/previous['storage_key']).is_file()
+            and store.versions.file_digest(download.temporary)==store.versions.file_digest(store.root/previous['storage_key']))
+        identity=job.item if same else download.final.name
+        saved=store.root/previous['storage_key'] if same and previous else download.final
         with download.temporary.open('rb') as stream:
             os.fsync(stream.fileno())
-        download.final.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(download.temporary, download.final)
-        store.versions._fsync(download.final.parent)
-        store.versions._fsync(download.final.parent.parent)
+        if same:
+            download.temporary.unlink()
+        else:
+            saved.parent.mkdir(parents=True,exist_ok=True)
+            os.replace(download.temporary,saved)
+            store.versions._fsync(saved.parent)
+            store.versions._fsync(saved.parent.parent)
         store.fault('after_media_move')
         row = store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0', (download.publication_id,)).fetchone()
         if row is None:
@@ -166,22 +194,36 @@ class MediaFiles:
         media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (download.publication_id,))]
         for value in media:
             if value['id']==job.item:
-                value.update(status='ready',reason='',name=actual.name,storage_key=str(download.final.relative_to(store.root)),size_bytes=size,
+                value.update(id=identity,status='ready',reason='',name=actual.name,storage_key=str(saved.relative_to(store.root)),size_bytes=size,
                              source_locator=actual.locator,mime_type=actual.mime_type)
+        subtitles=youtube_media.subtitle_id(content)==job.item
+        if identity!=job.item:
+            for block in content['blocks']:
+                if block.get('media_id')==job.item:
+                    block['media_id']=identity
+        if subtitles:
+            content['extra']['youtube']['captions']='available'
+            content['extra']['youtube']['captions_digest']=store.versions.file_digest(saved)
+            content['extra']['_reader']['captions']='available'
         self.project_header(content, media)
         with store.db:
             if not store.valid(job) or self.owner(job.item) != download.publication_id:
                 return False
-            store.db.execute("""UPDATE media_files SET status='ready',reason='',storage_key=?,size_bytes=?,source_locator=?,mime_type=?,name=? WHERE id=?""",
-                (str(download.final.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,job.item))
-            store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),download.publication_id))
+            store.db.execute("""UPDATE media_files SET id=?,status='ready',reason='',storage_key=?,size_bytes=?,source_locator=?,mime_type=?,name=? WHERE id=?""",
+                (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,job.item))
+            store.db.execute('UPDATE items SET content=?,media_ids=? WHERE id=?', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             store.finish(job)
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
             store.read_versions.media_changed(download.publication_id)
+            if subtitles:
+                store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(download.publication_id,))
+                store.read_versions.linked_changed(download.publication_id)
             publication_links.notify_parents(store,download.publication_id)
             store.fault('before_media_commit')
         store.fault('after_media_commit')
         store.publications.recover(download.publication_id)
+        if subtitles:
+            store.processing.sync()
         return True
 
     def release(self, download: MediaDownload) -> None:
@@ -208,22 +250,68 @@ class MediaFiles:
                 if path.is_file() and path not in self.active_paths:
                     path.unlink()
 
+    def _subtitles_absent(self, job: 'Job', owner: str, issue: AdapterIssue) -> None:
+        store=self.store
+        row=store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0',(owner,)).fetchone()
+        if row is None:
+            return
+        content=json.loads(row['content'])
+        content['extra']['youtube']['captions']='unavailable'
+        content['extra']['youtube'].pop('captions_digest',None)
+        content['extra']['_reader']['captions']='unavailable'
+        media=[dict(row) for row in store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(owner,))]
+        previous=next(value for value in media if value['id']==job.item)
+        identity=str(uuid4()) if previous['storage_key'] else job.item
+        for value in media:
+            if value['id']==job.item:
+                value.update(id=identity,status='unavailable',reason=issue.message,storage_key=None,size_bytes=None)
+        if identity!=job.item:
+            for block in content['blocks']:
+                if block.get('media_id')==job.item:
+                    block['media_id']=identity
+        self.project_header(content,media)
+        with store.db:
+            if not store.valid(job):
+                return
+            store.db.execute("UPDATE media_files SET id=?,status='unavailable',reason=?,storage_key=NULL,size_bytes=NULL WHERE id=?",(identity,issue.message,job.item))
+            store.db.execute('UPDATE items SET content=?,media_ids=? WHERE id=?',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
+            store.finish(job)
+            store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(owner,))
+            store.read_versions.linked_changed(owner)
+            publication_links.notify_parents(store,owner)
+        store.publications.recover(owner)
+        store.processing.sync()
+
     def failed(self, job: 'Job', issue: AdapterIssue) -> None:
         store = self.store
         if not store.valid(job):
             return
         owner = self.owner(job.item) if job.kind=='download_media' else job.item
+        if owner and issue.kind==AdapterErrorKind.notice and issue.code=='youtube-upcoming':
+            store.viewed(owner)
+            return
+        if owner and issue.kind==AdapterErrorKind.notice and issue.code=='subtitles-unavailable':
+            self._subtitles_absent(job,owner,issue)
+            return
         changed = issue.kind==AdapterErrorKind.media_changed
         status = 'cancelled' if changed else collection_jobs.failure_status(issue)
         content = None
+        subtitles = False
+        keep_subtitles = False
         if owner and job.kind=='download_media':
             publication = store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0', (owner,)).fetchone()
             if publication:
                 content = json.loads(publication['content'])
+                subtitles=youtube_media.subtitle_id(content)==job.item
                 media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (owner,))]
+                old=next((value for value in media if value['id']==job.item),None)
+                keep_subtitles=bool(subtitles and old and old['status']=='ready' and old['storage_key'] and (store.root/old['storage_key']).is_file())
+                if subtitles and not keep_subtitles:
+                    content['extra']['youtube']['captions']='error'
+                    content['extra']['_reader']['captions']='error'
                 for value in media:
                     if value['id']==job.item:
-                        value.update(reason=issue.message,status='unavailable' if status=='unavailable' or changed else 'pending_download')
+                        value.update(reason=issue.message,status='ready' if keep_subtitles else 'unavailable' if status=='unavailable' or changed else 'pending_download')
                 self.project_header(content,media)
         with store.db:
             if not store.valid(job):
@@ -234,10 +322,15 @@ class MediaFiles:
             if content is not None:
                 assert owner is not None
                 store.db.execute('UPDATE media_files SET reason=?,status=? WHERE id=?',
-                    (issue.message,'unavailable' if status=='unavailable' or changed else 'pending_download',job.item))
+                    (issue.message,'ready' if keep_subtitles else 'unavailable' if status=='unavailable' or changed else 'pending_download',job.item))
                 store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),owner))
                 store.subscriptions.history.saved(owner,False)
                 store.read_versions.media_changed(owner)
+                if subtitles:
+                    store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(owner,))
+                    store.read_versions.linked_changed(owner)
                 publication_links.notify_parents(store,owner)
         if content is not None:
             store.publications.recover(owner)
+            if subtitles:
+                store.processing.sync()

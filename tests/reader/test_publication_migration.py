@@ -12,6 +12,51 @@ from tests.support.v3 import TestClient
 HEADERS = {'Authorization': 'Bearer test'}
 
 
+def test_youtube_offline_migration_preserves_captions_cover_rules_and_results(tmp_path):
+    import json
+    import sqlite3
+    from oko.storage.migration import migrate_publications
+    from tests.support.youtube import VIDEO,PNG,feed_xml,subscribe,History
+    from tests.support.reader import wait_for
+    from tests.support.models import model_transport
+    from tests.support.presence import presence
+    class Captions:
+        async def fetch(self,video):
+            assert video==VIDEO
+            return 'Original YouTube captions.'
+    def response(request):
+        return httpx.Response(200,text=feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+    calls=[]
+    options=dict(token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response),
+                 youtube_history=History([VIDEO]),youtube_captions=Captions(),ai_transport=model_transport(calls))
+    source,destination=tmp_path/'old',tmp_path/'migration'
+    with TestClient(create_app(source,**options),headers=HEADERS) as client:
+        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
+        feed=subscribe(client)
+        presence(client,'reader')
+        item=wait_for(client,lambda:next((c['id'] for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        before_result=client.get('/api/v3/materials/'+item).json()['theses']['result']
+        before_settings=client.get('/api/v3/settings/oko/feed/'+feed).json()
+    count=len(calls)
+    before=snapshot(source)
+    report=migrate_publications(source,destination)
+    assert report['success'] and snapshot(source)==before==snapshot(destination/'backup')
+    assert any(row['old_id']==item and row['results']==['theses'] for row in report['publications'])
+    with sqlite3.connect(destination/'storage'/'state.sqlite') as db:
+        assert db.execute('SELECT platform,external_id FROM items WHERE id=?',(item,)).fetchone()==('youtube',VIDEO)
+        assert db.execute('SELECT adapter FROM feeds WHERE id=?',(feed,)).fetchone()[0]=='youtube_adapter'
+        content=json.loads(db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()[0])
+        assert content['blocks'][0]['type']=='external_media'
+        assert len(db.execute("SELECT id FROM media_files WHERE publication_id=? AND status='ready'",(item,)).fetchall())==2
+        assert all(block['type']!='text' or block.get('role')!='body' for block in content['blocks'])
+    with TestClient(create_app(destination/'storage',**options),headers=HEADERS) as client:
+        actual=client.get('/api/v3/materials/'+item).json()
+        assert actual['content']['text']=='Original YouTube captions.'
+        assert actual['theses']['result']==before_result and len(calls)==count
+        assert client.get('/api/v3/settings/oko/feed/'+feed).json()==before_settings
+
+
 def snapshot(root: Path) -> dict[str, str]:
     return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in root.rglob('*') if p.is_file()}

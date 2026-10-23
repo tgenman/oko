@@ -3,7 +3,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey,
 from datetime import datetime, timezone
 from oko.collection.telegram.reading import saved_telegraph
 from oko.storage.collection_status import CollectionStatus
-from oko.storage import material_read, collection_jobs, publication_links
+from oko.storage import material_read, collection_jobs, publication_links, youtube_media
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
@@ -465,7 +465,7 @@ class Store:
             "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=? AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL)"
         if ai_only:
             query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items i WHERE i.id=jobs.item AND i.platform IS NOT NULL
@@ -480,6 +480,11 @@ class Store:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}) OR feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=items.id AND root.viewed=0 AND root.feed_id IN ({placeholders})))))"
+        if media_only:
+            subtitles="""SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id
+                JOIN json_each(i.content,'$.blocks') b ON json_extract(b.value,'$.media_id')=m.id
+                WHERE json_extract(b.value,'$.role')='subtitles'"""
+            query += ' AND item '+('IN' if captions_only else 'NOT IN')+' ('+subtitles+')'
         if not include_deletions:
             query += " AND kind NOT IN ('delete','feed-delete')"
         blocked_history = """SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed
@@ -775,6 +780,12 @@ class Store:
     def original(self, item: str) -> tuple[dict[str, Any], str]:
         header,text=saved_document(self.path(item))
         if self.publications.active:
+            own=self.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()
+            if own and 'youtube' in json.loads(own[0]).get('extra',{}):
+                projected=youtube_media.add_input(self,json.loads(own[0]))
+                text='\n\n'.join(block['text'] for block in projected['blocks'] if block['type']=='text' and block.get('role')=='body')
+                if projected['extra']['youtube'].get('captions')=='error' and header.get('captions')=='available':
+                    header={**header,'captions':'error','full':False,'reason':'Локальный файл субтитров недоступен; повторите загрузку'}
             header=publication_links.project_header(self,item,header)
             article_text=publication_links.text(self,item)
             if article_text:
@@ -939,6 +950,10 @@ class Store:
     def content_version(self, item: str) -> str:
         version=self.versions.version(item)
         if self.publications.active:
+            youtube=self.db.execute("SELECT json_extract(content,'$.extra.youtube') FROM items WHERE id=? AND platform='youtube'",(item,)).fetchone()
+            if youtube and youtube[0]:
+                data=json.loads(youtube[0])
+                version=hashlib.sha256(json.dumps([version,data.get('captions'),data.get('captions_digest')]).encode()).hexdigest()
             linked=self.db.execute('''SELECT i.id,i.complete,v.fingerprint FROM publication_links l JOIN items i ON i.id=l.target_publication_id
                 LEFT JOIN content_current c ON c.item=i.id LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
                 WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()

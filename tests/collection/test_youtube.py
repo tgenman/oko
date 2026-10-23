@@ -252,6 +252,8 @@ class YouTubeTranscriptApi:
 ''')
     monkeypatch.setenv('PYTHONPATH', str(package.parent) + os.pathsep + os.environ.get('PYTHONPATH', ''))
     with TestClient(create_app(tmp_path / 'data', token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=LocalCaptions()), headers=HEADERS) as client:
+        # Keep the worker admitted when subscribe closes its short setup session.
+        presence(client, 'reader')
         feed = subscribe(client)
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')

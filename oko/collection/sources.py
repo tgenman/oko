@@ -15,6 +15,7 @@ from oko.collection.telegram.source import TelegramClient, TelegramSource
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.compatibility import TelegramWebSource
 from oko.collection.youtube.source import YouTubeSource
+from oko.collection.youtube.compatibility import YouTubeAdapterSource
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 
@@ -74,8 +75,9 @@ class Sources:
             previous = self.sources.get(config.feed)
             source: RSSSource | TelegramSource
             if config.transport == 'youtube' and self._rss_enabled:
-                source = previous if isinstance(previous, YouTubeSource) else YouTubeSource(
-                    config.url, config.initial_days, self._captions, self._transport, self._history)
+                youtube_type=YouTubeAdapterSource if config.independent_media else YouTubeSource
+                source = previous if type(previous) is youtube_type else youtube_type(
+                    config.url, config.initial_days, self._captions, self._publication_transport if config.independent_media else self._transport, self._history)
                 captions.append((config.feed, config.want_captions))
             elif access and access.kind == 'web':
                 assert access.username is not None
@@ -122,11 +124,20 @@ class Sources:
         source = self.sources.get(feed)
         return source.adapter if isinstance(source, TelegramSource) else None
 
+    def has_captions(self) -> bool:
+        return any(isinstance(source,YouTubeAdapterSource) for source in self.sources.values())
+
     def article_source(self) -> WebArticleSource:
         return WebArticleSource(WebAdapter(self._publication_transport))
 
-    def publication_adapter(self, feed: str) -> PublicationAdapter | None:
+    def publication_adapter(self, feed: str, *, captions: CaptionsClient | None = None) -> PublicationAdapter | None:
         source = self.sources.get(feed)
+        if isinstance(source,YouTubeAdapterSource):
+            adapter=source.publication_adapter()
+            if captions is not None:
+                adapter=copy(adapter)
+                adapter.captions=captions
+            return adapter
         if isinstance(source,RSSAdapterSource):
             return source.publication_adapter()
         return source.publication_adapter() if isinstance(source, TelegramWebSource) and source.independent_media else None

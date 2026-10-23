@@ -89,7 +89,7 @@ class Publications:
         return self.store.db.execute('SELECT 1 FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone() is not None
 
     def feed(self, feed: str) -> bool:
-        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','rss_adapter')", (feed,)).fetchone() is not None
+        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','rss_adapter','youtube_adapter')", (feed,)).fetchone() is not None
 
     def sync_feeds(self, feeds: list[str]) -> None:
         if self.store.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
@@ -101,17 +101,23 @@ class Publications:
         store = self.store
         row = store.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
         binding = store.subscriptions.telegram.binding(feed)
-        if row and row['transport']=='rss':
+        if row and row['transport'] in ('rss','youtube'):
             # Existing legacy RSS rows are converted by the final offline migration.
             if store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():
                 return
             from oko.collection.rss import normalized
             url=normalized(json.loads(row['original_urls'])[0])
+            platform,external_id,adapter='rss',url,'rss_adapter'
+            if row['transport']=='youtube':
+                from oko.collection.youtube.adapter import feed_reference
+                ref=feed_reference(url)
+                platform,external_id,adapter='youtube',ref.key.external_id,'youtube_adapter'
+                url=ref.url
             details=store.subscriptions.details.snapshot(feed)
             effective=store.subscriptions.effective('feed',feed)['effective']
-            store.db.execute('''UPDATE feeds SET platform='rss',external_id=?,url=?,description=?,created_at=?,
-                adapter='rss_adapter',config='{}',interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
-                (url,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),
+            store.db.execute('''UPDATE feeds SET platform=?,external_id=?,url=?,description=?,created_at=?,
+                adapter=?,config='{}',interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
+                (platform,external_id,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),adapter,
                  store.subscriptions.feed_refresh_minutes()*60,
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))
@@ -159,7 +165,7 @@ class Publications:
             item=existing[0]['id'] if existing else str(uuid4())
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
             current=self.store.db.execute('SELECT viewed FROM items WHERE id=?',(item,)).fetchone() if existing else None
-            refresh=bool(ref.key.platform.value=='rss' and current and not current['viewed']
+            refresh=bool(ref.key.platform.value in ('rss','youtube') and current and not current['viewed']
                 and publication.teaser and publication.teaser.adapter_content and not publication.teaser.adapter_content.needs_fetch)
             if publication.teaser and (not existing or refresh):
                 plan.version=self.store.versions.prepare(item,publication.teaser)
@@ -244,8 +250,21 @@ class Publications:
         media=[]
         identities={}
         known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,))}
+        youtube=content.get('extra',{}).get('youtube')
+        old_content=self.store.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone() if youtube is not None else None
+        old_youtube=json.loads(old_content[0]).get('extra',{}).get('youtube',{}) if old_content else {}
         for ref in value.media:
             previous=known.get(ref.key)
+            subtitles=youtube is not None and any(block.get('ref')=={'$media':ref.key} and block.get('role')=='subtitles' for block in content['blocks'])
+            keep_caption=bool(subtitles and previous and previous['source_locator']==ref.locator and
+                (previous['status']=='ready' and previous['storage_key'] and (self.store.root/previous['storage_key']).is_file() or youtube.get('captions')!='not_requested' and old_youtube.get('captions') in ('unavailable','error')))
+            if keep_caption and previous:
+                identities[ref.key]=previous['id']
+                media.append(previous)
+                youtube['captions']=old_youtube.get('captions','available')
+                if 'captions_digest' in old_youtube:
+                    youtube['captions_digest']=old_youtube['captions_digest']
+                continue
             unchanged=bool(previous and (
                 ref.resource_identity is not None and ref.resource_identity==previous['resource_identity']
                 or previous['status']=='pending_download' and previous['source_locator']==ref.locator
@@ -260,6 +279,15 @@ class Publications:
                 size_bytes=previous['size_bytes'] if ready and previous else ref.size_bytes,
                 storage_key=previous['storage_key'] if ready and previous else None,
                 status='ready' if ready else 'pending_download',reason='',resource_identity=ref.resource_identity))
+        if youtube is not None:
+            header['captions']={'available':'available','unavailable':'unavailable','not_requested':'not_requested'}.get(youtube.get('captions'),'error')
+            if youtube.get('captions')=='not_requested':
+                for block in content['blocks']:
+                    if block.get('role')=='subtitles':
+                        key=block['ref']['$media']
+                        for row in media:
+                            if row['resource_key']==key:
+                                row.update(status='unavailable',reason='Субтитры не запрошены')
         for block in content.get('blocks',[]):
             if block['type']=='media':
                 block['media_id']=identities[block.pop('ref')['$media']]
@@ -280,6 +308,10 @@ class Publications:
         old = store.db.execute('SELECT content FROM items WHERE id=?', (item,)).fetchone()
         previous = json.loads(old['content'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
+        if 'youtube' in content.get('extra',{}):
+            before=previous.get('extra',{}).get('youtube',{})
+            after=content['extra']['youtube']
+            same=not links_changed and all(before.get(key)==after.get(key) for key in ('captions','captions_digest'))
         content['extra']['_input_hash'] = fingerprint
         store.db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         for row in media:

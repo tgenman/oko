@@ -95,6 +95,8 @@ def migrate_publications(source: Path, destination: Path) -> dict[str, Any]:
 
 
 def _convert(store: Store, report: dict[str, Any]) -> None:
+    from oko.storage.migrate_youtube import convert
+    convert(store,report)
     for feed in store.subscriptions.feeds():
         binding = store.subscriptions.telegram.binding(feed['id'])
         if not binding or binding['kind'] != 'web' or feed['connection'] == 'deleting':

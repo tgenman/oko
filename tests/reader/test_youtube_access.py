@@ -106,20 +106,36 @@ def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
         assert captions.calls[1][1] - captions.calls[0][1] >= 10
 
 
-def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
+@pytest.mark.parametrize('publication_pipeline',[False,True])
+def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publication_pipeline):
+    if publication_pipeline:
+        from tests.reader.test_independent_media import migrated_root
+        tmp_path=migrated_root(tmp_path)
     clock = Clock()
     captions = Captions(clock, [CaptionsBlocked(), 'После паузы', 'Следующий'])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
         add(client)
         add(client, 'UC' + 'b' * 22)
         heartbeat(client)
-        eventually(lambda: (client.get('/api/v3/youtube').json()['admission']=='paused'))
+        def paused():
+            if client.get('/api/v3/youtube').json()['admission']=='paused':
+                return True
+            if publication_pipeline:
+                clock.advance(1)  # Common discovery commits its initial cursor before the next portion.
+            return False
+        eventually(paused)
         item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
         assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == clock.wall + 900
         client.post('/api/v3/materials/' + item['id'] + '/retry')
         client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
         add(client, 'https://rss.test/feed')
-        eventually(lambda: any(m['content'].get('text') == 'Независимый текст' for m in materials(client)))
+        def independent():
+            if any('Независимый текст' in m['content'].get('text','') for m in materials(client)):
+                return True
+            if publication_pipeline:
+                clock.tick+=1
+            return False
+        eventually(independent)
         assert len(captions.calls) == 1
     clock.tick = 0  # A new monotonic origin must not expire the durable pause.
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:

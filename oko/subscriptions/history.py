@@ -98,7 +98,7 @@ class History:
         if 'rss_history' in cursor:
             selection['stop_reason'] = cursor.get('stop_reason')
         selection['discovery_retry_at'] = cursor.get('history_retry_at')
-        if 'youtube_history' in cursor or 'rss_history' in cursor:
+        if 'youtube_history' in cursor or 'youtube_adapter' in cursor or 'rss_history' in cursor:
             selection['waiting'] = cursor.get('history_waiting', False)
             selection['requests'] = cursor.get('history_requests', 0)
         self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))

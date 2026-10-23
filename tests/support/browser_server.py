@@ -6,6 +6,7 @@ import secrets
 import re
 import socket
 import sys
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -14,7 +15,8 @@ import uvicorn
 from tests.support.app import create_app
 from tests.support.models import model_transport
 from tests.support.codex import CodexService
-from tests.support.youtube import PNG, History, NoCaptions
+from tests.support.youtube import PNG, History, feed_xml
+from oko.collection.contracts import SourceError
 from tests.support.telegram import Telegram
 from tests.support.telegram_web import page, external_page, AUDIO, VIDEO, mark_post_unavailable
 
@@ -108,7 +110,23 @@ def response(request):
 
 
 def build_app(root, token, *, persistent=False, public_url=None,collection=True,processing_delay=0):
+    def youtube_state():
+        path=root/'fixture-youtube-state'
+        return path.read_text() if path.is_file() else ''
+    class Captions:
+        async def fetch(self,video):
+            state=youtube_state()
+            if state=='error':
+                raise SourceError('Synthetic caption error')
+            return 'Raw YouTube captions.' if state=='ready' else None
     async def external(request):
+        if youtube_state() and request.url.host=='www.youtube.com':
+            return httpx.Response(200,text=feed_xml())
+        if youtube_state() and request.url.host=='i.ytimg.com':
+            path=root/'fixture-media-state'
+            while path.is_file() and path.read_text()=='held':
+                await asyncio.sleep(.01)
+            return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
         if request.url.host=='a.test' and request.url.path=='/linked-feed':
             return httpx.Response(200,text='<rss><channel><title>RSS pipeline</title><item><guid>announcement</guid><title>RSS announcement</title><link>https://linked.example/article</link><description>Own announcement.</description></item></channel></rss>')
         if request.url.host=='t.me' and '/linkedposts' in request.url.path:
@@ -160,7 +178,8 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
     ai=httpx.MockTransport(delayed_model)
     return create_app(root, token=token, rss_enabled=collection, persistent=persistent, public_url=public_url,
                      rss_transport=httpx.MockTransport(external), telegram_client=BrowserTelegram(), ai_transport=ai, codex_client=CodexService(),
-                     youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
+                     youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=Captions(),
+                     wall_clock=lambda:time.time()+{'error':11,'missing':22,'ready':33}.get(youtube_state(),0),
                      lease=60, grace=60)
 
 
