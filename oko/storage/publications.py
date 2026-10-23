@@ -18,7 +18,7 @@ from oko.collection.contracts import Material, Publication
 from oko.collection.adapters import ExternalReference
 from oko.collection.telegram.adapter import reference
 from oko.storage.reading import saved_document
-from oko.storage import publication_links
+from oko.storage import publication_links,material_read
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -46,7 +46,7 @@ FEED_COLUMNS = {
 class DiscoveryProjection:
     item: str
     source_id: str
-    version: tuple[int, str, bool] | None = None
+    fingerprint: str | None = None
     content: tuple[dict[str, Any], list[dict[str, Any]]] | None = None
 
 
@@ -213,14 +213,24 @@ class Publications:
             refresh=bool(current and not current['viewed'] and described and
                 (ref.key.platform.value in ('rss','youtube') and not described.needs_fetch or album_changed))
             if publication.teaser and (not existing or refresh):
-                plan.version=self.store.versions.prepare(item,publication.teaser)
-                plan.content=self.prepare(item,publication.teaser,self.store.versions.path(item,plan.version[0]).parent)
+                directory=self.store.root/'content'/item/'1'
+                plan.content=self.prepare(item,publication.teaser,directory)
+                plan.fingerprint=publication_input.digest(plan.content[0])
             plans[publication.id]=plan
         return plans
 
     def prepare(self, item: str, material: Material, directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Prepare durable files outside the accepting transaction."""
-        header, text = saved_document(directory/'original.md')
+        directory.mkdir(parents=True,exist_ok=True)
+        header: dict[str,Any]=dict(title=material.title,full=material.full,reason=material.reason,members=list(material.members),captions=material.captions,
+            attachments=[dict(name=a.name,kind=a.kind,mime=a.mime) for a in material.attachments])
+        if material.description:
+            header['description']=material.description
+        if material.source_manifest:
+            header['source_manifest']=material.source_manifest.model_dump(mode='json')
+        if material.reply_preview:
+            header['reply_preview']=material.reply_preview.model_dump()
+        text=material.text
         if material.adapter_content and material.adapter_content.metadata.reference.key.platform.value != 'telegram':
             return self._prepare_adapter(item, material, header, directory)
         manifest=material.source_manifest
@@ -285,7 +295,6 @@ class Publications:
         extra['_collection_reason'] = '' if header.get('reason', '').startswith('Вложения ещё не загружены') else header.get('reason', '')
         content = dict(blocks=blocks, extra=extra)
         self.store.media.project_header(content, media)
-        self.store.versions._write(directory/'original.md', (json.dumps(header,ensure_ascii=False)+'\n\n'+text).encode())
         return content, media
 
     def _prepare_adapter(self, item: str, material: Material, header: dict[str,Any], directory: Path) -> tuple[dict[str,Any],list[dict[str,Any]]]:
@@ -340,13 +349,13 @@ class Publications:
             _links=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in value.linked_publications])
         self.store.media.project_header(content,media)
         text='\n\n'.join(block.get('text','') for block in content['blocks'] if block['type']=='text' and block.get('role')=='body')
-        self.store.versions._write(directory/'original.md',(json.dumps(header,ensure_ascii=False)+'\n\n'+text).encode())
         return content,media
 
     def publish(self, item: str, prepared: tuple[dict[str, Any], list[dict[str, Any]]], fingerprint: str) -> None:
         """Called in the accepting transaction, after durable media preparation."""
         content, media = prepared
         store = self.store
+        store.db.execute('DELETE FROM source_deleted WHERE item=?',(item,))
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links))
@@ -379,58 +388,53 @@ class Publications:
         # Compatibility index points only to the current projection, never history.
         store.db.execute('DELETE FROM content_versions WHERE item=? AND number!=(SELECT number FROM content_current WHERE item=?)', (item, item))
 
+    def original(self, item: str) -> tuple[dict[str,Any],str]:
+        row=material_read.item(self.store.db,item)
+        assert row is not None
+        content=json.loads(row['content'])
+        header=deepcopy(content['extra']['_reader'])
+        text='\n\n'.join(b['text'] for b in content.get('blocks',[]) if b['type']=='text' and b['role']=='body')
+        return header,text
+
     def recover(self, item: str | None = None) -> None:
-        store = self.store
-        query = "SELECT * FROM items WHERE platform IS NOT NULL AND viewed=0 AND content!='{}'"
-        for row in store.db.execute(query+(' AND id=?' if item else ''), (item,) if item else ()).fetchall():
-            content = json.loads(row['content'])
-            directory = store.path(row['id']).parent
-            directory.mkdir(parents=True, exist_ok=True)
-            header = content['extra']['_reader']
-            text = '\n\n'.join(b['text'] for b in content['blocks'] if b['type']=='text' and b['role']=='body')
-            store.versions._write(directory/'original.md', (json.dumps(header, ensure_ascii=False)+'\n\n'+text).encode())
-            wanted = set()
-            for media in store.db.execute("SELECT * FROM media_files WHERE publication_id=? AND status='ready'", (row['id'],)):
-                saved = store.root/media['storage_key']
-                if saved.is_file():
-                    target = directory/store.media.projection_name(media)
-                    wanted.add(target.name)
-                    if target.exists() and os.path.samefile(saved,target):
-                        continue
-                    target.unlink(missing_ok=True)
-                    os.link(saved,target)
-            for path in directory.iterdir():
-                if path.name.startswith(('media-','image-')) and path.name not in wanted:
-                    path.unlink()
-            metadata = json.loads(row['processing_metadata'])
-            for kind, result in metadata.get('_legacy', {}).items():
-                store.versions._write(directory/(kind+'.md'), result['file'].encode())
+        """Discard old read projections; SQLite and MediaFile own current data."""
+        store=self.store
+        query="SELECT id FROM items WHERE platform IS NOT NULL AND content!='{}'"
+        for row in store.db.execute(query+(' AND id=?' if item else ''),(item,) if item else ()).fetchall():
+            directory=store.root/'content'/row['id']
+            if directory.exists():
+                for path in directory.rglob('*'):
+                    if path.is_file() and (path.name in ('original.md','filter.md','theses.md') or path.name.startswith(('media-','image-'))):
+                        path.unlink()
+            with store.db:
+                for table in ('content_versions','content_current'):
+                    store.db.execute('DELETE FROM '+table+' WHERE item=?',(row['id'],))
             self.prune(row['id'])
 
-    def results(self, item: str, results: dict[str, Any]) -> None:
-        """Bridge already validated legacy results until processing moves to blocks."""
-        row = self.store.db.execute('SELECT content,processing_metadata FROM items WHERE id=?', (item,)).fetchone()
-        content = publication_input.content(self.store,item)
-        metadata = json.loads(row['processing_metadata'])
-        metadata.setdefault('_legacy', {}).update(results)
-        for kind, value in results.items():
-            header, _ = value['file'].split('\n\n', 1)
-            saved = json.loads(header)
-            result = saved['result']
-            operation = 'filter' if kind == 'filter' else 'summary'
-            origin=saved.get('execution',saved.get('provenance')) or {}
-            input_content=json.loads(self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()[0]) if operation=='summary' else content
-            metadata[operation] = dict(input_hash=publication_input.digest(publication_input.blocks(input_content or content)),signature=saved['signature'],
-                settings_hash=publication_input.digest(publication_input.settings(self.store,item)),
-                completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**origin)
-            if kind == 'filter':
-                filtered=publication_input.filtered(content,item,result)
-                self.store.db.execute('UPDATE items SET filtered_content=?,status=? WHERE id=?',
-                    (json.dumps(filtered, ensure_ascii=False), 'filter_out' if result['hidden'] else 'pending_summary', item))
-            else:
-                summarized = dict(points=[dict(text=p['text'], source_publication_ids=[r['id'] for r in p['sources']]) for p in result['points']], extra={})
-                self.store.db.execute("UPDATE items SET summarized_content=?,status='ready' WHERE id=?", (json.dumps(summarized, ensure_ascii=False), item))
-        self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?', (json.dumps(metadata, ensure_ascii=False), item))
+    def provenance(self, item: str, kind: str) -> dict[str,Any] | None:
+        row=self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
+        metadata=json.loads(row[0]).get('filter' if kind=='filter' else 'summary',{}) if row else {}
+        return {key:metadata[key] for key in ('processor','model','reasoning_effort','fast') if key in metadata} or None
+
+    def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
+        """Publish a validated result and its provenance in the caller's transaction."""
+        row=self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
+        content=publication_input.content(self.store,item)
+        metadata=json.loads(row[0])
+        metadata.pop('_legacy',None)
+        operation='filter' if kind=='filter' else 'summary'
+        input_content=json.loads(self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()[0]) if kind=='theses' else content
+        metadata[operation]=dict(input_hash=publication_input.digest(publication_input.blocks(input_content or content)),signature=signature,
+            settings_hash=publication_input.digest(publication_input.settings(self.store,item)),
+            completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**(origin or {}))
+        if kind=='filter':
+            filtered=publication_input.filtered(content,item,result)
+            self.store.db.execute('UPDATE items SET filtered_content=?,status=? WHERE id=?',
+                (json.dumps(filtered,ensure_ascii=False),'filter_out' if result['hidden'] else 'pending_summary',item))
+        else:
+            summarized=dict(points=[dict(text=p['text'],source_publication_ids=[r['id'] for r in p['sources']]) for p in result['points']],extra={})
+            self.store.db.execute("UPDATE items SET summarized_content=?,status='ready' WHERE id=?",(json.dumps(summarized,ensure_ascii=False),item))
+        self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
 
     def complete_empty(self, item: str, kind: str) -> None:
         row=self.store.db.execute('SELECT * FROM items WHERE id=? AND platform IS NOT NULL AND viewed=0 AND complete=1',(item,)).fetchone()
@@ -455,9 +459,8 @@ class Publications:
             return
         publication_input.snapshot(self.store,item,0)
         result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
-        saved=dict(signature=signature,result=result,provenance=None)
         with self.store.db:
-            self.results(item,{kind:dict(file=json.dumps(saved,ensure_ascii=False)+'\n\n')})
+            self.accept_result(item,kind,signature,result,None)
             metadata=json.loads(self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()[0])
             metadata[operation]['reason']='no_input'
             self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))

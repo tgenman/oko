@@ -94,7 +94,7 @@ def saved_filter(runtime: Runtime, item: str, value: facts.Filter | None) -> wir
     current=runtime.require_store()
     filtered = filter_state(value, runtime.processing_wait(item, 'filter'))
     if filtered.root.result is not None:
-        saved = current.derivative_provenance(current.path(item).parent / 'filter.md', current.filters.signature(item))
+        saved = current.publications.provenance(item,'filter') if current.publications.owns(item) else current.derivative_provenance(current.path(item).parent / 'filter.md', current.filters.signature(item))
         if saved:
             from pydantic import TypeAdapter
             origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)

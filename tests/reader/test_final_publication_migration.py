@@ -95,3 +95,57 @@ def test_new_telegram_connection_rejects_date_selection(tmp_path):
             initial_history={'mode':'date','date':str(date.today()-timedelta(days=1)),'timezone':'UTC'}))
         assert result.status_code==422,result.text
         assert client.get('/api/v3/subscriptions').json()['feeds']==[]
+
+
+def test_canonical_reader_and_results_use_sql_without_persistent_markdown_projection(tmp_path):
+    from tests.reader.test_independent_media import migrated_root
+    from tests.support.telegram_web import page
+    from tests.support.models import model_transport
+    root=migrated_root(tmp_path)
+    def response(request):
+        if request.url.host=='cdn.test':
+            return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+        return httpx.Response(200,text=page([(11,'Latest SQL text<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.test/image.png\')"></a>')]))
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response),ai_transport=model_transport([]))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'','telegram_http_rps':10})
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',initial_history={'mode':'count','count':'1'}))
+        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        item=card['id']
+        material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+        assert material['content']['text']=='Latest SQL text'
+        assert client.get(material['content']['attachments'][0]['url']).content==PNG
+        assert not [p for p in (root/'content').rglob('*.md') if p.name in ('original.md','filter.md','theses.md')]
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        material=client.get('/api/v3/materials/'+item).json()
+        assert material['content']['text']=='Latest SQL text' and material['theses']['result']
+        assert client.get(material['content']['attachments'][0]['url']).content==PNG
+        assert not [p for p in (root/'content').rglob('*.md') if p.name in ('original.md','filter.md','theses.md')]
+
+
+def test_repeating_offline_copy_preserves_already_canonical_cursor_and_content(tmp_path):
+    import sqlite3
+    from tests.reader.test_independent_media import migrated_root
+    from tests.support.telegram_web import page
+    from tests.support.models import model_transport
+    root=migrated_root(tmp_path)
+    options=dict(token='test',api_only=True,ai_transport=model_transport([]),rss_transport=httpx.MockTransport(lambda r:httpx.Response(200,text=page([(11,'Preserved canonical text')]))))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
+        connected=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox','initial_history':{'mode':'count','count':'1'}})
+        feed=connected.json()['feed_id']
+        item=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))['id']
+    with sqlite3.connect(root/'state.sqlite') as db:
+        before=db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()[0]
+    destination=tmp_path/'second-copy'
+    report=migrate_publications(root,destination)
+    assert report['success'],report
+    with sqlite3.connect(destination/'storage'/'state.sqlite') as db:
+        assert db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()[0]==before
+    with TestClient(create_app(destination/'storage',**options),headers=HEADERS) as client:
+        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Preserved canonical text'
+        assert [c['id'] for c in client.get('/api/v3/cards').json()]==[item]

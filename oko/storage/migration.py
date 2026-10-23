@@ -98,11 +98,23 @@ def migrate_publications(source: Path, destination: Path) -> dict[str, Any]:
 
 
 def _convert(store: Store, report: dict[str, Any]) -> None:
+    # Already converted state is authoritative; do not round-trip it through legacy files.
+    for row in store.db.execute('SELECT * FROM items WHERE platform IS NOT NULL AND viewed=0').fetchall():
+        metadata=json.loads(row['processing_metadata'])
+        metadata.pop('_legacy',None)
+        with store.db:
+            store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),row['id']))
+        report['publications'].append(dict(old_id=row['id'],new_id=row['id'],old_key=row['source_id'],platform=row['platform'],external_id=row['external_id'],results=[name for name,key in [('filter','filter'),('theses','summary')] if key in metadata],preserved=True))
+    for feed in store.db.execute('SELECT * FROM feeds WHERE adapter IS NOT NULL').fetchall():
+        if store.publications.feed(feed['id']):
+            report['feeds'].append(dict(old_id=feed['id'],new_id=feed['id'],old_key=feed['identity'],platform=feed['platform'],external_id=feed['external_id'],preserved=True))
     from oko.storage.migrate_rss import convert as convert_rss
     convert_rss(store,report)
     from oko.storage.migrate_youtube import convert
     convert(store,report)
     for feed in store.subscriptions.feeds():
+        if store.publications.feed(feed['id']):
+            continue
         binding = store.subscriptions.telegram.binding(feed['id'])
         row=store.db.execute('SELECT config FROM feeds WHERE id=?',(feed['id'],)).fetchone()
         native=bool(binding and binding['kind']=='client' and json.loads(row[0]).get('source_kind')=='channel')
@@ -197,7 +209,7 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                         saved=json.loads(header)
                         saved['signature']=publication_input.signature(store,item,kind)
                         value['file']=json.dumps(saved,ensure_ascii=False)+'\n\n'+text
-                        store.publications.results(item,{kind:value})
+                        store.publications.accept_result(item,kind,saved['signature'],saved['result'],saved.get('execution',saved.get('provenance')))
                         table='filter_inputs' if kind=='filter' else 'thesis_inputs'
                         store.db.execute('UPDATE '+table+' SET signature=? WHERE item=?',(saved['signature'],item))
                     store.publications.status(item)

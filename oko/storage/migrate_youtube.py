@@ -81,7 +81,7 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
                         saved=json.loads(header_text)
                         saved['signature']=publication_input.signature(store,item,kind)
                         value['file']=json.dumps(saved,ensure_ascii=False)+'\n\n'+text
-                        store.publications.results(item,{kind:value})
+                        store.publications.accept_result(item,kind,saved['signature'],saved['result'],saved.get('execution',saved.get('provenance')))
                         table='filter_inputs' if kind=='filter' else 'thesis_inputs'
                         store.db.execute('UPDATE '+table+' SET signature=? WHERE item=?',(saved['signature'],item))
                     store.publications.status(item)
