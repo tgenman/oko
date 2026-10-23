@@ -41,7 +41,7 @@
 | 21 | Нет Restore/версий/date в UI/API; receipt, читатель и lifetime сохранены | `test_final_pipeline.ts`, `test_current_contract_has_no_restore_or_previous_version_operations`, `test_new_telegram_connection_rejects_date_selection`, `test_cli_requires_offline_copy_before_opening_populated_legacy_store`, HTTP/процессные/lifetime наборы |
 
 Названия файлов Python ищутся в tests/reader, tests/collection, tests/reviews и
- tests/lifecycle; браузер — tests/browser. Общие пути Source остаются для групп и
+tests/lifecycle; браузер — tests/browser. Общие пути Source остаются для групп и
 проверок исторического хранения; целевой CLI не активирует заполненную старую базу.
 
 ## Фактические запуски и исправления
@@ -77,8 +77,33 @@ SQL/read/legacy сценарии 55 PASS / 1 FAIL (27.83 s), затем испр
 новый читатель прошли, переключение доступа ожидало старый материал до завершения
 сбора. Проверка ждёт свежий серверный текст и заново открывает карточку.
 
-Итоговый общий прогон и ограниченный повтор после test-only правки: записываются
-ниже по завершении; предыдущие частичные успехи не подменяют их результат.
+Итоговый общий прогон на `f0eaed3215402d148f87d7a70a0800773d7c4fad`,
+tree `eadacbe99e87a774651496e624f2bd411dfb2200`, report
+`20261023T170614Z-6f471df7`: **204.40 s, exit 1**. Python **927 PASS / 1 FAIL**;
+browser **330 PASS / 3 FAIL / 2 SKIP**. Contracts, tooling-types, syntax, lint,
+Python types, browser-types, build, HTTP, diff, entrypoint и tools **PASS**;
+162 tooling tests. Полный прогон целиком не зелёный.
+
+Оставшийся Python-сценарий проверял URL прежнего уже загруженного файла, пока
+параллельный повтор метаданных статьи мог заменить описание ресурса. Проверка
+теперь ждёт завершения работы перед чтением текущего URL: **1 PASS, 2.57 s**,
+`/tmp/98-article-settled.log`. Два браузерных сценария статей учитывают разрешённое
+удержание предыдущего показа вкладкой: ждут готовый файл и выбирают карточку
+заново. Третье падение (settings Retry) прошло без изменения теста.
+
+Итоговый ограниченный browser repeat: `test_linked_publications_http.ts`,
+`test_telegram_client_publications.ts`, `test_feed_details.ts`, report
+`20261023T171120Z-a6d01561`: **9 PASS, 17.19 s**, tooling/browser types PASS.
+Он покрывает все три падения итогового browser и явное переключение доступа.
+
+Последняя ограниченная правка preflight охватывает неизвестные pending, failed
+и unavailable Job, а также неизвестный NULL status: все неподтверждённо завершённые
+статусы блокируют перенос, done/cancelled
+не блокируют. Параметризованный повтор **4 PASS, 2.08 s**,
+`/tmp/98-unknown-jobs-null.log`. После этих ограниченных правок полный набор
+не повторялся. Успех повторов относится к указанным сценариям; общий отчёт выше
+сохраняет свой exit 1. Матрица 21 критериев проверена на интегрированном состоянии
+с учётом этих исправлений и повторов.
 
 ## Визуальная проверка и пределы
 

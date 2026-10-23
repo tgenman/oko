@@ -216,7 +216,7 @@ def test_disabled_rss_does_not_retry_linked_article_after_restart(tmp_path):
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['transport'] is None
 
 
-@pytest.mark.parametrize('status',['pending','failed','unavailable'])
+@pytest.mark.parametrize('status',['pending','failed','unavailable',None])
 def test_unknown_pending_job_blocks_migration_without_publishing_partial_storage(tmp_path,status):
     from oko.storage.store import Store
     source=tmp_path/'legacy'

@@ -30,7 +30,7 @@ def results(path: str) -> dict[str,set[str]]:
 def inspect(store: 'Store', report: dict[str,Any]) -> None:
     report['history_boundaries']=[]
     known={'discover','fetch','download_media','filter','theses','delete','feed-delete','read'}
-    for row in store.db.execute("SELECT kind,item,status FROM jobs WHERE status NOT IN ('done','cancelled')"):
+    for row in store.db.execute("SELECT kind,item,status FROM jobs WHERE COALESCE(status,'') NOT IN ('done','cancelled')"):
         if row['kind'] not in known:
             report['conflicts'].append(dict(job_kind=row['kind'],item=row['item'],reason='Unknown unfinished job; resolve with the previous release before migration'))
     for feed in store.subscriptions.feeds():
