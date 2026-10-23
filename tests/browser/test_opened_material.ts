@@ -478,7 +478,7 @@ test('reply context is a compact separate card with safe navigation and local ex
     // independent of the card, as is renewing the browser presence lease.
     const heartbeat=await r.api('client-sessions','POST');
     const requests=await r.page.evaluate(()=>readerTransport.requests);
-    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url));
+    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&['/api/v3/status','/api/v3/collection-status'].includes(q.url));
     const start=await r.page.evaluate(()=>readerTransport.requests.length),versions=await r.page.evaluate(()=>window.replyVersions);
     assert.deepEqual(Object.keys(versions).sort(),['filter','material','media','theses']);
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();
@@ -487,6 +487,12 @@ test('reply context is a compact separate card with safe navigation and local ex
     assert.equal(await card.locator('.reply-preview-text').textContent(),excerpt);
     await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/reading/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({storage_id:null,resources:[]})});if(!reply.ok)throw new Error('Background check failed');});
     await r.page.evaluate(async({id,token})=>{const reply=await fetch('/api/v3/client-sessions/'+id,{method:'PUT',headers:{Authorization:'Bearer '+token}});if(!reply.ok)throw new Error('Heartbeat failed: '+reply.status);},{id:heartbeat.id,token:r.token});
+    await r.page.evaluate(async token=>{
+      for(const path of ['/api/v3/status','/api/v3/collection-status']){
+        const reply=await fetch(path,{headers:{Authorization:'Bearer '+token}});
+        if(!reply.ok)throw new Error('Background status failed: '+path);
+      }
+    },r.token);
     const observed=await r.page.evaluate(()=>readerTransport.requests);
     assert.ok(observed.some(q=>q.method==='PUT'&&q.url==='/api/v3/client-sessions/'+heartbeat.id));
     assert.deepEqual(observed.filter(foreground),requests.filter(foreground));
