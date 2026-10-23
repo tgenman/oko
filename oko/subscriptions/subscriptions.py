@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import secrets
+from uuid import uuid4
 import sqlite3
 import time
 from collections.abc import Callable
@@ -281,15 +282,19 @@ class Subscriptions:
         if old:
             return old
         title = body.title or urlsplit(body.url).hostname or 'RSS'
+        identity_id = self.new_feed_id(key(identity))
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             folder = self.ensure_folder(body.folder)
             self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,public_ai)
                             VALUES (?,?,?,?,?,?,?,?,?)''',
-                            (key(identity), identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
-            self.details.created(key(identity))
-            self.history.configure(key(identity), body.initial_history)
+                            (identity_id, identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
+            self.details.created(identity_id)
+            self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
+
+    def new_feed_id(self, legacy_id: str) -> str:
+        return str(uuid4()) if self.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone() else legacy_id
 
     def existing_feed(self, url: str) -> dict[str, Any] | None:
         identity, _, _ = identify(url)

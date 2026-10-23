@@ -313,3 +313,33 @@ def test_migration_preserves_external_video_in_common_content(tmp_path):
         content = json.loads(db.execute('SELECT content FROM items WHERE id=?', (item,)).fetchone()[0])
         assert {'type':'external_media', 'kind':'video', 'url':'https://t.me/fixture/11'} in content['blocks']
         assert db.execute('SELECT COUNT(*) FROM media_files').fetchone()[0] == 1
+
+
+def test_new_feed_on_migrated_storage_uses_uuid_identity(tmp_path):
+    from oko.storage.migration import migrate_publications
+    from uuid import UUID
+
+    source, destination = tmp_path/'old', tmp_path/'migration'
+    def response(request):
+        if request.url.host == 'example.org':
+            return httpx.Response(200, text=('<rss version="2.0"><channel><title>RSS</title><item><guid>entry</guid><title>RSS entry</title><link>https://example.org/article</link></item></channel></rss>'
+                if request.url.path == '/feed.xml' else '<article>Article text</article>'))
+        return httpx.Response(200, text=page([(11, 'New feed')]))
+    options = dict(token='test', api_only=True, rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(source, **options), headers=HEADERS):
+        pass
+    assert migrate_publications(source, destination)['success']
+    with TestClient(create_app(destination/'storage', **options), headers=HEADERS) as client:
+        configure_fast_web(client)
+        response = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
+        assert response.status_code == 200, response.text
+        UUID(response.json()['feed_id'])
+        UUID(settled(client)[0]['id'])
+        from tests.support.feed_url import verify, add
+        checked = verify(client)
+        rss = add(client, checked)
+        assert rss.status_code == 200, rss.text
+        UUID(rss.json()['id'])
+        cards = settled(client, 2)
+        rss_card = next(c for c in cards if c['feed_id'] == rss.json()['id'])
+        assert client.get('/api/v3/materials/'+rss_card['id']).json()['content']['text'] == 'Article text'
