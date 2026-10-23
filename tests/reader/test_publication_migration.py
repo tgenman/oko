@@ -203,7 +203,8 @@ def test_migration_keeps_proven_results_and_edit_reprocesses_current_input(tmp_p
     with sqlite3.connect(target/'state.sqlite') as db:
         summarized, metadata = db.execute('SELECT summarized_content,processing_metadata FROM items WHERE id=?', (item,)).fetchone()
         assert json.loads(summarized)['points']
-        assert json.loads(metadata)['summary']['provenance']
+        assert json.loads(metadata)['summary']['processor']=='llamacpp'
+        assert json.loads(metadata)['summary']['model']=='local:latest'
     inputs = [json.loads(json.loads(r.content)['messages'][1]['content']) for r in calls if r.url.path == '/v1/chat/completions']
     assert inputs[-1]['sources'][0]['text'] == 'New input text'
 
@@ -343,3 +344,28 @@ def test_new_feed_on_migrated_storage_uses_uuid_identity(tmp_path):
         cards = settled(client, 2)
         rss_card = next(c for c in cards if c['feed_id'] == rss.json()['id'])
         assert client.get('/api/v3/materials/'+rss_card['id']).json()['content']['text'] == 'Article text'
+
+
+def test_migration_does_not_relabel_results_when_processing_text_changes(tmp_path):
+    import sqlite3
+    from oko.storage.migration import migrate_publications
+    from tests.support.models import model_transport
+    from tests.support.reader import wait_for
+    source,destination=tmp_path/'old',tmp_path/'migration'
+    def response(request):
+        if request.url.host=='api.telegra.ph':
+            return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Article text']}]}})
+        return httpx.Response(200,text=page([(11,'Post <a href="https://telegra.ph/Fixture">article</a>')]))
+    with TestClient(create_app(source,token='test',api_only=True,rss_transport=httpx.MockTransport(response),ai_transport=model_transport([])),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=wait_for(client,lambda:next((c['id'] for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+    report=migrate_publications(source,destination)
+    assert report['success']
+    assert report['publications'][0]['results']==[]
+    assert any(row['publication_id']==item and 'processing text' in row['reason'] for row in report['unportable'])
+    with sqlite3.connect(destination/'storage'/'state.sqlite') as db:
+        assert db.execute('SELECT summarized_content FROM items WHERE id=?',(item,)).fetchone()[0]=='{}'
+    assert list((destination/'backup'/'content'/item).glob('*/theses.md'))

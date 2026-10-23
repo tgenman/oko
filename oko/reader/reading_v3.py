@@ -50,7 +50,7 @@ def filter_state(value: facts.Filter | None, waiting: ProcessingWait | None) -> 
     if value is None:
         return wire.FilterState(wire.FilterAttemptState(attempt=attempt('off', None), diagnostic_message=None, result=None))
     message = value.error if isinstance(value.error, str) else None
-    result = wire.FilterResult(hidden=value.hidden, removed=value.removed, restored=value.restored, reason=value.reason, provenance=provenance(None)) if value.status == 'done' else None
+    result = wire.FilterResult(can_restore=value.can_restore, hidden=value.hidden, removed=value.removed, restored=value.restored, reason=value.reason, provenance=provenance(None)) if value.status == 'done' else None
     if result is not None:
         return wire.FilterState(wire.FilterReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
     return wire.FilterState(wire.FilterAttemptState(attempt=attempt(value.status, message, waiting), diagnostic_message=message, result=None))

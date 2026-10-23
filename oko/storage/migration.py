@@ -17,6 +17,7 @@ from uuid import uuid4
 from typing import Any
 
 from oko.storage.store import Store
+from oko.reviews import publication_input
 from oko.collection.adapters import AdapterException
 from oko.collection.telegram.adapter import publication_reference
 
@@ -122,6 +123,7 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                            platform=current['platform'], external_id=current['external_id'], results=[])
             publication = store.publication(item)
             if publication and publication.teaser:
+                previous_text=store.original(item)[1]
                 prepared = store.publications.prepare(item, publication.teaser, store.path(item).parent)
                 # Capture only results accepted against the current input by the
                 # existing processors. File presence alone never establishes this.
@@ -133,9 +135,22 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                     accepted = store.processing.theses._accepted(item)
                     assert accepted
                     results['theses'] = dict(file=accepted[1].read_text())
+                current_text='\n\n'.join(b['text'] for b in publication_input.blocks(prepared[0]) if b['type']=='text')
+                if results and current_text!=previous_text:
+                    report['unportable'].append(dict(publication_id=item,reason='Changed processing text; results require reprocessing'))
+                    results={}
                 with store.db:
                     store.publications.publish(item, prepared, store.content_version(item))
-                    store.publications.results(item, results)
+                    for kind,value in results.items():
+                        # Result was validated against the legacy input above;
+                        # translate its signature for the same canonical text.
+                        header,text=value['file'].split('\n\n',1)
+                        saved=json.loads(header)
+                        saved['signature']=publication_input.signature(store,item,kind)
+                        value['file']=json.dumps(saved,ensure_ascii=False)+'\n\n'+text
+                        store.publications.results(item,{kind:value})
+                        table='filter_inputs' if kind=='filter' else 'thesis_inputs'
+                        store.db.execute('UPDATE '+table+' SET signature=? WHERE item=?',(saved['signature'],item))
                     store.publications.status(item)
                 mapping['results'] = list(results)
             else:

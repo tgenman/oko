@@ -31,6 +31,7 @@ from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex
 from oko.reviews.coordination import PreparedWork
 from oko.reader.telegram_http import TelegramHTTP
 from oko.reader.composition import FolderContents
+from oko.storage.media import MediaOutput
 from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
 from oko.collection.telegram.web import WebTelegram
@@ -135,6 +136,8 @@ class Runtime:
         self._ai_transport = ai_transport
         self._ai: asyncio.Task[None] | None = None
         self._ai_sync = 0.0
+        self._filter_sync = 0.0
+        self._summary_sync = 0.0
         self._source_revision: int | None = None
         self._ai_stage = 'Проверка обработчика'
         self._root, self._source, self._clock, self._fault = root, source, clock, fault
@@ -781,6 +784,8 @@ class Runtime:
 
     async def restore_filter(self, item: str) -> None:
         async with self._actions:
+            if self.require_store().publications.owns(item):
+                raise ActionError('conflict','Восстановление фильтра недоступно; исходник сохранён',expected=True)
             if not self.require_store().filters.restore(item):
                 raise ActionError('missing', 'Обработанный материал недоступен')
             await self._cancel()
@@ -1273,7 +1278,7 @@ class Runtime:
         try:
             if adapter is None:
                 raise ValueError('Publication adapter unavailable')
-            with download.temporary.open('wb') as output:
+            with MediaOutput(download.temporary,lambda:self._store is current and self._live() and current.valid(job)) as output:
                 actual = await adapter.download_media(download.publication, download.media, output)
             async with self._actions:
                 if self._store is current and self._live() and current.valid(job):
@@ -1329,6 +1334,12 @@ class Runtime:
                             self._store.read_sync.sync()
                             self._store.processing.sync()
                             self._ai_sync = now
+                        if now-self._filter_sync>=.5:
+                            self._store.processing.sync_stage('filter')
+                            self._filter_sync=now
+                        if now-self._summary_sync>=.5:
+                            self._store.processing.sync_stage('theses')
+                            self._summary_sync=now
                         if self._ai and self._ai.done():
                             await self._ai
                             self._ai = None

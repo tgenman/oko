@@ -9,7 +9,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 if TYPE_CHECKING:
     from oko.storage.store import Store, Job
 
-_TARGET = "(kind='download_media' OR (kind='fetch' AND item IN (SELECT id FROM items WHERE platform IS NOT NULL)))"
+_TARGET = "(kind='download_media' OR (kind IN ('fetch','filter','theses') AND item IN (SELECT id FROM items WHERE platform IS NOT NULL)))"
 
 
 def interrupt(store: 'Store', feeds: set[str] | None = None) -> None:
@@ -47,4 +47,4 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
     until = max(store.wall_clock()+delay,issue.retry_at.timestamp() if issue.retry_at else 0) if status=='pending' else None
     store.db.execute("""UPDATE jobs SET status=?,next=?,retry_at=?,retry_delay=?,wait_scope=?,error=?,problem_code=?
         WHERE id=? AND generation=?""",(status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
-        until,delay,issue.scope,None if cancelled else issue.message,None if cancelled else issue.code,job.id,job.generation))
+        until,delay,issue.scope if issue.kind==AdapterErrorKind.source_wait else None,None if cancelled else issue.message,None if cancelled else issue.code,job.id,job.generation))

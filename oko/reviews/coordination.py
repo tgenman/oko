@@ -1,5 +1,6 @@
 """Current processing work and reconciliation of dependent reader results."""
 from oko.storage import material_read
+from oko.reviews import publication_input
 from oko.diagnostics import record_caught
 from oko.storage.reading import retry_time
 from collections.abc import Callable
@@ -9,6 +10,7 @@ from typing import Literal, TYPE_CHECKING
 from oko.processing.contracts import FilterResult, ProcessingError, ProcessingRequest, Theses
 from oko.reviews.theses import PublicationTheses
 from oko.processing.execution import CodexChoice
+from oko.processing.llamacpp import GENERATION_PARAMETERS
 
 if TYPE_CHECKING:
     from oko.storage.store import Job, Store
@@ -141,11 +143,25 @@ class ProcessingCoordination:
         for item in items:
             # No suspension: changes made by this reconciliation are included
             # before removing its dirty marker. Interrupted passes retain it.
-            self.store.filters.sync([item])
-            self.theses.sync([item])
             with self.store.db:
-                self.store.publications.reconcile(item)
+                canonical=self.store.publications.reconcile(item)
+            if not canonical:
+                self.store.filters.sync([item])
+                self.theses.sync([item])
+            with self.store.db:
                 self.store.db.execute('DELETE FROM processing_dirty WHERE item=?', (item,))
+
+    def sync_stage(self, kind: Literal['filter','theses']) -> None:
+        """One independent periodic pass; the preceding stage only sets status."""
+        status='pending_filtering' if kind=='filter' else 'pending_summary'
+        items=[row[0] for row in self.store.db.execute(
+            'SELECT id FROM items WHERE platform IS NOT NULL AND viewed=0 AND status=?',(status,))]
+        operation=self.store.filters if kind=='filter' else self.theses
+        for item in items:
+            operation.sync([item])
+            self.store.publications.complete_empty(item,kind)
+            with self.store.db:
+                self.store.publications.status(item)
 
     def retry_failed(self, feed: str) -> None:
         """Retry failed processing only; accepted current results are untouched."""
@@ -161,6 +177,8 @@ class ProcessingCoordination:
 
     def prepare(self, job: 'Job') -> PreparedWork:
         operation = self._operations[job.kind]
+        if self.store.publications.owns(job.item):
+            publication_input.snapshot(self.store,job.item,job.generation)
         if job.kind in ('filter', 'theses'):
             row = self.store.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0', (job.item,)).fetchone()
             if row:
@@ -182,7 +200,9 @@ class ProcessingCoordination:
 
     def _execution_choice(self, job: 'Job', signature: str, request: ProcessingRequest) -> ProcessingRequest:
         origin = self.store.saved_execution(job, signature)
-        if origin is None:
+        # Codex choices stay fixed for an interrupted pass. Local execution uses
+        # the configured endpoint/model for this attempt; record what is sent.
+        if origin is None or request.processor!='codex' and self.store.publications.owns(job.item):
             if request.processor == 'codex':
                 config = self.store.codex_config()
                 if config is None:
@@ -191,6 +211,8 @@ class ProcessingCoordination:
             else:
                 local = self.store.processor_config()
                 origin = dict(processor=request.processor, model=local.model if local else None)
+                if self.store.publications.owns(job.item):
+                    origin['parameters']=dict(GENERATION_PARAMETERS)
             self.store.save_execution(job, signature, origin)
         choice = CodexChoice.model_validate({k: origin[k] for k in ('model', 'reasoning_effort', 'fast')}) if origin['processor'] == 'codex' else None
         return request.model_copy(update={'codex_choice': choice})

@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .contracts import ProcessingError, ProcessingRequest, Theses, FilterResult, result_type, processing_instruction
 
+GENERATION_PARAMETERS: dict[str, Any] = dict(temperature=0,max_tokens=4096,reasoning_effort='none')
+
+
 class ProcessorConfig(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
     endpoint: str = Field(max_length=2000)
@@ -103,7 +106,7 @@ class LlamaCpp:
         if sum(len(s.text) + len(s.title) + (len(s.reply_preview.model_dump_json()) if s.reply_preview else 0) for s in request.sources) > 150_000:
             raise ProcessingError('Материал превышает лимит входа; текст не обрезан')
         body = dict(model=self.config.model, stream=False, response_format={'type': 'json_object', 'schema': result_type(request).model_json_schema()},
-                    temperature=0, max_tokens=4096, cache_prompt=False, reasoning_effort='none', messages=[
+                    **GENERATION_PARAMETERS, cache_prompt=False, messages=[
             dict(role='system', content=processing_instruction(request)),
             dict(role='user', content=request.model_dump_json())])
         async with self._client() as client:

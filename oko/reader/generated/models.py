@@ -3041,6 +3041,10 @@ class EffectiveSettingsValues(WireModel):
 
 class FilterResult(WireModel):
     model_config = ConfigDict(extra="forbid")
+    can_restore: StrictBool = Field(
+        default=True,
+        description="Whether the retained legacy filter can be overridden. False for the latest publication pipeline.",
+    )
     hidden: StrictBool
     provenance: Provenance
     reason: StrictStr

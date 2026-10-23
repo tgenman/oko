@@ -106,6 +106,7 @@ class EffectiveValues(WireModel):
     theses: Theses
 
 class Filter(WireModel):
+    can_restore: StrictBool = True
     model_config = ConfigDict(extra='forbid')
     error: StrictStr | None | MISSING = Field(default=MISSING, title='Error')
     hidden: StrictBool = Field(..., title='Hidden')

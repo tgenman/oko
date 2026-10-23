@@ -1,4 +1,7 @@
 """Individual local files: job ownership, durable acceptance and reader projection."""
+import asyncio
+from io import BufferedWriter
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 import json
@@ -13,6 +16,7 @@ from oko.storage.reading import reading_value
 from oko.storage import collection_jobs
 
 if TYPE_CHECKING:
+    from typing_extensions import Buffer
     from oko.storage.store import Job, Store
 
 
@@ -23,6 +27,18 @@ class MediaDownload:
     media: MediaReference
     temporary: Path
     final: Path
+
+
+class MediaOutput(BufferedWriter):
+    """Reject writes after the caller withdraws this download's admission."""
+    def __init__(self, path: Path, admitted: Callable[[], bool]) -> None:
+        super().__init__(path.open('wb',buffering=0))
+        self.admitted=admitted
+
+    def write(self, buffer: 'Buffer') -> int:
+        if not self.admitted():
+            raise asyncio.CancelledError
+        return super().write(buffer)
 
 
 class MediaFiles:

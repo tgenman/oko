@@ -1479,6 +1479,10 @@ export type FilterReadyState = {
 };
 
 export type FilterResult = {
+    /**
+     * Whether the retained legacy filter can be overridden. False for the latest publication pipeline.
+     */
+    can_restore?: boolean;
     hidden: boolean;
     provenance: Provenance;
     reason: string;
