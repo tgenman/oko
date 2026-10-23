@@ -21,6 +21,17 @@ def _encode(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
+def publication_reference(feed: str, identity: str, url: str) -> ExternalReference:
+    feed=normalized(feed)
+    if not identity:
+        raise ValueError('RSS publication identity must not be empty')
+    return ExternalReference(ExternalKey(Platform.rss,_encode([feed,identity])),url or feed)
+
+
+def legacy_cursor(feed: str, identities: list[str]) -> str:
+    return _encode(dict(feed=normalized(feed),keys=list(dict.fromkeys(identities)),position=len(set(identities)),done=True))
+
+
 class RSSAdapter:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.downloader = Downloader(transport)
@@ -121,7 +132,7 @@ class RSSAdapter:
     @staticmethod
     def _metadata(feed: str, entry: Entry) -> PublicationMetadata:
         pub=entry.publication
-        return PublicationMetadata(ExternalReference(ExternalKey(Platform.rss,_encode([feed,pub.id])),pub.url or feed),
+        return PublicationMetadata(publication_reference(feed,pub.id,pub.url),
             entry.title,datetime.fromtimestamp(pub.published,timezone.utc) if pub.published_known else None)
 
     @staticmethod

@@ -36,7 +36,7 @@ def split(store: 'Store', item: str, material: Material, directory: Path, report
         if target['complete'] and (old_text!=article.text or target['title']!=(article.title or '')):
             raise ValueError('Conflicting cached article snapshots: '+ref.url)
         selected=[resources[key] for key in article.resource_keys if key in resources]
-        media=tuple(MediaReference(resource.key,resource.source_url or '',resource.name,resource.mime) for resource in selected)
+        media=tuple(MediaReference(resource.key,resource.source_url or '','',resource.mime) for resource in selected)
         blocks: list[dict[str,Any]]=[dict(type='text',role='body',text=article.text)]
         blocks.extend(dict(type='media',role='attachment' if resource.kind in ('file','unsupported') else resource.kind,
                            ref={'$media':resource.key}) for resource in selected)

@@ -105,14 +105,15 @@ class Publications:
         store = self.store
         row = store.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
         binding = store.subscriptions.telegram.binding(feed)
-        if row and row['transport'] in ('rss','youtube'):
+        transport=row['transport'] or (row['kind'] if migrate_legacy else None) if row else None
+        if row and transport in ('rss','youtube'):
             # Existing legacy RSS rows are converted by the final offline migration.
             if not migrate_legacy and store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():
                 return
             from oko.collection.rss import normalized
             url=normalized(json.loads(row['original_urls'])[0])
             platform,external_id,adapter='rss',url,'rss_adapter'
-            if row['transport']=='youtube':
+            if transport=='youtube':
                 from oko.collection.youtube.adapter import feed_reference
                 ref=feed_reference(url)
                 platform,external_id,adapter='youtube',ref.key.external_id,'youtube_adapter'
@@ -120,11 +121,11 @@ class Publications:
             details=store.subscriptions.details.snapshot(feed)
             effective=store.subscriptions.effective('feed',feed)['effective']
             store.db.execute('''UPDATE feeds SET platform=?,external_id=?,url=?,description=?,created_at=?,
-                adapter=?,config='{}',interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
+                adapter=?,config='{}',interval_seconds=?,filter_config=?,summary_config=?,enabled=? WHERE id=?''',
                 (platform,external_id,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),adapter,
                  store.subscriptions.feed_refresh_minutes()*60,
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
-                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))
+                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),int(row['transport'] is not None),feed))
             return
         if row and binding and binding['kind']=='client' and json.loads(row['config']).get('source_kind')=='channel':
             if not migrate_legacy and store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():

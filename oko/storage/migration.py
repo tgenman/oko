@@ -65,12 +65,15 @@ def migrate_publications(source: Path, destination: Path) -> dict[str, Any]:
                 raise ValueError('Source changed while copying; migration rejected')
             _integrity(work/'backup')
             shutil.copytree(work/'backup', work/'storage')
+            from oko.storage.migration_preflight import jobs,inspect
+            report['interrupted_jobs']=jobs(str(work/'storage'/'state.sqlite'))
             store = Store(work/'storage', lambda _: None)
             try:
+                inspect(store,report)
                 _convert(store, report)
                 if not report['conflicts']:
                     with store.db:
-                        store.db.execute("INSERT INTO state VALUES ('publication-pipeline','telegram_web') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+                        store.db.execute("INSERT INTO state VALUES ('publication-pipeline','complete') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
                         old_identity = store.read_versions.identity
                         new_identity = str(uuid4())
                         store.db.execute('UPDATE reader_identity SET value=? WHERE id=1', (new_identity,))
@@ -95,6 +98,8 @@ def migrate_publications(source: Path, destination: Path) -> dict[str, Any]:
 
 
 def _convert(store: Store, report: dict[str, Any]) -> None:
+    from oko.storage.migrate_rss import convert as convert_rss
+    convert_rss(store,report)
     from oko.storage.migrate_youtube import convert
     convert(store,report)
     for feed in store.subscriptions.feeds():
