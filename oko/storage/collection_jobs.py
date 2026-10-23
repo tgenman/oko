@@ -9,7 +9,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 if TYPE_CHECKING:
     from oko.storage.store import Store, Job
 
-_TARGET = "(kind='download_media' OR (kind='fetch' AND item IN (SELECT id FROM items WHERE platform IS NOT NULL)))"
+_TARGET = "(kind='download_media' OR (kind IN ('fetch','filter','theses') AND item IN (SELECT id FROM items WHERE platform IS NOT NULL)))"
 
 
 def interrupt(store: 'Store', feeds: set[str] | None = None) -> None:

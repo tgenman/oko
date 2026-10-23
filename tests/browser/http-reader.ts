@@ -40,6 +40,6 @@ export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>
     }
     const page=await readyContext.newPage();
     t?.signal.throwIfAborted();
-    return {page,context:readyContext,api,origin,token,close,setMediaState:(state:'held'|'error'|'ready')=>fs.writeFile(path.join(data,'fixture-media-state'),state),updatePublication:(text:string)=>fs.writeFile(path.join(data,'fixture-publication.txt'),text),openReader:async()=>{await page.goto(origin+'/#token='+token);await expect.poll(async()=>{const state=await api('v3/status');return state.lifetime.kind==='explicit'||state.active_client_sessions>0;}).toBe(true);},restart:()=>servers.restart(scenario!.id)};
+    return {page,context:readyContext,api,origin,token,close,setProcessingState:(state:'ready'|'error')=>fs.writeFile(path.join(data,'fixture-model-state'),state),setMediaState:(state:'held'|'error'|'ready')=>fs.writeFile(path.join(data,'fixture-media-state'),state),updatePublication:(text:string)=>fs.writeFile(path.join(data,'fixture-publication.txt'),text),openReader:async()=>{await page.goto(origin+'/#token='+token);await expect.poll(async()=>{const state=await api('v3/status');return state.lifetime.kind==='explicit'||state.active_client_sessions>0;}).toBe(true);},restart:()=>servers.restart(scenario!.id)};
   } catch(error) {await close();throw error;}
 };

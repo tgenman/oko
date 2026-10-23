@@ -16898,6 +16898,10 @@ components:
       properties:
         hidden:
           type: boolean
+        can_restore:
+          type: boolean
+          default: true
+          description: Whether the retained legacy filter can be overridden. False for the latest publication pipeline.
         restored:
           type: boolean
         reason:

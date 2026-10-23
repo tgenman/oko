@@ -1,0 +1,35 @@
+import {test} from 'node:test';
+import {expect} from 'playwright/test';
+import {productionReader} from './http-reader';
+import {artifactPath} from './artifacts';
+
+test('latest publication keeps accepted theses after failed regeneration and hides Restore', {timeout:30000},async t=>{
+ const r=await productionReader(t,{publicationPipeline:true});
+ await r.setProcessingState('ready');
+ await r.updatePublication('Открылась библиотека. Реклама: купите курс.');
+ await r.api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
+ await r.api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'Убери рекламу.',telegram_http_rps:10});
+ await r.openReader();
+ await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
+ await expect.poll(async()=>{const cards=await r.api('cards');return cards.length===1&&cards[0].theses.result!==null;}).toBe(true);
+ await r.page.locator('[data-card]').click();
+ await expect(r.page.locator('#filter-status')).toContainText('Реклама');
+ await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
+ await expect(r.page.locator('#text')).toContainText('Открылась библиотека.');
+ const summary=r.page.locator('#theses');const accepted=await summary.textContent();
+ await r.setProcessingState('error');
+ await r.page.getByRole('button',{name:'Regenerate',exact:true}).click();
+ await expect.poll(async()=>{const cards=await r.api('cards');return cards[0].theses.attempt.state;}).toBe('waiting');
+ await expect(summary).toHaveText(accepted!);
+ await r.page.screenshot({path:artifactPath('publication-processing-failed-regeneration.png')});
+ await r.updatePublication('Реклама: купите курс.');
+ await r.setProcessingState('ready');
+ const cards=await r.api('cards');await r.api('materials/'+cards[0].id+'/retry','POST');
+ await expect(r.page.locator('[data-card]')).toHaveCount(0);
+ await r.page.getByRole('button',{name:'List Actions',exact:true}).click();await r.page.locator('#show-hidden').check();await r.page.getByRole('button',{name:'List Actions',exact:true}).click();
+ await expect(r.page.locator('[data-card]')).toHaveCount(1);await r.page.locator('[data-card]').click();
+ await expect(r.page.locator('#filter-status')).toContainText('Hidden');
+ await expect(r.page.locator('#text')).toContainText('Реклама: купите курс.');
+ await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
+ await r.page.screenshot({path:artifactPath('publication-processing-hidden.png')});
+});

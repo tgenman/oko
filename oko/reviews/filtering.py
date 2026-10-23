@@ -1,5 +1,6 @@
 """Durable filtered views; originals and media remain owned by Store."""
 from oko.storage import material_read
+from oko.reviews import publication_input
 from oko.storage.reading import reading_value, saved_document
 from oko.diagnostics import record_caught
 import hashlib
@@ -27,6 +28,8 @@ class Filters:
     def _signature(self, item: str, *, legacy: bool = False) -> str | None:
         store = self.store
         row = material_read.item(store.db, item)
+        if not legacy and row and row['platform'] is not None and row['content']!='{}':
+            return publication_input.signature(store,item,'filter')
         if not row or row['viewed'] or not row['complete'] or not store.path(item).is_file():
             return None
         try:
@@ -106,6 +109,12 @@ class Filters:
         if not signature:
             return dict(status='off', hidden=False, restored=False, reason='', removed=[])
         store = self.store
+        row=material_read.item(store.db,item)
+        if row and row['platform'] is not None and row['content']!='{}':
+            metadata=json.loads(row['processing_metadata']).get('filter',{})
+            if metadata.get('signature',metadata.get('input_hash'))==signature:
+                result=json.loads(row['filtered_content'])
+                return dict(status='done',can_restore=False,hidden=result.get('hidden',False),restored=False,reason=result['reason'],removed=[r['text'] for r in result['removed']],error=None)
         override = material_read.restored_version(store.db,item)
         restored = bool(override and override == store.content_version(item))
         row = material_read.jobs(store.db, item).get('filter')
@@ -130,8 +139,18 @@ class Filters:
             return None
         settings = store.subscriptions.effective('feed', material['feed_id'])
         values = settings['effective']
-        request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text'], reply_preview=material.get('reply_preview')),), settings_version=store.settings_version(material['feed_id']), prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
-        return request, signature, settings['feed']['public_ai']
+        public_ai=settings['feed']['public_ai']
+        version_settings=self.store.settings_version(material['feed_id'])
+        if self.store.publications.owns(job.item):
+            chosen=publication_input.settings(self.store,job.item)
+            values={key:dict(value=value) for key,value in chosen['values'].items()}
+            public_ai=chosen['public_ai']
+            record=material_read.item(self.store.db,job.item)
+            assert record is not None
+            metadata=json.loads(record['processing_metadata'])
+            version_settings=metadata.get('_pass',{}).get('settings_version',version_settings)
+        request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text'], reply_preview=material.get('reply_preview')),), settings_version=version_settings, prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
+        return request, signature, public_ai
 
     def save(self, job: 'Job', signature: str, result: FilterResult) -> None:
         store = self.store
@@ -141,7 +160,7 @@ class Filters:
 
     def restore(self, item: str) -> bool:
         store = self.store
-        if not store.material(item) or self.read(item)['status'] != 'done':
+        if store.publications.owns(item) or not store.material(item) or self.read(item)['status'] != 'done':
             return False
         with store.db:
             store.db.execute('INSERT INTO filter_restores VALUES (?,?) ON CONFLICT(item) DO UPDATE SET version=excluded.version', (item, store.content_version(item)))
@@ -149,6 +168,9 @@ class Filters:
         return True
 
     def retry(self, item: str) -> bool:
+        row=material_read.item(self.store.db,item)
+        if row and row['platform'] is not None and json.loads(row['processing_metadata']).get('filter',{}).get('reason')=='no_input':
+            return True
         if not self.signature(item):
             return False
         self.store.forget_execution('filter', item)

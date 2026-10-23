@@ -135,6 +135,8 @@ class Runtime:
         self._ai_transport = ai_transport
         self._ai: asyncio.Task[None] | None = None
         self._ai_sync = 0.0
+        self._filter_sync = 0.0
+        self._summary_sync = 0.0
         self._source_revision: int | None = None
         self._ai_stage = 'Проверка обработчика'
         self._root, self._source, self._clock, self._fault = root, source, clock, fault
@@ -781,6 +783,8 @@ class Runtime:
 
     async def restore_filter(self, item: str) -> None:
         async with self._actions:
+            if self.require_store().publications.owns(item):
+                raise ActionError('conflict','Восстановление фильтра недоступно; исходник сохранён',expected=True)
             if not self.require_store().filters.restore(item):
                 raise ActionError('missing', 'Обработанный материал недоступен')
             await self._cancel()
@@ -1329,6 +1333,12 @@ class Runtime:
                             self._store.read_sync.sync()
                             self._store.processing.sync()
                             self._ai_sync = now
+                        if now-self._filter_sync>=.5:
+                            self._store.processing.sync_stage('filter')
+                            self._filter_sync=now
+                        if now-self._summary_sync>=.5:
+                            self._store.processing.sync_stage('theses')
+                            self._summary_sync=now
                         if self._ai and self._ai.done():
                             await self._ai
                             self._ai = None

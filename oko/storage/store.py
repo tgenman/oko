@@ -449,7 +449,8 @@ class Store:
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=? AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL)"
         if ai_only:
-            query += " AND kind IN ('filter','theses')"
+            query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items i WHERE i.id=jobs.item AND i.platform IS NOT NULL
+                AND i.status!=CASE jobs.kind WHEN 'filter' THEN 'pending_filtering' ELSE 'pending_summary' END)"""
         elif deleting_only:
             query += " AND kind IN ('delete','feed-delete')"
         elif media_only:
@@ -716,7 +717,7 @@ class Store:
             self.finish(job)
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
-        if job.kind=='fetch' and self.publications.owns(job.item):
+        if job.kind in ('fetch','filter','theses') and self.publications.owns(job.item):
             with self.db:
                 collection_jobs.fail(self, job, issue or AdapterIssue(code or 'fetch-failed', error,
                     AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
@@ -936,8 +937,12 @@ class Store:
         else:
             raise ValueError('Unknown derivative')
         provenance = self.execution_provenance(job) if provenance == 'execution' else provenance
+        header=dict(signature=signature,result=result,provenance=provenance)
+        if self.publications.owns(job.item) and isinstance(provenance,dict):
+            header['execution']=provenance
+            header['provenance']={key:value for key,value in provenance.items() if key!='parameters'}
         with pending.open('w', encoding='utf-8') as output:
-            output.write(json.dumps(dict(signature=signature, result=result, provenance=provenance), ensure_ascii=False) + '\n\n' + text)
+            output.write(json.dumps(header, ensure_ascii=False) + '\n\n' + text)
             output.flush()
             os.fsync(output.fileno())
         os.replace(pending, destination)

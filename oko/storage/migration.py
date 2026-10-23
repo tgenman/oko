@@ -17,6 +17,7 @@ from uuid import uuid4
 from typing import Any
 
 from oko.storage.store import Store
+from oko.reviews import publication_input
 from oko.collection.adapters import AdapterException
 from oko.collection.telegram.adapter import publication_reference
 
@@ -135,7 +136,16 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                     results['theses'] = dict(file=accepted[1].read_text())
                 with store.db:
                     store.publications.publish(item, prepared, store.content_version(item))
-                    store.publications.results(item, results)
+                    for kind,value in results.items():
+                        # Result was validated against the legacy input above;
+                        # translate its signature for the same canonical text.
+                        header,text=value['file'].split('\n\n',1)
+                        saved=json.loads(header)
+                        saved['signature']=publication_input.signature(store,item,kind)
+                        value['file']=json.dumps(saved,ensure_ascii=False)+'\n\n'+text
+                        store.publications.results(item,{kind:value})
+                        table='filter_inputs' if kind=='filter' else 'thesis_inputs'
+                        store.db.execute('UPDATE '+table+' SET signature=? WHERE item=?',(saved['signature'],item))
                     store.publications.status(item)
                 mapping['results'] = list(results)
             else:

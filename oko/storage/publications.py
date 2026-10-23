@@ -4,6 +4,8 @@ Only feeds selected by the offline migration use this path. Other sources keep
 their current persistence until their own migration step.
 """
 from copy import deepcopy
+from datetime import datetime, timezone
+from oko.reviews import publication_input
 from dataclasses import dataclass
 import json
 import os
@@ -60,6 +62,7 @@ class Publications:
         db.executescript('''
         CREATE UNIQUE INDEX IF NOT EXISTS publication_external_key ON items(platform,external_id) WHERE platform IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS feed_external_key ON feeds(platform,external_id) WHERE platform IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS publication_stage ON items(status,id) WHERE platform IS NOT NULL AND viewed=0;
         CREATE TABLE IF NOT EXISTS feed_publications (
           feed_id TEXT REFERENCES feeds(id), publication_id TEXT REFERENCES items(id),
           PRIMARY KEY(feed_id,publication_id));
@@ -214,7 +217,7 @@ class Publications:
         store = self.store
         old = store.db.execute('SELECT content FROM items WHERE id=?', (item,)).fetchone()
         previous = json.loads(old['content'])
-        same = previous.get('extra', {}).get('_input_hash') == fingerprint
+        same = publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         content['extra']['_input_hash'] = fingerprint
         store.db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         for row in media:
@@ -226,6 +229,13 @@ class Publications:
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if not same:
             store.db.execute("UPDATE items SET filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id=?", (item,))
+        elif previous:
+            row=store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()
+            filtered=json.loads(row[0])
+            if filtered:
+                result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
+                refreshed=publication_input.filtered(content,item,result)
+                store.db.execute('UPDATE items SET filtered_content=? WHERE id=?',(json.dumps(refreshed,ensure_ascii=False),item))
         # Compatibility index points only to the current projection, never history.
         store.db.execute('DELETE FROM content_versions WHERE item=? AND number!=(SELECT number FROM content_current WHERE item=?)', (item, item))
 
@@ -268,17 +278,13 @@ class Publications:
             saved = json.loads(header)
             result = saved['result']
             operation = 'filter' if kind == 'filter' else 'summary'
-            metadata[operation] = dict(input_hash=saved['signature'], provenance=saved.get('provenance'))
+            origin=saved.get('execution',saved.get('provenance')) or {}
+            input_content=json.loads(self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()[0]) if operation=='summary' else content
+            metadata[operation] = dict(input_hash=publication_input.digest(publication_input.blocks(input_content or content)),signature=saved['signature'],
+                settings_hash=publication_input.digest(publication_input.settings(self.store,item)),
+                completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**origin)
             if kind == 'filter':
-                filtered = deepcopy(content)
-                removed = []
-                for fragment in result['removed']:
-                    for index, block in enumerate(filtered['blocks']):
-                        if block['type']=='text' and block['role']=='body' and fragment in block['text']:
-                            block['text'] = block['text'].replace(fragment, '')
-                            removed.append(dict(publication_id=item, block_index=index, text=fragment))
-                            break
-                filtered.update(reason=result['reason'], removed=removed)
+                filtered=publication_input.filtered(content,item,result)
                 self.store.db.execute('UPDATE items SET filtered_content=?,status=? WHERE id=?',
                     (json.dumps(filtered, ensure_ascii=False), 'filter_out' if result['hidden'] else 'pending_summary', item))
             else:
@@ -286,16 +292,54 @@ class Publications:
                 self.store.db.execute("UPDATE items SET summarized_content=?,status='ready' WHERE id=?", (json.dumps(summarized, ensure_ascii=False), item))
         self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?', (json.dumps(metadata, ensure_ascii=False), item))
 
+    def complete_empty(self, item: str, kind: str) -> None:
+        row=self.store.db.execute('SELECT * FROM items WHERE id=? AND platform IS NOT NULL AND viewed=0 AND complete=1',(item,)).fetchone()
+        if not row or row['content']=='{}':
+            return
+        content=json.loads(row['content'])
+        if any(block.get('text','').strip() for block in publication_input.blocks(content)):
+            return
+        header=content['extra'].get('_reader',{})
+        if header.get('source_manifest',{}).get('post_web_unavailable'):
+            return
+        signature=publication_input.signature(self.store,item,kind)
+        if signature is None:
+            return
+        operation='filter' if kind=='filter' else 'summary'
+        metadata=json.loads(row['processing_metadata'])
+        if metadata.get(operation,{}).get('signature')==signature:
+            with self.store.db:
+                self.store.db.execute("UPDATE jobs SET status='done',generation=generation+1,error=NULL,problem_code=NULL WHERE kind=? AND item=? AND status='pending'",(kind,item))
+            return
+        publication_input.snapshot(self.store,item,0)
+        result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
+        saved=dict(signature=signature,result=result,provenance=None)
+        with self.store.db:
+            self.results(item,{kind:dict(file=json.dumps(saved,ensure_ascii=False)+'\n\n')})
+            metadata=json.loads(self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()[0])
+            metadata[operation]['reason']='no_input'
+            self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
+            if kind=='filter':
+                filtered=json.loads(self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()[0])
+                filtered['blocks']=[]
+                self.store.db.execute('UPDATE items SET filtered_content=? WHERE id=?',(json.dumps(filtered,ensure_ascii=False),item))
+            self.store.db.execute("UPDATE jobs SET status='done',generation=generation+1,error=NULL,problem_code=NULL WHERE kind=? AND item=?",(kind,item))
+        self.recover(item)
+
     def status(self, item: str) -> None:
         row = self.store.db.execute('SELECT * FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone()
         if not row or row['content']=='{}':
             return
+        if publication_input.awaiting_input(json.loads(row['content'])):
+            self.store.db.execute("UPDATE items SET status='pending_collection' WHERE id=?",(item,))
+            return
         filtered = self.store.filters.read(item)
-        if filtered['status'] not in ('off', 'done'):
+        jobs={r['kind']:r['status'] for r in self.store.db.execute("SELECT kind,status FROM jobs WHERE item=? AND kind IN ('filter','theses')",(item,))}
+        if filtered['status'] not in ('off', 'done') or self.store.filters.signature(item) and jobs.get('filter') in ('pending','running'):
             status = 'pending_filtering'
         elif filtered['hidden']:
             status = 'filter_out'
-        elif self.store.processing.theses.signature(item) and self.store.processing.theses.read(item) is None:
+        elif self.store.processing.theses.signature(item) and (self.store.processing.theses.read(item) is None or jobs.get('theses') in ('pending','running')) and json.loads(row['processing_metadata']).get('summary',{}).get('reason')!='no_input':
             status = 'pending_summary'
         else:
             status = 'ready'
@@ -310,7 +354,11 @@ class Publications:
             ('filter', 'filter', 'filtered_content', self.store.filters.signature(item)),
             ('theses', 'summary', 'summarized_content', self.store.processing.theses.signature(item)),
         ):
-            if operation in metadata and metadata[operation]['input_hash'] != signature:
+            table='filter_inputs' if kind=='filter' else 'thesis_inputs'
+            previous=self.store.db.execute('SELECT signature FROM '+table+' WHERE item=?',(item,)).fetchone()
+            if previous and previous[0]!=signature:
+                self.store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL WHERE kind=? AND item=? AND status!='cancelled'",(kind,item))
+            if operation in metadata and metadata[operation].get('signature',metadata[operation].get('input_hash')) != signature:
                 metadata.pop(operation)
                 metadata.get('_legacy', {}).pop(kind, None)
                 self.store.db.execute(f"UPDATE items SET {column}='{{}}' WHERE id=?", (item,))

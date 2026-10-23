@@ -203,7 +203,8 @@ def test_migration_keeps_proven_results_and_edit_reprocesses_current_input(tmp_p
     with sqlite3.connect(target/'state.sqlite') as db:
         summarized, metadata = db.execute('SELECT summarized_content,processing_metadata FROM items WHERE id=?', (item,)).fetchone()
         assert json.loads(summarized)['points']
-        assert json.loads(metadata)['summary']['provenance']
+        assert json.loads(metadata)['summary']['processor']=='llamacpp'
+        assert json.loads(metadata)['summary']['model']=='local:latest'
     inputs = [json.loads(json.loads(r.content)['messages'][1]['content']) for r in calls if r.url.path == '/v1/chat/completions']
     assert inputs[-1]['sources'][0]['text'] == 'New input text'
 

@@ -1,5 +1,6 @@
 """Publication theses: current inputs, durable results and their reader state."""
 from oko.storage import material_read
+from oko.reviews import publication_input
 from oko.storage.reading import reading_value, saved_bytes, saved_document
 from oko.diagnostics import record_caught
 import hashlib
@@ -25,6 +26,8 @@ class PublicationTheses:
 
     def _signature(self, item: str, legacy: bool = False) -> str | None:
         row = material_read.item(self.store.db, item)
+        if not legacy and row and row['platform'] is not None and row['content']!='{}':
+            return publication_input.signature(self.store,item,'theses')
         if not row or row['viewed'] or not row['complete'] or not self.store.path(item).is_file():
             return None
         try:
@@ -116,21 +119,36 @@ class PublicationTheses:
             return None
         settings = self.store.subscriptions.effective('feed', material['feed_id'])
         values = settings['effective']
+        public_ai=settings['feed']['public_ai']
+        version_settings=self.store.settings_version(material['feed_id'])
+        if self.store.publications.owns(job.item):
+            chosen=publication_input.settings(self.store,job.item)
+            values={key:dict(value=value) for key,value in chosen['values'].items()}
+            public_ai=chosen['public_ai']
+            record=material_read.item(self.store.db,job.item)
+            assert record is not None
+            metadata=json.loads(record['processing_metadata'])
+            version_settings=metadata.get('_pass',{}).get('settings_version',version_settings)
         text = material['display_text']
         version = self.store.content_version(job.item)
         if settings['feed']['kind'] == 'youtube':
             text = material['text']
             version = hashlib.sha256(text.encode()).hexdigest()
-        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text, reply_preview=material.get('reply_preview')),), settings_version=self.store.settings_version(material['feed_id']), prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
-        return request, signature, settings['feed']['public_ai']
+        request = ProcessingRequest(sources=(InputSource(id=job.item, version=version, url=material['url'], title=material['title'], text=text, reply_preview=material.get('reply_preview')),), settings_version=version_settings, prompt=values['prompt_theses']['value'], processor=values['processor']['value'], generation=job.generation)
+        return request, signature, public_ai
 
     def retry(self, item: str) -> bool:
+        row=material_read.item(self.store.db,item)
+        if row and row['platform'] is not None and json.loads(row['processing_metadata']).get('summary',{}).get('reason')=='no_input':
+            return True
         if not self.store.material(item) or not self.signature(item):
             return False
         self.store.forget_execution('theses', item)
         with self.store.db:
             self._accepted(item, retain=True)
             self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
+            if self.store.publications.owns(item):
+                self.store.db.execute("UPDATE items SET status='pending_summary' WHERE id=?",(item,))
         return True
 
     @reading_value
@@ -141,6 +159,14 @@ class PublicationTheses:
         return dict(status=row['status'],error=row['error']) if row else dict(status='pending', error=None)
 
     def read(self, item: str) -> dict[str, Any] | None:
+        row=material_read.item(self.store.db,item)
+        if row and row['platform'] is not None and row['content']!='{}':
+            metadata=json.loads(row['processing_metadata']).get('summary',{})
+            if metadata.get('signature',metadata.get('input_hash'))==self.signature(item) and metadata:
+                value=json.loads(row['summarized_content'])
+                url=self.store.db.execute('SELECT url FROM items WHERE id=?',(item,)).fetchone()[0]
+                return dict(points=[dict(text=p['text'],sources=[dict(id=identity,url=url) for identity in p['source_publication_ids']]) for p in value['points']])
+            return None
         accepted = self._accepted(item)
         return accepted[0] if accepted else None
 
@@ -203,6 +229,12 @@ class PublicationTheses:
         return None
 
     def provenance(self, item: str) -> dict[str, Any] | None:
+        row=material_read.item(self.store.db,item)
+        if row and row['platform'] is not None and row['content']!='{}':
+            if self.read(item) is None:
+                return None
+            metadata=json.loads(row['processing_metadata']).get('summary',{})
+            return {key:metadata[key] for key in ('processor','model','reasoning_effort','fast') if key in metadata} or None
         accepted = self._accepted(item)
         return self.store.derivative_provenance(accepted[1], self.signature(item)) if accepted else None
 

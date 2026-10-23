@@ -125,11 +125,18 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
             return httpx.Response(200, text=page([(11, text+photo)]).replace('fixture/', 'lateststate/'))
         return response(request)
     models=model_transport([])
+    from tests.support.filters import transport as filter_transport
+    publication_models=filter_transport([],theses=True)
     async def delayed_model(request):
         if request.url.path=='/v1/chat/completions':
             await asyncio.sleep(processing_delay)
+            state=root/'fixture-model-state'
+            if state.is_file():
+                if state.read_text()=='error':
+                    return httpx.Response(503)
+                return await publication_models.handle_async_request(request)
         return await models.handle_async_request(request)
-    ai=httpx.MockTransport(delayed_model) if processing_delay else models
+    ai=httpx.MockTransport(delayed_model)
     return create_app(root, token=token, rss_enabled=collection, persistent=persistent, public_url=public_url,
                      rss_transport=httpx.MockTransport(external), telegram_client=BrowserTelegram(), ai_transport=ai, codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=NoCaptions(),
