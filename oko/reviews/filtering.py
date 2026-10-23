@@ -73,7 +73,7 @@ class Filters:
             if old and old[0] == signature and state:
                 filtered = self.read(item)
                 store.read_versions.sync_filter(item, bool(filtered['hidden']))
-                if state['status'] != 'done' or filtered.get('status') == 'done':
+                if state['status'] not in ('done','cancelled') or filtered.get('status') == 'done':
                     continue
             store.read_versions.sync_filter(item, False)
             (store.path(item).parent / 'filter.md').unlink(missing_ok=True)
@@ -142,13 +142,7 @@ class Filters:
         public_ai=settings['feed']['public_ai']
         version_settings=self.store.settings_version(material['feed_id'])
         if self.store.publications.owns(job.item):
-            chosen=publication_input.settings(self.store,job.item)
-            values={key:dict(value=value) for key,value in chosen['values'].items()}
-            public_ai=chosen['public_ai']
-            record=material_read.item(self.store.db,job.item)
-            assert record is not None
-            metadata=json.loads(record['processing_metadata'])
-            version_settings=metadata.get('_pass',{}).get('settings_version',version_settings)
+            values,public_ai,version_settings=publication_input.request_settings(self.store,job.item)
         request = ProcessingRequest(operation='filter', sources=(InputSource(id=job.item, version=store.content_version(job.item), url=material['url'], title=material['title'], text=material['text'], reply_preview=material.get('reply_preview')),), settings_version=version_settings, prompt=values['prompt_filters']['value'], processor=values['processor']['value'], generation=job.generation)
         return request, signature, public_ai
 
@@ -175,7 +169,7 @@ class Filters:
             return False
         self.store.forget_execution('filter', item)
         with self.store.db:
-            self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='filter' AND item=?", (item,))
+            self.store.db.execute("UPDATE jobs SET status='pending',next=0,retry_at=NULL,error=NULL,generation=generation+1 WHERE kind='filter' AND item=?", (item,))
         self.store.processing.sync()
         return True
 

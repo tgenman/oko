@@ -76,7 +76,7 @@ class PublicationTheses:
             if signature is None and old is None and (not state or state[0] == 'cancelled') and not (self.store.path(item).parent / 'theses.md').exists():
                 continue
             if old and old[0] == signature:
-                if state and (state[0] != 'done' or self.read(item) is not None):
+                if state and (state[0] not in ('done','cancelled') or self.read(item) is not None):
                     continue
             path = self.store.path(item).parent / 'theses.md'
             path.unlink(missing_ok=True)
@@ -122,13 +122,7 @@ class PublicationTheses:
         public_ai=settings['feed']['public_ai']
         version_settings=self.store.settings_version(material['feed_id'])
         if self.store.publications.owns(job.item):
-            chosen=publication_input.settings(self.store,job.item)
-            values={key:dict(value=value) for key,value in chosen['values'].items()}
-            public_ai=chosen['public_ai']
-            record=material_read.item(self.store.db,job.item)
-            assert record is not None
-            metadata=json.loads(record['processing_metadata'])
-            version_settings=metadata.get('_pass',{}).get('settings_version',version_settings)
+            values,public_ai,version_settings=publication_input.request_settings(self.store,job.item)
         text = material['display_text']
         version = self.store.content_version(job.item)
         if settings['feed']['kind'] == 'youtube':
@@ -145,8 +139,9 @@ class PublicationTheses:
             return False
         self.store.forget_execution('theses', item)
         with self.store.db:
-            self._accepted(item, retain=True)
-            self.store.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
+            if not self.store.publications.owns(item):
+                self._accepted(item, retain=True)
+            self.store.db.execute("UPDATE jobs SET status='pending',next=0,retry_at=NULL,error=NULL,generation=generation+1 WHERE kind='theses' AND item=?", (item,))
             if self.store.publications.owns(item):
                 self.store.db.execute("UPDATE items SET status='pending_summary' WHERE id=?",(item,))
         return True

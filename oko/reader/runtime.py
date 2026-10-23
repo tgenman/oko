@@ -31,6 +31,7 @@ from oko.processing.codex import Codex, CodexClient, LocalCodex, status as codex
 from oko.reviews.coordination import PreparedWork
 from oko.reader.telegram_http import TelegramHTTP
 from oko.reader.composition import FolderContents
+from oko.storage.media import MediaOutput
 from oko.storage.store import Job, Store
 from oko.collection.telegram.contracts import TelegramBinding, ClientReadBinding
 from oko.collection.telegram.web import WebTelegram
@@ -1277,7 +1278,7 @@ class Runtime:
         try:
             if adapter is None:
                 raise ValueError('Publication adapter unavailable')
-            with download.temporary.open('wb') as output:
+            with MediaOutput(download.temporary,lambda:self._store is current and self._live() and current.valid(job)) as output:
                 actual = await adapter.download_media(download.publication, download.media, output)
             async with self._actions:
                 if self._store is current and self._live() and current.valid(job):

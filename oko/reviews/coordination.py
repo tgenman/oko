@@ -143,11 +143,12 @@ class ProcessingCoordination:
         for item in items:
             # No suspension: changes made by this reconciliation are included
             # before removing its dirty marker. Interrupted passes retain it.
-            if not self.store.publications.owns(item):
+            with self.store.db:
+                canonical=self.store.publications.reconcile(item)
+            if not canonical:
                 self.store.filters.sync([item])
                 self.theses.sync([item])
             with self.store.db:
-                self.store.publications.reconcile(item)
                 self.store.db.execute('DELETE FROM processing_dirty WHERE item=?', (item,))
 
     def sync_stage(self, kind: Literal['filter','theses']) -> None:
@@ -199,7 +200,9 @@ class ProcessingCoordination:
 
     def _execution_choice(self, job: 'Job', signature: str, request: ProcessingRequest) -> ProcessingRequest:
         origin = self.store.saved_execution(job, signature)
-        if origin is None:
+        # Codex choices stay fixed for an interrupted pass. Local execution uses
+        # the configured endpoint/model for this attempt; record what is sent.
+        if origin is None or request.processor!='codex' and self.store.publications.owns(job.item):
             if request.processor == 'codex':
                 config = self.store.codex_config()
                 if config is None:

@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
+import {editSetting} from './settings-actions';
 
 test('latest publication keeps accepted theses after failed regeneration and hides Restore', {timeout:30000},async t=>{
  const r=await productionReader(t,{publicationPipeline:true});
@@ -16,11 +17,11 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await expect(r.page.locator('#filter-status')).toContainText('Реклама');
  await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
  await expect(r.page.locator('#text')).toContainText('Открылась библиотека.');
- const summary=r.page.locator('#theses');const accepted=await summary.textContent();
+ const summary=r.page.locator('#theses');await expect(summary).toContainText('Просмотрено удаляет текст.');const accepted=await summary.textContent();
  await r.setProcessingState('error');
  await r.page.getByRole('button',{name:'Regenerate',exact:true}).click();
  await expect.poll(async()=>{const cards=await r.api('cards');return cards[0].theses.attempt.state;}).toBe('waiting');
- await expect(summary).toHaveText(accepted!);
+ await expect(summary).toHaveText(accepted!);await summary.scrollIntoViewIfNeeded();
  await r.page.screenshot({path:artifactPath('publication-processing-failed-regeneration.png')});
  await r.updatePublication('Реклама: купите курс.');
  await r.setProcessingState('ready');
@@ -32,4 +33,13 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await expect(r.page.locator('#text')).toContainText('Реклама: купите курс.');
  await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
  await r.page.screenshot({path:artifactPath('publication-processing-hidden.png')});
+ await r.page.locator('#settings-open').click();await editSetting(r.page,'prompt_filters');
+ await r.page.locator('#setting-prompt_filters').fill('');await r.page.getByRole('button',{name:'Save',exact:true}).click();
+ await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
+ expect((await r.api('settings/oko/global')).effective.prompt_filters.value).toBe('');
+ await r.page.locator('#settings-close').click();
+ await expect.poll(async()=>{const values=await r.api('cards');return values[0]?.filter.attempt.state==='disabled'&&values[0].theses.result!==null;}).toBe(true);
+ await r.page.reload();await r.page.locator('[data-card]').click();
+ await expect(r.page.locator('#theses')).toContainText('Просмотрено удаляет текст.');
+ await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
 });

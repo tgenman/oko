@@ -667,7 +667,7 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
         client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
-        wait_for(client,lambda:'Статья ещё не сохранена' in client.get('/api/v3/materials/'+item).json()['content']['text'])
+        wait_for(client,lambda:any(a.get('error') for a in (client.get('/api/v3/materials/'+item).json()['content'].get('linked_content') or {}).get('articles',[])))
         with sqlite3.connect(root/'state.sqlite') as db:
             job=db.execute("SELECT status,retry_at,error FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()
         assert job[0]=='pending' and job[1]>time.time() and job[2]
@@ -678,3 +678,31 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
         with sqlite3.connect(root/'state.sqlite') as db:
             assert db.execute("SELECT status,retry_at FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()==(('failed' if 'Missing' in extra else 'done'),None)
     assert len(calls)>=2
+
+
+def test_manual_fetch_retry_is_immediate_after_restart_without_resetting_backoff(tmp_path):
+    import sqlite3
+    from oko.storage.store import Store
+    root=migrated_root(tmp_path)
+    def response(request):
+        if request.url.host=='api.telegra.ph':
+            return httpx.Response(503)
+        return httpx.Response(200,text=page([(11,'Useful post <a href="https://telegra.ph/Fixture">article</a>')]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        feed=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()['feed_id']
+        item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
+        def failed():
+            with sqlite3.connect(root/'state.sqlite') as db:
+                return db.execute("SELECT retry_delay FROM jobs WHERE kind='fetch' AND item=? AND status='pending' AND error IS NOT NULL",(item,)).fetchone()
+        delay=wait_for(client,failed)[0]
+    store=Store(root,lambda _:None)
+    assert store.retry_material(item)
+    store.db.close()
+    store=Store(root,lambda _:None)
+    try:
+        job=store.next_job(store.clock(),feeds=[feed],include_deletions=False)
+        assert job is not None and job.kind=='fetch' and job.item==item
+        assert store.db.execute('SELECT retry_delay FROM jobs WHERE id=?',(job.id,)).fetchone()[0]==delay
+    finally:
+        store.db.close()

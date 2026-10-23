@@ -422,7 +422,8 @@ class Store:
             status='pending',manual_once=0,next=CASE WHEN jobs.problem_code LIKE '%FloodWaitError'
                 OR (jobs.wait_scope IS NOT NULL AND jobs.retry_at>?) THEN jobs.next ELSE 0 END,
             error=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>? THEN jobs.error ELSE NULL END,
-            generation=jobs.generation+1""", (item,self.wall_clock(),self.wall_clock()))
+            retry_at=CASE WHEN jobs.problem_code LIKE '%FloodWaitError' OR (jobs.wait_scope IS NOT NULL AND jobs.retry_at>?) THEN jobs.retry_at ELSE NULL END,
+            generation=jobs.generation+1""", (item,self.wall_clock(),self.wall_clock(),self.wall_clock()))
 
     @reading_value
     def item_feed(self, item: str) -> str:

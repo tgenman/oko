@@ -53,7 +53,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
             return None
         if filtered['status']=='done':
             selected=blocks(json.loads(row['filtered_content']))
-    config=store.processor_config()
+    config=store.processor_config() if values['processor'].startswith('llamacpp') else None
     processor=dict(endpoint=config.endpoint,local_execution=config.local_execution) if config else None
     relevant=dict(prompt=values['prompt_filters' if kind=='filter' else 'prompt_theses'],processor=values['processor'],public_ai=rules['public_ai'],local=processor)
     return digest([row['title'],selected,relevant])
@@ -67,6 +67,15 @@ def snapshot(store: 'Store', item: str, generation: int) -> None:
         metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),settings_version=store.settings_version(rules['feed_id']),generation=generation)
         with store.db:
             store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
+
+
+def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool, int]:
+    chosen=settings(store,item)
+    record=material_read.item(store.db,item)
+    assert record is not None
+    metadata=json.loads(record['processing_metadata'])
+    version=metadata.get('_pass',{}).get('settings_version',store.settings_version(chosen['feed_id']))
+    return {key:dict(value=value) for key,value in chosen['values'].items()},chosen['public_ai'],version
 
 
 def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict[str, Any]:

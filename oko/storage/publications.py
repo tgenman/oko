@@ -150,6 +150,9 @@ class Publications:
     def prepare(self, item: str, material: Material, directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Prepare durable files outside the accepting transaction."""
         header, text = saved_document(directory/'original.md')
+        manifest=material.source_manifest
+        if manifest and manifest.articles and manifest.preview_fragment is None:
+            text='\n\n'.join(part for part in [str(manifest.post.get('text','')),*[article.text for article in manifest.articles if article.text is not None]] if part)
         blocks: list[dict[str, Any]] = [dict(type='text', role='body', text=text)]
         if material.description:
             blocks.append(dict(type='text', role='description', text=material.description))
@@ -345,10 +348,10 @@ class Publications:
             status = 'ready'
         self.store.db.execute('UPDATE items SET status=? WHERE id=?', (status, item))
 
-    def reconcile(self, item: str) -> None:
+    def reconcile(self, item: str) -> bool:
         row = self.store.db.execute('SELECT processing_metadata FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone()
         if row is None:
-            return
+            return False
         metadata = json.loads(row['processing_metadata'])
         for kind, operation, column, signature in (
             ('filter', 'filter', 'filtered_content', self.store.filters.signature(item)),
@@ -363,7 +366,9 @@ class Publications:
                 metadata.get('_legacy', {}).pop(kind, None)
                 self.store.db.execute(f"UPDATE items SET {column}='{{}}' WHERE id=?", (item,))
         self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?', (json.dumps(metadata, ensure_ascii=False), item))
+        self.store.read_versions.sync_filter(item,bool(self.store.filters.read(item)['hidden']))
         self.status(item)
+        return True
 
     def prune(self, item: str) -> None:
         directory = self.store.path(item).parent
