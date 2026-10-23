@@ -22,10 +22,14 @@ class ReadingConnection(sqlite3.Connection):
     close retains SQLite's rollback semantics.
     """
     reading_lists: bool | None = None
+    membership_feeds: set[str]
+    membership_folders: set[str]
 
     def flush_reading_lists(self) -> None:
         if not self.in_transaction:
             return
+        if getattr(self,'membership_feeds',None) or getattr(self,'membership_folders',None):
+            self.refresh_memberships()
         if self.reading_lists is None:
             self.reading_lists=any(row[1]=='pending' for row in self.execute('PRAGMA table_info(reader_lists)'))
         if not self.reading_lists:
@@ -36,6 +40,26 @@ class ReadingConnection(sqlite3.Connection):
             digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
             self.execute('UPDATE reader_lists SET version=version+?,changed=CASE WHEN ? THEN oko_reader_time() ELSE changed END,digest=?,pending=0 WHERE identity=?',
                          (int(digest!=previous),int(digest!=previous),digest,identity))
+
+    def refresh_memberships(self) -> None:
+        feeds: set[str]=getattr(self,'membership_feeds',set())
+        folders: set[str]=getattr(self,'membership_folders',set())
+        self.membership_feeds=set()
+        self.membership_folders=set()
+        for feed in feeds:
+            self.execute("""UPDATE reader_feed_counts SET
+                unviewed=(SELECT count(*) FROM reading_memberships m JOIN items i ON i.id=m.publication_id WHERE m.feed_id=feed AND i.viewed=0),
+                visible=(SELECT count(*) FROM reading_memberships m JOIN items i ON i.id=m.publication_id LEFT JOIN reader_visibility v ON v.item=i.id
+                    WHERE m.feed_id=feed AND i.viewed=0 AND coalesce(v.hidden,0)=0) WHERE feed=?""",(feed,))
+            row=self.execute('SELECT folder_id FROM feeds WHERE id=?',(feed,)).fetchone()
+            if row:
+                folders.add(row[0])
+            self.execute("UPDATE reader_lists SET pending=1 WHERE scope='all' OR (scope='feed' AND owner=?)",(feed,))
+        for folder in folders:
+            self.execute("""UPDATE reader_folder_counts SET visible=(SELECT count(DISTINCT i.id)
+                FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id JOIN items i ON i.id=m.publication_id
+                LEFT JOIN reader_visibility v ON v.item=i.id WHERE f.folder_id=folder AND i.viewed=0 AND coalesce(v.hidden,0)=0) WHERE folder=?""",(folder,))
+            self.execute("UPDATE reader_lists SET pending=1 WHERE scope='folder' AND owner=?",(folder,))
 
     def commit(self) -> None:
         try:
@@ -99,7 +123,7 @@ class ReaderVersions:
             self.db.execute('INSERT OR IGNORE INTO reader_visibility SELECT id,0 FROM items')
             self.db.execute('''INSERT INTO reader_feed_counts
                 SELECT f.id,count(i.id),coalesce(sum(CASE WHEN i.id IS NOT NULL AND coalesce(v.hidden,0)=0 THEN 1 ELSE 0 END),0)
-                FROM feeds f LEFT JOIN items i ON i.feed_id=f.id AND i.viewed=0
+                FROM feeds f LEFT JOIN reading_memberships m ON m.feed_id=f.id LEFT JOIN items i ON i.id=m.publication_id AND i.viewed=0
                 LEFT JOIN reader_visibility v ON v.item=i.id GROUP BY f.id
                 ON CONFLICT(feed) DO UPDATE SET unviewed=excluded.unviewed,visible=excluded.visible WHERE unviewed IS NOT excluded.unviewed OR visible IS NOT excluded.visible''')
             # SUM's synthetic LEFT JOIN row is not an actual publication.
@@ -112,9 +136,20 @@ class ReaderVersions:
                 ON CONFLICT(job) DO NOTHING''', (store.clock(),))
         self.identity = str(self.db.execute('SELECT value FROM reader_identity WHERE id=1').fetchone()[0])
         self._install()
+        with self.db:
+            self.db.membership_feeds={r[0] for r in self.db.execute('SELECT id FROM feeds')}
+            self.db.membership_folders={r[0] for r in self.db.execute('SELECT id FROM folders')}
+            self.db.refresh_memberships()
 
     @staticmethod
     def functions(db: sqlite3.Connection, clock: Callable[[], float], wall_clock: Callable[[], float]) -> None:
+        def mark(field: str, identity: str | None) -> None:
+            if identity is not None:
+                values: set[str]=getattr(db,field,set())
+                values.add(identity)
+                setattr(db,field,values)
+        db.create_function('oko_memberships_changed',1,lambda feed: mark('membership_feeds',feed))
+        db.create_function('oko_folder_memberships_changed',1,lambda folder: mark('membership_folders',folder))
         db.create_function('oko_reader_time', 0, wall_clock)
         db.create_function('oko_reader_clock', 0, clock)
         db.create_function('oko_reader_hash', 1, lambda value: hashlib.sha256(str(value).encode()).hexdigest(), deterministic=True)
@@ -153,7 +188,7 @@ class ReaderVersions:
         return f"""SELECT i.id FROM items i JOIN feeds f ON f.id=i.feed_id
             LEFT JOIN reader_visibility v ON v.item=i.id
             WHERE i.viewed=0 AND ({hidden}=1 OR coalesce(v.hidden,0)=0)
-              AND ({scope}='all' OR ({scope}='feed' AND i.feed_id={owner}) OR ({scope}='folder' AND f.folder_id={owner}))
+              AND EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND ({scope}='all' OR ({scope}='feed' AND m.feed_id={owner}) OR ({scope}='folder' AND owner_feed.folder_id={owner})))
             ORDER BY CASE WHEN {sort}='importance' THEN CASE f.importance WHEN 'high' THEN -2 WHEN 'elevated' THEN -1 ELSE 0 END ELSE 0 END,
               CASE WHEN {sort}!='importance' THEN NOT i.published_known ELSE 0 END,
               CASE WHEN {sort}='importance' THEN -i.published WHEN i.published_known=0 THEN 0 WHEN {sort}='oldest' THEN i.published ELSE -i.published END,
@@ -179,6 +214,23 @@ class ReaderVersions:
             self.db.execute('BEGIN IMMEDIATE')
             for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reader_v_%'").fetchall():
                 self.db.execute('DROP TRIGGER "' + row[0].replace('"','""') + '"')
+            if self.store.publications.active:
+                for event,alias in [('INSERT','NEW'),('DELETE','OLD')]:
+                    self._trigger('shared_'+event,event,'feed_publications',
+                        f'SELECT oko_memberships_changed({alias}.feed_id);'+self._bump('navigation',"'navigation'")+
+                        'INSERT OR IGNORE INTO processing_dirty VALUES ('+alias+'.publication_id);')
+                    self._trigger('membership_items_'+event,event,'items',f'SELECT oko_memberships_changed({alias}.feed_id);',alias+'.platform IS NOT NULL')
+                shared="SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id=NEW.id;"
+                self._trigger('membership_items_UPDATE','UPDATE','items',shared+
+                    'SELECT oko_memberships_changed(OLD.feed_id);SELECT oko_memberships_changed(NEW.feed_id);',
+                    'NEW.platform IS NOT NULL AND (NEW.viewed IS NOT OLD.viewed OR NEW.feed_id IS NOT OLD.feed_id OR NEW.published IS NOT OLD.published OR NEW.published_known IS NOT OLD.published_known OR NEW.source_order IS NOT OLD.source_order)')
+                self._trigger('membership_visibility','UPDATE','reader_visibility',
+                    'SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id=NEW.item;',
+                    'NEW.hidden IS NOT OLD.hidden')
+                self._trigger('membership_folder','UPDATE','feeds',
+                    '''SELECT oko_memberships_changed(NEW.id);SELECT oko_folder_memberships_changed(OLD.folder_id);
+                    SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id IN (SELECT id FROM items WHERE feed_id=NEW.id);''',
+                    'NEW.folder_id IS NOT OLD.folder_id OR NEW.importance IS NOT OLD.importance')
             self._trigger('counts', 'UPDATE', 'reader_feed_counts',
                 "UPDATE reader_folder_counts SET visible=visible+NEW.visible-OLD.visible WHERE folder=(SELECT folder_id FROM feeds WHERE id=NEW.feed);"
                 + self._feed_lists('NEW.feed'),

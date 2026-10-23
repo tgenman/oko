@@ -58,7 +58,10 @@ def test_pending_deletion_survives_process_death(tmp_path: Path):
                     break
                 time.sleep(.02)
             assert not (tmp_path / 'content' / item).exists()
-            assert all('Око: первый материал'.encode() not in p.read_bytes()
+            client.post('/api/v3/stop')
+        assert process.wait(timeout=5)==0
+        # Scan stable files after SQLite closes its transient rollback journal.
+        assert all('Око: первый материал'.encode() not in p.read_bytes()
                        for p in tmp_path.rglob('*') if p.is_file())
     finally:
         cleanup(process)

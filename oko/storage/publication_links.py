@@ -73,13 +73,22 @@ def notify_parents(store: 'Store', item: str) -> None:
 
 
 def prune(store: 'Store', candidates: set[str]) -> None:
-    for item in candidates:
-        if not feedless(store,item) or store.db.execute('SELECT 1 FROM publication_links WHERE target_publication_id=?',(item,)).fetchone():
-            continue
-        store.publications.forget(item)
+    if not candidates:
+        return
+    rows=store.db.execute("""WITH RECURSIVE needed(id) AS (
+        SELECT i.id FROM items i JOIN feed_publications f ON f.publication_id=i.id WHERE i.viewed=0
+        UNION SELECT l.target_publication_id FROM publication_links l JOIN needed n ON n.id=l.source_publication_id)
+        SELECT id FROM items WHERE platform IS NOT NULL AND viewed=0 AND id NOT IN (SELECT id FROM needed)""").fetchall()
+    for row in rows:
+        item=row['id']
+        store.publications.forget(item,prune=False)
         store.versions.forget(item)
+        store.filters.forget(item)
+        store.youtube.reset(item)
+        store.db.execute('DELETE FROM thesis_inputs WHERE item=?',(item,))
+        store.db.execute('DELETE FROM retained_theses WHERE item=?',(item,))
         store.db.execute('UPDATE items SET viewed=1,complete=0 WHERE id=?',(item,))
-        store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE item=? AND kind!='delete'",(item,))
+        store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'",(item,))
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0",(item,))
 
 

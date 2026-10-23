@@ -130,6 +130,9 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                         ref=native_reference(feed['telegram_peer'],min(members),feed.get('telegram_username'))
                     else:
                         ref=publication_reference(row['url'])
+                    from oko.storage.migrate_shared import merge
+                    if merge(store,item,ref,report):
+                        continue
                     store.publications.identify(item,ref)
             except (sqlite3.IntegrityError, ValueError, AdapterException) as error:
                 report['conflicts'].append(dict(publication_id=item, reason=str(error)))

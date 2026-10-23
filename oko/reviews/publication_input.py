@@ -74,7 +74,11 @@ def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) ->
 def live_settings(store: 'Store', item: str) -> dict[str, Any]:
     feed=store.item_feed(item)
     current=store.subscriptions.effective('feed',feed,details=False)
-    rules=dict(feed_id=feed,public_ai=current['feed']['public_ai'],importance=current['feed']['importance'],values={key:value['value'] for key,value in current['effective'].items() if key in ('prompt_filters','theses','prompt_theses','processor')})
+    allowed=current['feed']['public_ai']
+    for owner in store.db.execute('''SELECT DISTINCT m.feed_id FROM reading_memberships m WHERE m.publication_id=? OR m.publication_id IN
+            (SELECT target_publication_id FROM publication_links WHERE source_publication_id=?)''',(item,item)):
+        allowed=allowed and store.subscriptions.effective('feed',owner[0],details=False)['feed']['public_ai']
+    rules=dict(feed_id=feed,public_ai=allowed,importance=current['feed']['importance'],values={key:value['value'] for key,value in current['effective'].items() if key in ('prompt_filters','theses','prompt_theses','processor')})
     return rules
 
 
@@ -130,7 +134,7 @@ def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool, i
     assert record is not None
     metadata=json.loads(record['processing_metadata'])
     version=metadata.get('_pass',{}).get('settings_version',store.settings_version(chosen['feed_id']))
-    return {key:dict(value=value) for key,value in chosen['values'].items()},chosen['public_ai'],version
+    return {key:dict(value=value) for key,value in chosen['values'].items()},chosen['public_ai'] and live_settings(store,item)['public_ai'],version
 
 
 def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict[str, Any]:
