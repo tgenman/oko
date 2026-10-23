@@ -695,12 +695,12 @@ class Store:
                 row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
                 for feed in memberships[member]:
                     self.read_sync.eligible(feed,json.loads(row['members']),'viewed')
+                self.subscriptions.history.viewed(member)
                 if self.publications.owns(member):
                     self.db.execute('DELETE FROM feed_publications WHERE publication_id=?',(member,))
                     publication_links.prune(self,{member})
                     self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND viewed=0',(member,))
                     continue
-                self.subscriptions.history.viewed(member)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
                 self.db.execute('DELETE FROM retained_theses WHERE item=?', (member,))
                 self.filters.forget(member)
