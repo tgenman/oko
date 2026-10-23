@@ -62,18 +62,26 @@ def legacy(value: PublicationContent) -> Publication:
 
 
 class _Downloads(Downloader):
-    def __init__(self, adapter: TelegramWebAdapter, value: PublicationContent) -> None:
+    def __init__(self, adapter: TelegramWebAdapter, value: PublicationContent, previous: Material | None = None) -> None:
         super().__init__(adapter.transport)
         self.adapter, self.value = adapter, value
+        names = {r['key']:r['name'] for r in value.content['extra']['telegram']['manifest']['resources']}
+        if previous and previous.source_manifest:
+            names.update({r.key:r.name for r in previous.source_manifest.resources})
+        self.by_name = {names[r.key]:r for r in value.media}
 
     async def download(self, url: str, stage: DownloadStage, name: str) -> StagedPayload:
         if not stage.admitted():
             raise asyncio.CancelledError
-        media = next(item for item in self.value.media if item.locator == url and item.name == name)
+        media = self.by_name[name]
+        if media.locator != url:
+            raise ValueError('Legacy media locator does not match the adapter descriptor')
         target = stage.path / ('incoming-'+name)
         try:
             with target.open('wb') as output:
                 await self.adapter.download_media(self.value.metadata.reference, media, output)
+            if not target.stat().st_size:
+                raise SourceError('Пустое вложение')
             if not stage.admitted():
                 raise asyncio.CancelledError
             digest = hashlib.sha256()
@@ -178,7 +186,7 @@ class TelegramWebSource(TelegramSource):
         expected = tuple(ExpectedMedia(r.key, 'photo' if r.kind=='image' else
             'document' if r.kind=='file' else cast(Literal['photo', 'video', 'audio', 'document', 'unsupported'], r.kind), by_key[r.key].locator if r.key in by_key else None,
             r.name, r.mime, reason=r.reason, external=r.external) for r in manifest.resources)
-        collected = await _Downloads(api, value).collect(expected, manifest.resources, publication.teaser, stage)
+        collected = await _Downloads(api, value, publication.teaser).collect(expected, manifest.resources, publication.teaser, stage)
         partial = bool(collected.error and collected.error.code == 'media-unavailable'
                        and (teaser.text.strip() or collected.attachments))
         manifest = manifest.model_copy(update={'resources': collected.resources, 'download_partial': partial})

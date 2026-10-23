@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import secrets
-import re
 from uuid import UUID
 from typing import Any, TYPE_CHECKING
 
@@ -95,10 +94,7 @@ class MediaFiles:
 
     @staticmethod
     def projection_name(row: Any) -> str:
-        suffix = Path(row['name']).suffix.lower()
-        if not re.fullmatch(r'\.[a-z0-9]{1,8}', suffix):
-            suffix = {'image/jpeg':'.jpg','image/png':'.png','video/mp4':'.mp4','audio/mpeg':'.mp3'}.get(row['mime_type'],'.bin')
-        return 'media-'+str(UUID(row['id']).int)+suffix
+        return 'media-'+str(UUID(row['id']).int)+'.bin'
 
     def file(self, item: str, media: str) -> tuple[Path, str] | None:
         row = self.store.db.execute('''SELECT m.* FROM media_files m JOIN items i ON i.id=m.publication_id
@@ -156,7 +152,7 @@ class MediaFiles:
         store = self.store
         if not store.valid(job) or self.owner(job.item) != download.publication_id:
             return False
-        if actual.key != download.media.key or actual.name != download.media.name or actual.resource_identity != download.media.resource_identity:
+        if actual.key != download.media.key or actual.resource_identity != download.media.resource_identity:
             raise ValueError('Media adapter changed the resource identity')
         size = download.temporary.stat().st_size
         if actual.size_bytes is not None and actual.size_bytes != size:
@@ -166,6 +162,7 @@ class MediaFiles:
         download.final.parent.mkdir(parents=True, exist_ok=True)
         os.replace(download.temporary, download.final)
         store.versions._fsync(download.final.parent)
+        store.versions._fsync(download.final.parent.parent)
         store.fault('after_media_move')
         row = store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0', (download.publication_id,)).fetchone()
         if row is None:
@@ -174,14 +171,14 @@ class MediaFiles:
         media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (download.publication_id,))]
         for value in media:
             if value['id']==job.item:
-                value.update(status='ready',reason='',storage_key=str(download.final.relative_to(store.root)),size_bytes=size,
+                value.update(status='ready',reason='',name=actual.name,storage_key=str(download.final.relative_to(store.root)),size_bytes=size,
                              source_locator=actual.locator,mime_type=actual.mime_type)
         self.project_header(content, media)
         with store.db:
             if not store.valid(job) or self.owner(job.item) != download.publication_id:
                 return False
-            store.db.execute("""UPDATE media_files SET status='ready',reason='',storage_key=?,size_bytes=?,source_locator=?,mime_type=? WHERE id=?""",
-                (str(download.final.relative_to(store.root)),size,actual.locator,actual.mime_type,job.item))
+            store.db.execute("""UPDATE media_files SET status='ready',reason='',storage_key=?,size_bytes=?,source_locator=?,mime_type=?,name=? WHERE id=?""",
+                (str(download.final.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,job.item))
             store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),download.publication_id))
             store.finish(job)
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
@@ -194,6 +191,26 @@ class MediaFiles:
     def release(self, download: MediaDownload) -> None:
         self.active_paths.difference_update((download.temporary, download.final))
         download.temporary.unlink(missing_ok=True)
+
+    def cleanup(self) -> None:
+        """Runs under Runtime's file admission, outside a database transaction."""
+        root = self.store.root
+        referenced = {root/row[0] for row in self.store.db.execute("SELECT storage_key FROM media_files WHERE storage_key IS NOT NULL")}
+        for directory in (root/'media').iterdir():
+            if not directory.is_dir() or directory.is_symlink():
+                if directory not in self.active_paths and directory not in referenced:
+                    directory.unlink()
+                continue
+            for path in directory.iterdir():
+                if path.is_file() and path not in referenced and path not in self.active_paths:
+                    path.unlink()
+            if not any(directory.iterdir()) and not any(directory in path.parents for path in self.active_paths):
+                directory.rmdir()
+        staging = root/'staging'/'_media'
+        if staging.is_dir():
+            for path in staging.iterdir():
+                if path.is_file() and path not in self.active_paths:
+                    path.unlink()
 
     def failed(self, job: 'Job', issue: AdapterIssue) -> None:
         store = self.store

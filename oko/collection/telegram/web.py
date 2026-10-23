@@ -76,6 +76,13 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
         key = 'telegram-web:'+str(member)+':'+str(index)+':'+key_kind
         name = 'media-'+str(int(hashlib.sha256(key.encode()).hexdigest()[:16],16))+'.'+extension
         external = None
+        original_name = ''
+        if key_kind == 'document':
+            download = node if node.has_attr('download') else node.select_one('a[download]')
+            title = node.select_one('.tgme_widget_message_document_title')
+            original_name = str(download.get('download') or '') if download else ''
+            if not original_name and title:
+                original_name = title.get_text('',strip=True)
         if not url and kind in ('photo','video','audio','document'):
             label = node.select_one('.message_media_not_supported_label')
             duration = node.select_one('.message_video_duration')
@@ -93,9 +100,9 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
         elif kind == 'video':
             result.append(ExpectedMedia(key,'video',url,name,mime,reason=reason or None,external=external))
         elif kind == 'audio':
-            result.append(ExpectedMedia(key,'audio',url,name,mime,reason=reason or None,external=external))
+            result.append(ExpectedMedia(key,'audio',url,name,mime,reason=reason or None,external=external,original_name=original_name))
         elif kind == 'document':
-            result.append(ExpectedMedia(key,'document',url,name,mime,reason=reason or None,external=external))
+            result.append(ExpectedMedia(key,'document',url,name,mime,reason=reason or None,external=external,original_name=original_name))
         else:
             result.append(ExpectedMedia(key,'unsupported',None,name,mime,reason=reason or 'Неподдерживаемое вложение'))
     def background(node: Tag) -> str | None:

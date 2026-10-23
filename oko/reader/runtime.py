@@ -153,6 +153,7 @@ class Runtime:
         self._sources = self._collection.sources
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
+        self._last_media_cleanup = clock()
         self._completions: dict[str, tuple[tuple[str, str], FolderContents | None]] = {}
         self._feed_checks: dict[str, str] = {}
         self._stop_requested = asyncio.Event()
@@ -166,6 +167,7 @@ class Runtime:
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=self._wall_clock())
         self._viewed_ids: list[str] = []
         self._lanes: dict[str, asyncio.Task[None]] = {}
+        self._media_job: Job | None = None
         self._account_retry: dict[int, float] = {}
         self._restored_wait_feeds: set[str] = set()
         self._lane_feeds: dict[str, str] = {}
@@ -219,6 +221,8 @@ class Runtime:
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
             cancelled_feeds = {self._lane_feeds[lane] for lane in lanes if lane in self._lane_feeds}
             tasks = [self._lanes.pop(lane) for lane in lanes]
+            if 'media' in lanes:
+                self._media_job = None
             if self._ai and (feeds is None or self._ai_feed in feeds):
                 tasks.append(self._ai)
                 self._ai = None
@@ -231,19 +235,7 @@ class Runtime:
                         if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
                             self.diagnostics.capture(error, 'Завершение фоновой задачи')
                 else:
-                    self._detached.add(task)
-                    if task is ai_task:
-                        self._detached_ai.add(task)
-
-                    def completed(finished: asyncio.Task[None]) -> None:
-                        self._detached.discard(finished)
-                        self._detached_ai.discard(finished)
-                        if not finished.cancelled():
-                            error = finished.exception()
-                            if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
-                                self.diagnostics.capture(error, 'Завершение отсоединённой задачи')
-
-                    task.add_done_callback(completed)
+                    self._detach_task(task, ai=task is ai_task)
             if self._telegram_client:
                 if feeds is None or (tasks and not isinstance(self._telegram_client, LocalTelegram)):
                     await self._telegram_client.close()
@@ -254,6 +246,19 @@ class Runtime:
         finally:
             if feeds is None:
                 self._cancelling -= 1
+
+    def _detach_task(self, task: asyncio.Task[None], *, ai: bool = False) -> None:
+        self._detached.add(task)
+        if ai:
+            self._detached_ai.add(task)
+        def completed(finished: asyncio.Task[None]) -> None:
+            self._detached.discard(finished)
+            self._detached_ai.discard(finished)
+            if not finished.cancelled():
+                error = finished.exception()
+                if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
+                    self.diagnostics.capture(error, 'Завершение отсоединённой задачи')
+        task.add_done_callback(completed)
 
     def _sync_sources(self) -> None:
         if not self._store:
@@ -1317,6 +1322,9 @@ class Runtime:
                             self._stop_requested.set()
                             break
                     elif self._store:
+                        if now-self._last_media_cleanup>=3600:
+                            self._store.media.cleanup()
+                            self._last_media_cleanup=now
                         if now - self._ai_sync >= .5:
                             self._store.read_sync.sync()
                             self._store.processing.sync()
@@ -1337,9 +1345,17 @@ class Runtime:
                         state = self._store.status()
                         for lane in ('common', 'personal', 'collection', 'media'):
                             task = self._lanes.get(lane)
+                            if lane=='media' and task and not task.done() and self._media_job and not self._store.valid(self._media_job):
+                                task.cancel()
+                                self._detach_task(task)
+                                del self._lanes[lane]
+                                self._media_job = None
+                                task = None
                             if task and task.done():
                                 await task
                                 del self._lanes[lane]
+                                if lane=='media':
+                                    self._media_job = None
                             profile = self._store.subscriptions.telegram.profile(lane) if lane in ('personal','collection') else None
                             ready_at = self._account_retry.get(profile['user_id'], 0) if profile else 0
                             if lane in self._lanes or now < ready_at:
@@ -1348,6 +1364,8 @@ class Runtime:
                             job = self._store.next_job(now, deleting_only=state['deleting'] or not feeds,
                                                        feeds=feeds, include_deletions=lane == 'common', media_only=lane=='media')
                             if job:
+                                if lane=='media':
+                                    self._media_job = job
                                 self._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self._store.item_feed(job.item)
                                 self._lanes[lane] = asyncio.create_task(self._execute(job))
                 await asyncio.sleep(.02)

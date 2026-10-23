@@ -3,6 +3,7 @@ import asyncio
 import threading
 
 import httpx
+import pytest
 
 from oko.storage.migration import migrate_publications
 from tests.support.app import create_app
@@ -299,3 +300,174 @@ def test_refreshed_signature_keeps_the_media_id_and_existing_bytes(tmp_path):
         assert before==after
         assert client.get(after).content==b'unchanged'
         assert len(downloads)==1
+
+
+def test_a_real_empty_attachment_is_ready_with_size_zero(tmp_path):
+    import sqlite3
+    root=migrated_root(tmp_path)
+    def response(request):
+        if request.url.host=='cdn.example':
+            return httpx.Response(200,content=b'',headers={'content-type':'application/octet-stream'})
+        document='<a class="tgme_widget_message_document_wrap" download="empty.txt" href="https://cdn.example/empty.txt"><div class="tgme_widget_message_document_title">empty.txt</div></a>'
+        return httpx.Response(200,text=page([(11,'Empty attachment'+document)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=wait_for(client,lambda:(cards[0]['id'] if (cards:=client.get('/api/v3/cards').json()) else None))
+        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+        assert client.get(ready['content']['attachments'][0]['url']).content==b''
+        with sqlite3.connect(root/'state.sqlite') as db:
+            assert db.execute('SELECT name,size_bytes,status FROM media_files WHERE publication_id=?',(item,)).fetchone()==('empty.txt',0,'ready')
+
+
+@pytest.mark.parametrize('refresh',['retry','collect'])
+def test_replacement_starts_while_cancel_resistant_old_media_is_still_waiting(tmp_path,refresh):
+    root=migrated_root(tmp_path)
+    phase=['a']
+    old_started, old_release, old_finished = threading.Event(), threading.Event(), threading.Event()
+    async def response(request):
+        if request.url.host=='cdn.example':
+            if request.url.path=='/a.jpg':
+                old_started.set()
+                while not old_release.is_set():
+                    try:
+                        await asyncio.sleep(.01)
+                    except asyncio.CancelledError:
+                        pass
+                old_finished.set()
+            return httpx.Response(200,content=request.url.path.encode(),headers={'content-type':'image/jpeg'})
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+phase[0]+'.jpg\')"></a>'
+        return httpx.Response(200,text=page([(11,'Text '+phase[0]+photo)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+            assert old_started.wait(3)
+            item=client.get('/api/v3/cards').json()[0]['id']
+            phase[0]='b'
+            client.post('/api/v3/materials/'+item+'/retry' if refresh=='retry' else '/api/v3/collect')
+            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['text']=='Text b' and m['content']['attachments'] else None))
+            assert not old_finished.is_set()
+            url=ready['content']['attachments'][0]['url']
+            assert client.get(url).content==b'/b.jpg'
+            old_release.set()
+            assert old_finished.wait(3)
+            assert client.get(url).content==b'/b.jpg'
+        finally:
+            old_release.set()
+
+
+def test_periodic_cleanup_removes_orphans_but_keeps_an_active_download(tmp_path):
+    import time
+    root=migrated_root(tmp_path)
+    offset=[0.]
+    started,release=threading.Event(),threading.Event()
+    class Held(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'first-'
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(.01)
+            yield b'last'
+    def response(request):
+        if request.url.host=='cdn.example':
+            return httpx.Response(200,stream=Held(),headers={'content-type':'image/jpeg'})
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg\')"></a>'
+        return httpx.Response(200,text=page([(11,'Text before media'+photo)]))
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response),clock=lambda:time.monotonic()+offset[0])
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+            assert started.wait(3)
+            item=client.get('/api/v3/cards').json()[0]['id']
+            orphan=root/'media'/'unreferenced'/'file'
+            orphan.parent.mkdir(parents=True)
+            orphan.write_bytes(b'orphan')
+            abandoned=root/'staging'/'_media'/'abandoned'
+            abandoned.write_bytes(b'abandoned')
+            offset[0]+=3601
+            wait_for(client,lambda:not orphan.exists() and not abandoned.exists())
+            release.set()
+            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+            assert client.get(ready['content']['attachments'][0]['url']).content==b'first-last'
+        finally:
+            release.set()
+
+
+def test_cleanup_between_move_and_commit_keeps_the_admitted_final_file(tmp_path):
+    """Public Store file boundary: the critical interval is synchronous, not HTTP."""
+    from dataclasses import replace
+    from oko.storage.store import Store
+    root=migrated_root(tmp_path)
+    started,release=threading.Event(),threading.Event()
+    async def response(request):
+        if request.url.host=='cdn.example':
+            started.set()
+            await asyncio.Event().wait()
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg\')"></a>'
+        return httpx.Response(200,text=page([(11,'Text'+photo)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()
+        assert started.wait(3)
+        item=client.get('/api/v3/cards').json()[0]['id']
+    def fault(point):
+        if point=='after_media_move':
+            store.media.cleanup()
+    store=Store(root,fault)
+    try:
+        job=store.next_job(store.clock()+3600,feeds=[connected['feed_id']],media_only=True)
+        assert job is not None
+        download=store.media.begin(job)
+        assert download is not None
+        download.temporary.write_bytes(b'complete-file')
+        assert store.media.complete(job,download,replace(download.media,size_bytes=13))
+        stored=store.media.file(item,job.item)
+        assert stored is not None and stored[0].read_bytes()==b'complete-file'
+        store.media.release(download)
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize('point,committed',[('after_media_move',False),('before_media_commit',False),('after_media_commit',True)])
+def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_path,point,committed):
+    import sqlite3
+    from tests.support.processes import launch,connect,cleanup
+    root=migrated_root(tmp_path)
+    started=threading.Event()
+    async def held(request):
+        if request.url.host=='cdn.example':
+            started.set()
+            await asyncio.Event().wait()
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg\')"></a>'
+        return httpx.Response(200,text=page([(11,'Process text'+photo)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(held)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        assert started.wait(3)
+        item=client.get('/api/v3/cards').json()[0]['id']
+    with sqlite3.connect(root/'state.sqlite') as db:
+        media_id=db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)).fetchone()[0]
+    url='/api/v3/materials/'+item+'/media/'+media_id
+    process=launch(root,point,api_only=True,web_media=True)
+    try:
+        with connect(root,process) as client:
+            try:
+                client.post('/api/v3/materials/'+item+'/retry')
+            except httpx.TransportError:
+                pass
+        assert process.wait(timeout=5)==79
+    finally:
+        cleanup(process)
+    def available(request):
+        if request.url.host=='cdn.example':
+            return httpx.Response(200,content=b'process-media',headers={'content-type':'image/jpeg'})
+        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg\')"></a>'
+        return httpx.Response(200,text=page([(11,'Process text'+photo)]))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(available)),headers=HEADERS) as client:
+        assert client.get(url).status_code==(200 if committed else 404)
+        if not committed:
+            client.post('/api/v3/materials/'+item+'/retry')
+        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+        assert client.get(ready['content']['attachments'][0]['url']).content==b'process-media'

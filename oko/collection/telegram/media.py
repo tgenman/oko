@@ -148,7 +148,7 @@ class Downloader:
         except (ValueError,TimeoutError) as error:
             raise SourceError('Не удалось прочитать статью',code='article-unavailable') from error
 
-    async def write(self, url: str, output: BinaryIO, admitted: Callable[[], bool] = lambda: True) -> tuple[int, str]:
+    async def write(self, url: str, output: BinaryIO, admitted: Callable[[], bool] = lambda: True, *, allow_empty: bool = False) -> tuple[int, str]:
         """Validate and stream one resource; the caller owns its output file."""
         async with self.open(url) as response:
             if not admitted():
@@ -169,7 +169,7 @@ class Downloader:
                     raise MediaLimit()
                 output.write(part)
                 digest.update(part)
-            if not size:
+            if not size and not allow_empty:
                 raise SourceError('Пустое вложение')
             return size, digest.hexdigest()
 

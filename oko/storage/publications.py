@@ -170,7 +170,7 @@ class Publications:
             ref = references.get(key)
             same = bool(old and path.is_file() and old['storage_key'] and (self.store.root/old['storage_key']).is_file()
                         and self.store.versions.file_digest(path) == self.store.versions.file_digest(self.store.root/old['storage_key']))
-            if ref and ref.resource_identity and old and old['resource_identity'] == ref.resource_identity and old['name'] == ref.name:
+            if ref and ref.resource_identity and old and old['resource_identity'] == ref.resource_identity:
                 same = True
             identity = old['id'] if same and old else str(uuid4())
             storage_key = 'media/'+item+'/'+identity if path.is_file() else None
@@ -188,11 +188,12 @@ class Publications:
                     os.fsync(output.fileno())
                 os.replace(pending, destination)
                 self.store.versions._fsync(destination.parent)
+                self.store.versions._fsync(destination.parent.parent)
             attachment = attachments.get(name)
             kind = resource.kind if resource else attachment.kind if attachment else 'image'
             media.append(dict(id=identity, publication_id=item, resource_key=key,
                 source_locator=ref.locator if ref else old['source_locator'] if same and old else resource.source_url or '' if resource else '', name=ref.name if ref else old['name'] if old else name,
-                mime_type=resource.mime if resource else attachment.mime if attachment else None,
+                mime_type=ref.mime_type if ref else resource.mime if resource else attachment.mime if attachment else None,
                 size_bytes=path.stat().st_size if path.is_file() else ref.size_bytes if ref else None, storage_key=storage_key,
                 status='ready' if storage_key else 'pending_download' if ref else 'unavailable',
                 reason=old['reason'] if same and old and not storage_key else resource.reason or '' if resource else '', resource_identity=ref.resource_identity if ref else old['resource_identity'] if same and old else None))

@@ -94,7 +94,7 @@ def content(post: TelegramPublication) -> PublicationContent:
     issues = []
     for item, resource in zip(post.media, teaser.source_manifest.resources):
         if item.url:
-            media.append(MediaReference(item.id, item.url, item.name, item.mime, item.size, resource_identity(item.url)))
+            media.append(MediaReference(item.id, item.url, item.original_name, item.mime, item.size, resource_identity(item.url)))
             blocks.append(dict(type='media', ref={'$media': item.id}, role='attachment' if resource.kind=='file' else resource.kind))
         elif item.external:
             blocks.append(dict(type='external_media', kind=item.external.kind, url=item.external.source_url))
@@ -226,12 +226,13 @@ class TelegramWebAdapter:
                              output: BinaryIO) -> MediaReference:
         current = await self.fetch(publication)
         actual = next((item for item in current.media if item.key == media.key), None)
-        if actual is None or actual.name != media.name or resource_identity(actual.locator) != resource_identity(media.locator):
+        if actual is None or resource_identity(actual.locator) != resource_identity(media.locator):
             raise AdapterException(AdapterIssue('media_changed', 'Вложение изменилось',
                 AdapterErrorKind.media_changed, publication, media.key))
         try:
             async with asyncio.timeout(180):
-                size, _ = await Downloader(self.transport).write(actual.locator, output)
+                size, _ = await Downloader(self.transport).write(actual.locator, output,
+                    allow_empty=actual.mime_type is None or actual.mime_type.startswith(('application/','text/')))
         except SourceError as error:
             raise failure(error, publication, media.key, 'telegram:media:'+urlsplit(actual.locator).netloc) from error
         except TimeoutError as error:

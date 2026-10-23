@@ -210,7 +210,8 @@ class Versions:
             raise ValueError('unowned download staging')
         if payload.path.is_symlink() or payload.path.resolve().parent!=staging.path.resolve() or not payload.path.is_file():
             raise ValueError('unowned staged file')
-        if not 0<payload.size<=200*1024*1024 or payload.path.stat().st_size!=payload.size:
+        minimum = 0 if self.store.publications.owns(job.item) else 1
+        if not minimum<=payload.size<=200*1024*1024 or payload.path.stat().st_size!=payload.size:
             raise ValueError('staged file size')
         digest,size = hashlib.sha256(),0
         with payload.path.open('rb') as source, target.open('wb') as output:

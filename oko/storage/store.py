@@ -777,7 +777,7 @@ class Store:
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a.get('media_id',a['name'])}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[] if row['platform'] is not None else [f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
             base.update(saved_external(header, f'/api/v3/materials/{item}'))
-            base['loading'] = base['loading'] or self.media.loading(item)
+            base['loading'] = base['loading'] or row['platform'] is not None and self.media.loading(item)
             base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=saved_telegraph(header, f'/api/v3/materials/{item}'))
             return base
         except (OSError, ValueError, KeyError):
