@@ -17,7 +17,7 @@ enabled, adapter/config, cursor, interval_seconds и настройками эт
 Текущие папки, важность, настройки и разрешения остаются в прежних полях/таблицах.
 Новая модель использует уникальность `(platform, external_id)` и таблицы
 `feed_publications`, `publication_links`, `media_files`. Отдельной сущности обхода нет.
-Новые Publication/MediaFile получают UUID. Существующие ID при переносе сохраняются
+Новые Feed/Publication/MediaFile получают UUID. Существующие ID при переносе сохраняются
 и явно перечисляются в отчёте. Преобразование старых Telegram URL принадлежит
 адаптеру; Store не конструирует внешний ключ.
 

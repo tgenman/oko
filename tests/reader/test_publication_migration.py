@@ -325,7 +325,7 @@ def test_new_feed_on_migrated_storage_uses_uuid_identity(tmp_path):
             return httpx.Response(200, text=('<rss version="2.0"><channel><title>RSS</title><item><guid>entry</guid><title>RSS entry</title><link>https://example.org/article</link></item></channel></rss>'
                 if request.url.path == '/feed.xml' else '<article>Article text</article>'))
         return httpx.Response(200, text=page([(11, 'New feed')]))
-    options = dict(token='test', api_only=True, rss_transport=httpx.MockTransport(response))
+    options = dict(token='test', api_only=True, rss_enabled=True, rss_transport=httpx.MockTransport(response))
     with TestClient(create_app(source, **options), headers=HEADERS):
         pass
     assert migrate_publications(source, destination)['success']

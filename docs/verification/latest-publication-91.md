@@ -1,12 +1,13 @@
 # Проверка последнего состояния Publication (#91)
 
 База: c5e35d325b5c9735e4afd63c1574ebc63a6966cc, после слияния #90 / PR #99.
-Код: 441dbda62f7fb4938e1cf486f50ed45971216591, ветка codex/91-latest-publication.
+Основной код: 441dbda62f7fb4938e1cf486f50ed45971216591; дополнение UUID Feed:
+1bf8d53. Ветка codex/91-latest-publication.
 Использовались только временные SQLite/файлы и синтетические HTTP/модели.
 
 ## Проверенное поведение
 
-9 тестов tests/reader/test_publication_migration.py проходят:
+10 тестов tests/reader/test_publication_migration.py проходят:
 
 - Исходное хранилище не изменяется; backup совпадает по SHA-256 каждого файла,
   включая старые версии. Последний текст читается по прежнему HTTP.
@@ -21,6 +22,8 @@
 - Занятый instance.lock запрещает перенос без записи в исходник/назначение.
 - Недоступность целого Telegram-поста сохраняет прежний доступный текст.
 - Внешнее видео остаётся external_media в общем JSON, без фиктивного локального файла.
+- Новые Telegram/RSS Feed на перенесённом хранилище получают UUID. Telegram
+  использует новый путь, RSS продолжает прежний сбор и чтение статьи.
 
 После исправлений ревью затронутый набор: 44 Python-теста PASS
 (migration, Telegram web, post_unavailable, внешний API адаптера).
@@ -62,7 +65,16 @@ test_telegram_http_settings.py на 441dbda: 4 PASS, тест не ослабл�
 Команда `./scripts/check all --browser-workers 2 --compact`, exit 0,
 314.89 секунды. Все группы PASS: contracts, tooling-types, syntax, lint, types,
 browser-types, build, http, browser, diff, python-tests, entrypoint, tool-tests.
-После этого прогона менялась только документация.
+Объём: 789 Python, 162 tools, 9 HTTP; 328 браузерных сценариев PASS, 2 skipped.
+
+После полного прогона при итоговой сверке найден пропуск требования UUID для
+новых Feed. Исправлены только две точки создания Feed и добавлена проверка
+нового Telegram/RSS подключения на перенесённой копии. После этого: 10 migration
+HTTP PASS, 31 затронутый Python PASS до добавления RSS-проверки, mypy 93 PASS;
+повтор Playwright с UUID Feed PASS:
+`.scratch/check-runs/20261023T054323Z-925416e1/report.json`. RSS-проверка сначала
+не запустила источник из-за выключенного RSS в fixture; после явного rss_enabled
+сценарий выполнен. Полный набор после этой локальной правки не повторялся.
 
 ## Границы
 
