@@ -645,3 +645,36 @@ def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_
         missing[0]=False
         client.post('/api/v3/materials/'+item+'/retry')
         wait_for(client,lambda:client.get('/api/v3/status').json()['sources'][0]['state']=='ready')
+
+
+@pytest.mark.parametrize('extra', ['', '<iframe src="https://unsupported.example/embed"></iframe>', '<a href="https://telegra.ph/Missing">missing</a>'])
+def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extra):
+    import sqlite3
+    import time
+    root=migrated_root(tmp_path)
+    broken=[True]
+    calls=[]
+    def response(request):
+        if request.url.host=='api.telegra.ph':
+            if 'Missing' in str(request.url):
+                return httpx.Response(404)
+            calls.append(str(request.url))
+            return httpx.Response(503) if broken[0] else httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[{'tag':'p','children':['Recovered article']}]}})
+        return httpx.Response(200,text=page([(11,'Useful post '+extra+' <a href="https://telegra.ph/Fixture">article</a>')]))
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
+        wait_for(client,lambda:'Статья ещё не сохранена' in client.get('/api/v3/materials/'+item).json()['content']['text'])
+        with sqlite3.connect(root/'state.sqlite') as db:
+            job=db.execute("SELECT status,retry_at,error FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()
+        assert job[0]=='pending' and job[1]>time.time() and job[2]
+        assert 'Useful post' in client.get('/api/v3/materials/'+item).json()['content']['text']
+    broken[0]=False
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        wait_for(client,lambda:'Recovered article' in client.get('/api/v3/materials/'+item).json()['content']['text'])
+        with sqlite3.connect(root/'state.sqlite') as db:
+            assert db.execute("SELECT status,retry_at FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()==(('failed' if 'Missing' in extra else 'done'),None)
+    assert len(calls)>=2

@@ -9,7 +9,7 @@ import hashlib
 import json
 from typing import Any, Literal, cast
 
-from oko.collection.adapters import AdapterException, PublicationContent
+from oko.collection.adapters import AdapterException, AdapterErrorKind, PublicationContent
 from oko.collection.contracts import (
     DownloadStage, StagedPayload, SourceError, SourceManifest, Material,
     Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview, Attachment,
@@ -211,7 +211,12 @@ class TelegramWebSource(TelegramSource):
         if self.independent_media:
             # The canonical store saves descriptions and schedules each file.
             # Linked-article collection is separated in #94.
-            return FetchResult(replace(teaser, full=not value.media and not teaser.reason), self.observation())
+            # A failed file cannot stop retries of unfinished article metadata.
+            issues = [issue for issue in value.issues if issue.media_key is None and issue.kind!=AdapterErrorKind.notice]
+            priority = {AdapterErrorKind.source_wait:3,AdapterErrorKind.temporary:2}
+            issue = max(issues,key=lambda issue:(priority.get(issue.kind,1),issue.retry_at.timestamp() if issue.retry_at else 0),default=None)
+            partial_error = source_error(AdapterException(issue)) if issue else None
+            return FetchResult(replace(teaser, full=not value.media and not teaser.reason,collection_error=partial_error), self.observation())
         manifest = teaser.source_manifest
         assert manifest
         if manifest.post_web_unavailable and str(manifest.post['text']).strip():

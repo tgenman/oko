@@ -3,7 +3,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey,
 from datetime import datetime, timezone
 from oko.collection.telegram.reading import saved_telegraph
 from oko.storage.collection_status import CollectionStatus
-from oko.storage import material_read
+from oko.storage import material_read, collection_jobs
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
@@ -130,6 +130,7 @@ class Store:
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_active ON jobs(status,kind,item) WHERE status IN ('pending','running') OR error IS NOT NULL")
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_problems ON jobs(kind,item) WHERE problem_code IS NOT NULL OR error IS NOT NULL")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.publications = Publications(self)
         self.media = MediaFiles(self)
@@ -143,11 +144,11 @@ class Store:
         for name in ('content', 'staging'):
             (root / name).mkdir(exist_ok=True)
         with self.db:
-            self.media.interrupt()
+            collection_jobs.interrupt(self)
             self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
             self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
             self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
-        self.media.recover_jobs()
+        collection_jobs.recover(self)
         self.versions = Versions(self)
         self.publications.recover()
         self.versions.recover()
@@ -604,6 +605,9 @@ class Store:
         if not error:
             self.db.execute('DELETE FROM source_deleted WHERE item=?', (job.item,))
             self.finish(job)
+        elif self.publications.owns(job.item):
+            collection_jobs.fail(self,job,error.adapter_issue or AdapterIssue(error.code or 'fetch-failed',error.label,
+                AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent))
         elif isinstance(error, SourceDeleted):
             self._record_fetch_removal(job, error.label)
         else:
@@ -713,8 +717,9 @@ class Store:
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind=='fetch' and self.publications.owns(job.item):
-            self.media.failed(job, issue or AdapterIssue(code or 'fetch-failed', error,
-                AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
+            with self.db:
+                collection_jobs.fail(self, job, issue or AdapterIssue(code or 'fetch-failed', error,
+                    AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
             return
         with self.db:
             if job.kind == 'fetch':
@@ -739,7 +744,7 @@ class Store:
             selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})) OR item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.feed_id IN ({placeholders})))"
             params = (*feeds, *feeds, *feeds)
         with self.db:
-            self.media.interrupt(feeds)
+            collection_jobs.interrupt(self,feeds)
             self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
             self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
 
