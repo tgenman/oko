@@ -144,6 +144,7 @@ class ProcessingCoordination:
             self.store.filters.sync([item])
             self.theses.sync([item])
             with self.store.db:
+                self.store.publications.reconcile(item)
                 self.store.db.execute('DELETE FROM processing_dirty WHERE item=?', (item,))
 
     def retry_failed(self, feed: str) -> None:

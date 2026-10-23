@@ -173,7 +173,7 @@ class TelegramAccess:
             duplicates = self.conflicts(claims, info.get('peer'))
             if duplicates:
                 raise TelegramConflict('duplicate_source', self.duplicates(duplicates), 'Источник уже подключён')
-            identity = secrets.token_urlsafe(24)
+            identity = subscriptions.new_feed_id(secrets.token_urlsafe(24))
             folder_id = subscriptions.ensure_folder(folder)
             profile = self.profile(binding['role']) if binding['kind'] == 'client' else None
             self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,

@@ -10,13 +10,13 @@ import * as path from 'node:path';
 import * as servers from './server-process.ts';
 import assert from 'node:assert/strict';
 
-export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>, options: {persistent?:boolean;hostname?:'oko';library?:{perFeed:26|100;active:boolean};collection?:boolean;processingDelay?:number}={}) {
+export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>, options: {persistent?:boolean;hostname?:'oko';library?:{perFeed:26|100;active:boolean};collection?:boolean;processingDelay?:number;publicationPipeline?:boolean}={}) {
   const data=await fs.mkdtemp(path.join(os.tmpdir(),'oko-history-http-'));
   const token=randomBytes(24).toString('base64url');
   let context: BrowserContext | undefined, scenario: Awaited<ReturnType<typeof servers.start>> | undefined, cleanup: Promise<void> | undefined;
   // Independent startup runs in parallel; cleanup waits for both owners,
   // including resources created after an abort or the other startup failing.
-  const started=Promise.resolve().then(()=>options.library ? servers.prepare(data,options.library.perFeed,options.library.active) : undefined).then(()=>servers.start(data,token,options.persistent,options.hostname,{collection:options.collection,processingDelay:options.processingDelay})).then(value=>{scenario=value;return value;});
+  const started=Promise.resolve().then(()=>options.library ? servers.prepare(data,options.library.perFeed,options.library.active) : options.publicationPipeline ? servers.preparePublications(data) : undefined).then(()=>servers.start(data,token,options.persistent,options.hostname,{collection:options.collection,processingDelay:options.processingDelay})).then(value=>{scenario=value;return value;});
   const contextStarted=newContext().then(value=>{context=value;return value;});
   const close=()=>cleanup ??= (async()=>{
     t?.signal.removeEventListener('abort',abort);
@@ -40,6 +40,6 @@ export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>
     }
     const page=await readyContext.newPage();
     t?.signal.throwIfAborted();
-    return {page,context:readyContext,api,origin,token,close,openReader:async()=>{await page.goto(origin+'/#token='+token);await expect.poll(async()=>{const state=await api('v3/status');return state.lifetime.kind==='explicit'||state.active_client_sessions>0;}).toBe(true);},restart:()=>servers.restart(scenario!.id)};
+    return {page,context:readyContext,api,origin,token,close,updatePublication:(text:string)=>fs.writeFile(path.join(data,'fixture-publication.txt'),text),openReader:async()=>{await page.goto(origin+'/#token='+token);await expect.poll(async()=>{const state=await api('v3/status');return state.lifetime.kind==='explicit'||state.active_client_sessions>0;}).toBe(true);},restart:()=>servers.restart(scenario!.id)};
   } catch(error) {await close();throw error;}
 };

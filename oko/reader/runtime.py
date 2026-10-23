@@ -262,6 +262,7 @@ class Runtime:
             return
         settings = []
         feeds = self._store.subscriptions.feeds()
+        self._store.publications.sync_feeds([feed['id'] for feed in feeds])
         for feed in feeds:
             if feed['id'] == self._source_feed and self._source:
                 continue

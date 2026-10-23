@@ -36,6 +36,16 @@ def username(feed: ExternalReference) -> str:
     return parts[0].lower()
 
 
+def publication_reference(url: str) -> ExternalReference:
+    """Resolve legacy public links without inventing a Telegram numeric peer ID."""
+    parsed = urlsplit(url)
+    name = username(reference(url))
+    message = parsed.path.rstrip('/').rsplit('/', 1)[-1]
+    if not message.isascii() or not message.isdecimal() or int(message) <= 0:
+        raise AdapterException(AdapterIssue('invalid_reference', 'Неверный адрес публикации Telegram', AdapterErrorKind.permanent))
+    return reference('https://t.me/'+name+'/'+str(int(message)))
+
+
 def failure(error: SourceError, publication: ExternalReference | None = None,
             media_key: str | None = None, scope: str = 'telegram:html') -> AdapterException:
     kind = AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent
