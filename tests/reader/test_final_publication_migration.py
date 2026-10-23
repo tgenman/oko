@@ -216,12 +216,13 @@ def test_disabled_rss_does_not_retry_linked_article_after_restart(tmp_path):
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['transport'] is None
 
 
-def test_unknown_pending_job_blocks_migration_without_publishing_partial_storage(tmp_path):
+@pytest.mark.parametrize('status',['pending','failed','unavailable'])
+def test_unknown_pending_job_blocks_migration_without_publishing_partial_storage(tmp_path,status):
     from oko.storage.store import Store
     source=tmp_path/'legacy'
     store=Store(source,lambda _:None)
     with store.db:
-        store.db.execute("INSERT INTO jobs(kind,item) VALUES ('unknown-old-stage','orphan')")
+        store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('unknown-old-stage','orphan',?)",(status,))
     store.db.close()
     report=migrate_publications(source,tmp_path/'converted')
     assert not report['success']

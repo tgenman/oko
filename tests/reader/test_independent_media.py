@@ -591,6 +591,7 @@ def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
             broken[0]=False
             release.set()
             client.post('/api/v3/materials/'+item+'/retry')
+            wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
             ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
             assert client.get(ready['content']['attachments'][0]['url']).content==b'article-image'
         finally:
