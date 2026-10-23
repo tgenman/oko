@@ -40,11 +40,11 @@ def test_reading_and_explicit_completion_receipts(tmp_path):
 
 def test_reading_errors_are_typed_and_queries_strict(tmp_path):
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
-        for path in ['/api/v3/cards?show_hidden=1', '/api/v3/cards?sort=bad', '/api/v3/cards?feed=', '/api/v3/cards?sort=newest&sort=oldest', '/api/v3/cards?extra=true', '/api/v3/materials/a/versions/01', '/api/v3/materials/a/versions/1e3']:
+        for path in ['/api/v3/cards?show_hidden=1', '/api/v3/cards?sort=bad', '/api/v3/cards?feed=', '/api/v3/cards?sort=newest&sort=oldest', '/api/v3/cards?extra=true']:
             response = client.get(path)
             assert response.status_code == 422, (path, response.text)
             assert response.json()['code'] == 'request_invalid'
-        for suffix in ['viewed', 'retry', 'regenerate', 'theses/retry', 'filter/retry', 'filter/restore']:
+        for suffix in ['viewed', 'retry', 'regenerate', 'theses/retry', 'filter/retry']:
             key = suffix.replace('/', '-')
             response = client.post('/api/v3/materials/missing/' + suffix, headers={'X-Oko-Action':key})
             assert response.status_code == 404, response.text
@@ -85,13 +85,9 @@ def test_versions_all_media_and_receipt_survive_until_explicit_viewed(tmp_path):
         assert response.status_code == 200, response.text
         current = wait_for(client, lambda: (v if (v := client.get(f'/api/v3/materials/{item}').json())['content']['text'] == 'Text 2' else None))
         content = current['content']
-        assert content['changed'] and len(content['previous_versions']) == 1
-        previous = client.get(content['previous_versions'][0]['url']).json()
-        assert previous['text'] == 'Text 1'
-        assert previous['revision_id'] == first['revision_id']
-        assert previous['number'] == first['version']
+        assert content['changed'] and content['previous_versions']==[]
         urls = []
-        for material in [content, previous]:
+        for material in [content]:
             assert [a['kind'] for a in material['attachments']] == ['image','video','audio','circle','file']
             urls += material['images'] + [a['url'] for a in material['attachments']]
         for url in urls:
@@ -151,8 +147,8 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
         assert len(client.get('/api/v3/cards').json()) == 2
         assert client.get('/api/v3/reading-composition').json()['count'] == 2
         assert hidden['filter']['result']['provenance']['kind'] == 'local'
-        assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore', headers={'X-Oko-Action':'restore-hidden'}).status_code == 200
-        assert len(client.get('/api/v3/cards').json()) == 3
+        assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore', headers={'X-Oko-Action':'restore-hidden'}).status_code == 404
+        assert len(client.get('/api/v3/cards').json()) == 2
         client.patch('/api/v3/settings/oko/global', json={'theses':True})
         item = next(c['id'] for c in cards if not c['filter']['result']['hidden'])
         path = '/api/v3/materials/' + item
@@ -169,7 +165,7 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
         assert preview['publications_count'] == 3
         assert client.post(f'/api/v3/folders/{folder}/completion', json={'token':preview['token']}).status_code == 200
         assert client.get('/api/v3/cards?show_hidden=true').json() == []
-        assert client.get('/api/v3/commands/restore-hidden').json()['outcome'] == 'succeeded'
+        assert client.get('/api/v3/commands/restore-hidden').json()['outcome']=='unknown'
 
 
 def test_waiting_reasons_and_previous_theses_during_failed_regeneration(tmp_path):

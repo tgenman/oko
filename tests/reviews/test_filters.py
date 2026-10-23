@@ -26,14 +26,14 @@ def test_hidden_ads_and_clean_view_preserve_original_and_restore_same_version(tm
         assert material['content']['display_text'] == 'Открылась библиотека. '
         assert material['content']['text'] == 'Открылась библиотека. Реклама: купите курс.'
         assert sum(f['count'] for f in client.get('/api/v3/folders').json()) == 2
-        assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore').status_code == 200
+        assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore').status_code == 404
         client.patch('/api/v3/settings/oko/global', json={'prompt_filters': 'Ещё раз убирай рекламу.'})
         wait_for(client, lambda: all(c['filter']['attempt']['state'] == 'ready' for c in client.get('/api/v3/cards').json()))
-        assert len(client.get('/api/v3/cards').json()) == 3
-        assert client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
+        assert len(client.get('/api/v3/cards').json()) == 2
+        assert not client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert len(client.get('/api/v3/cards').json()) == 3
-        assert client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
+        assert len(client.get('/api/v3/cards').json()) == 2
+        assert not client.get('/api/v3/materials/' + hidden['id']).json()['filter']['result']['restored']
         client.post('/api/v3/materials/' + hidden['id'] + '/viewed')
         assert client.get('/api/v3/materials/' + hidden['id']).status_code == 404
         assert not (tmp_path / 'content' / hidden['id']).exists()
@@ -120,9 +120,9 @@ def test_filter_missing_file_retries_without_losing_user_correction(tmp_path):
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         presence(client, 'reader')
         result = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['filter']['attempt']['state'] == 'ready' else None))
-        assert result['filter']['result']['restored']
-        assert not result['filter']['result']['hidden']
-        assert len(client.get('/api/v3/cards').json()) == 3
+        assert not result['filter']['result']['restored']
+        assert result['filter']['result']['hidden']
+        assert len(client.get('/api/v3/cards').json()) == 2
 
 
 def test_restore_applies_only_to_original_version_and_media_survive_filter(tmp_path):

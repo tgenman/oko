@@ -51,8 +51,8 @@ class Telegram:
         pass
 
 
-def connect(client, peer='@fixture', folder='Новости'):
-    response = connect_request(client, json=dict(account='fixture', peer=peer, folder=folder, auto_read=False, initial_history={'mode':'count','count':20}))
+def connect(client, peer='@fixture', folder='Новости', *, count=20):
+    response = connect_request(client, json=dict(account='fixture', peer=peer, folder=folder, auto_read=False, initial_history={'mode':'count','count':count}))
     assert response.status_code == 200, response.json()
     feed_id = response.json()['feed_id']
     return next(feed for feed in client.get('/api/v3/subscriptions').json()['feeds'] if feed['id'] == feed_id)

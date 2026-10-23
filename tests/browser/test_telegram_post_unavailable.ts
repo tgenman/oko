@@ -55,17 +55,3 @@ test('late unavailable Telegram post cannot replace another opened material',asy
   await expect(r.page.locator('#text')).toHaveText('Текст A');
  }finally{await r.close();}
 });
-
-test('previous restricted post shows its own card without changing current text',async()=>{
- const r=await reader();
- try{
-  await r.start([material('N',{url:'https://t.me/fixture/11',previous:[{number:1,url:'/api/v3/materials/N/versions/1'}]})]);
-  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/N/versions/1',{body:{number:1,revision_id:'old-post',title:'Пост доступен только в Telegram',text:'',reply_preview:null,images:[],attachments:[],external_attachments:[],post_web_unavailable:true,completeness:{state:'incomplete',reason:'post_web_unavailable',message:''}}}));
-  await r.page.getByRole('button',{name:/^N ·/}).click();
-  await expect(r.page.locator('#text')).toHaveText('Текст N');
-  await r.page.getByText('Version 1',{exact:true}).click();
-  await expect(r.page.locator('#versions .post-web-card')).toContainText('Telegram не предоставляет содержимое');
-  await expect(r.page.locator('#post-web-unavailable')).toHaveCount(0);
-  await expect(r.page.locator('#text')).toHaveText('Текст N');
- }finally{await r.close();}
-});

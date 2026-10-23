@@ -77,8 +77,7 @@ def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(t
         second = wait_for(client,lambda: m if (m:=client.get(url).json())['theses']['result'] and m['theses']['result']['points'][0]['text']=='Summary CONTEXT_TWO' else None)
         assert second['content']['revision_id'] != first['content']['revision_id']
         assert len(calls) == count+2
-        old = second['content']['previous_versions'][0]
-        assert client.get(old['url']).json()['reply_preview']['text'] == 'CONTEXT_ONE'
+        assert second['content']['previous_versions']==[]
         count = len(calls)
         client.post(url+'/retry')
         wait_for(client,lambda: not client.get(url).json()['content']['loading'])
@@ -188,6 +187,4 @@ def test_legacy_copy_can_be_processed_offline_then_reloaded_without_losing_histo
         client.post(url+'/retry')
         fixed=wait_for(client,lambda: m if (m:=client.get(url).json())['content']['reply_preview'] else None)
         assert fixed['content']['text']=='Own text'
-        assert fixed['content']['previous_versions']
-        previous=client.get(fixed['content']['previous_versions'][0]['url']).json()
-        assert previous['reply_preview'] is None and previous['text']==original['content']['text']
+        assert fixed['content']['previous_versions']==[]

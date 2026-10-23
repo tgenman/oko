@@ -65,12 +65,19 @@ def migrate_publications(source: Path, destination: Path) -> dict[str, Any]:
                 raise ValueError('Source changed while copying; migration rejected')
             _integrity(work/'backup')
             shutil.copytree(work/'backup', work/'storage')
-            from oko.storage.migration_preflight import jobs,inspect
+            from oko.storage.migration_preflight import jobs,inspect,results
             report['interrupted_jobs']=jobs(str(work/'storage'/'state.sqlite'))
+            previous_results=results(str(work/'storage'/'state.sqlite'))
             store = Store(work/'storage', lambda _: None)
             try:
                 inspect(store,report)
                 _convert(store, report)
+                _remove_viewed(store,report)
+                for item,operations in previous_results.items():
+                    row=store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
+                    current=set(json.loads(row[0])) if row else set()
+                    for operation in operations-current:
+                        report['unportable'].append(dict(publication_id=item,reason='Unverified '+operation+' result removed; reprocessing required'))
                 if not report['conflicts']:
                     with store.db:
                         store.db.execute("INSERT INTO state VALUES ('publication-pipeline','complete') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
@@ -100,7 +107,13 @@ def migrate_publications(source: Path, destination: Path) -> dict[str, Any]:
 def _convert(store: Store, report: dict[str, Any]) -> None:
     # Already converted state is authoritative; do not round-trip it through legacy files.
     for row in store.db.execute('SELECT * FROM items WHERE platform IS NOT NULL AND viewed=0').fetchall():
-        metadata=json.loads(row['processing_metadata'])
+        old_metadata=json.loads(row['processing_metadata'])
+        with store.db:
+            store.publications.reconcile(row['id'])
+        metadata=json.loads(store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(row['id'],)).fetchone()[0])
+        for name in ('filter','summary'):
+            if name in old_metadata and name not in metadata:
+                report['unportable'].append(dict(publication_id=row['id'],reason='Unverified '+name+' result removed; reprocessing required'))
         metadata.pop('_legacy',None)
         with store.db:
             store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),row['id']))
@@ -223,6 +236,32 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                 with store.db:
                     store.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1", (item,))
             report['publications'].append(mapping)
+
+
+def _remove_viewed(store: Store, report: dict[str,Any]) -> None:
+    """No tombstones in converted feeds; the backup retains the old history."""
+    report['removed_viewed']=[]
+    rows=store.db.execute("""SELECT i.* FROM items i LEFT JOIN feeds f ON f.id=i.feed_id
+        WHERE i.viewed=1 AND (i.platform IS NOT NULL OR f.adapter IS NOT NULL)""").fetchall()
+    for row in rows:
+        item=row['id']
+        if store.db.execute('SELECT 1 FROM publication_links l JOIN items i ON i.id=l.source_publication_id WHERE l.target_publication_id=? AND i.viewed=0',(item,)).fetchone():
+            report['conflicts'].append(dict(publication_id=item,reason='Viewed publication is still required by a live dependency'))
+            continue
+        media=[r[0] for r in store.db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,))]
+        with store.db:
+            store.publications.forget(item,prune=False)
+            store.versions.forget(item)
+            store.filters.forget(item)
+            for table in ('thesis_inputs','retained_theses','processing_dirty'):
+                store.db.execute('DELETE FROM '+table+' WHERE item=?',(item,))
+            for identity in [item,*media]:
+                store.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)',(identity,))
+                store.db.execute('DELETE FROM jobs WHERE item=?',(identity,))
+            store.db.execute('DELETE FROM items WHERE id=?',(item,))
+        for parent in ('content','staging','media'):
+            shutil.rmtree(store.root/parent/item,ignore_errors=True)
+        report['removed_viewed'].append(item)
 
 
 def main() -> None:

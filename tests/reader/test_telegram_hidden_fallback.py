@@ -79,4 +79,4 @@ def test_removing_a_real_unsupported_iframe_is_still_an_author_edit(tmp_path):
         content = client.get(path).json()['content']
         assert content['completeness']['state'] == 'complete'
         assert content['changed'] is True
-        assert len(content['previous_versions']) == 1
+        assert len(content['previous_versions']) == 0

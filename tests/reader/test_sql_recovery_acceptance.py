@@ -48,7 +48,7 @@ def test_existing_library_migrates_without_losing_work_or_content(tmp_path):
             material=current.json()
             assert material['content']['text']=='Persistent replacement text'
             assert material['content']['revision_id']==revision
-            assert len(material['content']['previous_versions'])==1
+            assert len(material['content']['previous_versions'])==0
             assert material['originals'] is False
             frame=client.get('/api/v3/reading/materials/'+identity).json()
             if storage_id:assert frame['storage_id']==storage_id

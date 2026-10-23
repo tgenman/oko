@@ -30,19 +30,16 @@ def test_rss_edit_keeps_previous_media_and_viewed_identity_never_returns(tmp_pat
         client.post('/api/v3/collect')
         current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == 'Версия 2' else None)
         assert current['content']['changed'] is True
-        previous = client.get(current['content']['previous_versions'][0]['url']).json()
-        assert previous['text'] == 'Версия 1'
-        assert client.get(previous['images'][0]).content == PNG + b'1'
+        assert current['content']['previous_versions']==[]
         assert client.get(current['content']['images'][0]).content == PNG + b'2'
         client.post('/api/v3/collect')
         wait_for(client, lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
-        assert len(client.get('/api/v3/materials/' + item).json()['content']['previous_versions']) == 1
+        assert len(client.get('/api/v3/materials/' + item).json()['content']['previous_versions']) == 0
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Версия 2'
         presence(client, 'test')
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get(previous['images'][0]).status_code == 404
-        assert client.get(current['content']['previous_versions'][0]['url']).status_code == 404
+        assert client.get(current['content']['images'][0]).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         revision[0] = 3
         client.post('/api/v3/collect')
@@ -105,8 +102,8 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
         source.text = 'Третья версия после восстановления'
         presence(client, 'test')
         current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
-        assert len(current['content']['previous_versions']) == 1
-        assert client.get(current['content']['previous_versions'][0]['url']).json()['text'] == 'Первая версия'
+        assert len(current['content']['previous_versions']) == 0
+        assert current['content']['previous_versions']==[]
         client.post('/api/v3/materials/' + item + '/viewed')
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
@@ -136,19 +133,18 @@ def test_explicit_telegram_reload_checks_known_ids_including_media_only_edits_an
         client.post('/api/v3/materials/' + item + '/retry')
         edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == '' else None)
         assert client.get(edited['content']['attachments'][0]['url']).content == b'edited-image'
-        previous = client.get(edited['content']['previous_versions'][0]['url']).json()
-        assert previous['text'] == 'Текст до правки'
-        assert client.get(previous['attachments'][0]['url']).content == b'first-image'
+        assert edited['content']['previous_versions']==[]
+        previous_revision=edited['content']['revision_id']
         source.data = b'media-only-edit'
         client.post('/api/v3/materials/' + item + '/retry')
-        edited = wait_for(client, lambda: m if len((m := client.get('/api/v3/materials/' + item).json())['content'].get('previous_versions', [])) == 2 else None)
+        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content']['revision_id']!=previous_revision else None)
         assert client.get(edited['content']['attachments'][0]['url']).content == b'media-only-edit'
         source.missing = True
         client.post('/api/v3/materials/' + item + '/retry')
         wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['content']['source_deleted'])
         assert client.get(edited['content']['attachments'][0]['url']).content == b'media-only-edit'
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get(previous['attachments'][0]['url']).status_code == 404
+        assert client.get(edited['content']['attachments'][0]['url']).status_code == 404
 
 
 def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path):
@@ -221,7 +217,6 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
         clock[0] += 11  # Manual refresh now retries captions, respecting the source interval.
         client.post('/api/v3/collect')
         material = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json()).get('title') == title[0] else None)
-        assert client.get(material['content']['previous_versions'][0]['url']).json()['title'] == 'О границах модели'
         present[0] = False
         client.post('/api/v3/collect')
         time.sleep(.1)
@@ -306,8 +301,7 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
         client.post('/api/v3/materials/' + item + '/retry')
         edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
         assert edited['content']['changed'] is True and (edited['content']['completeness']['state']=='complete') is True
-        assert len(edited['content']['previous_versions']) == 1
-        assert client.get(edited['content']['previous_versions'][0]['url']).json()['text'] == 'Неизменный пост'
+        assert len(edited['content']['previous_versions']) == 0
 
 
 def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_path):

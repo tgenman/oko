@@ -53,9 +53,7 @@ test('YouTube date selection explains that RSS does not provide the full archive
     await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa');
     await r.page.locator('#rss-check').click();
-    await r.page.locator('#rss-history-mode').selectOption('date');
-    await expect(r.page.locator('#rss-history-warning')).toContainText('Date-based history is limited to the available RSS window');
-    await r.page.locator('#rss-history-mode').selectOption('count');
+    await expect(r.page.locator('#rss-history-mode')).toHaveCount(0);
     await expect(r.page.locator('#rss-history-warning')).toContainText('excluding Shorts');
     await expect(r.page.locator('#rss-history-warning')).not.toContainText('Date-based history');
   } finally {await r.close();}

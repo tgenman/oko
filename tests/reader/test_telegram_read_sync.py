@@ -97,7 +97,7 @@ def test_old_history_blocks_until_separate_permission_and_external_reads_do_not_
     network.history.insert(0, dict(id=5, date=time.time()-7*86400, text='До импорта', group=None, media=None))
     with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
         presence(client, 'test')
-        feed = connect(client)
+        feed = connect(client,count=2)
         assert feed['read_history'] is False
         cards = settled(client, 2)
         later = next(c for c in cards if [int(identity) for identity in c['source']['message_ids']] == [29])['id']
@@ -263,7 +263,7 @@ def test_large_initial_history_is_confirmed_in_verified_pages(tmp_path):
     network.history.append(dict(id=999, date=time.time()-60, text='Новая публикация', group=None, media=None))
     with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
         presence(client, 'test')
-        feed = connect(client)
+        feed = connect(client,count=1)
         settled(client)
         client.patch('/api/v3/feeds/' + feed['id'], json={'auto_read': True, 'read_history': True})
         wait_for(client, lambda s: any(r.get('confirmed') == '999' for r in s['telegram_reads']))
@@ -307,7 +307,7 @@ def test_complete_early_post_is_auto_confirmed_before_loading_later_post(tmp_pat
     try:
         with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
             presence(client, 'test')
-            response = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=True, initial_history={'mode':'date','date':str(date.today()-timedelta(days=1)),'timezone':'UTC'}))
+            response = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=True, initial_history={'mode':'count','count':1}))
             assert response.status_code == 200
             wait_for(client, lambda state: network.acks == [11])
             network.history.append(later)

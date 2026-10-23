@@ -104,7 +104,8 @@ def test_old_initial_items_excluded_and_ambiguous_guids_not_hidden(tmp_path: Pat
     def response(request):
         return httpx.Response(200, text=feed_xml if request.url.path == '/feed' else '<article>Текст</article>')
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
-        import_feed(client)
+        from tests.support.subscriptions import add_source
+        add_source(client,'https://source.test/feed',count=2)
         presence(client, 'test')
         cards = wait_cards(client, 2)
         assert {c['source_url'] for c in cards} == {'https://source.test/a', 'https://source.test/b'}

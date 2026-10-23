@@ -1,7 +1,6 @@
-"""Latest Publication in SQLite; old reader files are a disposable projection.
+"""Latest Publication and results in SQLite; files belong to MediaFile.
 
-Only feeds selected by the offline migration use this path. Other sources keep
-their current persistence until their own migration step.
+New and migrated stores use this path; Telegram groups keep legacy persistence.
 """
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -90,7 +89,8 @@ class Publications:
         (store.root/'media').mkdir(exist_ok=True)
 
     def owns(self, item: str) -> bool:
-        return self.store.db.execute('SELECT 1 FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone() is not None
+        row=material_read.item(self.store.db,item)
+        return row is not None and row['platform'] is not None
 
     def feed(self, feed: str) -> bool:
         return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','telegram_client_adapter','rss_adapter','youtube_adapter')", (feed,)).fetchone() is not None
@@ -352,8 +352,8 @@ class Publications:
             self.prune(row['id'])
 
     def provenance(self, item: str, kind: str) -> dict[str,Any] | None:
-        row=self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
-        metadata=json.loads(row[0]).get('filter' if kind=='filter' else 'summary',{}) if row else {}
+        row=material_read.item(self.store.db,item)
+        metadata=json.loads(row['processing_metadata']).get('filter' if kind=='filter' else 'summary',{}) if row else {}
         return {key:metadata[key] for key in ('processor','model','reasoning_effort','fast') if key in metadata} or None
 
     def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
@@ -363,7 +363,7 @@ class Publications:
         metadata=json.loads(row[0])
         metadata.pop('_legacy',None)
         operation='filter' if kind=='filter' else 'summary'
-        input_content=json.loads(self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()[0]) if kind=='theses' else content
+        input_content=publication_input.selected_content(self.store,item,kind)
         metadata[operation]=dict(input_hash=publication_input.digest(publication_input.blocks(input_content or content)),signature=signature,
             settings_hash=publication_input.digest(publication_input.settings(self.store,item)),
             completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**(origin or {}))

@@ -16,8 +16,23 @@ def jobs(path: str) -> list[dict[str,Any]]:
         db.close()
 
 
+def results(path: str) -> dict[str,set[str]]:
+    db=sqlite3.connect(path)
+    try:
+        columns={r[1] for r in db.execute('PRAGMA table_info(items)')}
+        if 'processing_metadata' not in columns:
+            return {}
+        return {r[0]:set(json.loads(r[1])) & {'filter','summary'} for r in db.execute("SELECT id,processing_metadata FROM items WHERE platform IS NOT NULL AND viewed=0")}
+    finally:
+        db.close()
+
+
 def inspect(store: 'Store', report: dict[str,Any]) -> None:
     report['history_boundaries']=[]
+    known={'discover','fetch','download_media','filter','theses','delete','feed-delete','read'}
+    for row in store.db.execute("SELECT kind,item,status FROM jobs WHERE status IN ('pending','running','waiting')"):
+        if row['kind'] not in known:
+            report['conflicts'].append(dict(job_kind=row['kind'],item=row['item'],reason='Unknown unfinished job; resolve with the previous release before migration'))
     for feed in store.subscriptions.feeds():
         binding=store.subscriptions.telegram.binding(feed['id'])
         config=json.loads(store.db.execute('SELECT config FROM feeds WHERE id=?',(feed['id'],)).fetchone()[0])

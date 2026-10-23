@@ -153,15 +153,6 @@ class Filters:
             return
         store.save_derivative(job, signature, result.model_dump(), result.reason)
 
-    def restore(self, item: str) -> bool:
-        store = self.store
-        if store.publications.owns(item) or not store.material(item) or self.read(item)['status'] != 'done':
-            return False
-        with store.db:
-            store.db.execute('INSERT INTO filter_restores VALUES (?,?) ON CONFLICT(item) DO UPDATE SET version=excluded.version', (item, store.content_version(item)))
-        store.processing.sync()
-        return True
-
     def retry(self, item: str) -> bool:
         row=material_read.item(self.store.db,item)
         if row and row['platform'] is not None and json.loads(row['processing_metadata']).get('filter',{}).get('reason')=='no_input':

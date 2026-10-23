@@ -188,3 +188,83 @@ def test_cli_requires_offline_copy_before_opening_populated_legacy_store(tmp_pat
         assert hashlib.sha256((tmp_path/'state.sqlite').read_bytes()).hexdigest()==before
     finally:
         cleanup(process)
+
+
+def test_disabled_rss_does_not_retry_linked_article_after_restart(tmp_path):
+    from tests.reader.test_independent_media import migrated_root
+    import time
+    root=migrated_root(tmp_path)
+    calls=[]
+    def response(request):
+        if request.url.path=='/feed':
+            return httpx.Response(200,text='<rss><channel><item><guid>entry</guid><title>Title</title><link>https://web.test/article</link><description>Announcement</description></item></channel></rss>')
+        calls.append(str(request.url))
+        return httpx.Response(503)
+    options=dict(token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
+        feed=add_sources(client,[('https://source.test/feed','RSS','Inbox')]).json()['feeds'][0]
+        wait_for(client,lambda:bool(calls))
+        assert client.patch('/api/v3/feeds/'+feed['id'],json={'transport':None}).status_code==200
+    before=len(calls)
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        time.sleep(1.2)
+        assert len(calls)==before
+        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['transport'] is None
+
+
+def test_unknown_pending_job_blocks_migration_without_publishing_partial_storage(tmp_path):
+    from oko.storage.store import Store
+    source=tmp_path/'legacy'
+    store=Store(source,lambda _:None)
+    with store.db:
+        store.db.execute("INSERT INTO jobs(kind,item) VALUES ('unknown-old-stage','orphan')")
+    store.db.close()
+    report=migrate_publications(source,tmp_path/'converted')
+    assert not report['success']
+    assert any(conflict.get('job_kind')=='unknown-old-stage' for conflict in report['conflicts'])
+    assert (tmp_path/'converted'/'backup'/'state.sqlite').is_file()
+    assert not (tmp_path/'converted'/'storage').exists()
+
+
+def test_migration_removes_old_viewed_tombstones_but_keeps_backup(tmp_path):
+    import sqlite3
+    from tests.support.telegram import configure_fast_web,settled
+    from tests.support.telegram_web import page
+    source=tmp_path/'legacy'
+    with TestClient(create_app(source,token='test',api_only=True,rss_transport=httpx.MockTransport(lambda request:httpx.Response(200,text=page([(11,'Post')])))),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+        assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
+    report=migrate_publications(source,tmp_path/'converted')
+    assert report['success'],report
+    assert item in report['removed_viewed']
+    with sqlite3.connect(tmp_path/'converted'/'storage'/'state.sqlite') as db:
+        assert db.execute('SELECT 1 FROM items WHERE id=?',(item,)).fetchone() is None
+    with sqlite3.connect(tmp_path/'converted'/'backup'/'state.sqlite') as db:
+        assert db.execute('SELECT viewed FROM items WHERE id=?',(item,)).fetchone()==(1,)
+
+
+def test_migration_reports_and_drops_unverified_canonical_result(tmp_path):
+    import json,sqlite3
+    from tests.reader.test_independent_media import migrated_root
+    from tests.support.telegram import configure_fast_web,settled
+    from tests.support.telegram_web import page
+    root=migrated_root(tmp_path)
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(lambda request:httpx.Response(200,text=page([(11,'Post')])))),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+        item=settled(client)[0]['id']
+    with sqlite3.connect(root/'state.sqlite') as db:
+        db.create_function('oko_reader_time',0,lambda:1900000000.)
+        db.execute('UPDATE items SET summarized_content=?,processing_metadata=? WHERE id=?',
+            (json.dumps({'points':[{'text':'Unproven','source_publication_ids':[item]}]}),json.dumps({'summary':{'signature':'unproven'}}),item))
+    report=migrate_publications(root,tmp_path/'again')
+    assert report['success'],report
+    assert any(entry.get('publication_id')==item and 'summary result removed' in entry['reason'] for entry in report['unportable'])
+    with sqlite3.connect(tmp_path/'again'/'storage'/'state.sqlite') as db:
+        assert db.execute('SELECT summarized_content FROM items WHERE id=?',(item,)).fetchone()==('{}',)

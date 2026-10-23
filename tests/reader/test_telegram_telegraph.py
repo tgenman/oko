@@ -128,10 +128,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
         changed = client.get('/api/v3/materials/'+identity).json()
-        assert 'Version two' in changed['content']['text'] and len(changed['content']['previous_versions'])==1
-        previous = client.get(changed['content']['previous_versions'][0]['url']).json()
-        assert 'Version one' in previous['linked_content']['articles'][0]['text']
-        assert '/versions/' in previous['linked_content']['articles'][0]['media_urls'][0]
+        assert 'Version two' in changed['content']['text'] and len(changed['content']['previous_versions']) == 0
 
 
 def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):

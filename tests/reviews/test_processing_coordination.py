@@ -91,18 +91,6 @@ def test_permission_revoked_during_processor_check_prevents_source_transfer(tmp_
         assert all(c['theses']['result'] is None for c in client.get('/api/v3/cards').json())
 
 
-def test_restore_hidden_original_creates_its_theses(tmp_path):
-    calls = []
-    with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport(calls)), headers=HEADERS) as client:
-        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Убери рекламу.'})
-        presence(client, 'reader')
-        hidden = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards?show_hidden=true').json() if (c['filter']['result'] or {}).get('hidden')), None))
-        assert hidden['theses']['result'] is None
-        assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore').status_code == 200
-        material = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + hidden['id']).json())['theses']['result'] else None)
-        assert material['filter']['result']['restored']
-        assert any(c['operation'] == 'theses' and c['sources'][0]['id'] == hidden['id'] for c in calls)
 
 
 def test_original_presentation_inherits_independently_of_theses(tmp_path):

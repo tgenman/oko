@@ -35,20 +35,6 @@ def test_count_selects_whole_album_and_resumes_without_live_count(tmp_path):
         assert len(cards)==3
         assert client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']['progress']['loaded']==2
 
-def test_telegram_date_is_inclusive_and_validation_matches_rss(tmp_path):
-    archive=Archive()
-    archive.rows=[dict(id=n,date=1759352400+offset,text=str(n),group=None,media=None) for n,offset in [(1,-1),(2,0),(3,1)]]
-    with TestClient(create_app(tmp_path,token='test',telegram_client=archive),headers=HEADERS) as client:
-        presence(client, 'reader')
-        body=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=False)
-        assert connect_request(client,json=dict(**body,initial_history=dict(mode='count',count=0))).status_code==422
-        feed=connected_feed(client, connect_request(client,json=dict(**body,initial_history=dict(mode='date',date='2025-10-02',timezone='Europe/Moscow'))))
-        for _ in range(200):
-            h=client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
-            if h['state']=='complete':break
-            time.sleep(.02)
-        assert h['progress']['loaded']==2
-        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()}=={2,3}
 
 def test_snapshot_and_sparse_group_pages_resume_before_older_pages(tmp_path):
     import asyncio
