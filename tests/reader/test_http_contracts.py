@@ -13,7 +13,7 @@ def test_exported_reading_contract_rejects_missing_fields_and_wrong_types(tmp_pa
     result = subprocess.run([sys.executable, '-m', 'oko.reader.contracts'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     schemas = json.loads(result.stdout)
-    assert set(schemas) == {'navigation', 'cards', 'material', 'version', 'status'}
+    assert set(schemas) == {'navigation', 'cards', 'material', 'status'}
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test'), headers=HEADERS) as client:
         setup_reader(client, theses=False)
         from oko.reader.contracts import CONTRACTS

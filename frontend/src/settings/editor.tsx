@@ -94,11 +94,9 @@ function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefi
 function RSSHistoryControls({owner,feed,active,busy}:{owner:MenusOwner;feed:SubscriptionFeed;active:boolean;busy:boolean}){
  const path='feed/'+feed.id, draft=owner.draft(path), saved=owner.getHistory(feed);
  const history=saved&&saved.state!=='absent'?saved:null;
- const value:Selection={mode:draft.rssHistoryMode==='date'?'date':draft.rssHistoryMode==='count'?'count':history?.selection.mode||'count',
-  count:String(draft.rssHistoryCount??(history?.selection.mode==='count'?history.selection.count:'200')),
-  date:String(draft.rssHistoryDate??(history?.selection.mode==='date'?history.selection.date:''))};
+ const value:Selection={mode:'count',count:String(draft.rssHistoryCount??(history?.selection.mode==='count'?history.selection.count:'20'))};
  return <><HistoryFields prefix="rss-load" value={value} disabled={!owner.workAllowed} onChange={next=>{
-  owner.edit(path,'rssHistoryMode',next.mode);owner.edit(path,'rssHistoryCount',next.count);owner.edit(path,'rssHistoryDate',next.date);
+  owner.edit(path,'rssHistoryCount',next.count);
  }}/><p>History follows continuation links supplied by the source. The requested number may be unavailable.</p>
  <button id="rss-load-history-start" disabled={!owner.workAllowed||busy||active} onClick={()=>{const chosen=selection(value,'rss-load');if(chosen)void owner.history(feed,'start',chosen);}}>Load History</button>
  <button id="rss-load-history-stop" disabled={!owner.workAllowed||busy} hidden={!active} onClick={()=>void owner.history(feed,'stop')}>Stop History Download</button></>;

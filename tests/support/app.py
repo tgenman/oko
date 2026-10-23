@@ -35,6 +35,23 @@ class EmptyHistory:
         return dict(entries=[], state={}, complete=True, error=None, requests=0)
 
 
+class AtomHistory:
+    """Available fixture window only; never invokes the real history worker."""
+    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
+        self.transport=transport
+
+    async def fetch(self, channel: str, count: int, state: dict[str, Any]) -> dict[str, Any]:
+        from oko.collection.rss import RSSSource,entries
+        source=RSSSource('https://www.youtube.com/feeds/videos.xml?channel_id='+channel,0,self.transport)
+        found={}
+        for kind in ('UULF','UULV'):
+            raw,url,_=await source.download('https://www.youtube.com/feeds/videos.xml?playlist_id='+kind+channel[2:])
+            for entry in entries(raw,url):
+                if entry.publication.id.startswith('yt:video:'):
+                    found[entry.publication.id]=dict(id=entry.publication.id.removeprefix('yt:video:'),title=entry.title)
+        return dict(entries=list(found.values())[:count],state={},complete=True,error=None,requests=2)
+
+
 class RejectTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError('Tests require an explicit synthetic transport for HTTP', request=request)
@@ -65,6 +82,8 @@ class OwnedServerTransport(httpx.AsyncBaseTransport):
 def create_app(root: Path, **options: Any) -> FastAPI:
     defaults: dict[str, Any] = dict(codex_client=UnavailableCodex(), youtube_captions=NoCaptions(), youtube_history=EmptyHistory(),
                     rss_transport=RejectTransport(), ai_transport=RejectTransport())
+    if options.get('rss_transport') is not None and options.get('youtube_history') is None:
+        defaults['youtube_history']=AtomHistory(options['rss_transport'])
     if 'youtube_history' not in inspect.signature(production_app).parameters:
         defaults.pop('youtube_history')
     # None also means use the synthetic default, just like production assembly.

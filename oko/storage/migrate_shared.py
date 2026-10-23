@@ -20,6 +20,15 @@ def _files(material: Material, youtube: bool) -> list[str]:
     return sorted(hashlib.sha256(value).hexdigest() for value in files.values())
 
 
+def _saved_files(store: 'Store', item: str, material: Material, youtube: bool) -> list[str]:
+    row=store.db.execute('SELECT platform,content FROM items WHERE id=?',(item,)).fetchone()
+    if row['platform'] is None or row['content']=='{}':
+        return _files(material,youtube)
+    return sorted(store.versions.file_digest((store.root/r['storage_key'])) for r in
+        store.db.execute("SELECT resource_key,storage_key FROM media_files WHERE publication_id=? AND status='ready'",(item,))
+        if r['storage_key'] and (store.root/r['storage_key']).is_file() and not (youtube and r['resource_key']=='youtube:subtitles'))
+
+
 def merge(store: 'Store', item: str, reference: ExternalReference, report: dict[str,Any]) -> bool:
     other=store.db.execute('SELECT id FROM items WHERE platform=? AND external_id=? AND id!=?',
         (reference.key.platform.value,reference.key.external_id,item)).fetchone()
@@ -33,7 +42,7 @@ def merge(store: 'Store', item: str, reference: ExternalReference, report: dict[
         return (material.title,material.text,material.description,
                 material.source_manifest.post if material.source_manifest else None)
     youtube=reference.key.platform.value=='youtube'
-    if value(old.teaser)!=value(new.teaser) or not Counter(_files(old.teaser,youtube))<=Counter(_files(new.teaser,youtube)):
+    if value(old.teaser)!=value(new.teaser) or not Counter(_saved_files(store,item,old.teaser,youtube))<=Counter(_saved_files(store,other[0],new.teaser,youtube)):
         raise ValueError('Conflicting latest states for the same external publication key')
     if reference.key.platform.value=='telegram' and old.teaser.source_manifest and old.teaser.source_manifest.source_url not in (None,reference.url):
         raise ValueError('Legacy Telegram manifest contradicts its external identity')

@@ -5,7 +5,7 @@ import threading
 import httpx
 import pytest
 
-from oko.storage.migration import migrate_publications
+from tests.support.publication_pipeline import migrated_root
 from tests.support.app import create_app
 from tests.support.telegram import configure_fast_web, settled
 from tests.support.telegram_web import page
@@ -14,14 +14,6 @@ from tests.support.reader import wait_for
 
 HEADERS = {'Authorization':'Bearer test'}
 
-
-def migrated_root(tmp_path):
-    source = tmp_path/'old'
-    with TestClient(create_app(source, token='test', api_only=True), headers=HEADERS):
-        pass
-    target = tmp_path/'migration'
-    assert migrate_publications(source, target)['success']
-    return target/'storage'
 
 
 def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
@@ -599,6 +591,7 @@ def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
             broken[0]=False
             release.set()
             client.post('/api/v3/materials/'+item+'/retry')
+            wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
             ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
             assert client.get(ready['content']['attachments'][0]['url']).content==b'article-image'
         finally:

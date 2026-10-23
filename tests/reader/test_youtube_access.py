@@ -109,7 +109,7 @@ def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
 @pytest.mark.parametrize('publication_pipeline',[False,True])
 def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publication_pipeline):
     if publication_pipeline:
-        from tests.reader.test_independent_media import migrated_root
+        from tests.support.publication_pipeline import migrated_root
         tmp_path=migrated_root(tmp_path)
     clock = Clock()
     captions = Captions(clock, [CaptionsBlocked(), 'После паузы', 'Следующий'])

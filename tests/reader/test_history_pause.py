@@ -20,7 +20,7 @@ def wait_history(client, feed, predicate):
     return history
 
 
-@pytest.mark.parametrize('selection', [{'mode':'count','count':3}, {'mode':'date','date':'2025-10-01','timezone':'UTC'}])
+@pytest.mark.parametrize('selection', [{'mode':'count','count':3}])
 def test_removed_pause_preserves_history_snapshot_across_restart_and_fetches_new_posts(tmp_path, selection):
     blocked = True
     posts = [3, 2, 1]

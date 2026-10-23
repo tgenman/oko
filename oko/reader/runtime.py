@@ -288,7 +288,7 @@ class Runtime:
             return
         settings = []
         feeds = self._store.subscriptions.feeds()
-        self._dependency_feeds=[feed['id'] for feed in feeds if feed['connection']!='deleting']
+        self._dependency_feeds=[feed['id'] for feed in feeds if feed['connection']!='deleting' and (feed['transport'] is not None or (binding:=self._store.subscriptions.telegram.binding(feed['id'])) is not None and binding['kind']=='web')]
         self._store.publications.sync_feeds([feed['id'] for feed in feeds])
         for feed in feeds:
             if feed['id'] == self._source_feed and self._source:
@@ -799,14 +799,6 @@ class Runtime:
         async with check.accept():
             self._codex_status = result
         return result
-
-    async def restore_filter(self, item: str) -> None:
-        async with self._actions:
-            if self.require_store().publications.owns(item):
-                raise ActionError('conflict','Восстановление фильтра недоступно; исходник сохранён',expected=True)
-            if not self.require_store().filters.restore(item):
-                raise ActionError('missing', 'Обработанный материал недоступен')
-            await self._cancel()
 
     async def retry_filter(self, item: str) -> None:
         async with self._actions:

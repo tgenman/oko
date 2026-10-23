@@ -165,7 +165,7 @@ def test_media_completion_is_not_author_edit_but_changed_known_bytes_are(tmp_pat
         settled(client)
         changed = client.get('/api/v3/materials/'+identity).json()
         assert changed['content']['revision_id'] != loaded['content']['revision_id']
-        assert len(changed['content']['previous_versions']) == 1
+        assert len(changed['content']['previous_versions']) == 0
 
 
 def test_media_redirect_cannot_reach_a_local_service(tmp_path):
@@ -321,19 +321,6 @@ def test_album_first_part_deletion_and_new_url_keep_one_card_and_tombstone(tmp_p
         assert client.get('/api/v3/cards').json()==[]
 
 
-def test_web_date_boundary_is_inclusive_without_enrolling_earlier_post(tmp_path):
-    text = page([(9,'Earlier'),(11,'Selected')]).replace('2026-10-15T12:00:00+00:00','2026-10-14T12:00:00+00:00',1)
-    async def response(request):
-        return httpx.Response(200,text=text)
-    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
-                    headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',
-                    initial_history={'mode':'date','date':'2026-10-15','timezone':'UTC'}))
-        assert result.status_code == 200, result.text
-        cards = settled(client)
-        assert [int(identity) for identity in cards[0]['source']['message_ids']]==[11]
-        assert client.get('/api/v3/materials/'+cards[0]['id']).json()['content']['text']=='Selected'
 
 
 def test_html_quotes_poll_voice_sticker_and_unavailable_document_are_preserved(tmp_path):
@@ -440,6 +427,8 @@ def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync
 
 
 def test_malformed_web_record_does_not_discard_valid_neighbor_and_is_diagnosed(tmp_path):
+    from tests.support.publication_pipeline import migrated_root
+    tmp_path=migrated_root(tmp_path)
     html = page([(11, 'Valid text'), (12, 'Broken identity')]).replace('data-post="fixture/12"', 'data-post="broken"')
     with TestClient(create_app(tmp_path, token='test', api_only=True,
             rss_transport=httpx.MockTransport(lambda request: httpx.Response(200, text=html))),

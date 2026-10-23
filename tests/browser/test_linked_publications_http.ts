@@ -40,6 +40,9 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await expect(r.page.locator('#completeness')).toContainText('Не удалось загрузить вложение');
  await r.setMediaState('ready');
  await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
+ await expect.poll(async()=>{const current=await r.api(`materials/${cards[0]!.id}`);return current.availability==='available'&&current.content.availability==='available'&&current.content.completeness.state==='complete'&&current.content.attachments.length>0;}).toBe(true);
+ // The open tab may retain its earlier snapshot; selecting the card accepts current content.
+ await r.page.locator('[data-card]').click();
  const image=r.page.locator(kind==='telegram'?'#text .telegraph-article img':'#images img');
  await expect(image).toHaveAttribute('src',/^blob:/);
  await r.page.screenshot({path:artifactPath(`linked-${kind}-ready.png`)});

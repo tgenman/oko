@@ -1,7 +1,7 @@
 """Linked articles remain independent publications at the reader HTTP boundary."""
 import httpx
 
-from tests.reader.test_independent_media import migrated_root
+from tests.support.publication_pipeline import migrated_root
 from tests.support.app import create_app
 from tests.support.rss import import_feed, wait_cards
 from tests.support.reader import presence
@@ -36,7 +36,7 @@ def test_two_rss_records_with_one_url_keep_distinct_guid_identities(tmp_path):
                               rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
         from tests.support.subscriptions import add_source
         from tests.support.reader import wait_for
-        add_source(client,'https://source.test/feed','RSS','News')
+        add_source(client,'https://source.test/feed','RSS','News',count=1)
         presence(client,'rss')
         # Explicit replay opens the whole currently available RSS window.
         wait_cards(client)

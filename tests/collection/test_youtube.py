@@ -255,7 +255,6 @@ class YouTubeTranscriptApi:
         # Keep the worker admitted when subscribe closes its short setup session.
         presence(client, 'reader')
         feed = subscribe(client)
-        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
         wait(client, lambda m: m['source'].get('captions') == 'error', keep_alive=True)
         groups = client.get('/api/v3/diagnostics').json()['groups']

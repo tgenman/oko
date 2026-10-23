@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 
-def add_source(client, url, title='Источник', folder='Без папки'):
+def add_source(client, url, title='Источник', folder='Без папки', *, count=None):
     presence(client, 'setup')
     checked = client.post('/api/v3/feeds/verify', json={'url':url})
     assert checked.status_code == 200, checked.text
@@ -13,8 +13,9 @@ def add_source(client, url, title='Источник', folder='Без папки'
     if value['state'] == 'existing':
         close_presence(client, 'setup')
         return value['existing_feed']
+    chosen=count if count is not None else (1 if value['candidate']['kind']=='youtube' else 20)
     result = client.post('/api/v3/feeds', json=dict(url=value['candidate']['url'], verification=value['verification'], title=title, folder=folder,
-        initial_history={'mode':'date','date':str(date.today()-timedelta(days=1)), 'timezone':'UTC'}))
+        initial_history={'mode':'count','count':str(chosen)}))
     assert result.status_code == 200, result.text
     close_presence(client, 'setup')
     return result.json()

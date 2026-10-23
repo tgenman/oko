@@ -34,13 +34,18 @@ def content(store: 'Store', item: str) -> dict[str, Any]:
     return own
 
 
-def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
-    from oko.processing.contracts import InputSource
-    from oko.collection.contracts import ReplyPreview
+def selected_content(store: 'Store', item: str, kind: str) -> dict[str, Any]:
     selected=content(store,item)
     row=store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()
     if kind=='theses' and row and row[0]!='{}' and 'youtube' not in selected.get('extra',{}):
         selected=json.loads(row[0])
+    return selected
+
+
+def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
+    from oko.processing.contracts import InputSource
+    from oko.collection.contracts import ReplyPreview
+    selected=selected_content(store,item,kind)
     groups: dict[str,list[dict[str,Any]]]={item:[]}
     for block in blocks(selected):
         groups.setdefault(block.get('source_publication_id',item),[]).append(block)

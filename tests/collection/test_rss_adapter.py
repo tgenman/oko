@@ -116,7 +116,7 @@ def test_rss_enclosures_are_individual_media_and_are_downloaded_only_on_request(
 
 
 def test_rss_source_bridge_keeps_adapter_keys_and_ready_content_across_pages():
-    from oko.collection.rss_compatibility import RSSAdapterSource
+    from oko.collection.rss_source import RSSAdapterSource
     transport=httpx.MockTransport(lambda _:httpx.Response(200,text='<rss><channel><title>News</title><item><guid>2</guid><link>https://web.example/2</link><description>Second</description></item><item><guid>1</guid><link>https://web.example/1</link><description>First</description></item></channel></rss>'))
     source=RSSAdapterSource('https://rss.example/feed',1,transport)
     source.initial_history={'mode':'count','count':2}
@@ -169,7 +169,7 @@ def test_latest_rss_metadata_does_not_fetch_history_until_the_offset_needs_it():
 
 
 def test_new_rss_history_run_freezes_its_count_and_resolves_an_archive_offset():
-    from oko.collection.rss_compatibility import RSSAdapterSource
+    from oko.collection.rss_source import RSSAdapterSource
     def respond(request):
         text=('<item><guid>one</guid><description>One</description></item>' if request.url.path=='/archive' else
               '<item><guid>two</guid><description>Two</description></item><atom:link rel="next" href="/archive"/>')

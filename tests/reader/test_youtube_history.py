@@ -144,7 +144,7 @@ def test_stop_then_new_selection_retains_viewed_tombstones_and_saved_materials(t
         progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert progress['progress']['available'] == 2 and progress['progress']['viewed'] == 1
         assert len(client.get('/api/v3/cards').json()) == 3
-        assert len(history.calls) == 2
+        assert [count for _,count in history.calls][-2:]==[4,2]
 
 
 def test_recovered_rss_window_does_not_import_old_entries_outside_n(tmp_path):
@@ -190,49 +190,3 @@ def test_smaller_history_after_new_upload_preserves_retained_order(tmp_path):
         for sort, numbers in [('newest', [61, 60, 59, 58]), ('oldest', [58, 59, 60, 61])]:
             cards = client.get('/api/v3/cards', params={'feed': feed, 'sort': sort}).json()
             assert [c['source_url'].split('=')[-1] for c in cards] == [video(n) for n in numbers]
-
-
-@pytest.mark.parametrize('all_failed', [False, True])
-def test_date_boundary_survives_failed_rss_windows(tmp_path, all_failed):
-    clock = [0.]
-    recovered = False
-    requests = []
-    def reply(request):
-        if request.url.host == 'i.ytimg.com':
-            return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
-        if 'channel_id' in request.url.params:
-            return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>Channel</title></feed>')
-        playlist = request.url.params.get('playlist_id', '')
-        requests.append(playlist)
-        if not recovered and (all_failed or playlist.startswith('UULV')):
-            return httpx.Response(503)
-        items = ''.join(f'<entry><id>yt:video:{video(n)}</id><title>Video {n}</title><link href="https://www.youtube.com/watch?v={video(n)}"/><published>{date}</published></entry>'
-                        for n, date in ([(1, '2020-01-01T00:00:00Z'), (2, '2026-02-01T00:00:00Z')] if playlist.startswith('UULV') else [(2, '2026-02-01T00:00:00Z')]))
-        return httpx.Response(200, text=f'<feed xmlns="http://www.w3.org/2005/Atom"><title>Channel</title>{items}</feed>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, lease=600, clock=lambda: clock[0],
-                              rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={'theses': False})
-        presence(client, 'history')
-        url = f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}'
-        checked = client.post('/api/v3/feeds/verify', json={'url': url})
-        assert checked.status_code == 200, checked.text
-        result = client.post('/api/v3/feeds', json={'url': url,
-            'title':'Channel', 'folder':'Video', 'verification':checked.json()['verification'],
-            'initial_history':{'mode':'date','date':'2026-01-01','timezone':'UTC'}})
-        assert result.status_code == 200, result.text
-        presence(client, 'history')
-        for _ in range(100):
-            if len(requests) >= 2:
-                break
-            time.sleep(.02)
-        time.sleep(.1)
-        recovered = True
-        clock[0] += 61
-        presence(client, 'history')
-        client.post('/api/v3/collect')
-        for _ in range(100):
-            cards = client.get('/api/v3/cards').json()
-            if len(requests) >= 4 and cards and all(not c['loading'] for c in cards):
-                break
-            time.sleep(.02)
-        assert [c['source_url'] for c in cards] == [f'https://www.youtube.com/watch?v={video(2)}']

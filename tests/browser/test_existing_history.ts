@@ -20,7 +20,7 @@ test('legacy feed shows only known history settings and saving does not change i
     await feedOptions(r.page);
     await expect(r.page.locator('#feed-options')).toContainText('Saved history depth: 7 days; the actual boundary was not saved');
     await expect(r.page.locator('#feed-options')).toContainText('The initial download count and progress were not saved');
-    await expect(r.page.locator('#rss-load-history-count')).toHaveValue('200');
+    await expect(r.page.locator('#rss-load-history-count')).toHaveValue('20');
     expect(await r.page.evaluate(()=>readerTransport.requests.some(r=>r.method==='POST'&&r.url==='/api/v3/feeds/legacy/history'))).toBe(false);
     await expect(r.page.locator('#feed-options')).not.toContainText('Loaded 0');
     await r.page.locator('#feed-options button').filter({hasText: 'Save Feed'}).click();

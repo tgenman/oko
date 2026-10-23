@@ -5,7 +5,7 @@ export async function addSources(api:<P extends string>(path:P,method?:string,bo
  for(const [url,title,folder] of rows){
   const checked:FeedVerification=await api('v3/feeds/verify','POST',{url});
   if(checked.state==='existing')continue;
-  await api('v3/feeds','POST',{url:checked.candidate.url,verification:checked.verification,title,folder,initial_history:{mode:'date',date:new Date(Date.now()-86400000).toISOString().slice(0,10),timezone:'UTC'}});
+  await api('v3/feeds','POST',{url:checked.candidate.url,verification:checked.verification,title,folder,initial_history:{mode:'count',count:checked.candidate.kind==='youtube'?'1':'20'}});
 
  }
  await api('v3/client-sessions/'+session.id,'DELETE');

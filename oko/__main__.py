@@ -79,7 +79,13 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
         except BlockingIOError:
             existing(root, not (args.no_browser or args.api_only), api_only=args.api_only, persistent=args.persistent)
             return
-        if args.initially_disabled and not (root / 'state.sqlite').exists():
+        fresh=not (root/'state.sqlite').exists()
+        from oko.storage.bootstrap import prepare
+        try:
+            prepare(root)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+        if args.initially_disabled and fresh:
             from oko.storage.store import Store
             store = Store(root, fault=fault)
             try:

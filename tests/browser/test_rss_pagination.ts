@@ -29,10 +29,7 @@ test('RSS settings show the shortage reason and can request count or inclusive d
   await r.page.locator('#rss-load-history-start').click();
   await r.page.waitForFunction(()=>readerTransport.requests.some(r=>r.method==='POST'&&r.url==='/api/v3/feeds/rss/history'));
   expect(await r.page.evaluate(()=>readerTransport.requests.find(r=>r.method==='POST'&&r.url==='/api/v3/feeds/rss/history')!.body)).toEqual({mode:'count',count:'200'});
-  await r.page.locator('#rss-load-history-mode').selectOption('date');
-  await r.page.locator('#rss-load-history-date').fill('2025-10-01');
-  await r.page.locator('#rss-load-history-start').click();
-  await r.page.waitForFunction(()=>readerTransport.requests.filter(r=>r.method==='POST'&&r.url==='/api/v3/feeds/rss/history').length===2);
-  expect(await r.page.evaluate(()=>readerTransport.requests.filter(r=>r.method==='POST'&&r.url==='/api/v3/feeds/rss/history').at(-1)!.body)).toEqual({mode:'date',date:'2025-10-01',timezone:await r.page.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone)});
+  await expect(r.page.locator('#rss-load-history-mode')).toHaveCount(0);
+  await expect(r.page.locator('#rss-load-history-date')).toHaveCount(0);
  } finally {await r.close();}
 });

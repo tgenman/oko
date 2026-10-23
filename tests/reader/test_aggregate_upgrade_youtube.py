@@ -54,15 +54,11 @@ def test_upgrade_preserves_youtube_caption_theses_after_metadata_revision(tmp_pa
             saved_material(material,expected)
             assert material['title']==expected['title']
             assert material['source']['captions']==expected['captions']
-            for version, saved in zip(material['content']['previous_versions'], fixture['previous'], strict=True):
-                response = client.get(version['url'])
-                assert response.status_code == 200
-                previous = response.json()
-                assert previous['text']==saved['text'] and previous['title']==saved['title']
-                assert previous['completeness']['state']==('complete' if saved['full'] else 'incomplete')
-                assert previous['images']==[url.replace('/api/materials/','/api/v3/materials/',1) for url in saved['images']]
-                assert previous['attachments']==saved['attachments']
+            assert material['content']['previous_versions']==[]
             for url, contents in fixture['media'].items():
+                if '/versions/' in url:
+                    assert client.get(url.replace('/api/materials/','/api/v3/materials/',1)).status_code==404
+                    continue
                 response = client.get(url.replace('/api/materials/','/api/v3/materials/',1))
                 assert response.status_code == 200
                 assert response.content == bytes.fromhex(contents)
@@ -102,7 +98,10 @@ def test_upgrade_preserves_caption_theses_while_filter_blocks_reading(tmp_path, 
     with TestClient(create_app(tmp_path, token='test', ai_transport=httpx.MockTransport(response)), headers={'Authorization': 'Bearer test'}) as client:
         expected = fixture['expected']
         if filter_state == 'hidden':
-            assert client.post('/api/v3/materials/' + expected['id'] + '/filter/restore').status_code == 200
+            assert client.post('/api/v3/materials/' + expected['id'] + '/filter/restore').status_code == 404
+            assert client.get('/api/v3/materials/'+expected['id']).json()['theses']['result'] is None
+            assert calls==[]
+            return
         presence(client, 'test')
         material = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + expected['id']).json())['theses']['result'] else None)
         saved_theses(material,expected['theses'],expected['provenance'])

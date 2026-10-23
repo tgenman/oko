@@ -66,7 +66,7 @@ def test_open_read_budget_and_parity(tmp_path,count,processed):
         if processed:
             assert legacy['theses']['result']['points']
             assert legacy['filter']['result']['removed']==['Advertisement']
-            assert legacy['content']['images'] and legacy['content']['previous_versions']
+            assert legacy['content']['images'] and legacy['content']['previous_versions']==[]
         cost.update(selects=sum(q.lstrip().upper().startswith(('SELECT','WITH')) for q in statements),
                     writes=sum(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE','REPLACE')) for q in statements),
                     max_file_reads=max(files.values(),default=0))

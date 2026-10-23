@@ -90,9 +90,7 @@ def test_external_metadata_changes_keep_old_version_context_without_false_update
             if not third['loading'] and third['text'].startswith('Edited own text'):break
             time.sleep(.02)
         assert third['changed'] is True
-        previous=client.get(third['previous_versions'][0]['url']).json()
-        assert previous['external_attachments'][0]['restriction'] is None
-        assert client.get(previous['external_attachments'][0]['poster_url']).content==b'poster'
+        assert third['previous_versions']==[]
         assert client.get('/api/v3/status').json()['problems']['count']==0
 
 

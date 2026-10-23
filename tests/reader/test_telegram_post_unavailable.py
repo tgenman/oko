@@ -116,12 +116,7 @@ def test_later_content_is_collected_and_previous_version_keeps_post_restriction(
         assert content['text'] == text[0]
         assert content['post_web_unavailable'] is False
         assert content['completeness']['state'] == 'complete'
-        old = client.get(content['previous_versions'][0]['url']).json()
-        assert old['post_web_unavailable'] is True
-        assert old['text'] == ''
-        assert old['external_attachments'] == []
-        assert old['completeness']['reason'] == 'post_web_unavailable'
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert content['previous_versions']==[]
 
 
 def test_unknown_unsupported_post_is_reclassified_only_after_source_confirmation(tmp_path):

@@ -1,7 +1,7 @@
 """The existing fetch worker can collect a feedless article through WebAdapter."""
 from oko.collection.adapters import AdapterException
 from oko.collection.contracts import (FetchRequirements,FetchResources,FetchResult,Publication,SourceError,SourceObservation)
-from oko.collection.rss_compatibility import material
+from oko.collection.rss_source import material
 from oko.collection.adapter_errors import source_error
 from oko.collection.web_adapter import WebAdapter
 

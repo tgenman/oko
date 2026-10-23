@@ -6,7 +6,7 @@ import threading
 import httpx
 import pytest
 
-from tests.reader.test_independent_media import migrated_root
+from tests.support.publication_pipeline import migrated_root
 from tests.support.app import create_app
 from tests.support.reader import HEADERS,wait_for
 from tests.support.presence import presence
@@ -121,6 +121,15 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         assert any(call['operation']=='filter' for call in calls)
         summary=next(call for call in calls if call['operation']=='theses')
         assert summary['sources'][0]['text']=='Useful words. Ad text.'
+        import sqlite3
+        from oko.reviews.publication_input import digest
+        with sqlite3.connect(root/'state.sqlite') as db:
+            saved=db.execute('SELECT processing_metadata,content FROM items WHERE id=?',(card['id'],)).fetchone()
+            metadata=json.loads(saved[0])
+            blocks=json.loads(saved[1])['blocks']
+            index=next(i for i,b in enumerate(blocks) if b.get('role')=='subtitles')
+            media=blocks[index]['media_id']
+        assert metadata['summary']['input_hash']==digest([dict(type='text',role='body',text='Useful words. Ad text.',source_media_id=media,source_block_index=index)])
         material=client.get('/api/v3/materials/'+card['id']).json()
         assert material['content']['text']=='Useful words. Ad text.'
         assert material['content']['display_text']=='Useful words. '

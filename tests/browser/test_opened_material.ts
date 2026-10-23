@@ -96,28 +96,6 @@ async function settle(page: Page) {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
-test('previous version and media delivered after switching never reach the new card', async () => {
-  const r = await reader();
-  try {
-    await r.start([material('A', {images: ['/api/v3/materials/A/images/image-1.png'], previous: [{url: '/api/v3/materials/A/versions/1'}]}), material('B')]);
-    await r.page.evaluate(() => { readerTransport.held.set('/api/v3/materials/A/images/image-1.png', true); readerTransport.held.set('/api/v3/materials/A/versions/1', true); });
-    await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/images/image-1.png'));
-    await r.page.locator('#versions summary').click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A/versions/1'));
-    await r.page.getByRole('button', {name: /^B/}).click();
-    await expect(r.page.locator('#text')).toHaveText('Текст B');
-    await r.page.evaluate(() => {
-      readerTransport.release('/api/v3/materials/A/images/image-1.png', 'late image');
-      readerTransport.release('/api/v3/materials/A/versions/1', {title: 'Прежнее A', text: 'СЕКРЕТ ПРЕЖНЕГО A', full:true, reason:'', images: [], attachments:[]});
-    });
-    await settle(r.page);
-    await expect(r.page.locator('#material')).not.toContainText('СЕКРЕТ');
-    await expect(r.page.locator('#images img')).toHaveCount(0);
-    assert.deepEqual(await r.page.evaluate(() => browserResources.created), []);
-    assert.deepEqual(r.errors, []);
-  } finally {await r.close();}
-});
 
 async function videoFixture(page: Page) {
   return page.evaluate(async () => {
@@ -420,28 +398,8 @@ test('current publication text is first-class and previous versions start collap
   await expect(r.page.locator('#text')).toBeVisible();
   assert.equal(await r.page.locator('#text').locator('xpath=ancestor::details').count(),0);
   await expect(r.page.locator('#original-panel')).toHaveCount(0);
-  await expect(r.page.locator('#versions h2')).toHaveText('Previous Versions · 2');
-  assert.deepEqual(await r.page.locator('#versions summary').allTextContents(),['Version 2','Version 1']);
-  await expect(r.page.locator('#versions details[open]')).toHaveCount(0);
-  await r.page.setViewportSize({width:1512,height:1000});
-  await r.page.screenshot({path:artifactPath('current-and-history-desktop.png')});
-  await r.page.setViewportSize({width:1120,height:1000});
-  assert.equal(await r.page.locator('#text').evaluate(node=>node.scrollWidth<=node.clientWidth),true);
-  assert.equal(await r.page.locator('#versions').evaluate(node=>node.scrollWidth<=node.clientWidth),true);
-  await r.page.screenshot({path:artifactPath('current-and-history-narrow.png')});
-  await r.page.evaluate(()=>{
-   for(const number of [1,2])readerTransport.replies.set('/api/v3/materials/A/versions/'+number,{body:{title:'Прежняя версия',text:'Прежний текст',full:true,images:[],attachments:[]}});
-  });
-  await r.page.locator('#versions summary').first().focus();
-  await r.page.keyboard.press('Enter');
-  await expect(r.page.locator('#versions')).toContainText('Прежний текст');
-  await r.page.locator('#versions summary').last().click();
-  await expect(r.page.locator('#versions details[open]')).toHaveCount(2);
-  await r.page.locator('#versions summary').first().click();
-  await r.page.locator('#versions summary').first().click();
-  await expect(r.page.locator('#versions')).toContainText('Прежний текст');
-  await r.page.locator('[data-card="B"]').click();
-  await expect(r.page.locator('#versions')).toBeEmpty();
+  await expect(r.page.locator('#versions')).toHaveCount(0);
+  await r.page.screenshot({path:artifactPath('latest-publication-desktop.png')});
   assert.deepEqual(r.errors,[]);
  }finally{await r.close();}
 });
@@ -540,10 +498,7 @@ test('reply context stays with its revision and historical previews use their ow
     await r.page.locator('#material-update-button').click();
     await expect(card).toContainText('Новый контекст');
     await expect(card.getByRole('button',{name:'Весь фрагмент'})).toHaveAttribute('aria-expanded','false');
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/A/versions/1',{body:{title:'История',text:'Старый собственный текст',full:true,images:[],attachments:[],reply_preview:{author:'Исторический автор',text:'Исторический фрагмент',source_url:'https://t.me/fixture/5'}}}));
-    await r.page.locator('#versions summary').click();
-    await expect(r.page.locator('#reply-version-1')).toContainText('Исторический фрагмент');
-    assert.equal(await r.page.locator('#reply-version-1 a').getAttribute('href'),'https://t.me/fixture/5');
+    await expect(r.page.locator('#versions')).toHaveCount(0);
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
 });

@@ -88,9 +88,7 @@ test('current video description and previous captions remain available independe
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#title')).toHaveText('video');
   await expect(r.page.locator('#description')).toHaveText('Текущее описание');
-  await r.page.locator('#versions summary').click();
-  await expect(r.page.locator('#description')).toHaveText('Текущее описание');
-  await expect(r.page.locator('#versions')).toContainText('Прежние субтитры');
+  await expect(r.page.locator('#versions')).toHaveCount(0);
   await expect(r.page.locator('#text')).toHaveText('Текущие субтитры');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}

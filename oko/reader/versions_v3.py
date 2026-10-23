@@ -62,7 +62,7 @@ class VersionedReading:
         theses_state=_state(theses['status'] if theses else 'pending',theses['error'] if theses else None) if store.processing.theses.signature(identity) else 'disabled'
         result.update(title=title,snippet=snippet(preview),availability='available',hidden=bool(filtered['hidden']),
             filter_state=_state(filtered['status'],filtered.get('error')),theses_state=theses_state,
-            changed=bool(store.versions.previous(identity)),revision_id=store.content_version(identity),
+            changed=row['platform'] is None and bool(store.versions.previous(identity)),revision_id=store.content_version(identity),
             loading=bool(store.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",(identity,reader_now(store.clock()))).fetchone()),
             preview_url=header.get('_media_urls',{}).get(image.name,f'/api/v3/materials/{identity}/images/{image.name}') if image else header.get('_media_urls',{}).get(attachment['name'],f"/api/v3/materials/{identity}/media/{attachment.get('media_id',attachment['name'])}") if attachment else None)
         result['loading'] = result['loading'] or row['platform'] is not None and store.media.loading(identity)
@@ -101,10 +101,10 @@ class VersionedReading:
         external = saved_external(header,f'/api/v3/materials/{identity}')
         linked=saved_telegraph(header,f'/api/v3/materials/{identity}')
         if row['platform']=='telegram':
-            linked=publication_links.reading(store,identity,saved_document(store.path(identity))[1]) or linked
+            linked=publication_links.reading(store,identity,store.publications.original(identity)[1]) or linked
         return dict(data,availability='available',content=dict(availability='available',linked_content=linked,post_web_unavailable=external['post_web_unavailable'],text=text,description=header.get('description',''),reply_preview=header.get('reply_preview'),
             completeness=completeness(full,header.get('reason',''),external['external_only'],external['post_web_unavailable']).model_dump(mode='json'),loading=loading,
-            changed=bool(store.versions.previous(identity)),source_deleted=store.versions.deleted(identity),
+            changed=row['platform'] is None and bool(store.versions.previous(identity)),source_deleted=store.versions.deleted(identity),
             revision_id=store.content_version(identity),version=store.versions.number(identity)))
 
     def media(self, identity: str) -> dict[str, Any]:
@@ -118,7 +118,7 @@ class VersionedReading:
         return dict(post_web_unavailable=external['post_web_unavailable'],external_attachments=external['external_attachments'],revision_id=store.content_version(identity),
             images=[] if store.publications.owns(identity) else [f'/api/v3/materials/{identity}/images/{p.name}' for p in sorted(path.parent.glob('image-*'))],
             attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{identity}/media/{a.get('media_id',a['name'])}"),kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])],
-            previous_versions=[dict(number=v['number'],revision_id=v['version'],url=v['url']) for v in store.versions.previous(identity)])
+            previous_versions=[])
 
     def navigation(self) -> dict[str, Any]:
         store=self.runtime.require_store()

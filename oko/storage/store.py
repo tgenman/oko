@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from oko.collection.telegram.reading import saved_telegraph
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links, youtube_media
+from oko.reviews import publication_input
 from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
@@ -185,7 +186,7 @@ class Store:
                 shutil.rmtree(p)
         with self.db:
             for row in self.db.execute('SELECT * FROM items WHERE complete=1 AND viewed=0').fetchall():
-                if not self.path(row['id']).is_file():
+                if row['platform'] is None and not self.path(row['id']).is_file():
                     self.db.execute('UPDATE items SET complete=0 WHERE id=?', (row['id'],))
                     self.db.execute("UPDATE jobs SET status='pending' WHERE kind='fetch' AND item=?", (row['id'],))
 
@@ -300,13 +301,12 @@ class Store:
                     self.db.execute('INSERT OR IGNORE INTO feed_publications VALUES (?,?)', (feed, item))
                 if p.teaser and (inserted.rowcount or target and plans.get(p.id) and plans[p.id].content is not None):
                     planned = plans.get(p.id)
-                    prepared = planned.version if planned else None
-                    prepared = prepared or self.versions.prepare(item, p.teaser)
-                    self.versions.publish(item, prepared, False)
                     if target:
-                        assert planned and planned.content
-                        canonical = planned.content
-                        self.publications.publish(item, canonical, prepared[1])
+                        assert planned and planned.content and planned.fingerprint
+                        self.publications.publish(item,planned.content,planned.fingerprint)
+                    else:
+                        prepared=self.versions.prepare(item,p.teaser)
+                        self.versions.publish(item,prepared,False)
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
                 row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
                 if row and p.published_known and not row['published_known']:
@@ -552,17 +552,13 @@ class Store:
     def publication(self, item: str, staging: DownloadStage | None = None) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
         if row and row['platform'] is not None:
-            header, text = saved_document(self.path(item)) if row['complete'] else ({},'')
-            files = self.db.execute("SELECT * FROM media_files WHERE publication_id=? AND status='ready'", (item,)).fetchall()
-            kinds = {a['media_id']:a['kind'] for a in header.get('attachments', []) if 'media_id' in a}
-            retained = tuple(Attachment(self.media.projection_name(media), self._retained_payload(self.root/media['storage_key'], staging),
-                kinds.get(media['id'],'file'), media['mime_type'] or 'application/octet-stream') for media in files if (self.root/media['storage_key']).is_file())
+            header, text = (self.publications.original(item) if row['content']!='{}' else saved_document(self.path(item))) if row['complete'] else ({},'')
             refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
                 for m in self.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,)) if m['source_locator'])
             last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
                 header.get('title',''),datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),media=refs,
                 linked_publications=tuple(ExternalReference(ExternalKey(Platform(target['platform']),target['external_id']),target['url']) for target in self.db.execute('SELECT i.* FROM publication_links l JOIN items i ON i.id=l.target_publication_id WHERE l.source_publication_id=?',(item,))))
-            teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),attachments=retained,
+            teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
                 source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
                 reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None,adapter_content=last_description) if row['complete'] else None
@@ -599,16 +595,15 @@ class Store:
                 material = replace(retained.teaser, full=False, members=material.members,
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
         if self.publications.owns(item):
-            prepared = self.versions.prepare(item, material, job, staging)
-            canonical = self.publications.prepare(item, material, self.versions.path(item, prepared[0]).parent)
+            canonical=self.publications.prepare(item,material,self.root/'content'/item/'1')
+            fingerprint=publication_input.digest(canonical[0])
             self.fault('after_file_move')
             with self.db:
                 if not self.valid(job) or not self._has_unviewed(item):
                     return
                 if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
                     self.publications.identify(item,material.adapter_content.metadata.reference)
-                self.versions.publish(item, prepared, True)
-                self.publications.publish(item, canonical, prepared[1])
+                self.publications.publish(item,canonical,fingerprint)
                 self.db.execute('UPDATE items SET complete=1,members=? WHERE id=?', (json.dumps(material.members), item))
                 self._finish_fetch(job, material, self.clock() if now is None else now)
             self.publications.recover(item)
@@ -814,11 +809,12 @@ class Store:
 
     @reading_value
     def original(self, item: str) -> tuple[dict[str, Any], str]:
-        header,text=saved_document(self.path(item))
-        if self.publications.active:
-            own=self.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()
-            if own and 'youtube' in json.loads(own[0]).get('extra',{}):
-                projected=youtube_media.add_input(self,json.loads(own[0]))
+        own=material_read.item(self.db,item)
+        canonical=bool(own and own['platform'] is not None and own['content']!='{}')
+        header,text=self.publications.original(item) if canonical else saved_document(self.path(item))
+        if canonical:
+            if own and 'youtube' in json.loads(own['content']).get('extra',{}):
+                projected=youtube_media.add_input(self,json.loads(own['content']))
                 text='\n\n'.join(block['text'] for block in projected['blocks'] if block['type']=='text' and block.get('role')=='body')
                 if projected['extra']['youtube'].get('captions')=='error' and header.get('captions')=='available':
                     header={**header,'captions':'error','full':False,'reason':'Локальный файл субтитров недоступен; повторите загрузку'}
@@ -855,7 +851,7 @@ class Store:
         try:
             header, text = self.original(item)
             filtered = self.filters.read(item)
-            previous = self.versions.previous(item)
+            previous=[] if row['platform'] is not None else self.versions.previous(item)
             base.update(changed=bool(previous), previous=previous, source_deleted=self.versions.deleted(item),
                 filter=filtered, title=header['title'], theses=self.processing.theses.read(item),
                 provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
@@ -870,7 +866,7 @@ class Store:
             base['loading'] = base['loading'] or row['platform'] is not None and self.media.loading(item)
             linked=saved_telegraph(header, f'/api/v3/materials/{item}')
             if row['platform']=='telegram':
-                linked=publication_links.reading(self,item,saved_document(self.path(item))[1]) or linked
+                linked=publication_links.reading(self,item,self.publications.original(item)[1]) or linked
             base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=linked)
             return base
         except (OSError, ValueError, KeyError):
@@ -990,7 +986,7 @@ class Store:
             if youtube and youtube[0]:
                 data=json.loads(youtube[0])
                 version=hashlib.sha256(json.dumps([version,data.get('captions'),data.get('captions_digest')]).encode()).hexdigest()
-            linked=self.db.execute('''SELECT i.id,i.complete,v.fingerprint FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+            linked=self.db.execute('''SELECT i.id,i.complete,json_extract(i.content,'$.extra._input_hash') FROM publication_links l JOIN items i ON i.id=l.target_publication_id
                 LEFT JOIN content_current c ON c.item=i.id LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
                 WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()
             if linked:
@@ -1002,12 +998,15 @@ class Store:
             return
         # This runs in the reader loop. Admission needs only the saved caption
         # state, not a reader material with filters, theses and provenance.
-        rows = self.db.execute("""SELECT id FROM items WHERE feed_id=? AND viewed=0 AND complete=1
+        rows = self.db.execute("""SELECT id,platform,content FROM items WHERE feed_id=? AND viewed=0 AND complete=1
             AND NOT EXISTS (SELECT 1 FROM jobs WHERE kind='fetch' AND item=items.id AND status IN ('pending','running'))""", (feed,)).fetchall()
         for row in rows:
             try:
-                with self.path(row['id']).open() as source:
-                    header = json.loads(source.readline())
+                if row['platform'] is not None and row['content']!='{}':
+                    header=json.loads(row['content'])['extra']['_reader']
+                else:
+                    with self.path(row['id']).open() as source:
+                        header = json.loads(source.readline())
             except (OSError, ValueError):
                 record_caught('store.prepare_youtube')
                 continue
@@ -1016,6 +1015,17 @@ class Store:
 
     def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True, *, provenance: dict[str, Any] | None | Literal['execution'] = 'execution') -> None:
         """Commit a validated AI result; callers own admission and input signature."""
+        if self.publications.owns(job.item):
+            if not self.valid(job):
+                return
+            origin=self.execution_provenance(job) if provenance=='execution' else provenance
+            with self.db:
+                self.publications.accept_result(job.item,job.kind,signature,result,origin)
+                if finish:
+                    self.finish(job)
+                if job.kind=='filter':
+                    self.read_versions.sync_filter(job.item,bool(result['hidden']))
+            return
         stage = None
         if job.kind in ('filter', 'theses'):
             stage = self.root / 'staging' / job.item
@@ -1045,8 +1055,6 @@ class Store:
         self.fault('after_' + job.kind + '_move')
         if finish:
             with self.db:
-                if self.publications.owns(job.item):
-                    self.publications.results(job.item, {job.kind: dict(file=destination.read_text())})
                 self.finish(job)
                 if job.kind == 'filter':
                     self.read_versions.sync_filter(job.item, bool(result['hidden']) and not self.filters.read(job.item).get('restored', False))

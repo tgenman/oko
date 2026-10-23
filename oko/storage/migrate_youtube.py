@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 def convert(store: 'Store', report: dict[str,Any]) -> None:
     for feed in store.subscriptions.feeds():
-        if feed['transport']!='youtube' or feed['connection']=='deleting':
+        if (feed['transport'] or feed['kind'])!='youtube' or feed['connection']=='deleting':
             continue
         if store.publications.feed(feed['id']):
             continue
@@ -81,7 +81,7 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
                         saved=json.loads(header_text)
                         saved['signature']=publication_input.signature(store,item,kind)
                         value['file']=json.dumps(saved,ensure_ascii=False)+'\n\n'+text
-                        store.publications.results(item,{kind:value})
+                        store.publications.accept_result(item,kind,saved['signature'],saved['result'],saved.get('execution',saved.get('provenance')))
                         table='filter_inputs' if kind=='filter' else 'thesis_inputs'
                         store.db.execute('UPDATE '+table+' SET signature=? WHERE item=?',(saved['signature'],item))
                     store.publications.status(item)
@@ -93,7 +93,7 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
             report['publications'].append(mapping)
         try:
             with store.db:
-                store.publications.configure_feed(feed['id'])
+                store.publications.configure_feed(feed['id'],migrate_legacy=True)
             current=store.db.execute('SELECT platform,external_id FROM feeds WHERE id=?',(feed['id'],)).fetchone()
             history=legacy.get('youtube_history',{})
             chosen=[row[0] for row in store.db.execute('SELECT i.external_id FROM items i JOIN feed_publications f ON f.publication_id=i.id WHERE f.feed_id=? AND i.platform=\'youtube\' ORDER BY i.published,i.id',(feed['id'],))]

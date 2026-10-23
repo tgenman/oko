@@ -59,11 +59,8 @@ def test_date_boundary_uses_user_zone_and_invalid_values_are_rejected(tmp_path):
                         {'mode': 'date', 'date': '2025-10-01'}, {'mode': 'date', 'date': 'bad'}]:
             assert add(client, checked, initial_history=history).status_code == 422
         response = add(client, checked, initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'Europe/Moscow'})
-        assert response.status_code == 200, response.text
-        history = response.json()['history']
-        assert history['selection'] == {'mode':'date','date':'2025-10-01','timezone':'Europe/Moscow'}  # 2025-09-30 21:00 UTC = Oct 1 midnight Moscow
-    with client_for(tmp_path) as client:
-        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['history']['selection'] == {'mode':'date','date':'2025-10-01','timezone':'Europe/Moscow'}
+        assert response.status_code == 422, response.text
+        assert client.get('/api/v3/subscriptions').json()['feeds']==[]
 
 
 def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
@@ -108,25 +105,6 @@ def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
         assert len(client.get('/api/v3/cards').json()) == 5
 
 
-def test_selected_date_includes_midnight_and_every_later_post(tmp_path):
-    import httpx
-    from fastapi.testclient import TestClient
-    from tests.support.app import create_app
-    from tests.support.feed_url import HEADERS
-    def reply(request):
-        if request.url.path == '/feed':
-            timestamps = ['2025-09-30T20:59:59Z', '2025-09-30T21:00:00Z', '2025-10-01T10:00:00Z']
-            return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>История</title>' + ''.join(f'<entry><id>{n}</id><title>Post {n}</title><link href="https://source.test/post/{n}"/><published>{stamp}</published></entry>' for n, stamp in reversed(list(enumerate(timestamps)))) + '</feed>')
-        return httpx.Response(200, text='<article>Текст</article>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'Europe/Moscow'}).json()
-        for _ in range(100):
-            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress']['loaded'] == 2:
-                break
-            time.sleep(.02)
-        assert history['progress']['loaded'] == 2
-        assert {c['source_url'] for c in client.get('/api/v3/cards').json()} == {'https://source.test/post/1', 'https://source.test/post/2'}
 
 
 def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_path):
@@ -167,36 +145,6 @@ def test_count_has_no_product_limit_and_preserves_large_integer(tmp_path):
         assert response.json()['history']['selection']['count'] == '9007199254740993'
 
 
-def test_rss_unknown_dates_included_and_window_warnings_survive_rotation(tmp_path):
-    import httpx
-    from fastapi.testclient import TestClient
-    from tests.support.app import create_app
-    from tests.support.feed_url import HEADERS
-    rows = [('unknown', ''), ('new', '2025-10-02T12:00:00Z'), ('old', '2025-09-01T12:00:00Z')]
-    def reply(request):
-        if request.url.path == '/feed':
-            return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>История</title>' + ''.join(f'<entry><id>{n}</id><title>{n}</title><link href="https://source.test/{n}"/><published>{stamp}</published></entry>' for n, stamp in rows) + '</feed>')
-        return httpx.Response(200, text='<article>Текст</article>')
-    def reader():
-        return TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
-    with reader() as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'UTC'}).json()
-        for _ in range(100):
-            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress']['loaded'] == 2:
-                break
-            time.sleep(.02)
-        assert history['progress']['loaded'] == 2
-        assert 'полнота истории за период не подтверждена' in ' '.join(history['progress']['warnings'])
-        unknown = next(c for c in client.get('/api/v3/cards').json() if c['source_url'].endswith('/unknown'))
-        assert unknown['published_at'] is None
-        assert unknown['published_at'] is None  # no invented publication date
-        assert client.get('/api/v3/materials/' + unknown['id']).json()['published_at'] is None
-    rows[:] = [('later', '2025-10-03T12:00:00Z')]
-    with reader() as client:
-        history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-        assert history['progress']['available'] == 2
-        assert 'полнота истории за период не подтверждена' in ' '.join(history['progress']['warnings'])
 
 
 @pytest.mark.parametrize('dates, warning', [(['', '', ''], True), (['2025-10-03T12:00:00Z', '', '2025-10-01T12:00:00Z'], True), (['2025-10-01T12:00:00Z', '', '2025-10-03T12:00:00Z'], True)])

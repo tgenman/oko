@@ -42,7 +42,6 @@ test('multiline Markdown links normalize only their labels and destinations in a
   await expect(r.page.locator('#text code').last()).toHaveText('[Блок\n\nкода](https://code.test)\n');
   await expect(r.page.locator('#text code').first()).toHaveText('[Код ссылки](https://code.test)');
   await expect(r.page.locator('#description').getByRole('link',{name:'Описание видео'})).toHaveAttribute('href','https://youtu.be/BPoce9VGatE');
-  await r.page.locator('#versions summary').click();await expect(r.page.locator('#versions').getByRole('link',{name:'Прежняя ссылка'})).toHaveAttribute('href','https://example.net/old');
   const source=await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/materials/A');return reply.json();});
   assert.equal(source.content.text,text);
   await expect(r.page.locator('#text p').first()).toHaveText('До ссылки');await expect(r.page.locator('#text p').last()).toHaveText('После ссылки');
@@ -80,11 +79,7 @@ test('filtered publication keeps a collapsed full original, media and restorable
   await expect(r.page.locator('#images img')).toBeVisible();
   await r.page.locator('#original-panel summary').click();await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#text')).toContainText('Реклама');await expect(r.page.locator('#material img')).toHaveCount(1);
-  const restored={...item,filter:{...item.filter!,restored:true}};
-  await r.page.evaluate(restored=>readerTransport.replies.set('/api/v3/materials/A/filter/restore',{body:{ok:true},next:[['/api/v3/materials/A',{body:restored}]]}),restored);
-  await r.page.locator('#filter-restore').click();
-  await expect(r.page.locator('#original-panel')).toHaveCount(0);await expect(r.page.locator('#text')).toContainText('Реклама');
-  await expect(r.page.locator('#filtered-text')).toBeEmpty();
+  await expect(r.page.locator('#filter-restore')).toHaveCount(0);
   const hidden={...item,filter:{...item.filter!,hidden:true,reason:'Скрыто фильтром'}};
   await r.page.evaluate(hidden=>readerTransport.replies.set('/api/v3/materials/A',{body:hidden}),hidden);
   await expect(r.page.locator('#filter-status')).toContainText('Скрыто фильтром');await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();

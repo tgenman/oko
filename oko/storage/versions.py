@@ -38,8 +38,10 @@ class Versions:
     def number(self, item: str) -> int:
         snapshot=material_read.current(self.store.db)
         if snapshot and item in snapshot.items:
-            return int(snapshot.items[item]['current_number'] or 0)
-        row=self.store.db.execute('SELECT number FROM content_current WHERE item=?',(item,)).fetchone()
+            row=snapshot.items[item]
+            return 1 if row['platform'] is not None and row['content']!='{}' else int(row['current_number'] or 0)
+        row=self.store.db.execute("""SELECT CASE WHEN i.platform IS NOT NULL AND i.content!='{}' THEN 1 ELSE coalesce(c.number,0) END
+            FROM items i LEFT JOIN content_current c ON c.item=i.id WHERE i.id=?""",(item,)).fetchone()
         return int(row[0]) if row else 0
 
     def path(self, item: str, number: int | None = None) -> Path:
@@ -252,10 +254,15 @@ class Versions:
     @reading_value
     def version(self, item: str) -> str:
         snapshot=material_read.current(self.store.db)
-        if snapshot and item in snapshot.items and snapshot.items[item]['current_fingerprint']:
-            return str(snapshot.items[item]['current_fingerprint'])
-        row=self.store.db.execute('SELECT fingerprint FROM content_versions WHERE item=? AND number=?',(item,self.number(item))).fetchone()
-        return str(row[0]) if row else self.fingerprint(self.path(item).parent)
+        row=(snapshot.items[item] if snapshot and item in snapshot.items else
+             self.store.db.execute("""SELECT i.platform,i.content,v.fingerprint AS current_fingerprint FROM items i
+                LEFT JOIN content_current c ON c.item=i.id LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
+                WHERE i.id=?""",(item,)).fetchone())
+        if row and row['platform'] is not None and row['content']!='{}':
+            return str(json.loads(row['content'])['extra']['_input_hash'])
+        if row and row['current_fingerprint']:
+            return str(row['current_fingerprint'])
+        return self.fingerprint(self.path(item).parent)
 
     @reading_value
     def previous(self, item: str) -> list[dict[str, Any]]:

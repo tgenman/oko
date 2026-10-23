@@ -24,7 +24,8 @@ test('explicit channel access changes keep the feed and publication in the real 
  await expect(r.page.locator('#feed-options').getByText(/^Personal Account ·/)).toBeVisible();
  await r.page.screenshot({path:artifactPath('telegram-client-access-changed.png')});
  await r.page.locator('#feeds-close').click();
- await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
+ await expect.poll(async()=>{const material=await r.api(`materials/${item}`);return material.availability==='available'&&material.content.availability==='available'&&material.content.text.includes('Client original');}).toBe(true);
+ await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#text')).toContainText('Client original');
  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
  expect((await r.api('cards')).map(c=>c.id)).toEqual([item]);
@@ -34,7 +35,8 @@ test('explicit channel access changes keep the feed and publication in the real 
  await r.page.locator('#feed-telegram-change').click();
  await expect(r.page.locator('#feed-telegram-status')).toContainText('Access changed');
  await r.page.locator('#feeds-close').click();
- await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
+ await expect.poll(async()=>{const material=await r.api(`materials/${item}`);return material.availability==='available'&&material.content.availability==='available'&&material.content.text.includes('Web original');}).toBe(true);
+ await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#text')).toContainText('Web original');
  expect((await r.api('cards')).map(c=>c.id)).toEqual([item]);
  await r.page.screenshot({path:artifactPath('telegram-web-access-restored.png')});

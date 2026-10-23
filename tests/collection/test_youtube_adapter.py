@@ -140,7 +140,7 @@ def test_cover_rejects_non_image_and_oversize_without_accepting_partial_bytes():
 
 def test_paused_history_never_advances_and_cancel_opens_next_normal_window():
     import json
-    from oko.collection.youtube.compatibility import YouTubeAdapterSource
+    from oko.collection.youtube.publication_source import YouTubeAdapterSource
     calls=[]
     def respond(request):
         calls.append(str(request.url))

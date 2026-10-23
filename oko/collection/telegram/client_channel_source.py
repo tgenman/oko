@@ -1,4 +1,4 @@
-"""Temporary reader projection of channel client metadata and external cursors."""
+"""Native channel metadata delivery and observation through the common adapter."""
 from dataclasses import replace
 from typing import Any
 
@@ -7,7 +7,7 @@ from oko.collection.adapter_errors import source_error
 from oko.collection.contracts import DiscoveryResult,FetchResult,FetchResources,FetchRequirements,Publication,SourceObservation,SourceIdentity,Material
 from oko.collection.telegram.source import TelegramSource
 from oko.collection.telegram.client_adapter import TelegramClientAdapter,encode,publication_reference,finish_window
-from oko.collection.telegram.compatibility import material
+from oko.collection.telegram.channel_source import material
 from oko.collection.telegram.contracts import HistoryEnvelope,HistorySelection
 from oko.collection.telegram.web import WebTelegram
 
@@ -66,14 +66,18 @@ class TelegramClientSource(TelegramSource):
                 paused=bool(selection.get('paused')))).encode()
         try:
             if selection.get('cancelled') and not state.get('initial_complete',False):
-                state.update(telegram_client_adapter=finish_window(self.peer,state.get('telegram_client_adapter','')),
+                token=state.get('telegram_client_adapter','')
+                if not token:
+                    metadata=await api.resolve_feed('https://t.me/'+(self.username or str(self.peer)))
+                    token=metadata.latest_cursor
+                state.update(telegram_client_adapter=finish_window(self.peer,token),
                     run=run,initial_complete=True,locating=False,scan_complete=True)
                 return DiscoveryResult((),saved())
             if selection.get('paused') and not state.get('initial_complete',False):
                 return DiscoveryResult((),saved())
             if 'telegram_client_adapter' not in state or state.get('run')!=run:
                 metadata=await api.resolve_feed('https://t.me/'+(self.username or str(self.peer)))
-                state=dict(telegram_client_adapter=metadata.latest_cursor,run=run,count=selection.get('count') or 1,locating=True)
+                state=dict(telegram_client_adapter=metadata.latest_cursor,run=run,count=selection.get('count'),locating=selection.get('mode')=='count')
                 return DiscoveryResult((),saved(),self._observation(),continuation=.1)
             feed=ExternalReference(ExternalKey(Platform.telegram,str(self.peer)),api._url())
             if state.get('locating'):

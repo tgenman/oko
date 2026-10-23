@@ -5,7 +5,7 @@ import sqlite3
 import httpx
 import pytest
 
-from tests.reader.test_independent_media import migrated_root
+from tests.support.publication_pipeline import migrated_root
 from tests.reviews.test_processing_coordination import coordinated_transport
 from tests.support.app import create_app
 from tests.support.presence import presence
@@ -79,7 +79,7 @@ def test_hidden_has_empty_blocks_original_and_no_restore_or_summary(tmp_path):
         assert row['filtered_content']['reason']
         assert row['content']['blocks'][0]['text']=='Реклама: купите курс.'
         assert not any(c['operation']=='theses' for c in calls)
-        assert client.post('/api/v3/materials/'+card['id']+'/filter/restore').status_code==400
+        assert client.post('/api/v3/materials/'+card['id']+'/filter/restore').status_code==404
 
 
 def test_confirmed_empty_input_completes_without_model(tmp_path):

@@ -2,7 +2,7 @@
 import httpx
 import pytest
 
-from tests.reader.test_independent_media import migrated_root
+from tests.support.publication_pipeline import migrated_root
 from tests.support.app import create_app
 from tests.support.reader import HEADERS,wait_for
 from tests.support.presence import presence
@@ -191,10 +191,11 @@ def test_shared_card_owner_and_importance_order_match_full_and_selective_http(sh
 
 def test_offline_migration_merges_only_proven_same_external_keys(tmp_path):
     from oko.storage.migration import migrate_publications
+    from tests.support.youtube import History
     source=tmp_path/'legacy'
     def response(request):
         return httpx.Response(200,text=feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
-    options=dict(token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response))
+    options=dict(token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response),youtube_history=History([VIDEO]))
     with TestClient(create_app(source,**options),headers=HEADERS) as client:
         presence(client,'reader')
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})

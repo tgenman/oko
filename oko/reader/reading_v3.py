@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, Request
 from fastapi.responses import Response
 
 from oko.reader import projection_v3 as project
-from oko.reader.api_v3 import ApiError, invalid, no_query, positive_version, scalar_boolean
+from oko.reader.api_v3 import ApiError, invalid, no_query, scalar_boolean
 from oko.reader.commands_v3 import track
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
@@ -50,7 +50,7 @@ def filter_state(value: facts.Filter | None, waiting: ProcessingWait | None) -> 
     if value is None:
         return wire.FilterState(wire.FilterAttemptState(attempt=attempt('off', None), diagnostic_message=None, result=None))
     message = value.error if isinstance(value.error, str) else None
-    result = wire.FilterResult(can_restore=value.can_restore, hidden=value.hidden, removed=value.removed, restored=value.restored, reason=value.reason, provenance=provenance(None)) if value.status == 'done' else None
+    result = wire.FilterResult(can_restore=False, hidden=value.hidden, removed=value.removed, restored=value.restored, reason=value.reason, provenance=provenance(None)) if value.status == 'done' else None
     if result is not None:
         return wire.FilterState(wire.FilterReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
     return wire.FilterState(wire.FilterAttemptState(attempt=attempt(value.status, message, waiting), diagnostic_message=message, result=None))
@@ -94,7 +94,7 @@ def saved_filter(runtime: Runtime, item: str, value: facts.Filter | None) -> wir
     current=runtime.require_store()
     filtered = filter_state(value, runtime.processing_wait(item, 'filter'))
     if filtered.root.result is not None:
-        saved = current.derivative_provenance(current.path(item).parent / 'filter.md', current.filters.signature(item))
+        saved = current.publications.provenance(item,'filter') if current.publications.owns(item) else current.derivative_provenance(current.path(item).parent / 'filter.md', current.filters.signature(item))
         if saved:
             from pydantic import TypeAdapter
             origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
@@ -249,21 +249,8 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
                 reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
                 post_web_unavailable=projected.post_web_unavailable, external_attachments=projected.external_attachments, images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
                 loading=projected.loading, changed=projected.changed, source_deleted=projected.source_deleted,
-                revision_id=projected.revision_id, version=projected.version, previous_versions=projected.previous_versions)
+                revision_id=projected.revision_id, version=projected.version, previous_versions=[])
             return wire.ReadableMaterial(wire.AvailableReadableMaterial(**shared, availability='available', content=content))
-
-    @router.get('/api/v3/materials/{item}/versions/{number}', response_model=wire.PublicationVersion)
-    async def version(item: str, number: str) -> wire.PublicationVersion:
-        identity(item)
-        n = positive_version(number)
-        current = runtime.require_store()
-        raw = current.versions.read(item, n)
-        if raw is None:
-            raise ApiError(404, wire.ErrorEnvelope(wire.VersionUnavailableError(code='version_unavailable', message='Версия недоступна', details=wire.VersionUnavailableErrorDetails(material_id=identity(item), number=n), command_id=None, diagnostic_id=None)))
-        value = facts.Version.model_validate(raw)
-        revision = current.versions.fingerprint(current.versions.path(item, n).parent)
-        return wire.PublicationVersion(linked_content=wire.LinkedContent.model_validate(value.linked_content.model_dump()) if value.linked_content else None, number=n, revision_id=wire.RevisionId(revision), title=value.title, text=value.text, reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
-            post_web_unavailable=value.post_web_unavailable, external_attachments=[wire.ExternalAttachment(**a.model_dump()) for a in value.external_attachments], completeness=completeness(value.full, value.reason, value.external_only, value.post_web_unavailable), images=[media_url(url) for url in value.images], attachments=attachments(value.attachments))
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:
         identity(item)
@@ -293,10 +280,6 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
     @router.get('/api/v3/materials/{item}/media/{name}')
     async def attachment(item: str, name: str) -> Response:
         return read_media(item, 'media', name)
-
-    @router.get('/api/v3/materials/{item}/versions/{number}/{kind}/{name}')
-    async def version_media(item: str, number: str, kind: Literal['images','media'], name: str) -> Response:
-        return read_media(item, kind, name, positive_version(number))
 
     @router.post('/api/v3/feeds/{feed}/completion/preview', response_model=wire.CompletionPreview)
     async def preview_feed_completion(feed: str) -> wire.CompletionPreview:
@@ -382,7 +365,7 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             elif isinstance(value, wire.CommandRetryFilter):
                 await runtime.retry_filter(value.material_id.root)
             elif isinstance(value, wire.CommandRestoreFilter):
-                await runtime.restore_filter(value.material_id.root)
+                raise ApiError(410, wire.ErrorEnvelope(wire.ActionInvalidError(code='action_invalid',message='Restore removed',details=wire.ActionInvalidErrorDetails(reason='feature_removed'),command_id=None,diagnostic_id=None)))
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     @router.post('/api/v3/materials/{item}/viewed', response_model=wire.CommandAcknowledgement)
@@ -404,10 +387,6 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
     @router.post('/api/v3/materials/{item}/filter/retry', response_model=wire.CommandAcknowledgement)
     async def retry_filter(request: Request, item: str) -> wire.CommandAcknowledgement:
         return await execute(request, wire.CommandContext(wire.CommandRetryFilter(operation='retry_filter', material_id=identity(item))))
-
-    @router.post('/api/v3/materials/{item}/filter/restore', response_model=wire.CommandAcknowledgement)
-    async def restore_filter(request: Request, item: str) -> wire.CommandAcknowledgement:
-        return await execute(request, wire.CommandContext(wire.CommandRestoreFilter(operation='restore_filter', material_id=identity(item))))
 
     app.include_router(router)
     return read_material
