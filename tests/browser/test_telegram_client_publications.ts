@@ -21,6 +21,7 @@ test('explicit channel access changes keep the feed and publication in the real 
  await r.page.locator('#feed-telegram-access').selectOption('personal');
  await r.page.locator('#feed-telegram-change').click();
  await expect(r.page.locator('#feed-telegram-status')).toContainText('Access changed');
+ await expect(r.page.locator('#feed-options').getByText(/^Personal Account ·/)).toBeVisible();
  await r.page.screenshot({path:artifactPath('telegram-client-access-changed.png')});
  await r.page.locator('#feeds-close').click();
  await r.page.getByRole('button',{name:'Show new version',exact:true}).click();

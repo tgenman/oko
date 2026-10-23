@@ -141,6 +141,13 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         assert calls == {'bad':1, 'good':1}
         offset[0] += 61
         wait_for(client, lambda: calls['bad']==2)
+        # The provider call starts before its failure is committed. Keep the
+        # clock fixed until the doubled delay is visible through HTTP.
+        from datetime import datetime
+        def doubled_delay():
+            return any(datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp()>time.time()+offset[0]+119
+                for w in client.get('/api/v3/status').json()['work'] if w['phase']=='waiting' and w.get('retry_at'))
+        wait_for(client,doubled_delay)
         assert calls['good']==1
         offset[0] += 61
         assert client.get('/api/v3/materials/'+item).json()['content']['completeness']['state']=='incomplete'

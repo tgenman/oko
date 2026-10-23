@@ -78,7 +78,8 @@ export function TelegramAccessEditor({owner,feed}:{owner:MenusOwner;feed:Subscri
   try{
    const body={feed_id:feed.id,source_locator:source.trim(),folder:owner.subscriptions.folders.find(f=>f.id===feed.folder_id)?.title||'Inbox'};
    await owner.api.command({operation:'telegram_connect'},headers=>sdk.telegramConnect({headers,client:owner.api.client,body:access==='web'?{...body,access:{kind:'web'}}:{...body,access:{kind:'client',profile:access}}}));
-   await owner.refresh();context.commit(()=>setStatus('Access changed. Saved publications and settings kept.'));
+   owner.needsRefresh.add('feed/'+feed.id);await owner.refresh();
+   await context.commit(()=>owner.loadSettings());context.commit(()=>setStatus('Access changed. Saved publications and settings kept.'));
   }catch(error){context.commit(()=>setStatus(message(error)));}finally{setBusy(false);}
  };
  return <fieldset disabled={busy||!owner.workAllowed||owner.stopped}><legend>Change Channel Access</legend><p>Oko verifies the same source before switching. Saved publications and settings are kept.</p>
