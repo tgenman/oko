@@ -287,6 +287,9 @@ class MediaFiles:
         if not store.valid(job):
             return
         owner = self.owner(job.item) if job.kind=='download_media' else job.item
+        if owner and issue.kind==AdapterErrorKind.notice and issue.code=='youtube-upcoming':
+            store.viewed(owner)
+            return
         if owner and issue.kind==AdapterErrorKind.notice and issue.code=='subtitles-unavailable':
             self._subtitles_absent(job,owner,issue)
             return

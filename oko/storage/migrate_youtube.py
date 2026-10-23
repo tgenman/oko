@@ -18,6 +18,11 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
     for feed in store.subscriptions.feeds():
         if feed['transport']!='youtube' or feed['connection']=='deleting':
             continue
+        if store.publications.feed(feed['id']):
+            continue
+        legacy=json.loads(store.cursor(feed['id']) or '{}')
+        selection=store.db.execute('SELECT selection FROM initial_history WHERE feed=?',(feed['id'],)).fetchone()
+        selection=json.loads(selection[0]) if selection else {}
         for row in store.db.execute('SELECT * FROM items WHERE feed_id=? AND platform IS NULL',(feed['id'],)).fetchall():
             item=row['id']
             publication=store.publication(item)
@@ -87,6 +92,21 @@ def convert(store: 'Store', report: dict[str,Any]) -> None:
             with store.db:
                 store.publications.configure_feed(feed['id'])
             current=store.db.execute('SELECT platform,external_id FROM feeds WHERE id=?',(feed['id'],)).fetchone()
+            history=legacy.get('youtube_history',{})
+            chosen=[row[0] for row in store.db.execute('SELECT external_id FROM items WHERE feed_id=? AND platform=\'youtube\' ORDER BY published,id',(feed['id'],))]
+            excluded=[key.removeprefix('yt:video:') for key in history.get('baseline',legacy.get('baseline',[])) if key.removeprefix('yt:video:') not in chosen]
+            position_state=dict(channel=current[1],keys=chosen,position=len(chosen),done=True,excluded=excluded)
+            complete=not history or history.get('complete',False)
+            if history and not complete:
+                anchor=history.get('state',{}).get('anchors',{}).get('UU')
+                count=selection.get('count') or 1
+                position_state.update(keys=[anchor] if anchor else [],position=0,done=False,history=history.get('state',{}),
+                    history_count=count,provider_count=count,history_position=anchor,history_offset=count-1,locating=True)
+            cursor=dict(youtube_adapter=json.dumps(position_state),run=selection.get('run','initial'),
+                count=selection.get('count') or 1,locating=False,initial_complete=complete,scan_complete=complete)
+            with store.db:
+                store.db.execute('UPDATE feeds SET cursor=? WHERE id=?',(json.dumps(cursor),feed['id']))
+                store.db.execute('DELETE FROM state WHERE key=?',(store.cursor_key(feed['id'],''),))
             report['feeds'].append(dict(old_id=feed['id'],new_id=feed['id'],old_key=feed['identity'],platform=current[0],external_id=current[1]))
         except (sqlite3.IntegrityError,ValueError,AdapterException) as error:
             report['conflicts'].append(dict(feed_id=feed['id'],reason=str(error)))

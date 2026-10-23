@@ -74,7 +74,7 @@ def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) ->
 def live_settings(store: 'Store', item: str) -> dict[str, Any]:
     feed=store.item_feed(item)
     current=store.subscriptions.effective('feed',feed,details=False)
-    rules=dict(feed_id=feed,public_ai=current['feed']['public_ai'],values={key:value['value'] for key,value in current['effective'].items() if key in ('prompt_filters','theses','prompt_theses','processor')})
+    rules=dict(feed_id=feed,public_ai=current['feed']['public_ai'],importance=current['feed']['importance'],values={key:value['value'] for key,value in current['effective'].items() if key in ('prompt_filters','theses','prompt_theses','processor')})
     return rules
 
 
@@ -90,10 +90,13 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
         return None
     rules=live_settings(store,item)
     values=rules['values']
-    if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not values['theses']:
-        return None
     youtube=row['platform']=='youtube'
+    summary=values['theses'] or youtube and rules['importance']=='high'
+    if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not summary:
+        return None
     selected_content=json.loads(row['content']) if youtube else content(store,item)
+    if youtube and selected_content.get('extra',{}).get('youtube',{}).get('captions')=='available' and not youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content)):
+        return None
     if awaiting_input(selected_content) or awaiting_linked_input(store,item,selected_content):
         return None
     selected=([dict(captions=selected_content.get('extra',{}).get('youtube',{}).get('captions'),

@@ -155,3 +155,18 @@ def test_paused_history_never_advances_and_cancel_opens_next_normal_window():
     source.initial_history=dict(count=10,run='one')
     following=asyncio.run(source.discover(cancelled.cursor))
     assert [p.id for p in following.publications]==[VIDEO]
+
+
+def test_repeat_window_keeps_initial_count_and_only_admits_new_or_selected_videos():
+    from datetime import datetime,timezone
+    videos=['v0000000003','v0000000002','v0000000001']
+    def respond(request):
+        rows=''.join('<entry><id>yt:video:'+v+'</id><title>'+v+'</title><published>'+datetime(2026,10,int(v[-1]),tzinfo=timezone.utc).isoformat()+'</published><link href="https://www.youtube.com/watch?v='+v+'"/></entry>' for v in videos)
+        return httpx.Response(200,text='<feed xmlns="http://www.w3.org/2005/Atom">'+rows+'</feed>')
+    adapter=YouTubeAdapter(Captions(),httpx.MockTransport(respond))
+    feed=asyncio.run(adapter.resolve_feed('https://www.youtube.com/feeds/videos.xml?channel_id='+CHANNEL))
+    initial=asyncio.run(adapter.discover(feed.reference,feed.latest_cursor,10))
+    assert [p.metadata.reference.key.external_id for p in initial.publications]==['v0000000003']
+    videos.insert(0,'v0000000004')
+    repeat=asyncio.run(adapter.discover(feed.reference,initial.next_cursor,10))
+    assert [p.metadata.reference.key.external_id for p in repeat.publications]==['v0000000003','v0000000004']

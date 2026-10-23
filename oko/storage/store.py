@@ -784,6 +784,8 @@ class Store:
             if own and 'youtube' in json.loads(own[0]).get('extra',{}):
                 projected=youtube_media.add_input(self,json.loads(own[0]))
                 text='\n\n'.join(block['text'] for block in projected['blocks'] if block['type']=='text' and block.get('role')=='body')
+                if projected['extra']['youtube'].get('captions')=='error' and header.get('captions')=='available':
+                    header={**header,'captions':'error','full':False,'reason':'Локальный файл субтитров недоступен; повторите загрузку'}
             header=publication_links.project_header(self,item,header)
             article_text=publication_links.text(self,item)
             if article_text:

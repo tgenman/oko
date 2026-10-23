@@ -53,7 +53,8 @@ class YouTubeAdapterSource(YouTubeSource):
                          history_enroll=[value.metadata.reference.key.external_id for value in page.publications]
                          if not state.get('initial_complete') else [])
             retry=any(issue.kind.value=='temporary' for issue in page.issues)
-            state.update(history_waiting=retry,history_error='; '.join(issue.message for issue in page.issues) if retry else None)
+            state.update(history_waiting=retry,history_error='; '.join(issue.message for issue in page.issues) if retry else None,
+                         warnings=[issue.message for issue in page.issues if issue.code=='history-shortfall'])
             if not page.has_more:
                 state['initial_complete']=True
             publications=tuple(Publication(value.metadata.reference.key.external_id,value.metadata.reference.url,

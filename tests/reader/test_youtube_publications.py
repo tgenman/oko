@@ -4,6 +4,7 @@ import json
 import threading
 
 import httpx
+import pytest
 
 from tests.reader.test_independent_media import migrated_root
 from tests.support.app import create_app
@@ -14,7 +15,8 @@ from tests.support.youtube import CHANNEL,VIDEO,PNG,feed_xml,subscribe,History
 from tests.support.v3 import TestClient
 
 
-def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path):
+@pytest.mark.parametrize('high_importance',[False,True])
+def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path,high_importance):
     root=migrated_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     captions_calls=[]
@@ -36,8 +38,10 @@ def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path):
             youtube_history=History([VIDEO]),ai_transport=model_transport(models)),headers=HEADERS) as client:
         try:
             client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
-            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
-            subscribe(client)
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':not high_importance,'prompt_filters':''})
+            feed=subscribe(client)
+            if high_importance:
+                assert client.patch('/api/v3/feeds/'+feed,json={'importance':'high'}).status_code==200
             presence(client,'reader')
             assert started.wait(3)
             card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result']),None))
@@ -194,6 +198,16 @@ def test_manual_caption_revalidation_rotates_only_changed_file_and_results(tmp_p
         wait_for(client,lambda:len(calls)==3 and not client.get('/api/v3/materials/'+card['id']).json()['content']['loading'])
         same=client.get('/api/v3/materials/'+card['id']).json()
         assert next(a['url'] for a in same['content']['attachments'] if a['kind']=='file')==current_file
+        assert sum(request.url.path=='/v1/chat/completions' for request in models)==count
+        # Losing the local input must not turn an unknown transcript into a
+        # confirmed empty input or keep presenting its old result as current.
+        import sqlite3
+        with sqlite3.connect(root/'state.sqlite') as db:
+            key=db.execute('SELECT storage_key FROM media_files WHERE id=?',(current_file.rsplit('/',1)[-1],)).fetchone()[0]
+        (root/key).unlink()
+        missing=client.get('/api/v3/materials/'+card['id']).json()
+        assert missing['theses']['result'] is None
+        assert missing['source']['captions']=='error'
         assert sum(request.url.path=='/v1/chat/completions' for request in models)==count
 
 

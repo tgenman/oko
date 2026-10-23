@@ -11,7 +11,7 @@ import httpx
 from oko.collection.adapter_errors import failure
 from oko.collection.adapters import (AdapterErrorKind,AdapterException,AdapterIssue,DiscoveryPage,
     ExternalKey,ExternalReference,FeedMetadata,MediaReference,Platform,PublicationContent,PublicationMetadata)
-from oko.collection.contracts import CaptionsClient,SourceError,Publication
+from oko.collection.contracts import CaptionsClient,SourceError,SourceSkipped,Publication
 from oko.collection.rss import Entry,RSSSource,entries
 from oko.collection.youtube.history import HistoryClient,LocalHistory
 
@@ -141,7 +141,7 @@ class YouTubeAdapter:
         feed=feed_reference(url)
         keys=await self._window(feed)
         return FeedMetadata(feed,'','',_encode(dict(channel=feed.key.external_id,keys=keys,
-            position=max(0,len(keys)-1),done=False,metadata=self._metadata(keys),
+            position=max(0,len(keys)-1),done=False,excluded=keys,metadata=self._metadata(keys),
             anchors={**self.anchors,**({'UU':keys[-1]} if keys else {})})))
 
     async def cursor_before(self, feed: ExternalReference, cursor: str, offset: int) -> str:
@@ -183,10 +183,12 @@ class YouTubeAdapter:
                 issues: tuple[AdapterIssue,...]=(AdapterIssue('youtube-history-error',str(state['history_error']),AdapterErrorKind.temporary),) if state.get('history_error') else ()
                 return DiscoveryPage((),_encode(state),True,issues)
         if state['done']:
-            state=dict(channel=feed.key.external_id,keys=current,position=0,done=False)
+            excluded=state.get('excluded',[])
+            state=dict(channel=feed.key.external_id,keys=[key for key in current if key not in excluded],position=0,done=False,excluded=excluded)
         keys=state['keys'][state['position']:state['position']+limit]
         values=tuple(self._value(key) for key in keys)
         state['position']+=len(keys)
+        state['excluded']=[key for key in state.get('excluded',[]) if key not in keys]
         state['done']=state['position']>=len(state['keys'])
         issues=self.issues
         if state.pop('shortfall',0):
@@ -220,5 +222,7 @@ class YouTubeAdapter:
                 raise SourceError('Субтитры превышают лимит; текст не обрезан',retryable=False)
             output.write(raw)
             return replace(current,size_bytes=len(raw))
+        except SourceSkipped as error:
+            raise AdapterException(AdapterIssue('youtube-upcoming',error.label,AdapterErrorKind.notice,publication,media.key)) from error
         except SourceError as error:
             raise failure(error,publication,media.key,scope='youtube:captions' if current.key=='youtube:subtitles' else 'youtube:cover') from error
