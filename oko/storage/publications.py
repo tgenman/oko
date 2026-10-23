@@ -89,7 +89,7 @@ class Publications:
         return self.store.db.execute('SELECT 1 FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone() is not None
 
     def feed(self, feed: str) -> bool:
-        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','rss_adapter','youtube_adapter')", (feed,)).fetchone() is not None
+        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','telegram_client_adapter','rss_adapter','youtube_adapter')", (feed,)).fetchone() is not None
 
     def sync_feeds(self, feeds: list[str]) -> None:
         if self.store.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
@@ -118,6 +118,20 @@ class Publications:
             store.db.execute('''UPDATE feeds SET platform=?,external_id=?,url=?,description=?,created_at=?,
                 adapter=?,config='{}',interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
                 (platform,external_id,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),adapter,
+                 store.subscriptions.feed_refresh_minutes()*60,
+                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
+                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))
+            return
+        if row and binding and binding['kind']=='client' and json.loads(row['config']).get('source_kind')=='channel':
+            if store.db.execute('SELECT 1 FROM items WHERE feed_id=? AND platform IS NULL',(feed,)).fetchone():
+                return
+            config={**json.loads(row['config']),**binding}
+            url='https://t.me/'+row['telegram_username'] if row['telegram_username'] else 'https://t.me/c/'+str(-row['telegram_peer']-1000000000000)
+            details=store.subscriptions.details.snapshot(feed)
+            effective=store.subscriptions.effective('feed',feed)['effective']
+            store.db.execute('''UPDATE feeds SET platform='telegram',external_id=?,url=?,description=?,created_at=?,
+                adapter='telegram_client_adapter',config=?,interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
+                (str(row['telegram_peer']),url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),json.dumps(config),
                  store.subscriptions.feed_refresh_minutes()*60,
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))

@@ -14,6 +14,7 @@ from oko.collection.web_compatibility import WebArticleSource
 from oko.collection.telegram.source import TelegramClient, TelegramSource
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.compatibility import TelegramWebSource
+from oko.collection.telegram.client_compatibility import TelegramClientSource
 from oko.collection.youtube.source import YouTubeSource
 from oko.collection.youtube.compatibility import YouTubeAdapterSource
 from oko.collection.contracts import CaptionsClient
@@ -86,7 +87,8 @@ class Sources:
                     http_transport=self._telegram_transport)
             elif config.transport == 'telegram' and self._telegram and access and access.peer:
                 assert access.account is not None
-                source = previous if isinstance(previous, TelegramSource) else TelegramSource(
+                client_type=TelegramClientSource if config.independent_media else TelegramSource
+                source = previous if type(previous) is client_type else client_type(
                     self._telegram, access.account, access.peer, config.initial_days, access.username,
                     http_transport=self._telegram_transport)
             elif config.transport == 'rss' and self._rss_enabled:
@@ -139,5 +141,7 @@ class Sources:
                 adapter.captions=captions
             return adapter
         if isinstance(source,RSSAdapterSource):
+            return source.publication_adapter()
+        if isinstance(source,TelegramClientSource):
             return source.publication_adapter()
         return source.publication_adapter() if isinstance(source, TelegramWebSource) and source.independent_media else None

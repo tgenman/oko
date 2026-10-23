@@ -13,7 +13,7 @@ import shutil
 import os
 import sys
 import time
-from typing import Any, Protocol
+from typing import Any, Protocol, BinaryIO
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,6 +121,7 @@ class _TelegramWorker(_TelegramOperations):
     async def request(self, operation: str, **args: Any) -> Any:
         observation.stage('Загрузка вложения' if operation == 'download' else 'Ожидание Telegram worker')
         target = args.pop('_target', None)
+        output = args.pop('_output', None)
         generation = self.generation
         async with self.lock:
             try:
@@ -155,6 +156,17 @@ class _TelegramWorker(_TelegramOperations):
                 if operation == 'download':
                     path = self.spool / 'media.bin'
                     try:
+                        if output is not None:
+                            size=0
+                            with path.open('rb') as source:
+                                while chunk:=source.read(1024*1024):
+                                    size+=len(chunk)
+                                    if size>200*1024*1024:
+                                        raise SourceError('Вложение превышает лимит 200 МиБ',code='media-too-large',retryable=False)
+                                    if output.write(chunk)!=len(chunk):
+                                        raise OSError('Incomplete Telegram media output')
+                                    await asyncio.sleep(0)
+                            return size
                         if target is not None:
                             if not isinstance(target,Path) or target.parent.parent.resolve()!=(self.root/'staging'/'_downloads').resolve() or not target.name.startswith('incoming-media-'):
                                 raise ValueError('unowned client download target')
@@ -249,6 +261,10 @@ class LocalTelegram(_TelegramOperations):
             raise asyncio.CancelledError
         payload: StagedPayload = await self.request('download',account=account,peer=peer,id=identity,_target=staging.path/('incoming-'+name))
         return payload
+
+    async def download_stream(self, account: str, peer: int, identity: int, output: BinaryIO) -> int:
+        size: int=await self.request('download',account=account,peer=peer,id=identity,_output=output)
+        return size
 
     async def close_account(self, account: str) -> None:
         user = self.expected_users.get(account)

@@ -626,3 +626,22 @@ def test_worker_service_actions_keep_read_ids_but_do_not_consume_post_count(tmp_
         finally:
             await bridge.close()
     asyncio.run(scenario())
+
+
+def test_owned_client_streams_one_file_into_adapter_output(tmp_path,monkeypatch):
+    import asyncio
+    from io import BytesIO
+    from oko.collection.telegram.source import LocalTelegram
+    project=fake_sdk_project(tmp_path,monkeypatch)
+    sdk=project/'telethon'/'__init__.py'
+    sdk.write_text(sdk.read_text().replace('await asyncio.sleep(100)','return file.name'))
+    async def scenario():
+        bridge=LocalTelegram(project/'.env',tmp_path/'data')
+        output=BytesIO()
+        try:
+            size=await bridge.download_stream('fixture',-1001234567890,11,output)
+            assert size==len(b'partial-download') and output.getvalue()==b'partial-download'
+            assert not list((tmp_path/'data'/'staging'/'_telegram').rglob('media.bin'))
+        finally:
+            await bridge.close()
+    asyncio.run(scenario())

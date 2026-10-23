@@ -234,6 +234,12 @@ class TelegramAccess:
             self.save_avatar(feed, info)
 
     def save_avatar(self, feed: str, info: dict[str, Any]) -> None:
+        if info.get('kind') in ('channel','group','supergroup'):
+            row=self.db.execute('SELECT config FROM feeds WHERE id=?',(feed,)).fetchone()
+            if row:
+                config=json.loads(row[0])
+                config['source_kind']=info['kind']
+                self.db.execute('UPDATE feeds SET config=? WHERE id=?',(json.dumps(config),feed))
         if 'avatar' not in info:
             return
         if info['avatar'] is None:
