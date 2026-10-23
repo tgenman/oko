@@ -15,7 +15,7 @@ from oko.collection.contracts import (
     DownloadStage, StagedPayload, SourceError, SourceManifest, Material,
     Publication, FetchResources, FetchResult, DiscoveryResult, ReplyPreview, Attachment,
 )
-from oko.collection.telegram.adapter import TelegramWebAdapter, reference, publication_reference
+from oko.collection.telegram.adapter import TelegramWebAdapter, reference, publication_reference, finish_window
 from oko.collection.telegram.contracts import HistoryEnvelope, HistorySelection, ExpectedMedia
 from oko.collection.telegram.media import Downloader
 from oko.collection.telegram.source import TelegramSource
@@ -141,10 +141,17 @@ class TelegramWebSource(TelegramSource):
         assert self.username
         api = self.publication_adapter()
         feed = reference('https://t.me/s/'+self.username)
+        run=self.initial_history.get('run','initial')
+        if previous and previous.position.get('run','initial')!=run:
+            previous=None
         state: dict[str, Any] = dict(previous.position) if previous else {}
         observations: tuple[Publication, ...] = ()
         warnings: tuple[str, ...] = ()
         try:
+            if self.initial_history.get('cancelled') and previous and not previous.selection.scan_complete:
+                state['adapter_cursor']=finish_window(state.get('adapter_cursor',''))
+                selection=previous.selection.model_copy(update={'scan_complete':True,'paused':False,'enrolled_ids':()})
+                return DiscoveryResult((),previous.model_copy(update={'selection':selection,'position':state}).encode(),self.observation())
             if previous and previous.selection.scan_complete:
                 # Preserve the existing restriction-reclassification behavior
                 # until the storage migration: observe only the public page
@@ -159,7 +166,7 @@ class TelegramWebSource(TelegramSource):
                 metadata = await api.resolve_feed(feed.url)
                 # Persist the boundary before scanning back N publications. A
                 # failure on an older page cannot shift the window on retry.
-                state = dict(adapter_cursor=metadata.latest_cursor, locating=True, since=0)
+                state = dict(adapter_cursor=metadata.latest_cursor, locating=True, since=0,run=run)
                 complete = not metadata.latest_cursor
                 result: tuple[Publication, ...] = ()
             elif previous and self.initial_history.get('paused') and not previous.selection.scan_complete:

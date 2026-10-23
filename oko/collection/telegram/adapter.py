@@ -122,6 +122,11 @@ def resource_identity(locator: str) -> str:
     return urlunsplit((url.scheme.lower(), url.netloc.lower(), url.path, urlencode(query), ''))
 
 
+def finish_window(cursor: str) -> str:
+    state=decode(cursor) if cursor else dict(upper=0)
+    return encode(state['upper']+1,state['upper'],done=True)
+
+
 class TelegramWebAdapter:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None, *, linked_descriptions: bool = False) -> None:
         self.transport = transport

@@ -71,6 +71,10 @@ class Publications:
         CREATE TABLE IF NOT EXISTS feed_publications (
           feed_id TEXT REFERENCES feeds(id), publication_id TEXT REFERENCES items(id),
           PRIMARY KEY(feed_id,publication_id));
+        CREATE INDEX IF NOT EXISTS feed_publications_publication ON feed_publications(publication_id,feed_id);
+        CREATE VIEW IF NOT EXISTS reading_memberships AS
+          SELECT publication_id,feed_id FROM feed_publications
+          UNION SELECT id,feed_id FROM items WHERE platform IS NULL AND feed_id IS NOT NULL;
         CREATE TABLE IF NOT EXISTS publication_links (
           source_publication_id TEXT REFERENCES items(id), target_publication_id TEXT REFERENCES items(id),
           PRIMARY KEY(source_publication_id,target_publication_id));
@@ -521,7 +525,7 @@ class Publications:
                 if str(path.relative_to(self.store.root)) not in referenced and path not in self.store.media.active_paths:
                     path.unlink()
 
-    def forget(self, item: str) -> None:
+    def forget(self, item: str, *, prune: bool = True) -> None:
         db = self.store.db
         linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,))}
         db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL
@@ -530,4 +534,5 @@ class Publications:
         db.execute('DELETE FROM publication_links WHERE source_publication_id=? OR target_publication_id=?', (item, item))
         db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
         db.execute("UPDATE items SET content='{}',media_ids='[]',filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id=?", (item,))
-        publication_links.prune(self.store,linked)
+        if prune:
+            publication_links.prune(self.store,linked)

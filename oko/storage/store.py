@@ -200,9 +200,9 @@ class Store:
     def change_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
         self.subscriptions.check_owner('feed', feed)
         configured = next(f for f in self.subscriptions.feeds() if f['id'] == feed)
-        if configured['transport'] not in ('rss', 'youtube'):
+        if configured['transport'] not in ('rss', 'youtube') and not self.publications.feed(feed):
             raise ValueError('Догрузка доступна подключённому RSS/Atom или YouTube-фиду')
-        if configured['transport'] == 'youtube' and selection and selection.mode != 'count':
+        if self.publications.feed(feed) and selection and selection.mode != 'count':
             raise ValueError('Догрузка YouTube поддерживает последние N видео')
         with self.db:
             return self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
@@ -686,13 +686,19 @@ class Store:
         with self.db:
             if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
                 return False
-            changed_feeds = {row['feed_id'] for member in members for row in self.db.execute('SELECT feed_id FROM items WHERE id=? AND viewed=0', (member,))}
+            changed_feeds = {row[0] for member in members for row in self.db.execute('SELECT feed_id FROM reading_memberships WHERE publication_id=?', (member,))}
             for feed in changed_feeds:
                 self.subscriptions.details.record(feed, 'marked_read')
             self.problems.forget_materials(affected, self.wall_clock())
             for member in members:
                 row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
-                self.read_sync.eligible(row['feed_id'], json.loads(row['members']), 'viewed')
+                for feed in [r[0] for r in self.db.execute('SELECT feed_id FROM reading_memberships WHERE publication_id=?',(member,))]:
+                    self.read_sync.eligible(feed,json.loads(row['members']),'viewed')
+                if self.publications.owns(member):
+                    self.db.execute('DELETE FROM feed_publications WHERE publication_id=?',(member,))
+                    publication_links.prune(self,{member})
+                    self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND viewed=0',(member,))
+                    continue
                 self.subscriptions.history.viewed(member)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
                 self.db.execute('DELETE FROM retained_theses WHERE item=?', (member,))
@@ -713,6 +719,16 @@ class Store:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
             self.db.execute("UPDATE feeds SET connection='deleting' WHERE id=?", (feed,))
+            shared=[r[0] for r in self.db.execute('SELECT id FROM items WHERE platform IS NOT NULL AND feed_id=?',(feed,))]
+            self.db.execute('DELETE FROM feed_publications WHERE feed_id=?',(feed,))
+            for item in shared:
+                remaining=self.db.execute('SELECT feed_id FROM feed_publications WHERE publication_id=? ORDER BY feed_id LIMIT 1',(item,)).fetchone()
+                self.db.execute('UPDATE items SET feed_id=? WHERE id=?',(remaining[0] if remaining else feed,item))
+                if remaining:
+                    self.db.execute("UPDATE jobs SET status=CASE WHEN status='running' THEN 'pending' ELSE status END,generation=generation+1 WHERE item=? AND kind IN ('fetch','filter','theses')",(item,))
+            publication_links.prune(self,set(shared))
+            for item in shared:
+                self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND feed_id=? AND viewed=0',(item,feed))
             items = [r[0] for r in self.db.execute('SELECT id FROM items WHERE feed_id=?', (feed,))]
             self.problems.forget_materials(set(items), self.wall_clock())
             self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE (item=? OR item IN (SELECT id FROM items WHERE feed_id=?)) AND kind NOT IN ('delete','feed-delete')", (feed, feed))
@@ -751,6 +767,9 @@ class Store:
     def delete(self, job: Job) -> None:
         self.fault('before_delete')
         for path in (self.root / 'content' / job.item, self.root / 'staging' / job.item, self.root / 'media' / job.item):
+            if any(path==active or path in active.parents for active in self.media.active_paths):
+                self.retry(job,self.clock(),'Ожидание завершения сохранения файла',.1)
+                return
             if path.exists():
                 shutil.rmtree(path)
         self.fault('after_delete_files')
@@ -758,7 +777,7 @@ class Store:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
             if self.publications.active:
-                self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL AND (platform='rss' OR feed_id IS NULL)",(job.item,))
+                self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL ",(job.item,))
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind in ('fetch','filter','theses') and self.publications.owns(job.item):

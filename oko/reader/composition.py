@@ -72,20 +72,24 @@ class ReadingComposition:
         feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds(feed, folder=folder)}
         where, parameters = ['i.viewed=0'], []
         if feed is not None:
-            where.append('i.feed_id=?')
+            where.append('EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id AND m.feed_id=?)')
             parameters.append(feed)
         if folder is not None:
-            where.append('f.folder_id=?')
+            where.append('EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner ON owner.id=m.feed_id WHERE m.publication_id=i.id AND owner.folder_id=?)')
             parameters.append(folder)
         rows = self._store.db.execute('SELECT i.* FROM items i JOIN feeds f ON f.id=i.feed_id WHERE '
                                       + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
         cards = []
         for row in rows:
+            owners=[r[0] for r in self._store.db.execute('SELECT feed_id FROM reading_memberships WHERE publication_id=? ORDER BY feed_id',(row['id'],)) if r[0] in feeds]
+            if not owners:
+                continue
+            owner_id=row['feed_id'] if row['feed_id'] in owners else owners[0]
             material = self._store.saved_publication(row)
             if material:
-                material = _reading_heading(material, feeds[row['feed_id']], self._store.original(row['id'])[0] if material['complete'] else {})
+                material = _reading_heading(material, feeds[owner_id], self._store.original(row['id'])[0] if material['complete'] else {})
             if material and (show_hidden or not material.get('filter', {}).get('hidden')):
-                owner = feeds[row['feed_id']]
+                owner = feeds[owner_id]
                 text = material.pop('text')
                 description = material.pop('description', '')
                 material.pop('reply_preview', None)
@@ -100,7 +104,7 @@ class ReadingComposition:
                 if filtered.get('status') == 'done' and not filtered['restored']:
                     for fragment in filtered['removed']:
                         preview = preview.replace(fragment, '')
-                cards.append(dict(material, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
+                cards.append(dict(material, feed_id=owner_id, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
         return cards
 
     @reading_snapshot()
@@ -113,7 +117,7 @@ class ReadingComposition:
         feed_members: dict[str, set[str]] = {feed['id']: set() for feed in feeds}
         visible = set()
         unviewed_feeds: set[str] = set()
-        for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0'):
+        for row in self._store.db.execute('SELECT i.id,m.feed_id FROM items i JOIN reading_memberships m ON m.publication_id=i.id WHERE i.viewed=0'):
             if row['feed_id'] not in by_feed:
                 continue
             unviewed_feeds.add(row['feed_id'])
@@ -131,7 +135,7 @@ class ReadingComposition:
     def folder_contents(self, folder: str) -> FolderContents:
         self._store.subscriptions.check_owner('folder', folder)
         cards = self.cards(True, folder=folder)
-        rows = self._store.db.execute("""SELECT i.id,i.members FROM items i JOIN feeds f ON f.id=i.feed_id
+        rows = self._store.db.execute("""SELECT DISTINCT i.id,i.members FROM items i JOIN reading_memberships m ON m.publication_id=i.id JOIN feeds f ON f.id=m.feed_id
             WHERE i.viewed=0 AND f.folder_id=? ORDER BY i.id""", (folder,))
         # Completion includes hidden, unreadable and loading publications.
         return FolderContents(tuple((row['id'], row['members']) for row in rows),
@@ -140,7 +144,7 @@ class ReadingComposition:
     @reading_snapshot()
     def feed_contents(self, feed: str) -> FolderContents:
         self._store.subscriptions.check_owner('feed', feed)
-        rows = self._store.db.execute('SELECT id,members FROM items WHERE viewed=0 AND feed_id=? ORDER BY id', (feed,)).fetchall()
+        rows = self._store.db.execute('SELECT i.id,i.members FROM items i JOIN reading_memberships m ON m.publication_id=i.id WHERE i.viewed=0 AND m.feed_id=? ORDER BY i.id', (feed,)).fetchall()
         return FolderContents(tuple((row['id'], row['members']) for row in rows),
                               tuple(sorted(card['id'] for card in self.cards(True, feed=feed))))
 

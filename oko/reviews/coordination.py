@@ -122,7 +122,7 @@ class ProcessingCoordination:
         self.sync()
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
-        query = 'SELECT i.id FROM items i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0'
+        query = 'SELECT DISTINCT i.id FROM items i JOIN reading_memberships m ON m.publication_id=i.id JOIN feeds f ON f.id=m.feed_id WHERE i.viewed=0'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
             query += ' AND ' + ('f.id=?' if scope == 'feed' else 'f.folder_id=?')

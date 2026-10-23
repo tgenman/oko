@@ -57,6 +57,11 @@ def decode(peer: int, cursor: str) -> dict[str,Any]:
         raise AdapterException(AdapterIssue('telegram-cursor-incompatible','Несовместимый курсор Telegram client',AdapterErrorKind.permanent)) from error
 
 
+def finish_window(peer: int, cursor: str) -> str:
+    state=decode(peer,cursor) if cursor else dict(upper=0)
+    return encode(peer,state['upper']+1,state['upper'],done=True)
+
+
 class TelegramClientAdapter:
     def __init__(self, client: TelegramClient, account: str, peer: int) -> None:
         self.client,self.account,self.peer=client,account,peer

@@ -126,7 +126,8 @@ class VersionedReading:
         versions=store.read_versions.batch({('folder',f['id']) for f in folders})
         counts={row['folder']:row['visible'] for row in store.db.execute('SELECT * FROM reader_folder_counts')}
         feeds=[dict(id=r['id'],count=r['visible'] or 0,has_unviewed=bool(r['unviewed'])) for r in store.db.execute('SELECT f.id,c.visible,c.unviewed FROM feeds f LEFT JOIN reader_feed_counts c ON c.feed=f.id ORDER BY f.rowid')]
-        return dict(folders=[dict(id=f['id'],title=f['title'],position=f['position'] or 0,count=counts.get(f['id'],0),version=str(versions['folder',f['id']]['version'])) for f in folders],feeds=feeds,count=sum(f['count'] for f in feeds))
+        return dict(folders=[dict(id=f['id'],title=f['title'],position=f['position'] or 0,count=counts.get(f['id'],0),version=str(versions['folder',f['id']]['version'])) for f in folders],feeds=feeds,count=store.db.execute('''SELECT count(*) FROM items i LEFT JOIN reader_visibility v ON v.item=i.id
+            WHERE i.viewed=0 AND coalesce(v.hidden,0)=0 AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)''').fetchone()[0])
 
     async def finish(self) -> None:
         store=self.runtime._store
