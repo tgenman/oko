@@ -4788,6 +4788,14 @@ paths:
                       feed_id: null
                     diagnostic_id: null
                     command_id: null
+                AccessImmutableError:
+                  value:
+                    code: access_immutable
+                    message: example
+                    details:
+                      feed_id: null
+                    diagnostic_id: null
+                    command_id: null
                 SourceIdentityConflictError:
                   value:
                     code: source_identity_conflict
@@ -14356,6 +14364,9 @@ components:
     TelegramWebConnectRequest:
       type: object
       properties:
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+          description: Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.
         source_locator:
           type: string
           minLength: 1
@@ -14383,6 +14394,9 @@ components:
     TelegramClientConnectRequest:
       type: object
       properties:
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+          description: Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.
         source_locator:
           type: string
           minLength: 1
@@ -21539,6 +21553,7 @@ components:
         command_id: null
     TelegramConnect409Errors:
       oneOf:
+      - $ref: '#/components/schemas/AccessImmutableError'
       - $ref: '#/components/schemas/DuplicateSourceError'
       - $ref: '#/components/schemas/IdentityUnconfirmedError'
       - $ref: '#/components/schemas/SourceIdentityConflictError'
@@ -21549,6 +21564,7 @@ components:
       discriminator:
         propertyName: code
         mapping:
+          access_immutable: '#/components/schemas/AccessImmutableError'
           duplicate_source: '#/components/schemas/DuplicateSourceError'
           identity_unconfirmed: '#/components/schemas/IdentityUnconfirmedError'
           source_identity_conflict: '#/components/schemas/SourceIdentityConflictError'

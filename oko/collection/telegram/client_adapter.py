@@ -1,6 +1,6 @@
 """Channel-only Telegram client adapter with external keys and individual files."""
 from dataclasses import replace
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 import json
 from typing import Any,BinaryIO
 from urllib.parse import urlsplit
@@ -8,9 +8,31 @@ from urllib.parse import urlsplit
 from oko.collection.adapters import (AdapterErrorKind,AdapterException,AdapterIssue,DiscoveryPage,
     ExternalKey,ExternalReference,FeedMetadata,MediaReference,Platform,PublicationContent,PublicationMetadata)
 from oko.collection.contracts import SourceError,SourceDeleted
-from oko.collection.telegram.adapter import failure
+from oko.collection.telegram.adapter import failure as source_failure
 from oko.collection.telegram.source import TelegramClient,LocalTelegram
 from oko.collection.telegram.telegraph import direct_articles
+
+
+def publication_reference(peer: int, message: int, username: str | None = None) -> ExternalReference:
+    if peer>=-1000000000000 or message<=0:
+        raise ValueError('Marked channel and positive message required')
+    base='https://t.me/'+username.lower() if username else 'https://t.me/c/'+str(-peer-1000000000000)
+    url=base+'/'+str(message)
+    return ExternalReference(ExternalKey(Platform.telegram,url),url)
+
+
+def failure(error: SourceError, publication: ExternalReference | None = None,
+            media_key: str | None = None, scope: str = '') -> AdapterException:
+    if error.remote_type=='ChangedMedia':
+        return AdapterException(AdapterIssue('media-changed',error.label,AdapterErrorKind.media_changed,publication,media_key))
+    if error.remote_type=='FloodWaitError':
+        return AdapterException(AdapterIssue('telegram-flood-wait',error.label,AdapterErrorKind.source_wait,
+            publication,media_key,scope,datetime.now(timezone.utc)+timedelta(seconds=error.delay)))
+    if error.remote_type=='OverflowError':
+        error.code,error.retryable='media-too-large',False
+    elif error.remote_type in ('ChannelPrivateError','ChatAdminRequiredError','UsernameInvalidError','UsernameNotOccupiedError','PeerIdInvalidError','FileNotFoundError','PermissionError'):
+        return AdapterException(AdapterIssue(error.code or 'telegram-unavailable',error.label,AdapterErrorKind.unavailable,publication,media_key))
+    return source_failure(error,publication,media_key,scope)
 
 
 def encode(peer: int, start: int, upper: int, *, done: bool = False) -> str:
@@ -48,8 +70,7 @@ class TelegramClientAdapter:
         return base+'/'+str(message) if message is not None else base
 
     def _reference(self, message: int) -> ExternalReference:
-        url=self._url(message)
-        return ExternalReference(ExternalKey(Platform.telegram,url),url)
+        return publication_reference(self.peer,message,self.info.get('username'))
 
     def _groups(self, rows: list[dict[str,Any]]) -> list[list[dict[str,Any]]]:
         groups: dict[tuple[str,int],dict[int,dict[str,Any]]]={}
@@ -75,13 +96,16 @@ class TelegramClientAdapter:
             if item['kind']=='unsupported':
                 issues.append(AdapterIssue('media-unsupported','Тип вложения пока не поддерживается',AdapterErrorKind.unavailable,reference,key))
                 continue
-            locator=json.dumps(dict(peer=self.peer,message=row['id']),separators=(',',':'))
+            locator=json.dumps(dict(peer=self.peer,message=row['id'],publication_key=reference.key.external_id),separators=(',',':'))
             name='media-'+str(row['id'])+'.'+item['extension']
             media.append(MediaReference(key,locator,name,item['mime'],item.get('size'),item.get('identity')))
             blocks.append(dict(type='media',role='attachment' if item['kind']=='file' else item['kind'],ref={'$media':key}))
             resources.append(dict(key=key,origin='telegram:'+str(self.peer)+'/'+str(row['id']),order=len(resources),
                 name=name,kind=item['kind'],mime=item['mime'],status='missing'))
         members=[row['id'] for row in rows]
+        publishing=any(row.get('group') and datetime.now(timezone.utc).timestamp()-row['date']<5 for row in rows)
+        if publishing:
+            issues.append(AdapterIssue('telegram-album-pending','Альбом ещё публикуется',AdapterErrorKind.temporary,reference))
         manifest=dict(source_url=reference.url,post=dict(text=text,members=members,
             baseline_text='\n\n'.join(row.get('original_text',row['text']) for row in rows if row.get('original_text',row['text'])),
             edits=[dict(id=row['id'],at=row.get('edited')) for row in rows]),resources=resources)
@@ -89,7 +113,7 @@ class TelegramClientAdapter:
         content=dict(blocks=blocks,extra=dict(telegram=dict(members=members,album_id=rows[0].get('group'),description='',manifest=manifest)))
         return PublicationContent(PublicationMetadata(reference,text.split('\n')[0] if text else 'Telegram · медиа',
             datetime.fromtimestamp(rows[0]['date'],timezone.utc)),content,tuple(media),
-            tuple(article_reference(url) for url in direct_articles(text)),issues=tuple(issues))
+            tuple(article_reference(url) for url in direct_articles(text)),needs_fetch=publishing,issues=tuple(issues))
 
     async def resolve_feed(self, url: str) -> FeedMetadata:
         try:
@@ -173,14 +197,24 @@ class TelegramClientAdapter:
             raise failure(source,publication,scope='telegram:client:'+self.account) from error
 
     async def download_media(self, publication: ExternalReference, media: MediaReference, output: BinaryIO) -> MediaReference:
-        current=await self.fetch(publication)
+        try:
+            locator=json.loads(media.locator)
+            if (locator['peer']!=self.peer or locator['publication_key']!=publication.key.external_id
+                    or publication.key!=ExternalKey(Platform.telegram,publication.url)):
+                raise ValueError('owner')
+            anchor=int(publication.url.rstrip('/').rsplit('/',1)[-1])
+        except (ValueError,TypeError,KeyError):
+            raise AdapterException(AdapterIssue('media-changed','Нужно обновить описание вложения Telegram',AdapterErrorKind.media_changed,publication,media.key)) from None
+        current=await self.fetch(publication_reference(self.peer,anchor))
+        if current.metadata.reference.key!=publication.key:
+            raise AdapterException(AdapterIssue('media-changed','Адрес публикации Telegram изменился',AdapterErrorKind.media_changed,publication,media.key))
         selected=next((value for value in current.media if value.key==media.key),None)
         if selected is None or selected.resource_identity!=media.resource_identity:
             raise AdapterException(AdapterIssue('media-changed','Вложение Telegram изменилось',AdapterErrorKind.media_changed,publication,media.key))
         try:
             message=json.loads(selected.locator)['message']
             if isinstance(self.client,LocalTelegram):
-                size=await self.client.download_stream(self.account,self.peer,message,output)
+                size=await self.client.download_stream(self.account,self.peer,message,output,expected_identity=selected.resource_identity)
                 return replace(selected,size_bytes=size)
             raw=await self.client.download(self.account,self.peer,message)
             if not raw:

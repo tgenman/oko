@@ -92,3 +92,63 @@ def test_empty_channel_reports_shortfall_without_fabricated_publication():
     page=asyncio.run(adapter.discover(feed.reference,cursor,10))
     assert page.publications==() and not page.has_more
     assert [issue.code for issue in page.issues]==['history-shortfall']
+
+
+def test_native_flood_wait_is_typed_and_keeps_its_account_scope():
+    import pytest
+    from oko.collection.adapters import AdapterException,AdapterErrorKind,ExternalKey,ExternalReference
+    from oko.collection.contracts import SourceError
+    from oko.collection.telegram.client_adapter import TelegramClientAdapter
+    class Client(Telegram):
+        async def messages(self,*args):
+            return [dict(id=11,date=time.time()-60,text='Post',group=None,
+                media=dict(kind='image',extension='jpg',mime='image/jpeg'))]
+        async def download(self,*args):
+            error=SourceError('Flood wait',123)
+            error.remote_type='FloodWaitError'
+            raise error
+    adapter=TelegramClientAdapter(Client(),'fixture',-1001234567890)
+    ref=ExternalReference(ExternalKey(Platform.telegram,'https://t.me/c/1234567890/11'),'https://t.me/c/1234567890/11')
+    value=asyncio.run(adapter.fetch(ref))
+    with pytest.raises(AdapterException) as caught:
+        asyncio.run(adapter.download_media(ref,value.media[0],BytesIO()))
+    assert caught.value.issue.kind==AdapterErrorKind.source_wait
+    assert caught.value.issue.scope=='telegram:client:fixture'
+    assert caught.value.issue.retry_at is not None
+
+
+def test_native_media_rename_refreshes_publication_description_before_download():
+    import pytest
+    from oko.collection.adapters import AdapterException,AdapterErrorKind,ExternalKey,ExternalReference
+    from oko.collection.telegram.client_adapter import TelegramClientAdapter
+    renamed=[False]
+    calls=[]
+    class Client(Telegram):
+        async def info(self,*args):
+            return dict(peer=-1001234567890,username='renamed' if renamed[0] else 'fixture',title='Channel',kind='channel')
+        async def messages(self,*args):
+            return [dict(id=11,date=time.time()-60,text='Post',group=None,media=dict(kind='image',extension='jpg',mime='image/jpeg'))]
+        async def download(self,*args):
+            calls.append(True)
+            return b'img'
+    adapter=TelegramClientAdapter(Client(),'fixture',-1001234567890)
+    ref=ExternalReference(ExternalKey(Platform.telegram,'https://t.me/fixture/11'),'https://t.me/fixture/11')
+    value=asyncio.run(adapter.fetch(ref))
+    renamed[0]=True
+    with pytest.raises(AdapterException) as caught:
+        asyncio.run(adapter.download_media(ref,value.media[0],BytesIO()))
+    assert caught.value.issue.kind==AdapterErrorKind.media_changed
+    assert calls==[]
+
+
+def test_new_native_album_requests_metadata_retry_until_publication_settles():
+    from oko.collection.adapters import ExternalKey,ExternalReference,AdapterErrorKind
+    from oko.collection.telegram.client_adapter import TelegramClientAdapter
+    class Client(Telegram):
+        async def messages(self,*args):
+            return [dict(id=11,date=time.time(),text='Still publishing',group=77,media=None)]
+    adapter=TelegramClientAdapter(Client(),'fixture',-1001234567890)
+    ref=ExternalReference(ExternalKey(Platform.telegram,'https://t.me/c/1234567890/11'),'https://t.me/c/1234567890/11')
+    value=asyncio.run(adapter.fetch(ref))
+    assert value.needs_fetch
+    assert any(issue.code=='telegram-album-pending' and issue.kind==AdapterErrorKind.temporary for issue in value.issues)

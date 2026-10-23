@@ -106,7 +106,13 @@ class MediaFiles:
             AND status IN ('pending','running','failed','unavailable') AND item NOT IN (SELECT id FROM media_files)""")
         db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE kind='download_media' AND status IN ('pending','running') AND item IN (SELECT id FROM media_files WHERE publication_id=? AND status='unavailable')",(item,))
         for row in db.execute("SELECT id FROM media_files WHERE publication_id=? AND status='pending_download'", (item,)).fetchall():
-            db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('download_media',?)", (row['id'],))
+            now,wall=self.store.clock(),self.store.wall_clock()
+            db.execute("""INSERT INTO jobs(kind,item) VALUES ('download_media',?) ON CONFLICT(kind,item) DO UPDATE SET
+                status='pending',generation=generation+1,error=NULL,problem_code=NULL,
+                next=?+max(jobs.retry_delay,coalesce(jobs.retry_at,0)-?,0),
+                retry_at=max(coalesce(jobs.retry_at,0),?+jobs.retry_delay),
+                wait_scope=CASE WHEN jobs.retry_at>? THEN jobs.wait_scope ELSE NULL END
+                WHERE jobs.status='cancelled'""",(row['id'],now,wall,wall,wall))
 
     def owner(self, media: str) -> str | None:
         row = self.store.db.execute('SELECT publication_id FROM media_files WHERE id=?', (media,)).fetchone()
@@ -214,6 +220,8 @@ class MediaFiles:
             store.db.execute('UPDATE items SET content=?,media_ids=? WHERE id=?', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             store.finish(job)
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
+            store.db.execute('''INSERT OR IGNORE INTO telegram_read_dirty
+                SELECT feed_id FROM items WHERE id=? AND feed_id IS NOT NULL''',(download.publication_id,))
             store.read_versions.media_changed(download.publication_id)
             if subtitles:
                 store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(download.publication_id,))

@@ -99,12 +99,18 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
     convert(store,report)
     for feed in store.subscriptions.feeds():
         binding = store.subscriptions.telegram.binding(feed['id'])
-        if not binding or binding['kind'] != 'web' or feed['connection'] == 'deleting':
+        row=store.db.execute('SELECT config FROM feeds WHERE id=?',(feed['id'],)).fetchone()
+        native=bool(binding and binding['kind']=='client' and json.loads(row[0]).get('source_kind')=='channel')
+        if not binding or (binding['kind'] != 'web' and not native) or feed['connection'] == 'deleting':
             continue
-        cursor = store.cursor(feed['id'], 'telegram-web') or ''
+        namespace='telegram' if native else 'telegram-web'
+        cursor = store.cursor(feed['id'], namespace) or ''
+        if native:
+            from oko.collection.telegram.client_compatibility import legacy_cursor
+            cursor=legacy_cursor(cursor,feed['telegram_peer'],feed['initial_history'] or {})
         try:
             with store.db:
-                store.publications.configure_feed(feed['id'])
+                store.publications.configure_feed(feed['id'],migrate_legacy=True)
         except (sqlite3.IntegrityError, ValueError) as error:
             report['conflicts'].append(dict(feed_id=feed['id'], reason=str(error)))
             continue
@@ -113,12 +119,18 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                                     platform=current['platform'], external_id=current['external_id']))
         with store.db:
             store.db.execute('UPDATE feeds SET cursor=? WHERE id=?', (cursor, feed['id']))
-            store.db.execute('DELETE FROM state WHERE key=?', (store.cursor_key(feed['id'], 'telegram-web'),))
+            store.db.execute('DELETE FROM state WHERE key=?', (store.cursor_key(feed['id'], namespace),))
         for row in store.db.execute('SELECT * FROM items WHERE feed_id=? AND viewed=0', (feed['id'],)).fetchall():
             item = row['id']
             try:
                 with store.db:
-                    store.publications.identify(item, publication_reference(row['url']))
+                    if native:
+                        from oko.collection.telegram.client_adapter import publication_reference as native_reference
+                        members=json.loads(row['members'])
+                        ref=native_reference(feed['telegram_peer'],min(members),feed.get('telegram_username'))
+                    else:
+                        ref=publication_reference(row['url'])
+                    store.publications.identify(item,ref)
             except (sqlite3.IntegrityError, ValueError, AdapterException) as error:
                 report['conflicts'].append(dict(publication_id=item, reason=str(error)))
                 continue
@@ -128,9 +140,6 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
             publication = store.publication(item)
             if publication and publication.teaser:
                 previous_text=store.original(item)[1]
-                prepared = store.publications.prepare(item, publication.teaser, store.path(item).parent)
-                # Capture only results accepted against the current input by the
-                # existing processors. File presence alone never establishes this.
                 results: dict[str, Any] = {}
                 filtered = store.filters.read(item)
                 if filtered['status'] == 'done':
@@ -139,6 +148,33 @@ def _convert(store: Store, report: dict[str, Any]) -> None:
                     accepted = store.processing.theses._accepted(item)
                     assert accepted
                     results['theses'] = dict(file=accepted[1].read_text())
+                material=publication.teaser
+                from oko.storage.migrate_articles import split
+                try:
+                    material=split(store,item,material,store.path(item).parent,report)
+                except ValueError as error:
+                    report['conflicts'].append(dict(publication_id=item,reason=str(error)))
+                    continue
+                if native and material.source_manifest:
+                    from dataclasses import replace
+                    from datetime import datetime,timezone
+                    from oko.collection.adapters import MediaReference,PublicationContent,PublicationMetadata
+                    from oko.collection.web_adapter import reference as article_reference
+                    from oko.collection.telegram.telegraph import direct_articles
+                    refs=[]
+                    for resource in material.source_manifest.resources:
+                        if not resource.key.startswith('telegram-client:'+str(feed['telegram_peer'])+':'):
+                            continue
+                        message=int(resource.key.rsplit(':',1)[-1])
+                        refs.append(MediaReference(resource.key,json.dumps(dict(peer=feed['telegram_peer'],message=message,publication_key=ref.key.external_id)),resource.name,resource.mime))
+                    value=PublicationContent(PublicationMetadata(ref,material.title,
+                        datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),
+                        dict(extra=dict(telegram=dict(members=list(material.members)))),tuple(refs),
+                        tuple(article_reference(url) for url in direct_articles(str(material.source_manifest.post.get('text',material.text)))))
+                    material=replace(material,adapter_content=value)
+                prepared = store.publications.prepare(item, material, store.path(item).parent)
+                # Capture only results accepted against the current input by the
+                # existing processors. File presence alone never establishes this.
                 current_text='\n\n'.join(b['text'] for b in publication_input.blocks(prepared[0]) if b['type']=='text')
                 if results and current_text!=previous_text:
                     report['unportable'].append(dict(publication_id=item,reason='Changed processing text; results require reprocessing'))

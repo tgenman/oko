@@ -67,6 +67,8 @@ def text(store: 'Store', item: str) -> str:
 def notify_parents(store: 'Store', item: str) -> None:
     for row in store.db.execute('SELECT source_publication_id FROM publication_links WHERE target_publication_id=?',(item,)).fetchall():
         store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(row[0],))
+        store.db.execute('''INSERT OR IGNORE INTO telegram_read_dirty
+            SELECT feed_id FROM items WHERE id=? AND feed_id IS NOT NULL''',(row[0],))
         store.read_versions.linked_changed(row[0])
 
 

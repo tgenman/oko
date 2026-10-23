@@ -531,7 +531,7 @@ def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_us
         item = settled(client)[0]['id']
         tg.private = True
         response = connect_request(client, json=dict(account='fixture', peer='-1001234567890', folder='Новости', auto_read=False, feed_id=feed['id']))
-        assert response.status_code == 422
+        assert response.status_code == 409 and response.json()['code'] == 'access_immutable'
         before=client.get('/api/v3/subscriptions').json()
         assert before['feeds'][0]['id']==feed['id']
         assert client.delete('/api/v3/feeds/'+feed['id']).status_code==200
@@ -642,6 +642,34 @@ def test_owned_client_streams_one_file_into_adapter_output(tmp_path,monkeypatch)
             size=await bridge.download_stream('fixture',-1001234567890,11,output)
             assert size==len(b'partial-download') and output.getvalue()==b'partial-download'
             assert not list((tmp_path/'data'/'staging'/'_telegram').rglob('media.bin'))
+        finally:
+            await bridge.close()
+    asyncio.run(scenario())
+
+
+def test_owned_adapter_refuses_a_file_replaced_between_metadata_and_download(tmp_path,monkeypatch):
+    import asyncio
+    from io import BytesIO
+    from oko.collection.adapters import AdapterException,AdapterErrorKind
+    from oko.collection.telegram.source import LocalTelegram
+    from oko.collection.telegram.client_adapter import TelegramClientAdapter
+    project=fake_sdk_project(tmp_path,monkeypatch)
+    sdk=project/'telethon'/'__init__.py'
+    source=sdk.read_text().replace('await asyncio.sleep(100)','return file.name')
+    source=source.replace('photo=True, document=None','photo=SimpleNamespace(id=2 if isinstance(params.get("ids"),int) else 1), document=None')
+    sdk.write_text(source)
+    async def scenario():
+        bridge=LocalTelegram(project/'.env',tmp_path/'data')
+        adapter=TelegramClientAdapter(bridge,'fixture',-1001234567890)
+        try:
+            feed=await adapter.resolve_feed('https://t.me/s/fixture')
+            page=await adapter.discover(feed.reference,feed.latest_cursor,10)
+            value,=page.publications
+            output=BytesIO()
+            with pytest.raises(AdapterException) as caught:
+                await adapter.download_media(value.metadata.reference,value.media[0],output)
+            assert caught.value.issue.kind==AdapterErrorKind.media_changed
+            assert output.getvalue()==b''
         finally:
             await bridge.close()
     asyncio.run(scenario())

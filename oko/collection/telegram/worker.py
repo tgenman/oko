@@ -21,6 +21,10 @@ from oko.collection.telegram.topics import history, message_topic, topic_info, r
 MAX_MEDIA = 200 * 1024 * 1024
 
 
+class ChangedMedia(Exception):
+    pass
+
+
 def message_text(message: Any) -> str:
     raw = message.message or ''
     encoded = raw.encode('utf-16-le')
@@ -77,6 +81,14 @@ def record(msg: Any) -> dict[str, Any]:
         media = dict(kind=kind, mime=mime if extension != 'bin' else 'application/octet-stream', extension=extension)
     elif msg.media and type(msg.media).__name__ != 'MessageMediaWebPage':
         media = dict(kind='unsupported', mime='application/octet-stream', extension='bin')
+    if media is not None:
+        original=msg.photo or msg.document
+        identity=getattr(original,'id',None)
+        if identity is not None:
+            media['identity']=('photo:' if msg.photo else 'document:')+str(identity)
+        size=getattr(getattr(msg,'file',None),'size',None)
+        if size is not None:
+            media['size']=size
     edited = getattr(msg,'edit_date',None)
     return dict(id=msg.id, date=msg.date.timestamp(), text=message_text(msg), original_text=msg.message or '',
                 group=msg.grouped_id, media=media, service=False,
@@ -284,6 +296,9 @@ async def main() -> None:
                         msg = await cl.get_messages(entity, ids=body['id'])
                         if not msg or not msg.media or (topic_id is not None and message_topic(msg) != topic_id):
                             raise FileNotFoundError('media')
+                        expected=body.get('expected_media_identity')
+                        if expected is not None and (record(msg)['media'] or {}).get('identity')!=expected:
+                            raise ChangedMedia()
                         if msg.file and msg.file.size and msg.file.size > MAX_MEDIA:
                             raise OverflowError('media')
                         path = spool / 'media.bin'
@@ -304,6 +319,8 @@ async def main() -> None:
                 response = dict(value=value)
             except SessionLockError as error:
                 response = dict(error='Telegram-сессия занята другим клиентом', **exception_details(error))
+            except ChangedMedia as error:
+                response=dict(error='Вложение Telegram изменилось',**exception_details(error))
             except FloodWaitError as error:
                 response = dict(error='Ограничение частоты Telegram', delay=max(1, error.seconds), **exception_details(error))
             except PermissionError as error:

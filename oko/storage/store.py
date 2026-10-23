@@ -309,6 +309,8 @@ class Store:
                 if row and row['viewed'] and namespace=='telegram-web':
                     self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(sorted(set(json.loads(row['members'])) | set(p.members))),row['id']))
                 needs_fetch = (p.teaser is None or p.teaser.adapter_content is None or p.teaser.adapter_content.needs_fetch) if target else not envelope or bool(row and self._needs_collection(row['id'],p.teaser))
+                if target and row and p.members and set(p.members)!=set(json.loads(row['members'])):
+                    needs_fetch=True
                 if target and p.observed_only:
                     needs_fetch = bool(row and self._needs_collection(row['id'],p.teaser))
                 if row and not row['viewed'] and needs_fetch and not self.db.execute("SELECT 1 FROM source_deleted WHERE item=?", (row['id'],)).fetchone():
@@ -465,7 +467,7 @@ class Store:
             "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
             ('' if feed == 'demo' else feed, feed)).fetchone())
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=? AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL)"
         if ai_only:
             query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items i WHERE i.id=jobs.item AND i.platform IS NOT NULL
@@ -475,11 +477,15 @@ class Store:
         elif media_only:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
-            query += f" AND kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND (i.feed_id IN ({placeholders}) OR i.feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=i.id AND root.viewed=0 AND root.feed_id IN ({placeholders}))))"
+            dependencies=available if dependency_feeds is None else dependency_feeds
+            dependency_keys=','.join('?' for _ in dependencies) or "''"
+            query += f" AND kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND (i.feed_id IN ({placeholders}) OR i.feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=i.id AND root.viewed=0 AND root.feed_id IN ({dependency_keys}))))"
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
-            query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}) OR feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=items.id AND root.viewed=0 AND root.feed_id IN ({placeholders})))))"
+            dependencies=available if dependency_feeds is None else dependency_feeds
+            dependency_keys=','.join('?' for _ in dependencies) or "''"
+            query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}) OR feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=items.id AND root.viewed=0 AND root.feed_id IN ({dependency_keys})))))"
         if media_only:
             subtitles="""SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id
                 JOIN json_each(i.content,'$.blocks') b ON json_extract(b.value,'$.media_id')=m.id
@@ -498,7 +504,7 @@ class Store:
             ELSE EXISTS ({blocked_history} AND m.item=jobs.item) END)"""
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
-        params = (now,) if deleting_only or ai_only else (now, *available, *available) if media_only else (now, *('' if f == 'demo' else f for f in available), *available, *available)
+        params = (now,) if deleting_only or ai_only else (now, *available, *dependencies) if media_only else (now, *('' if f == 'demo' else f for f in available), *available, *dependencies)
         row = self.db.execute(query, params).fetchone()
         if not row:
             return None
@@ -590,6 +596,8 @@ class Store:
             with self.db:
                 if not self.valid(job) or not self._has_unviewed(item):
                     return
+                if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
+                    self.publications.identify(item,material.adapter_content.metadata.reference)
                 self.versions.publish(item, prepared, True)
                 self.publications.publish(item, canonical, prepared[1])
                 self.db.execute('UPDATE items SET complete=1,members=? WHERE id=?', (json.dumps(material.members), item))

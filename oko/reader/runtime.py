@@ -141,6 +141,7 @@ class Runtime:
         self._filter_sync = 0.0
         self._summary_sync = 0.0
         self._source_revision: int | None = None
+        self._dependency_feeds: list[str] = []
         self._ai_stage = 'Проверка обработчика'
         self._root, self._source, self._clock, self._fault = root, source, clock, fault
         self._shutdown = shutdown
@@ -287,6 +288,7 @@ class Runtime:
             return
         settings = []
         feeds = self._store.subscriptions.feeds()
+        self._dependency_feeds=[feed['id'] for feed in feeds if feed['connection']!='deleting']
         self._store.publications.sync_feeds([feed['id'] for feed in feeds])
         for feed in feeds:
             if feed['id'] == self._source_feed and self._source:
@@ -937,7 +939,7 @@ class Runtime:
                 self._telegram_client.expected_users[profile['account']] = user_id
         return profile
 
-    async def connect_telegram_binding(self, source: str, folder: str, history: InitialHistory | None, role: str | None, auto_read: bool = False) -> dict[str, Any]:
+    async def connect_telegram_binding(self, source: str, folder: str, history: InitialHistory | None, role: str | None, auto_read: bool | None = None, feed_id: str | None = None) -> dict[str, Any]:
         from oko.subscriptions.telegram import locator, TelegramConflict
         kind, address = locator(source)
         async with self._actions:
@@ -946,8 +948,13 @@ class Runtime:
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения', expected=True)
             duplicates = current.subscriptions.telegram.owners([(kind, str(address))])
-            if duplicates:
+            if any(identity!=feed_id for identity in duplicates):
                 raise TelegramConflict('duplicate_source', current.subscriptions.telegram.duplicates(duplicates), 'Источник уже подключён')
+            previous=current.subscriptions.telegram.binding(feed_id) if feed_id else None
+            if feed_id and not previous:
+                raise TelegramConflict('access_immutable',dict(feed_id=feed_id),'Фид не найден или не имеет привязки Telegram')
+            if feed_id and not current.publications.feed(feed_id):
+                raise TelegramConflict('access_immutable',dict(feed_id=feed_id),'Этот сохранённый фид ещё не поддерживает смену доступа')
             connection = _ExternalCheck(self, current)
         profile = await self._verify_telegram_profile(role) if role else None
         if profile:
@@ -965,12 +972,34 @@ class Runtime:
             except SourceError as error:
                 raise TelegramConflict('source_unavailable', dict(retry_at=None), error.label, 503) from None
             binding = dict(kind='web', username=info['username'], preview_url=info['preview_url'])
+            if previous and previous['kind']=='client':
+                old_profile=await self._verify_telegram_profile(previous['role'])
+                verified,check=await self._call_telegram(lambda client:client.info(old_profile['account'],int(previous['peer_id'])))
+                connection=connection.follow(check)
+                aliases={name.lower() for name in [verified.get('username'),*verified.get('usernames',[])] if isinstance(name,str)}
+                if info['username'].lower() not in aliases:
+                    raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Публичный адрес прежнего канала не подтверждён')
+                info.update(peer=verified['peer'],kind=verified.get('kind'))
         async with connection.accept() as current:
             if profile:
                 latest = current.subscriptions.telegram.profile(str(role))
                 if not latest or latest['generation'] != profile['generation']:
                     raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Профиль изменился во время подключения', 503)
-            result = current.subscriptions.telegram.connect(binding, info, source, folder, history, auto_read, current.subscriptions)
+            if feed_id:
+                if current.subscriptions.telegram.binding(feed_id)!=previous:
+                    raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Привязка изменилась во время проверки; повторите действие')
+                try:
+                    with current.db:
+                        current.db.execute('BEGIN IMMEDIATE')
+                        result=current.subscriptions.telegram.change_access(feed_id,binding,info,auto_read,current.subscriptions)
+                        current.publications.configure_feed(feed_id)
+                        current.publications.changed_adapter(feed_id)
+                except sqlite3.IntegrityError:
+                    raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Внешний ключ уже принадлежит другому фиду') from None
+                await self._cancel({feed_id})
+                self._sources.pop(feed_id,None)
+            else:
+                result = current.subscriptions.telegram.connect(binding, info, source, folder, history, bool(auto_read), current.subscriptions)
             self._sync_sources()
             return result
 
@@ -1190,7 +1219,7 @@ class Runtime:
                 access = None if linked else self._collection.telegram_access(feed)
                 caption_attempt = CaptionAttempt(self, current, job) if job.kind == 'fetch' and source and source.fetch_requirements.captions else None
                 resources = FetchResources(staging, caption_attempt, not current.youtube.terminal(job.item) if caption_attempt else True)
-            if not source:
+            if not source and not linked:
                 return
             if access is not None:
                 saved_binding = current.subscriptions.telegram.binding(feed)
@@ -1200,8 +1229,10 @@ class Runtime:
                     await self._verify_telegram_profile(saved_binding['role'])
 
             if job.kind == 'read':
+                assert source is not None
                 await self._execute_read(job, current, source)
             elif job.kind == 'discover':
+                assert source is not None
                 outcome = await source.discover(cursor)
                 async with self._actions:
                     if self._store is current and self._live() and current.valid(job):
@@ -1216,7 +1247,11 @@ class Runtime:
                         current.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
                         self._finish_collection(job, current, collection_error)
             elif publication:
-                fetched = await self._collection.article_source().fetch(publication,resources) if linked else await source.fetch(publication, resources)
+                if linked:
+                    fetched=await self._collection.article_source().fetch(publication,resources)
+                else:
+                    assert source is not None
+                    fetched=await source.fetch(publication,resources)
                 material = fetched.material
                 collection_error = material.collection_error
                 async with self._actions:
@@ -1297,16 +1332,35 @@ class Runtime:
             current = self._store
             if not current or not self._live() or not current.valid(job):
                 return
+            from oko.storage import publication_links
+            owner=current.media.owner(job.item)
+            if owner is None:
+                current.finish(job)
+                return
+            feed=current.item_feed(owner)
+            binding=self._telegram_bindings.get(feed)
+            native=binding if binding and binding.read and not publication_links.feedless(current,owner) else None
+            if native and native.read:
+                ready=self._account_retry.get(native.read.user_id,0)
+                if ready>self._clock():
+                    current.media.failed(job,AdapterIssue('telegram-flood-wait','Ожидание ограничения Telegram',AdapterErrorKind.source_wait,
+                        scope='telegram:account:'+str(native.read.user_id),
+                        retry_at=datetime.fromtimestamp(self._wall_clock()+ready-self._clock(),timezone.utc)))
+                    return
             download = current.media.begin(job)
             if download is None:
                 current.finish(job)
                 return
-            from oko.storage import publication_links
             caption_attempt=CaptionAttempt(self,current,job) if download.media.key=='youtube:subtitles' else None
-            adapter = self._collection.article_source().adapter if publication_links.feedless(current,download.publication_id) else self._collection.publication_adapter(current.item_feed(job.item),captions=caption_attempt)
+            adapter = self._collection.article_source().adapter if publication_links.feedless(current,download.publication_id) else self._collection.publication_adapter(feed,captions=caption_attempt)
         try:
             if adapter is None:
                 raise ValueError('Publication adapter unavailable')
+            if native:
+                await self._verify_telegram_profile(native.lane)
+                async with self._actions:
+                    if self._store is not current or not self._live() or not current.valid(job):
+                        raise asyncio.CancelledError
             with MediaOutput(download.temporary,lambda:self._store is current and self._live() and current.valid(job)) as output:
                 actual = await adapter.download_media(download.publication, download.media, output)
             async with self._actions:
@@ -1322,12 +1376,18 @@ class Runtime:
             async with self._actions:
                 if self._store is current and self._live() and current.valid(job):
                     issue = error.issue if isinstance(error, AdapterException) else AdapterIssue('media-download',
-                        'Не удалось сохранить вложение' if isinstance(error,OSError) else 'Нарушен контракт медиа',
-                        AdapterErrorKind.temporary if isinstance(error,OSError) else AdapterErrorKind.permanent)
+                        'Не удалось сохранить вложение' if isinstance(error,OSError) else str(error) if isinstance(error,(ActionError,TelegramConflict)) else 'Нарушен контракт медиа',
+                        AdapterErrorKind.temporary if isinstance(error,(OSError,ActionError,TelegramConflict)) else AdapterErrorKind.permanent)
+                    source_error=error.__cause__ if isinstance(error.__cause__,SourceError) else None
+                    if native and native.read and source_error and source_error.remote_type=='FloodWaitError':
+                        issue=AdapterIssue(issue.code,issue.message,AdapterErrorKind.source_wait,download.publication,download.media.key,
+                            'telegram:account:'+str(native.read.user_id),datetime.fromtimestamp(self._wall_clock()+source_error.delay,timezone.utc))
                     if caption_attempt and caption_attempt.blocked:
                         issue=AdapterIssue(issue.code,issue.message,AdapterErrorKind.source_wait,download.publication,download.media.key,
                             'youtube:captions',datetime.fromtimestamp(current.youtube.ready_at(),timezone.utc))
                     current.media.failed(job, issue)
+                    if native:
+                        self._account_wait(feed,source_error,job)
         finally:
             current.media.release(download)
 
@@ -1411,8 +1471,9 @@ class Runtime:
                             if lane in self._lanes or now < ready_at:
                                 continue
                             feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else [feed for feed in self._sources if self._lane(feed) == lane]
-                            job = self._store.next_job(now, deleting_only=state['deleting'] or not feeds,
-                                                       feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions')
+                            dependencies=self._dependency_feeds if lane in ('common','media') else []
+                            job = self._store.next_job(now, deleting_only=state['deleting'] or not (feeds or dependencies),
+                                                       feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
                             if job:
                                 if media_lane:
                                     self._media_jobs[lane] = job

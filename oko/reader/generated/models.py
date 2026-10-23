@@ -2501,6 +2501,10 @@ class TelegramClientConnectRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramClientAccessRequest
     auto_read: StrictBool = False
+    feed_id: FeedId | MISSING = Field(
+        default=MISSING,
+        description="Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.",
+    )
     folder: StrictStr = Field(..., max_length=200, min_length=1)
     initial_history: HistorySelection = Field(
         default={"count": "20", "mode": "count"},
@@ -2595,6 +2599,10 @@ class TelegramReadState(WireModel):
 class TelegramWebConnectRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramWebAccessRequest | MISSING = MISSING
+    feed_id: FeedId | MISSING = Field(
+        default=MISSING,
+        description="Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.",
+    )
     folder: StrictStr = Field(..., max_length=200, min_length=1)
     initial_history: HistorySelection = Field(
         default={"count": "20", "mode": "count"},
@@ -4768,7 +4776,8 @@ class ReadingResource(
 
 class TelegramConnect409Errors(
     RootModel[
-        DuplicateSourceError
+        AccessImmutableError
+        | DuplicateSourceError
         | IdentityUnconfirmedError
         | SourceIdentityConflictError
         | DeletionInProgressError
@@ -4779,7 +4788,8 @@ class TelegramConnect409Errors(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
-        DuplicateSourceError
+        AccessImmutableError
+        | DuplicateSourceError
         | IdentityUnconfirmedError
         | SourceIdentityConflictError
         | DeletionInProgressError

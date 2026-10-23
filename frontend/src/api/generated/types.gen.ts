@@ -2888,6 +2888,10 @@ export type TelegramClientAccessRequest = {
 export type TelegramClientConnectRequest = {
     access: TelegramClientAccessRequest;
     auto_read?: boolean;
+    /**
+     * Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.
+     */
+    feed_id?: FeedId;
     folder: string;
     /**
      * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
@@ -2921,6 +2925,8 @@ export type TelegramConfirmedAccess = ({
 } & TelegramClientAccess);
 
 export type TelegramConnect409Errors = ({
+    code: 'access_immutable';
+} & AccessImmutableError) | ({
     code: 'duplicate_source';
 } & DuplicateSourceError) | ({
     code: 'identity_unconfirmed';
@@ -3109,6 +3115,10 @@ export type TelegramWebAccessRequest = {
 
 export type TelegramWebConnectRequest = {
     access?: TelegramWebAccessRequest;
+    /**
+     * Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.
+     */
+    feed_id?: FeedId;
     folder: string;
     /**
      * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.

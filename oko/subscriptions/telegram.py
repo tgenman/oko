@@ -185,7 +185,7 @@ class TelegramAccess:
             subscriptions.details.created(identity)
             subscriptions.details.description(identity, info.get('description'))
             self.put_binding(identity, binding)
-            self.save_avatar(identity, info)
+            self.save_metadata(identity, info)
             for claim in claims:
                 self.claim(identity, claim, 'verified client' if profile else 'public preview')
             if history is not None:
@@ -220,6 +220,39 @@ class TelegramAccess:
         result: dict[str, Any] = subscriptions.feeds(feed)[0]
         return result
 
+    def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
+                      auto_read: bool | None, subscriptions: Any) -> dict[str,Any]:
+        """Apply verified channel access inside Runtime's acceptance transaction."""
+        subscriptions.check_owner('feed',feed)
+        row=self.db.execute('SELECT * FROM feeds WHERE id=?',(feed,)).fetchone()
+        previous=self.binding(feed)
+        if row['kind']!='telegram' or row['transport']=='rss' or row['connection']=='deleting' or not previous:
+            raise TelegramConflict('access_immutable',dict(feed_id=feed),'Способ доступа этого фида изменить нельзя')
+        known_peer=row['telegram_peer']
+        if known_peer is not None and info.get('peer')!=known_peer:
+            raise TelegramConflict('source_identity_conflict',dict(feed_id=feed),'Не подтверждён прежний канал Telegram')
+        if info.get('kind') not in (None,'channel') or binding['kind']=='client' and info.get('kind')!='channel':
+            raise TelegramConflict('access_immutable',dict(feed_id=feed),'Смена доступа поддерживается только для каналов')
+        aliases={name.lower() for name in [info.get('username'),*info.get('usernames',[])] if isinstance(name,str)}
+        if previous['kind']=='web' and previous['username'].lower() not in aliases:
+            raise TelegramConflict('source_identity_conflict',dict(feed_id=feed),'Username прежнего фида не подтверждён клиентом')
+        owners=[owner for owner in self.conflicts(self.claims(info),info.get('peer')) if owner!=feed]
+        if owners:
+            raise TelegramConflict('source_identity_conflict',dict(feed_id=feed),'Внешний ключ уже принадлежит другому фиду')
+        profile=self.profile(binding['role']) if binding['kind']=='client' else None
+        account=profile['account'] if profile else row['telegram_account']
+        automatic=(bool(row['auto_read']) if auto_read is None else auto_read) if profile else None
+        self.put_binding(feed,binding)
+        self.db.execute('''UPDATE feeds SET telegram_peer=?,telegram_account=?,telegram_username=?,transport=?,
+            connection='connected',auto_read=?,config=?,cursor='' WHERE id=?''',
+            (info.get('peer',known_peer),account,info.get('username'), 'telegram' if profile else None,automatic,
+             json.dumps(dict(source_kind=info.get('kind','channel'))),feed))
+        self.save_metadata(feed,info)
+        for claim in self.claims(info):
+            self.claim(feed,claim,'explicit access change')
+        self.modified(feed)
+        return dict(subscriptions.feeds(feed)[0])
+
     def refresh(self, feed: str, info: dict[str, Any]) -> None:
         claims = self.claims(info)
         with self.db:
@@ -231,9 +264,9 @@ class TelegramAccess:
                     raise TelegramConflict('source_identity_conflict', dict(feed_id=feed), 'Новый alias уже занят другим фидом')
             for claim in claims:
                 self.claim(feed, claim, 'client metadata refresh')
-            self.save_avatar(feed, info)
+            self.save_metadata(feed, info)
 
-    def save_avatar(self, feed: str, info: dict[str, Any]) -> None:
+    def save_metadata(self, feed: str, info: dict[str, Any]) -> None:
         if info.get('kind') in ('channel','group','supergroup'):
             row=self.db.execute('SELECT config FROM feeds WHERE id=?',(feed,)).fetchone()
             if row:

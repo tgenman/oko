@@ -262,8 +262,8 @@ class LocalTelegram(_TelegramOperations):
         payload: StagedPayload = await self.request('download',account=account,peer=peer,id=identity,_target=staging.path/('incoming-'+name))
         return payload
 
-    async def download_stream(self, account: str, peer: int, identity: int, output: BinaryIO) -> int:
-        size: int=await self.request('download',account=account,peer=peer,id=identity,_output=output)
+    async def download_stream(self, account: str, peer: int, identity: int, output: BinaryIO, *, expected_identity: str | None = None) -> int:
+        size: int=await self.request('download',account=account,peer=peer,id=identity,_output=output,expected_media_identity=expected_identity)
         return size
 
     async def close_account(self, account: str) -> None:
