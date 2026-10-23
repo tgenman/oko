@@ -21,6 +21,7 @@ from oko.collection import request_observation as observation
 from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, DownloadStage, Attachment, SourceManifest, ResourceManifest, ExternalMedia, ReplyPreview
 from oko.collection.telegram.contracts import TelegramPublication, ExpectedMedia
 from oko.collection.telegram.media import Downloader
+from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalReference, ExternalKey, Platform
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class WebPage:
     posts: tuple[TelegramPublication, ...]
     next_before: int | None
     avatar_url: str | None = None
+    issues: tuple[AdapterIssue, ...] = ()
 
 
 MEDIA_WIDGETS = '.tgme_widget_message_video_player, .tgme_widget_message_photo_wrap, video, audio, .tgme_widget_message_sticker, .tgme_widget_message_tgsticker, .tgme_widget_message_document_wrap, .link_preview_image, .link_preview_right_image, iframe'
@@ -151,7 +153,7 @@ def media_blocks(wrapper: Tag, username: str, message: int) -> tuple[ExpectedMed
     return tuple(result)
 
 
-def parse_page(data: bytes, username: str) -> WebPage:
+def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
     document = BeautifulSoup(data, 'html.parser')
     history = document.select_one('.tgme_channel_history')
     if history is None:
@@ -159,90 +161,103 @@ def parse_page(data: bytes, username: str) -> WebPage:
     title = document.select_one('.tgme_channel_info_header_title')
     description = document.select_one('.tgme_channel_info_description')
     posts = []
+    issues = []
     for wrapper in history.select('.tgme_widget_message[data-post]'):
-        identity = re.fullmatch(r'([a-zA-Z0-9_]+)/([1-9][0-9]*)', str(wrapper.get('data-post')))
-        if not identity or identity[1].lower() != username.lower():
-            raise SourceError('Некорректная идентичность публикации Telegram')
-        message = int(identity[2])
-        anchors = []
-        for anchor in wrapper.select('a.grouped_media_wrap[href]'):
-            address = urlsplit(str(anchor['href']))
-            match = re.fullmatch('/'+re.escape(username)+r'/([1-9][0-9]*)', address.path, re.I)
-            if address.hostname not in ('t.me','telegram.me') or not match:
-                raise SourceError('Неподтверждённый состав альбома Telegram')
-            anchors.append(int(match[1]))
-        members = tuple(sorted(set(anchors or [message])))
-        reply_preview = None
-        reply = wrapper.select_one('.tgme_widget_message_reply')
-        if reply is not None:
-            def plain(node: Tag | NavigableString) -> str:
-                if isinstance(node, NavigableString):
-                    return str(node)
-                if node.name in ('script', 'style', 'iframe'):
-                    return ''
-                if node.name == 'img':
-                    return str(node.get('alt', ''))
-                if node.name == 'br':
-                    return ' '
-                content = ''.join(plain(child) for child in node.children if isinstance(child, (Tag, NavigableString)))
-                return ' '+content+' ' if node.name in ('div', 'p', 'li') else content
-            def clean(node: Tag | None) -> str:
-                return ' '.join(plain(node).split()) if node is not None else ''
-            author = clean(reply.select_one('.tgme_widget_message_author_name'))
-            fragment = clean(reply.select_one('.js-message_reply_text, .tgme_widget_message_text'))
-            safe = None
-            try:
-                reply_address = urljoin(f'https://t.me/{username}/{message}', str(reply.get('href', ''))) if reply.get('href') else None
-                parsed = urlsplit(reply_address) if reply_address else None
-                if parsed and parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.username and not parsed.password and re.fullmatch(r'https?://[^\s]+', reply_address or ''):
-                    safe = reply_address
-            except ValueError:
-                pass  # Malformed source addresses do not discard the saved excerpt.
-
-            reply_preview = ReplyPreview(author=author or None, text=fragment, source_url=safe)
-            reply.decompose()
-        own_text = [readable(node) for node in wrapper.select('.tgme_widget_message_text')]
-        own_title = next((line.strip() for part in own_text for line in part.splitlines() if line.strip()), '')
-        paragraphs = []
-        for quote in wrapper.select('.tgme_widget_message_forwarded_from'):
-            paragraphs.append('> '+readable(quote))
-        forwarded_count = len(paragraphs)
-        for paragraph in wrapper.select('.tgme_widget_message_text'):
-            if paragraph.find_parent(class_='tgme_widget_message_reply') is None:
-                paragraphs.append(readable(paragraph))
-        for selector in ('.tgme_widget_message_poll', '.tgme_widget_message_contact'):
-            paragraphs.extend(readable(node) for node in wrapper.select(selector))
-        service = wrapper.select_one('.service_message')
-        if service and not paragraphs:
-            paragraphs.append(readable(service))
-        body = '\n\n'.join(part for part in paragraphs if part)
-        stamp = wrapper.select_one('time[datetime]')
         try:
-            published = datetime.fromisoformat(str(stamp['datetime']).replace('Z','+00:00')).timestamp() if stamp else None
-        except ValueError:
-            published = None
-        if published is None:
-            raise SourceError('Telegram не предоставил дату публикации')
-        post_web_unavailable = bool('text_not_supported_wrap' in wrapper.get_attribute_list('class')
-            and wrapper.select_one('.message_media_not_supported .message_media_view_in_telegram')
-            and not any(part.strip() for part in paragraphs[forwarded_count:]) and reply_preview is None
-            and not wrapper.select_one(MEDIA_WIDGETS))
-        media = () if post_web_unavailable else media_blocks(wrapper,username,message)
-        if not post_web_unavailable and not media and not any(part.strip() for part in paragraphs[forwarded_count:]) and reply_preview is None:
-            media = (ExpectedMedia('telegram-web:'+str(message)+':unknown','unsupported',None,'media-'+str(message)+'.bin',reason='Предпросмотр не предоставил содержимое публикации'),)
-        preview = wrapper.select_one('.tgme_widget_message_link_preview')
-        preview_text = readable(preview) if preview else ''
-        meta = wrapper.select_one('.tgme_widget_message_meta')
-        edited = bool(meta and re.match(r'^edited\b',meta.get_text(' ',strip=True)))
-        resources = tuple(ResourceManifest(key=m.id,origin='telegram:'+username+'/'+str(message),order=i,
-            name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
-            mime=m.mime or 'application/octet-stream',status='external' if m.external else 'missing' if m.url else 'unsupported',reason=m.reason or '',external=m.external) for i,m in enumerate(media))
-        manifest = SourceManifest(post_web_unavailable=post_web_unavailable,source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
-        file_title = next((node.get_text(' ',strip=True) for node in wrapper.select('.tgme_widget_message_document_title') if node.get_text(' ',strip=True)), '')
-        file_fallback = file_title or ('Файл доступен в Telegram' if any(m.kind=='document' for m in media) else '')
-        teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа')),body,False,
-                          'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
-        posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published,teaser,members),body,media))
+            identity = re.fullmatch(r'([a-zA-Z0-9_]+)/([1-9][0-9]*)', str(wrapper.get('data-post')))
+            if not identity or identity[1].lower() != username.lower():
+                raise SourceError('Некорректная идентичность публикации Telegram')
+            message = int(identity[2])
+            anchors = []
+            for anchor in wrapper.select('a.grouped_media_wrap[href]'):
+                address = urlsplit(str(anchor['href']))
+                match = re.fullmatch('/'+re.escape(username)+r'/([1-9][0-9]*)', address.path, re.I)
+                if address.hostname not in ('t.me','telegram.me') or not match:
+                    raise SourceError('Неподтверждённый состав альбома Telegram')
+                anchors.append(int(match[1]))
+            members = tuple(sorted(set(anchors or [message])))
+            reply_preview = None
+            reply = wrapper.select_one('.tgme_widget_message_reply')
+            if reply is not None:
+                def plain(node: Tag | NavigableString) -> str:
+                    if isinstance(node, NavigableString):
+                        return str(node)
+                    if node.name in ('script', 'style', 'iframe'):
+                        return ''
+                    if node.name == 'img':
+                        return str(node.get('alt', ''))
+                    if node.name == 'br':
+                        return ' '
+                    content = ''.join(plain(child) for child in node.children if isinstance(child, (Tag, NavigableString)))
+                    return ' '+content+' ' if node.name in ('div', 'p', 'li') else content
+                def clean(node: Tag | None) -> str:
+                    return ' '.join(plain(node).split()) if node is not None else ''
+                author = clean(reply.select_one('.tgme_widget_message_author_name'))
+                fragment = clean(reply.select_one('.js-message_reply_text, .tgme_widget_message_text'))
+                safe = None
+                try:
+                    reply_address = urljoin(f'https://t.me/{username}/{message}', str(reply.get('href', ''))) if reply.get('href') else None
+                    parsed = urlsplit(reply_address) if reply_address else None
+                    if parsed and parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.username and not parsed.password and re.fullmatch(r'https?://[^\s]+', reply_address or ''):
+                        safe = reply_address
+                except ValueError:
+                    pass  # Malformed source addresses do not discard the saved excerpt.
+
+                reply_preview = ReplyPreview(author=author or None, text=fragment, source_url=safe)
+                reply.decompose()
+            own_text = [readable(node) for node in wrapper.select('.tgme_widget_message_text')]
+            own_title = next((line.strip() for part in own_text for line in part.splitlines() if line.strip()), '')
+            paragraphs = []
+            for quote in wrapper.select('.tgme_widget_message_forwarded_from'):
+                paragraphs.append('> '+readable(quote))
+            forwarded_count = len(paragraphs)
+            for paragraph in wrapper.select('.tgme_widget_message_text'):
+                if paragraph.find_parent(class_='tgme_widget_message_reply') is None:
+                    paragraphs.append(readable(paragraph))
+            for selector in ('.tgme_widget_message_poll', '.tgme_widget_message_contact'):
+                paragraphs.extend(readable(node) for node in wrapper.select(selector))
+            service = wrapper.select_one('.service_message')
+            if service and not paragraphs:
+                paragraphs.append(readable(service))
+            body = '\n\n'.join(part for part in paragraphs if part)
+            stamp = wrapper.select_one('time[datetime]')
+            try:
+                published = datetime.fromisoformat(str(stamp['datetime']).replace('Z','+00:00')).timestamp() if stamp else None
+            except ValueError:
+                published = None
+            if published is None and not partial:
+                raise SourceError('Telegram не предоставил дату публикации')
+            post_web_unavailable = bool('text_not_supported_wrap' in wrapper.get_attribute_list('class')
+                and wrapper.select_one('.message_media_not_supported .message_media_view_in_telegram')
+                and not any(part.strip() for part in paragraphs[forwarded_count:]) and reply_preview is None
+                and not wrapper.select_one(MEDIA_WIDGETS))
+            media = () if post_web_unavailable else media_blocks(wrapper,username,message)
+            if not post_web_unavailable and not media and not any(part.strip() for part in paragraphs[forwarded_count:]) and reply_preview is None:
+                media = (ExpectedMedia('telegram-web:'+str(message)+':unknown','unsupported',None,'media-'+str(message)+'.bin',reason='Предпросмотр не предоставил содержимое публикации'),)
+            preview = wrapper.select_one('.tgme_widget_message_link_preview')
+            preview_text = readable(preview) if preview else ''
+            meta = wrapper.select_one('.tgme_widget_message_meta')
+            edited = bool(meta and re.match(r'^edited\b',meta.get_text(' ',strip=True)))
+            resources = tuple(ResourceManifest(key=m.id,origin='telegram:'+username+'/'+str(message),order=i,
+                name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
+                mime=m.mime or 'application/octet-stream',status='external' if m.external else 'missing' if m.url else 'unsupported',reason=m.reason or '',external=m.external) for i,m in enumerate(media))
+            manifest = SourceManifest(post_web_unavailable=post_web_unavailable,source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
+            file_title = next((node.get_text(' ',strip=True) for node in wrapper.select('.tgme_widget_message_document_title') if node.get_text(' ',strip=True)), '')
+            file_fallback = file_title or ('Файл доступен в Telegram' if any(m.kind=='document' for m in media) else '')
+            teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа')),body,False,
+                              'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
+            posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published or 0,teaser,members,published_known=published is not None),body,media))
+        except (SourceError, ValueError) as error:
+            if not partial:
+                raise
+            identity = re.fullmatch(re.escape(username)+r'/([1-9][0-9]*)', str(wrapper.get('data-post')), re.I)
+            ref = None
+            if identity:
+                message = int(identity[1])
+                url = f'https://t.me/{username}/{message}'
+                ref = ExternalReference(ExternalKey(Platform.telegram, url), url)
+                posts.append(TelegramPublication(Publication(str(message), url, 0, members=(message,), published_known=False), ''))
+            issues.append(AdapterIssue('malformed_publication', error.label if isinstance(error, SourceError) else 'Некорректные данные публикации Telegram', AdapterErrorKind.permanent, ref))
     more = history.select_one('a.js-messages_more[href*="before="]')
     next_before = None
     if more:
@@ -255,10 +270,10 @@ def parse_page(data: bytes, username: str) -> WebPage:
             raise SourceError('Пустая страница с неподтверждённым продолжением Telegram')
     return WebPage(title.get_text(' ',strip=True) if title else username,
                    readable(description) if description else '',tuple(posts),next_before,
-                   str(avatar.get('src')) if (avatar := document.select_one('.tgme_channel_info_photo img, .tgme_page_photo_image img, img.tgme_page_photo_image')) and avatar.get('src') else None)
+                   str(avatar.get('src')) if (avatar := document.select_one('.tgme_channel_info_photo img, .tgme_page_photo_image img, img.tgme_page_photo_image')) and avatar.get('src') else None, tuple(issues))
 
 
-async def load(username: str, before: int, transport: httpx.AsyncBaseTransport | None) -> tuple[WebPage,str]:
+async def load(username: str, before: int, transport: httpx.AsyncBaseTransport | None, *, partial: bool = False) -> tuple[WebPage,str]:
     url = 'https://t.me/s/'+username+('?before='+str(before) if before else '')
     original_url = url
     try:
@@ -279,7 +294,7 @@ async def load(username: str, before: int, transport: httpx.AsyncBaseTransport |
                             data.extend(part)
                             if len(data)>2*1024*1024:
                                 raise ValueError('preview too large')
-                page = parse_page(bytes(data),username)
+                page = parse_page(bytes(data),username,partial=partial)
                 if before and any(int(post.publication.id)>=before for post in page.posts):
                     raise SourceError('Telegram вернул страницу вне запрошенной границы')
                 if before and page.next_before is not None and page.next_before>=before:
@@ -310,7 +325,7 @@ async def avatar_metadata(page: WebPage, transport: httpx.AsyncBaseTransport | N
 
 
 async def preview(username: str, transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
-    page,url = await load(username,0,transport)
+    page,url = await load(username,0,transport,partial=True)
     return dict(username=username,title=page.title,description=page.description,preview_url=url,**await avatar_metadata(page,transport))
 
 
@@ -340,7 +355,7 @@ class WebTelegram:
     async def page(self, account: str, peer: int, after: int, since: float, *, position: dict[str, Any] | None = None) -> dict[str, Any]:
         progress = dict(position or {})
         before = progress.get('catchup_before',0)
-        page,_ = await load(self.username,before,self.transport)
+        page,_ = await load(self.username,before,self.transport,partial=True)
         await self.metadata(page)
         upper = progress.get('catchup_upper') or max((max(p.publication.members) for p in page.posts),default=after)
         self.observed = tuple(p.publication for p in page.posts if max(p.publication.members)<=after)

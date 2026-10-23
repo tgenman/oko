@@ -437,3 +437,17 @@ def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync
         assert client.post('/api/v3/materials/'+card['id']+'/viewed').status_code==200
         assert client.get('/api/v3/status').json()['telegram_reads']==[]
         assert client.delete('/api/v3/feeds/'+connected.json()['feed_id']).status_code==200
+
+
+def test_malformed_web_record_does_not_discard_valid_neighbor_and_is_diagnosed(tmp_path):
+    html = page([(11, 'Valid text'), (12, 'Broken identity')]).replace('data-post="fixture/12"', 'data-post="broken"')
+    with TestClient(create_app(tmp_path, token='test', api_only=True,
+            rss_transport=httpx.MockTransport(lambda request: httpx.Response(200, text=html))),
+            headers={'Authorization': 'Bearer test'}) as client:
+        configure_fast_web(client)
+        result = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
+        assert result.status_code == 200, result.text
+        card = settled(client)[0]
+        assert client.get('/api/v3/materials/'+card['id']).json()['content']['text'] == 'Valid text'
+        state = client.get('/api/v3/status').json()
+        assert any(history['history']['progress']['warnings'] for history in state['initial_histories'])
