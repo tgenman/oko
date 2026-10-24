@@ -88,5 +88,152 @@
     "wall_seconds": 316.921,
     "runner_seconds": 608.85
   },
-  "after": []
+  "after": [
+    {
+      "run_id": 40122321996,
+      "url": "https://github.com/tgenman/oko/actions/runs/40122321996",
+      "head_sha": "87786669a7619a44aa70df651c510998992f9741",
+      "wall_seconds": 189.834,
+      "runner_seconds": 710.702,
+      "jobs": [
+        {
+          "id": 120956356753,
+          "name": "Build and static checks",
+          "start": "2026-10-24T18:47:33.3318395Z",
+          "end": "2026-10-24T18:48:28.0333577Z",
+          "seconds": 54.702,
+          "check_summary": [
+            "PASS tooling-types (2.30s)",
+            "PASS contracts (1.20s)",
+            "PASS build (6.16s)",
+            "PASS syntax (1.24s)",
+            "PASS lint (1.16s)",
+            "PASS types (5.95s)",
+            "PASS browser-types (3.89s)",
+            "PASS diff (0.10s)",
+            "PASS entrypoint (1.58s)",
+            "Total 23.59s"
+          ]
+        },
+        {
+          "id": 120956578199,
+          "name": "python-1 checks",
+          "start": "2026-10-24T18:48:31.9845006Z",
+          "end": "2026-10-24T18:50:19.8777474Z",
+          "seconds": 107.893,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "Total of 1 artifact(s) downloaded",
+            "PASS contracts (1.33s)",
+            "PASS python-tests (86.18s)",
+            "Tests Python: PASS, 432 passed, 0 skipped, 86.18s",
+            "Total 87.76s"
+          ]
+        },
+        {
+          "id": 120956578251,
+          "name": "python-2 checks",
+          "start": "2026-10-24T18:48:32.3187189Z",
+          "end": "2026-10-24T18:50:30.4292951Z",
+          "seconds": 118.111,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "Total of 1 artifact(s) downloaded",
+            "PASS contracts (1.38s)",
+            "PASS python-tests (93.50s)",
+            "Tests Python: PASS, 479 passed, 0 skipped, 93.50s",
+            "Total 95.14s"
+          ]
+        },
+        {
+          "id": 120956578255,
+          "name": "tools checks",
+          "start": "2026-10-24T18:48:31.7882683Z",
+          "end": "2026-10-24T18:50:10.7866282Z",
+          "seconds": 98.998,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "PASS contracts (1.31s)",
+            "PASS tool-tests (78.46s)",
+            "Tests tools: PASS, 249 passed, 15 skipped, 78.46s",
+            "Total 80.02s"
+          ]
+        },
+        {
+          "id": 120956578303,
+          "name": "node checks",
+          "start": "2026-10-24T18:48:32.3314993Z",
+          "end": "2026-10-24T18:49:03.2790111Z",
+          "seconds": 30.948,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "PASS tooling-types (2.39s)",
+            "PASS browser-types (3.96s)",
+            "PASS node-tests (2.24s)",
+            "Tests Node: PASS, 113 passed, 0 skipped, 2.24s",
+            "Total 8.75s"
+          ]
+        },
+        {
+          "id": 120956578307,
+          "name": "browser-1 checks",
+          "start": "2026-10-24T18:48:32.0384145Z",
+          "end": "2026-10-24T18:50:22.4538504Z",
+          "seconds": 110.415,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "Total of 1 artifact(s) downloaded",
+            "PASS tooling-types (1.61s)",
+            "PASS browser-types (2.59s)",
+            "PASS browser (83.72s)",
+            "Tests Playwright: PASS, 109 passed, 2 skipped, 83.72s",
+            "Total 88.29s"
+          ]
+        },
+        {
+          "id": 120956578357,
+          "name": "latency checks",
+          "start": "2026-10-24T18:48:31.7793111Z",
+          "end": "2026-10-24T18:49:39.3450161Z",
+          "seconds": 67.566,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "Total of 1 artifact(s) downloaded",
+            "PASS tooling-types (1.36s)",
+            "PASS browser-types (2.18s)",
+            "PASS browser (40.71s)",
+            "Tests Playwright: PASS, 4 passed, 0 skipped, 40.71s",
+            "Total 44.57s"
+          ]
+        },
+        {
+          "id": 120956578450,
+          "name": "browser-2 checks",
+          "start": "2026-10-24T18:48:32.0715697Z",
+          "end": "2026-10-24T18:50:26.6095091Z",
+          "seconds": 114.538,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "Total of 1 artifact(s) downloaded",
+            "PASS tooling-types (1.60s)",
+            "PASS browser-types (2.71s)",
+            "PASS browser (89.19s)",
+            "Tests Playwright: PASS, 112 passed, 0 skipped, 89.19s",
+            "Total 93.87s"
+          ]
+        },
+        {
+          "id": 120957049404,
+          "name": "Full checks",
+          "start": "2026-10-24T18:50:35.6348252Z",
+          "end": "2026-10-24T18:50:43.1659851Z",
+          "seconds": 7.531,
+          "check_summary": [
+            "Total of 1 artifact(s) downloaded",
+            "Total of 8 artifact(s) downloaded"
+          ]
+        }
+      ]
+    }
+  ]
 }

@@ -49,7 +49,7 @@ Before205: build51.986с, Python203.812с (тесты176.822с), browser252.916�
 Сумма elapsed всех job logs —608.850с (10.15 машино-минут), без округления биллинга.
 Это4CPU Linux runners, четыре Python/browser исполнителя на VM.
 
-After будет измерен тем же способом через фактический draft PR CI. Новые проверки
+After измеряется тем же способом через фактический draft PR CI. Новые проверки
 самого шардинга увеличивают tools inventory; исходные Python911, browser225+2skip
 и Node113 сохраняются. Число кейсов внутри частей не обязано быть одинаковым:
 балансируется измеренное время. Это сравнение на shared GitHub-hosted runners,
@@ -69,3 +69,40 @@ Test tree `b3af41b449260380ba0682ce6f57a83988229770`.
 Отчёт: `/private/tmp/oko-ci-sharding-local-20261024/20261024T184302Z-84330c2d/report.json`.
 После старта snapshot менялись только этот отчёт и компактные measurements.json.
 Локальный all не распределяет тесты по разным VM; реальный sharding измеряется в CI.
+
+
+## Первый фактический CI after
+
+[PR125](https://github.com/tgenman/oko/pull/125), head8778666,
+[Checks207](https://github.com/tgenman/oko/actions/runs/40122321996): все9 jobs,
+включая Full checks, success с первой попытки. Измерено189.834с (3:10),
+до316.921с (5:17): **−127.087с, −40.10%**.
+Сумма job elapsed710.702с (11.85 машино-минут) против608.850с (10.15): **+16.73%**.
+Точная копия timestamps и summary — [measurements.json](ci-sharding-20261024/measurements.json).
+
+| Job | Полный elapsed, с | Проверки |
+| --- | ---: | --- |
+| Build/static/plan | 54.702 | Общие contracts/types/build/static PASS |
+| Python1 | 107.893 | 432 passed |
+| Python2 | 118.111 | 479 passed |
+| Browser1 | 110.415 | 109 passed/2 прежних skipped |
+| Browser2 | 114.538 | 112 passed |
+| Latency | 67.566 | Все4 passed, прежние p95 budgets |
+| Node | 30.948 | 113 passed |
+| Tools | 98.998 | 249 passed/15 прежних CI skips |
+| Full checks | 7.531 | Успех всей matrix и coverage audit |
+
+Итого исходные Python911, browser225 passed/2skip и Node113 сохранены.
+Tools получили18 новых регрессий шардинга: total264; до было246, включая те же15
+Linux/CI skips. Локально264 passed без skips. Пропусков/ослабления старых тестов нет.
+
+Build действительно восстановил старые Python/browser hints: known_files123/123
+и66/66. Общий новый cache ещё отсутствовал; первый after проверил bootstrap.
+После общего успешного аудита сохранена объединённая история. Следующий CI на
+том же исполняемом коде проверит её восстановление и даст второй замер.
+
+Скачан и прочитан настоящий `ci-coverage-audit` Checks207: один план,
+190 файлов (Python123 + browser66 + latency1),1138 cases:1136 passed/2 skipped,
+0 failed/errors/cancelled. Revision плана — GitHub synthetic merge d41f5b7,
+одинаковый для всех jobs; head PR остаётся8778666. Фактический layout artifacts
+и общий аудит подтверждены исполнением. Реальное Око не запускалось.
