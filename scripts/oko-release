@@ -220,10 +220,13 @@ def start(home, port_wait=0):
         if not running:
             compose(home, 'up', '--detach', '--wait', '--wait-timeout', '45')
         readiness(home)
-        probe = ("import json,urllib.request; from pathlib import Path; "
+        probe = ("import json,time,urllib.request,urllib.error\nfrom pathlib import Path\n"
                  "r=urllib.request.Request('http://host.docker.internal:8767/v1/health',"
-                 "headers={'Authorization':'Bearer '+Path('/run/secrets/codex').read_text().strip(),'X-Oko-Protocol':'1'}); "
-                 "d=json.load(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(r,timeout=5)); "
+                 "headers={'Authorization':'Bearer '+Path('/run/secrets/codex').read_text().strip(),'X-Oko-Protocol':'1'})\n"
+                 "deadline=time.monotonic()+15\nwhile True:\n"
+                 " try:\n  with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(r,timeout=2) as response: d=json.load(response)\n  break\n"
+                 " except urllib.error.HTTPError: raise\n"
+                 " except OSError:\n  if time.monotonic()>=deadline: raise\n  time.sleep(.25)\n"
                  "assert d['protocol']==1 and d['release']==" + repr(read(home / 'current.json')['release']))
         compose(home, 'exec', '--no-TTY', 'reader', 'python', '-c', probe)
     except Exception:

@@ -1,0 +1,269 @@
+{
+  "started_at": "20261024T120718Z",
+  "selected_files": {
+    "browser": [],
+    "node-tests": [],
+    "python-tests": [
+      "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/tests/development/test_docker_release.py"
+    ],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.63s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.venv/bin/python",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.6282
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.6282
+    },
+    "python-tests": {
+      "status": "PASS (16.31s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--rootdir=/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko",
+            "--junitxml=/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T120718Z-60e7ad37/parallel/python-tests/20261024T120719Z-da5d36d1/pytest-5a9f1ca470e14198acd88e0d33663cd5.xml",
+            "-o",
+            "junit_family=xunit1",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/tests/development/test_docker_release.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 16.2847
+        }
+      ],
+      "failures": [],
+      "counts": {
+        "total": 28,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 28
+      },
+      "test_durations": [
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_port_wait_handles_transient_bind_and_preserves_persistent_listener[True]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.125
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_port_wait_handles_transient_bind_and_preserves_persistent_listener[False]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.219
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_update_waits_for_port_only_after_stopping_owned_release",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.021
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_prepare_refuses_dirty_checkout_before_build_or_home_creation",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.189
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_prepare_freezes_source_and_uses_desktop_context_without_development_mount",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 1.306
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_install_creates_private_paired_helper_without_starting_or_changing_hosts",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.775
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_backup_refuses_running_container_and_preserves_data",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.879
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_backup_succeeds_only_stopped_and_preserves_material_and_release",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.87
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_migrate_refuses_an_owned_old_store_without_copying",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.816
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_restore_requires_explicit_data_loss_acknowledgement_before_stopping",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.811
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_prepare_excludes_untracked_private_files_from_release",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.693
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_status_supports_compose_ndjson",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 1.072
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_rollback_preserves_modified_data_and_does_not_start_old_version",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 1.128
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_stop_blocks_on_abandoned_supervisor_marker_and_preserves_it",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 1.145
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch[backup]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.825
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch[update]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 1.103
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch[migrate]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.864
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_owned_execution_lock_blocks_backup_even_without_marker",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.841
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_open_launches_localhost_8765_without_logging_reader_credential",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 1.115
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_restored_reader_timeline_gets_new_identity_and_retains_entity_versions",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.009
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_backup_verifies_copied_bytes_before_publishing_manifest",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.008
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_migrate_rejects_partial_destination_and_retains_source[copy]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.009
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_migrate_rejects_partial_destination_and_retains_source[initialize]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.01
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_start_waits_for_helper_listener_after_reader_is_ready[ready]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.285
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_start_waits_for_helper_listener_after_reader_is_ready[wrong_release]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.29
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_start_waits_for_helper_listener_after_reader_is_ready[wrong_protocol]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.284
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_start_waits_for_helper_listener_after_reader_is_ready[unauthorized]",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.279
+        },
+        {
+          "file": "tests/development/test_docker_release.py",
+          "name": "test_unreachable_helper_exits_at_deadline_and_stops_new_reader",
+          "classname": "tests.development.test_docker_release",
+          "seconds": 0.016
+        }
+      ],
+      "file_durations": {
+        "tests/development/test_docker_release.py": 15.987
+      },
+      "duration_seconds": 16.3135,
+      "worker_durations": {
+        "python-tests": 16.3135
+      },
+      "worker_results": {
+        "python-tests": "PASS (16.29s)"
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "scripts/oko-release",
+      "tests/development/test_docker_release.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {
+    "Python": {
+      "status": "PASS",
+      "counts": {
+        "total": 28,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 28
+      },
+      "duration_seconds": 16.3135
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 17.43,
+  "log": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T120718Z-60e7ad37/output.log"
+}

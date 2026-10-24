@@ -362,3 +362,94 @@ def test_migrate_rejects_partial_destination_and_retains_source(tmp_path,monkeyp
         maintenance['migrate'](SimpleNamespace(home=home,source=source))
     assert not (home/'data').exists()
     assert maintenance['tree_digest'](source)==before
+
+
+@pytest.mark.parametrize('reply',['ready','wrong_release','wrong_protocol','unauthorized'])
+def test_start_waits_for_helper_listener_after_reader_is_ready(tmp_path,monkeypatch,reply):
+    import runpy
+    import threading
+    import urllib.request
+    import urllib.error
+    from http.server import HTTPServer,BaseHTTPRequestHandler
+    maintenance=runpy.run_path(str(SCRIPT))
+    scope=maintenance['start'].__globals__
+    home=tmp_path/'installation'
+    (home/'secrets').mkdir(parents=True)
+    (home/'secrets/codex').write_text('synthetic-token')
+    (home/'current.json').write_text(json.dumps(dict(release='a'*40)))
+    (home/'installation.json').write_text(json.dumps(dict(launchagents=str(tmp_path/'agents'))))
+    release_listener=threading.Event()
+    listener_ready=threading.Event()
+    class Health(BaseHTTPRequestHandler):
+        def log_message(self,*args):pass
+        def do_GET(self):
+            assert self.headers['Authorization']=='Bearer synthetic-token'
+            self.send_response(401 if reply=='unauthorized' else 200);self.end_headers()
+            self.wfile.write(json.dumps(dict(protocol=2 if reply=='wrong_protocol' else 1,release='b'*40 if reply=='wrong_release' else 'a'*40)).encode())
+    server=HTTPServer(('127.0.0.1',0),Health,bind_and_activate=False)
+    server.server_bind()
+    def listen():
+        release_listener.wait()
+        server.server_activate();listener_ready.set();server.serve_forever(poll_interval=.01)
+    listener=threading.Thread(target=listen)
+    listener.start()
+    attempts=[]
+    original_open=urllib.request.OpenerDirector.open
+    def open_health(self,*args,**kwargs):
+        attempts.append('health')
+        if len(attempts)==1:
+            release_listener.set()
+            raise urllib.error.URLError(ConnectionRefusedError('Synthetic helper is not listening yet'))
+        assert listener_ready.wait(2)
+        return original_open(self,*args,**kwargs)
+    monkeypatch.setattr(urllib.request.OpenerDirector,'open',open_health)
+    stopped=[]
+    monkeypatch.setitem(scope,'helper_loaded',lambda home:False)
+    monkeypatch.setitem(scope,'available',lambda *args,**kwargs:None)
+    monkeypatch.setitem(scope,'run',lambda *args,**kwargs:None)
+    monkeypatch.setitem(scope,'readiness',lambda home:None)
+    monkeypatch.setitem(scope,'stop',lambda home:stopped.append(True))
+    def compose(home,*args,**kwargs):
+        if args[0]=='ps':return ''
+        if args[0]=='exec':
+            probe=args[-1].replace('http://host.docker.internal:8767',f'http://127.0.0.1:{server.server_port}').replace('/run/secrets/codex',str(home/'secrets/codex'))
+            exec(probe,{})
+    monkeypatch.setitem(scope,'compose',compose)
+    try:
+        if reply=='ready':
+            maintenance['start'](home)
+            assert len(attempts)>=2 and not stopped
+        else:
+            with pytest.raises(urllib.error.HTTPError if reply=='unauthorized' else AssertionError):maintenance['start'](home)
+            assert len(attempts)==2 and stopped==[True]
+    finally:
+        release_listener.set()
+        assert listener_ready.wait(2)
+        server.shutdown();listener.join(timeout=2);server.server_close()
+
+
+def test_unreachable_helper_exits_at_deadline_and_stops_new_reader(tmp_path,monkeypatch):
+    import builtins
+    import runpy
+    import urllib.request
+    import urllib.error
+    from types import SimpleNamespace
+    maintenance=runpy.run_path(str(SCRIPT));scope=maintenance['start'].__globals__
+    home=tmp_path/'installation';(home/'secrets').mkdir(parents=True)
+    (home/'secrets/codex').write_text('synthetic-token')
+    (home/'current.json').write_text(json.dumps(dict(release='a'*40)))
+    (home/'installation.json').write_text(json.dumps(dict(launchagents=str(tmp_path/'agents'))))
+    ticks=iter([0,20]);attempts=[];stopped=[]
+    clock=SimpleNamespace(monotonic=lambda:next(ticks),sleep=lambda seconds:pytest.fail('Deadline exceeded: no more retries allowed'))
+    def importing(name,*args,**kwargs):return clock if name=='time' else builtins.__import__(name,*args,**kwargs)
+    def unavailable(*args,**kwargs):
+        attempts.append(True)
+        raise urllib.error.URLError(ConnectionRefusedError('synthetic unreachable helper'))
+    monkeypatch.setattr(urllib.request.OpenerDirector,'open',unavailable)
+    for name,fn in {'helper_loaded':lambda home:False,'available':lambda *args,**kwargs:None,'run':lambda *args,**kwargs:None,'readiness':lambda home:None,'stop':lambda home:stopped.append(True)}.items():monkeypatch.setitem(scope,name,fn)
+    def compose(home,*args,**kwargs):
+        if args[0]=='ps':return ''
+        if args[0]=='exec':exec(args[-1].replace('/run/secrets/codex',str(home/'secrets/codex')),{'__builtins__':dict(vars(builtins),__import__=importing)})
+    monkeypatch.setitem(scope,'compose',compose)
+    with pytest.raises(urllib.error.URLError):maintenance['start'](home)
+    assert attempts==[True] and stopped==[True]
