@@ -1,0 +1,467 @@
+{
+  "started_at": "20261024T103954Z",
+  "selected_files": {
+    "browser": [],
+    "node-tests": [],
+    "python-tests": [],
+    "tool-tests": [
+      "tests/development/test_fixture_contracts.py",
+      "tests/development/test_test_environment.py",
+      "tests/development/test_update_working_oko.py",
+      "tests/development/test_agent_tools.py",
+      "tests/development/test_docker_release.py",
+      "tests/development/test_library_templates.py",
+      "tests/development/test_update_checkout.py",
+      "tests/development/test_check_snapshot.py",
+      "tests/development/test_check_report.py",
+      "tests/development/test_api_generation.py",
+      "tests/development/test_browser_host.py",
+      "tests/development/test_build_speed.py",
+      "tests/development/test_check_runner.py",
+      "tests/development/test_frontend_builder.py",
+      "tests/development/test_github_issues.py",
+      "tests/development/test_hooks.py",
+      "tests/development/test_process_logs.py",
+      "tests/development/test_task_changes.py",
+      "tests/api/test_governance.py",
+      "tests/api/test_strict_generation.py"
+    ],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.57s)",
+      "commands": [
+        {
+          "command": [
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/.venv/bin/python",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.57
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.57
+    },
+    "tooling-types": {
+      "status": "PASS (1.10s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.0951
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 1.0952
+    },
+    "syntax": {
+      "status": "PASS (0.57s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/scripts/check-ts.cts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/docs/initializer.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/errors.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/client/client.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/client/index.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/client/types.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/client/utils.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/client.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/auth.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/bodySerializer.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/params.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/pathSerializer.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/queryKeySerializer.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/serverSentEvents.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/types.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/core/utils.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/index.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/media.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/revision.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/sdk.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/generated/types.gen.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/reader.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/api/transport.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/browser-auth.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/browser-platform.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/main.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reader-session.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/completion.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/coordination.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/external-attachments.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/feed-actions.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/folder-actions.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/folder-menu.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/linked-content.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/list.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/markdown-links.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/markdown.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/news-actions.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/opened.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/position.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/post-web-unavailable.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/resources.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/store.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/telegram-reply.prototype.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/title.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/tree.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/renderer.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/service-text.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/connections.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/editor.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/feed-details.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/history.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/menus.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/models.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/operations.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/owner.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/telegram.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/settings/youtube.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/shell.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/status/actions.ts",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/status/collection.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/status/debug.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/status/panel.tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/status/recovery.ts"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.5246
+        },
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--check",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/frontend/src/reading/telegram-reply.prototype.mjs"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.0445
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.5692
+    },
+    "lint": {
+      "status": "PASS (0.60s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/scripts/lint-js.cts"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.5968
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.5968
+    },
+    "types": {
+      "status": "FAIL (2.26s)",
+      "commands": [
+        {
+          "command": [
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/.venv/bin/python",
+            "-m",
+            "mypy",
+            "oko",
+            "tests/support/codex.py",
+            "tests/support/app.py"
+          ],
+          "exit_code": 1,
+          "duration_seconds": 2.2558
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 2.2558
+    },
+    "browser-types": {
+      "status": "PASS (1.56s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.5615
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 1.5615
+    },
+    "build": {
+      "status": "PASS (8.22s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/scripts/build-frontend.mts"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 7.8431
+        },
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/scripts/build-frontend.mts",
+            "--check"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.3757
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 8.2189
+    },
+    "http": {
+      "status": "PASS (3.35s)",
+      "commands": [
+        {
+          "command": [
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--rootdir=/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout",
+            "--junitxml=/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T103954Z-511a4267/pytest-4d9a202912e84692a8f6917bb9afec82.xml",
+            "-o",
+            "junit_family=xunit1",
+            "tests/reader/test_web_assets.py",
+            "tests/reader/test_frontend_delivery.py",
+            "tests/reader/test_frontend_build.py",
+            "tests/reader/test_http_contracts.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 3.3517
+        }
+      ],
+      "failures": [],
+      "counts": {
+        "total": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 9
+      },
+      "test_durations": [
+        {
+          "file": "tests/reader/test_web_assets.py",
+          "name": "test_reader_serves_entire_browser_module_graph_without_exposing_reader_data",
+          "classname": "tests.reader.test_web_assets",
+          "seconds": 0.196
+        },
+        {
+          "file": "tests/reader/test_frontend_delivery.py",
+          "name": "test_frontend_nested_modules_survive_a_different_working_directory",
+          "classname": "tests.reader.test_frontend_delivery",
+          "seconds": 0.12
+        },
+        {
+          "file": "tests/reader/test_frontend_delivery.py",
+          "name": "test_frontend_rejects_traversal_symlinks_and_unknown_data_paths",
+          "classname": "tests.reader.test_frontend_delivery",
+          "seconds": 0.125
+        },
+        {
+          "file": "tests/reader/test_frontend_build.py",
+          "name": "test_missing_build_fails_before_creating_reader_storage",
+          "classname": "tests.reader.test_frontend_build",
+          "seconds": 0.001
+        },
+        {
+          "file": "tests/reader/test_frontend_build.py",
+          "name": "test_stale_or_damaged_build_fails_before_creating_reader_storage[stale]",
+          "classname": "tests.reader.test_frontend_build",
+          "seconds": 0.029
+        },
+        {
+          "file": "tests/reader/test_frontend_build.py",
+          "name": "test_stale_or_damaged_build_fails_before_creating_reader_storage[damaged]",
+          "classname": "tests.reader.test_frontend_build",
+          "seconds": 0.018
+        },
+        {
+          "file": "tests/reader/test_http_contracts.py",
+          "name": "test_exported_reading_contract_rejects_missing_fields_and_wrong_types",
+          "classname": "tests.reader.test_http_contracts",
+          "seconds": 0.537
+        },
+        {
+          "file": "tests/reader/test_http_contracts.py",
+          "name": "test_material_and_stopped_status_preserve_wire_fields",
+          "classname": "tests.reader.test_http_contracts",
+          "seconds": 0.224
+        },
+        {
+          "file": "tests/reader/test_http_contracts.py",
+          "name": "test_work_status_rejects_history_without_progress_fields",
+          "classname": "tests.reader.test_http_contracts",
+          "seconds": 0.122
+        }
+      ],
+      "file_durations": {
+        "tests/reader/test_web_assets.py": 0.196,
+        "tests/reader/test_frontend_delivery.py": 0.245,
+        "tests/reader/test_frontend_build.py": 0.048,
+        "tests/reader/test_http_contracts.py": 0.883
+      },
+      "duration_seconds": 3.3521
+    },
+    "node-tests": {
+      "status": "NOT RUN",
+      "commands": [],
+      "failures": []
+    },
+    "browser": {
+      "status": "NOT RUN",
+      "commands": [],
+      "failures": []
+    },
+    "diff": {
+      "status": "PASS (0.31s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.2742
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.0343
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.3085
+    },
+    "python-tests": {
+      "status": "NOT RUN",
+      "commands": [],
+      "failures": []
+    },
+    "entrypoint": {
+      "status": "PASS (0.52s)",
+      "commands": [
+        {
+          "command": [
+            "/private/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout/.venv/bin/python",
+            "-m",
+            "oko",
+            "--help"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.5216
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.5216
+    },
+    "tool-tests": {
+      "status": "NOT RUN",
+      "commands": [],
+      "failures": []
+    }
+  },
+  "snapshot": {
+    "source": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko",
+    "checkout": "/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-zo5j4rj5/checkout",
+    "head": "c2310069edd0797d0cc64a2fbdf6538dece6ab75",
+    "tree": "91c82ae0aad5c61fcf628dbaf2c522d7a6c6d8f5"
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "scripts/oko-release",
+      "tests/development/test_docker_release.py"
+    ],
+    "base": "c2310069edd0797d0cc64a2fbdf6538dece6ab75",
+    "tests": [
+      "tests/development/test_fixture_contracts.py",
+      "tests/development/test_test_environment.py",
+      "tests/development/test_update_working_oko.py",
+      "tests/development/test_agent_tools.py",
+      "tests/development/test_docker_release.py",
+      "tests/development/test_library_templates.py",
+      "tests/development/test_update_checkout.py",
+      "tests/development/test_check_snapshot.py",
+      "tests/development/test_check_report.py",
+      "tests/development/test_api_generation.py",
+      "tests/development/test_browser_host.py",
+      "tests/development/test_build_speed.py",
+      "tests/development/test_check_runner.py",
+      "tests/development/test_frontend_builder.py",
+      "tests/development/test_github_issues.py",
+      "tests/development/test_hooks.py",
+      "tests/development/test_process_logs.py",
+      "tests/development/test_task_changes.py",
+      "tests/api/test_governance.py",
+      "tests/api/test_strict_generation.py"
+    ]
+  },
+  "test_groups": {
+    "Python": {
+      "status": "NOT RUN",
+      "counts": {
+        "total": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 9
+      },
+      "duration_seconds": 3.3521
+    },
+    "tools": {
+      "status": "NOT RUN",
+      "counts": {},
+      "duration_seconds": 0.0
+    },
+    "Node": {
+      "status": "NOT RUN",
+      "counts": {},
+      "duration_seconds": 0.0
+    },
+    "Playwright": {
+      "status": "NOT RUN",
+      "counts": {},
+      "duration_seconds": 0.0
+    }
+  },
+  "exit_code": 1,
+  "duration_seconds": 19.93,
+  "log": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T103954Z-511a4267/output.log"
+}

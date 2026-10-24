@@ -308,3 +308,57 @@ def test_restored_reader_timeline_gets_new_identity_and_retains_entity_versions(
         assert db.execute('SELECT version FROM reader_entities').fetchone()[0]==7
     with sqlite3.connect(original/'state.sqlite') as db:
         assert db.execute('SELECT value FROM reader_identity').fetchone()[0]==identity
+
+
+def test_backup_verifies_copied_bytes_before_publishing_manifest(tmp_path,monkeypatch):
+    import runpy
+    maintenance=runpy.run_path(str(SCRIPT))
+    scope=maintenance['backup'].__globals__
+    home=tmp_path/'synthetic-installation'
+    data=home/'data'
+    data.mkdir(parents=True)
+    (data/'material').write_bytes(b'original')
+    (home/'current.json').write_text(json.dumps(dict(release='synthetic-release')))
+    monkeypatch.setitem(scope,'confirm_helper_stopped',lambda home:None)
+    monkeypatch.setitem(scope,'compose',lambda *args,**kwargs:'')
+    copy=scope['shutil'].copytree
+    def corrupt(source,target):
+        copy(source,target)
+        (target/'material').write_bytes(b'corrupted copy')
+    monkeypatch.setattr(scope['shutil'],'copytree',corrupt)
+    with pytest.raises(ValueError,match='Backup verification failed'):
+        maintenance['backup'](home)
+    assert (data/'material').read_bytes()==b'original'
+    assert len(list((home/'backups').glob('*/data/material')))==1
+    assert not list((home/'backups').glob('*/backup.json'))
+
+
+@pytest.mark.parametrize('failure',['copy','initialize'])
+def test_migrate_rejects_partial_destination_and_retains_source(tmp_path,monkeypatch,failure):
+    import runpy
+    from types import SimpleNamespace
+    maintenance=runpy.run_path(str(SCRIPT))
+    scope=maintenance['migrate'].__globals__
+    home=tmp_path/'synthetic-installation'
+    (home/'data').mkdir(parents=True)
+    source=tmp_path/'synthetic-candidate'
+    source.mkdir()
+    (source/'instance.lock').touch()
+    (source/'state.sqlite').write_bytes(b'synthetic database')
+    (source/'media').write_bytes(b'synthetic file')
+    before=maintenance['tree_digest'](source)
+    monkeypatch.setitem(scope,'release',lambda home:(tmp_path,{}))
+    monkeypatch.setitem(scope,'confirm_helper_stopped',lambda home:None)
+    if failure=='copy':
+        copy=scope['shutil'].copytree
+        def corrupt(source,target):
+            copy(source,target)
+            (target/'media').write_bytes(b'corrupted')
+        monkeypatch.setattr(scope['shutil'],'copytree',corrupt)
+    else:
+        def fail(*args,**kwargs):raise ValueError('synthetic initialization failure')
+        monkeypatch.setitem(scope,'run',fail)
+    with pytest.raises(ValueError,match='verification failed|initialization failure'):
+        maintenance['migrate'](SimpleNamespace(home=home,source=source))
+    assert not (home/'data').exists()
+    assert maintenance['tree_digest'](source)==before

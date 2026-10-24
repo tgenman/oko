@@ -1,0 +1,57 @@
+{
+  "started_at": "20261024T103645Z",
+  "snapshot": {
+    "source": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko",
+    "checkout": "/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-qmyw_1ji/checkout",
+    "head": "c2310069edd0797d0cc64a2fbdf6538dece6ab75",
+    "tree": "8fbbefeed3c55572a9da70ac15f3d6f93e08cf41"
+  },
+  "test_groups": {
+    "Python": {
+      "status": "PASS",
+      "counts": {
+        "total": 871,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 871
+      },
+      "duration_seconds": 155.1544
+    },
+    "tools": {
+      "status": "PASS",
+      "counts": {
+        "total": 208,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 208
+      },
+      "duration_seconds": 159.4586
+    },
+    "Node": {
+      "status": "PASS",
+      "counts": {
+        "total": 113,
+        "passed": 113,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "duration_seconds": 1.4486
+    },
+    "Playwright": {
+      "status": "PASS",
+      "counts": {
+        "total": 223,
+        "passed": 221,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 2
+      },
+      "duration_seconds": 158.1452
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 178.6
+}

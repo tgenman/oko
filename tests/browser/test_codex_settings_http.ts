@@ -5,12 +5,13 @@ import {productionReader} from './http-reader.ts';
 import {artifactPath} from './artifacts.ts';
 
 test('production HTTP saves choices, reads provenance and recreates material from the browser', {timeout:30000}, async t=>{
-  const {page,api,origin,token}=await productionReader(t);
+  const {page,api,openReader}=await productionReader(t);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
   const plan=await addSources(api, [["https://a.test/feed", "Статьи", "Наука"]]);
   const feed=plan.feeds[0];
-  await page.goto(origin+'/#token='+token);
+  await openReader();
+  await expect(page.locator('#collect')).toBeEnabled();
   await page.locator('#settings-open').click();
   await page.locator('[data-settings-target="models"]').click();
   await page.locator('[data-settings-target="codex"]').click();
@@ -34,9 +35,10 @@ test('production HTTP saves choices, reads provenance and recreates material fro
 });
 
 test('model screens save connection and independent Codex choices through production HTTP', {timeout:30000}, async t=>{
-  const {page,api,origin,token}=await productionReader(t);
+  const {page,api,openReader}=await productionReader(t);
   await page.setViewportSize({width:1280,height:900});
-  await page.goto(origin+'/#token='+token);
+  await openReader();
+  await expect(page.locator('#collect')).toBeEnabled();
   await page.locator('#settings-open').click();
   await page.locator('[data-settings-target="models"]').click();
   await page.getByRole('button',{name:'llama.cpp',exact:true}).click();

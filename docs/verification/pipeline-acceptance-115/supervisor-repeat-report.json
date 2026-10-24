@@ -1,0 +1,155 @@
+{
+  "started_at": "20261024T104343Z",
+  "selected_files": {
+    "browser": [],
+    "node-tests": [],
+    "python-tests": [
+      "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/tests/processing/test_codex_bridge.py"
+    ],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.59s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.venv/bin/python",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.5882
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.5882
+    },
+    "python-tests": {
+      "status": "PASS (11.83s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--rootdir=/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko",
+            "--junitxml=/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T104343Z-5097bb5a/parallel/python-tests/20261024T104344Z-4dd7fff7/pytest-be6bacef713642da8bf73786798289b1.xml",
+            "-o",
+            "junit_family=xunit1",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/tests/processing/test_codex_bridge.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 11.8198
+        }
+      ],
+      "failures": [],
+      "counts": {
+        "total": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 9
+      },
+      "test_durations": [
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_remote_codex_preserves_contract_over_real_http",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 1.545
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_private_protocol_rejects_browser_bad_secret_version_and_unbounded_content",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 0.212
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_attempt_replay_is_deduplicated_and_release_keeps_tombstone",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 0.619
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_cancel_stops_owned_process_before_acknowledging_and_releases_slot",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 1.021
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_absolute_deadline_expires_attempt_and_rejects_late_renewal",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 2.541
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_lost_creation_response_resolves_same_attempt_without_second_put",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 1.131
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_helper_parent_crash_eof_stops_own_cli_and_cleans_scratch",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 0.708
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_supervisor_crash_blocks_new_work_until_owned_process_cleanup",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 0.511
+        },
+        {
+          "file": "tests/processing/test_codex_bridge.py",
+          "name": "test_unconfirmed_group_stop_preserves_marker_and_blocks_next_job",
+          "classname": "tests.processing.test_codex_bridge",
+          "seconds": 2.634
+        }
+      ],
+      "file_durations": {
+        "tests/processing/test_codex_bridge.py": 10.922
+      },
+      "duration_seconds": 11.827,
+      "worker_durations": {
+        "python-tests": 11.827
+      },
+      "worker_results": {
+        "python-tests": "PASS (11.82s)"
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "scripts/oko-release",
+      "tests/development/test_docker_release.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {
+    "Python": {
+      "status": "PASS",
+      "counts": {
+        "total": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 9
+      },
+      "duration_seconds": 11.827
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 12.87,
+  "log": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T104343Z-5097bb5a/output.log"
+}

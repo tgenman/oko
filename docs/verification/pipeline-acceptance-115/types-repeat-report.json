@@ -1,0 +1,50 @@
+{
+  "started_at": "20261024T104023Z",
+  "selected_files": {
+    "browser": [],
+    "node-tests": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "types": {
+      "status": "PASS (2.18s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.venv/bin/python",
+            "-m",
+            "mypy",
+            "oko",
+            "tests/support/codex.py",
+            "tests/support/app.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 2.1836
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 2.1836
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "scripts/oko-release",
+      "tests/development/test_docker_release.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {},
+  "exit_code": 0,
+  "duration_seconds": 2.26,
+  "log": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T104023Z-eba9a79c/output.log"
+}
