@@ -283,7 +283,7 @@ def test_open_launches_localhost_8765_without_logging_reader_credential(tmp_path
     assert result.returncode == 0, result.stderr
     assert 'synthetic-private-token' not in result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    assert calls[-1] == ['open', 'http://localhost:8765/#token=synthetic-private-token']
+    assert calls[-1] == ['open', 'http://localhost:8765/']
 
 
 def test_restored_reader_timeline_gets_new_identity_and_retains_entity_versions(tmp_path):

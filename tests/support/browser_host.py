@@ -16,6 +16,9 @@ from tests.support.browser_server import build_app
 class Scenario:
     def __init__(self, data, token, persistent=False, port=0, hostname='127.0.0.1',collection=True,processing_delay=0):
         self.data, self.persistent, self.hostname = data, persistent, hostname
+        if persistent and not (Path(data) / 'access.json').exists():
+            from oko.reader.password_auth import PasswordAccess
+            PasswordAccess(Path(data)).set_user('reader', 'synthetic-password')
         self.collection,self.processing_delay=collection,processing_delay
         self.socket = socket.socket()
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

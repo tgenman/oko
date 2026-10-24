@@ -10,6 +10,10 @@ test('remembered browser reopens without token and survives a reader restart', {
   if(checked.state==='existing')throw new Error('Expected a new synthetic feed');
   await api('feeds','POST',{url:checked.candidate.url,verification:checked.verification,title:'Alpha',folder:'Science',initial_history:{mode:'count',count:'1'}});
   await page.goto(origin+'/#token='+token);
+  await expect(page.getByLabel('Логин')).toBeVisible();
+  await page.getByLabel('Логин').fill('reader');
+  await page.getByLabel('Пароль').fill('synthetic-password');
+  await page.getByRole('button',{name:'Войти'}).click();
   expect(await page.evaluate(()=>window.isSecureContext)).toBe(false);
   await expect(page.locator('#stop')).toBeEnabled();
   await expect(page).toHaveURL(origin+'/');

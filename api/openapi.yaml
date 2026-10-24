@@ -22972,13 +22972,13 @@ components:
     BrowserSession:
       type: apiKey
       in: cookie
-      name: oko_browser
-      description: 'Persistent web profile only. Host-only remembered credential bootstrapped using process bearer and X-Oko-Remember:
-        1; cookie mutations require matching Origin.'
+      name: oko_access
+      description: 'Persistent web profile. Host-only HttpOnly session issued by the HTML POST /login form after password verification.
+        Cookie mutations require matching Origin; HTTPS sessions are Secure. Revoked, disabled or expired credentials deny all reader data.'
     ReaderSession:
       type: http
       scheme: bearer
-      description: Local application token; supplied explicitly. Host must be permitted and Origin, if present, must match.
+      description: Local service token; supplied explicitly. In the password profile it is accepted only on local HTTP origins for non-browser service requests, never on the external HTTPS origin. Host must be permitted and Origin, if present, must match.
         Presence sessions are separate and do not authenticate.
 security:
 - ReaderSession: []

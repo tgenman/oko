@@ -4,6 +4,7 @@ import {createRoot, type Root} from 'react-dom/client';
 
 let root: Root | undefined;
 let shell: ReactNode = null;
+let disposed = false;
 const surfaces = new Map<HTMLElement, ReactNode>();
 const portalKeys = new WeakMap<HTMLElement,string>();
 let surfaceSequence = 0;
@@ -20,6 +21,7 @@ class SurfaceBoundary extends Component<{children:ReactNode; name:string}, {fail
 }
 
 function render() {
+  if (disposed) return;
   if (!root) {
     const host = document.getElementById('react-root');
     if (!host) throw new Error('Reader React root is missing');
@@ -31,6 +33,7 @@ function render() {
 // Composition only: each surface keeps its own React state and resources.
 // The shell and all named surfaces share this one React tree.
 export function mountSurface(host:HTMLElement, node:ReactNode) {
+  if (disposed) return () => {};
   // Claim the shell slot once; portals do not clear its initial placeholder.
   if (!surfaces.has(host)) {
     host.replaceChildren();
@@ -42,3 +45,12 @@ export function mountSurface(host:HTMLElement, node:ReactNode) {
 
 export function initializeReaderShell(node:ReactNode) {shell=node;render();}
 export function setRenderReporter(reporter:typeof reportRenderError) {reportRenderError=reporter;}
+
+// End the document lifetime before its DOM is removed, including effect observers.
+export function disposeReaderShell() {
+  disposed=true;
+  root?.unmount();
+  root=undefined;
+  shell=null;
+  surfaces.clear();
+}

@@ -413,9 +413,7 @@ def main():
     elif args.command == 'restore':
         restore(args)
     elif args.command == 'open':
-        runtime = read(args.home / 'data/runtime.json')
-        # Token travels only in launcher argument, never printed to logs.
-        run(['open', 'http://localhost:8765/#token=' + runtime['token']])
+        run(['open', 'http://localhost:8765/'])
     elif args.command == 'status':
         _, manifest = release(args.home)
         output = compose(args.home, 'ps', '--format', 'json', capture=True).strip()

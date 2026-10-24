@@ -37,7 +37,7 @@ def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: b
                     if version.split('.')[0] != bundled['info']['version'].split('.')[0]:
                         raise SystemExit(f'Запущенный экземпляр использует API {version}; требуется {bundled["info"]["version"]}. Завершите его перед обновлением.')
                     if browser:
-                        webbrowser.open(data['url'] + '/#token=' + data['token'])
+                        webbrowser.open(data['url'] + ('/' if persistent else '/#token=' + data['token']))
                     print(f'Открыт существующий экземпляр Око ({actual}, API {version}).')
                     return
         except (OSError, ValueError):
@@ -115,7 +115,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                              lease=args.lease, grace=args.grace, api_only=args.api_only, persistent=args.persistent,
                              public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo,
                              telegram_client=LocalTelegram(telegram_env, root) if telegram_env and not args.demo else None)
-            config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2)
+            config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2, proxy_headers=False)
             server = uvicorn.Server(config)
 
             async def serve() -> None:
@@ -131,7 +131,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                     os.replace(temporary, root / 'runtime.json')
                     print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram" if telegram_env else "RSS"}).', flush=True)
                     if not (args.no_browser or args.api_only):
-                        await asyncio.to_thread(webbrowser.open, url + '/#token=' + token)
+                        await asyncio.to_thread(webbrowser.open, url + ('/' if args.persistent else '/#token=' + token))
                 await task
 
             # asyncio.run waits indefinitely for cancellation-resistant tasks.
