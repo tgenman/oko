@@ -307,7 +307,7 @@ def test_list_maintenance_failure_rolls_back_data_and_versions(tmp_path,monkeypa
         raise OSError('Synthetic commit failure')
     for explicit in [False,True]:
         with monkeypatch.context() as patch:
-            patch.setattr(store.db,'flush_reading_lists',fail)
+            patch.setattr(store.db,'before_commit',fail)
             with pytest.raises(OSError,match='Synthetic commit failure'):
                 if explicit:
                     store.db.execute("INSERT INTO items(id,feed_id,published) VALUES ('rejected','demo',1)")

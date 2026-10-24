@@ -7,123 +7,13 @@ import hashlib
 import json
 import sqlite3
 from oko.storage.transaction import begin_write
+from oko.storage.connection import ReadingConnection
 import uuid
-from _thread import RLock
-from typing import Any, TYPE_CHECKING, cast, Literal
+from typing import Any, TYPE_CHECKING, cast
 from collections.abc import Callable
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
-
-
-class ReadingConnection(sqlite3.Connection):
-    """Flush derived list versions before the transaction becomes visible.
-
-    Store uses implicit transactions, commit and connection contexts. SQL COMMIT
-    and autocommitting DML scripts are not write interfaces of this connection.
-    close retains SQLite's rollback semantics.
-    """
-    reading_lists: bool | None = None
-    membership_feeds: set[str]
-    membership_folders: set[str]
-    transaction_depth: int = 0
-    transaction_failed: bool = False
-    commit_callbacks: list[Callable[[], None]] | None = None
-    _access_lock: RLock | None = None
-
-    @property
-    def access_lock(self) -> RLock:
-        if self._access_lock is None:
-            self._access_lock = RLock()
-        return self._access_lock
-
-    def __enter__(self) -> 'ReadingConnection':
-        self.access_lock.acquire()
-        return self
-
-    def after_commit(self, callback: Callable[[], None]) -> None:
-        if self.transaction_depth:
-            if self.commit_callbacks is None:
-                self.commit_callbacks = []
-            self.commit_callbacks.append(callback)
-        else:
-            callback()
-
-    def flush_reading_lists(self) -> None:
-        if not self.in_transaction:
-            return
-        if getattr(self,'membership_feeds',None) or getattr(self,'membership_folders',None):
-            self.refresh_memberships()
-        if self.reading_lists is None:
-            self.reading_lists=any(row[1]=='pending' for row in self.execute('PRAGMA table_info(reader_lists)'))
-        if not self.reading_lists:
-            return
-        rows=self.execute('SELECT identity,scope,owner,sort,hidden,digest FROM reader_lists WHERE pending=1').fetchall()
-        for identity,scope,owner,sort,hidden,previous in rows:
-            ids=[row[0] for row in self.execute(ReaderVersions._ids(scope,':owner',':sort',':hidden'),dict(scope=scope,owner=owner,sort=sort,hidden=hidden))]
-            digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
-            self.execute('UPDATE reader_lists SET version=version+?,changed=CASE WHEN ? THEN oko_reader_time() ELSE changed END,digest=?,pending=0 WHERE identity=?',
-                         (int(digest!=previous),int(digest!=previous),digest,identity))
-
-    def refresh_memberships(self) -> None:
-        feeds: set[str]=getattr(self,'membership_feeds',set())
-        folders: set[str]=getattr(self,'membership_folders',set())
-        self.membership_feeds=set()
-        self.membership_folders=set()
-        for feed in feeds:
-            self.execute("""UPDATE reader_feed_counts SET
-                unviewed=(SELECT count(*) FROM reading_memberships m JOIN items i ON i.id=m.publication_id WHERE m.feed_id=feed AND i.viewed=0),
-                visible=(SELECT count(*) FROM reading_memberships m JOIN items i ON i.id=m.publication_id LEFT JOIN reader_visibility v ON v.item=i.id
-                    WHERE m.feed_id=feed AND i.viewed=0 AND coalesce(v.hidden,0)=0) WHERE feed=?""",(feed,))
-            row=self.execute('SELECT folder_id FROM feeds WHERE id=?',(feed,)).fetchone()
-            if row:
-                folders.add(row[0])
-            self.execute("UPDATE reader_lists SET pending=1 WHERE scope='all' OR (scope='feed' AND owner=?)",(feed,))
-        for folder in folders:
-            self.execute("""UPDATE reader_folder_counts SET visible=(SELECT count(DISTINCT m.publication_id)
-                FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id JOIN items i ON i.id=m.publication_id
-                LEFT JOIN reader_visibility v ON v.item=i.id WHERE f.folder_id=folder AND i.viewed=0 AND coalesce(v.hidden,0)=0) WHERE folder=?""",(folder,))
-            self.execute("UPDATE reader_lists SET pending=1 WHERE scope='folder' AND owner=?",(folder,))
-
-    def commit(self) -> None:
-        if self.transaction_depth:
-            return
-        try:
-            self.flush_reading_lists()
-            super().commit()
-        except BaseException:
-            self.rollback()
-            raise
-        callbacks, self.commit_callbacks = self.commit_callbacks or [], None
-        for callback in callbacks:
-            callback()
-
-    def rollback(self) -> None:
-        if self.transaction_depth:
-            self.transaction_failed = True
-            return
-        super().rollback()
-        self.commit_callbacks = None
-        self.membership_feeds = set()
-        self.membership_folders = set()
-
-    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Literal[False]:
-        try:
-            if exc_type is None:
-                self.commit()
-            else:
-                self.rollback()
-        finally:
-            self.access_lock.release()
-        return False
-
-    def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
-        if self.transaction_depth:
-            raise RuntimeError('Schema scripts cannot join an action transaction')
-        # CPython's executescript commits through C, bypassing commit overrides.
-        # Production scripts are schema/trigger setup, not data-write batches.
-        self.commit()
-        return super().executescript(sql_script)
 
 
 class ReaderVersions:
@@ -155,7 +45,7 @@ class ReaderVersions:
                 for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reader_v_%'").fetchall():
                     self.db.execute('DROP TRIGGER "'+row['name'].replace('"','""')+'"')
                 self.db.execute('ALTER TABLE reader_lists ADD COLUMN pending INTEGER NOT NULL DEFAULT 0')
-        self.db.reading_lists=True
+        self.db.before_commit=lambda: self.flush_reading_lists(self.db)
         self.db.execute('CREATE INDEX IF NOT EXISTS reader_lists_pending ON reader_lists(identity) WHERE pending=1')
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO reader_identity VALUES (1,?)', (str(uuid.uuid4()),))
@@ -182,7 +72,39 @@ class ReaderVersions:
         with self.db:
             self.db.membership_feeds={r[0] for r in self.db.execute('SELECT id FROM feeds')}
             self.db.membership_folders={r[0] for r in self.db.execute('SELECT id FROM folders')}
-            self.db.refresh_memberships()
+            self.refresh_memberships(self.db)
+
+    @staticmethod
+    def flush_reading_lists(db: ReadingConnection) -> None:
+        if getattr(db,'membership_feeds',None) or getattr(db,'membership_folders',None):
+            ReaderVersions.refresh_memberships(db)
+        rows=db.execute('SELECT identity,scope,owner,sort,hidden,digest FROM reader_lists WHERE pending=1').fetchall()
+        for identity,scope,owner,sort,hidden,previous in rows:
+            ids=[row[0] for row in db.execute(ReaderVersions._ids(scope,':owner',':sort',':hidden'),dict(scope=scope,owner=owner,sort=sort,hidden=hidden))]
+            digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+            db.execute('UPDATE reader_lists SET version=version+?,changed=CASE WHEN ? THEN oko_reader_time() ELSE changed END,digest=?,pending=0 WHERE identity=?',
+                         (int(digest!=previous),int(digest!=previous),digest,identity))
+
+    @staticmethod
+    def refresh_memberships(db: ReadingConnection) -> None:
+        feeds: set[str]=getattr(db,'membership_feeds',set())
+        folders: set[str]=getattr(db,'membership_folders',set())
+        db.membership_feeds=set()
+        db.membership_folders=set()
+        for feed in feeds:
+            db.execute("""UPDATE reader_feed_counts SET
+                unviewed=(SELECT count(*) FROM reading_memberships m JOIN items i ON i.id=m.publication_id WHERE m.feed_id=feed AND i.viewed=0),
+                visible=(SELECT count(*) FROM reading_memberships m JOIN items i ON i.id=m.publication_id LEFT JOIN reader_visibility v ON v.item=i.id
+                    WHERE m.feed_id=feed AND i.viewed=0 AND coalesce(v.hidden,0)=0) WHERE feed=?""",(feed,))
+            row=db.execute('SELECT folder_id FROM feeds WHERE id=?',(feed,)).fetchone()
+            if row:
+                folders.add(row[0])
+            db.execute("UPDATE reader_lists SET pending=1 WHERE scope='all' OR (scope='feed' AND owner=?)",(feed,))
+        for folder in folders:
+            db.execute("""UPDATE reader_folder_counts SET visible=(SELECT count(DISTINCT m.publication_id)
+                FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id JOIN items i ON i.id=m.publication_id
+                LEFT JOIN reader_visibility v ON v.item=i.id WHERE f.folder_id=folder AND i.viewed=0 AND coalesce(v.hidden,0)=0) WHERE folder=?""",(folder,))
+            db.execute("UPDATE reader_lists SET pending=1 WHERE scope='folder' AND owner=?",(folder,))
 
     @staticmethod
     def functions(db: sqlite3.Connection, clock: Callable[[], float], wall_clock: Callable[[], float]) -> None:
@@ -196,6 +118,18 @@ class ReaderVersions:
         db.create_function('oko_reader_time', 0, wall_clock)
         db.create_function('oko_reader_clock', 0, clock)
         db.create_function('oko_reader_hash', 1, lambda value: hashlib.sha256(str(value).encode()).hexdigest(), deterministic=True)
+        if isinstance(db, ReadingConnection):
+            ready = False
+
+            def flush() -> None:
+                nonlocal ready
+                if not ready:
+                    ready = any(row[1] == 'pending' for row in db.execute('PRAGMA table_info(reader_lists)'))
+                if ready:
+                    ReaderVersions.flush_reading_lists(db)
+
+            db.before_commit = flush
+
     @staticmethod
     def _bump(kind: str, identity: str) -> str:
         return f"""INSERT INTO reader_entities VALUES ('{kind}',{identity},1,oko_reader_time())
@@ -440,7 +374,7 @@ class ReaderVersions:
 
     def list_version(self, options: dict[str, Any]) -> sqlite3.Row:
         identity=self.list_identity(options)
-        self.db.flush_reading_lists()
+        self.db.flush()
         row=self.db.execute('SELECT version,changed FROM reader_lists WHERE identity=?',(identity,)).fetchone()
         if row:return cast(sqlite3.Row,row)
         ids=self.ids(options)

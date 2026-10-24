@@ -3,7 +3,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Iterator
 import time
-from oko.storage.reader_versions import ReaderVersions,ReadingConnection
+from oko.storage.reader_versions import ReaderVersions
+from oko.storage.connection import ReadingConnection
 
 
 @contextmanager

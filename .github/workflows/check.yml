@@ -147,10 +147,41 @@ jobs:
           name: check-reports-${{ matrix.job }}
           path: .scratch/check-runs/
           if-no-files-found: ignore
+  postgres:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_USER: oko_test
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: oko_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oko_test -d oko_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Verify migrations against actual PostgreSQL
+        env:
+          OKO_TEST_POSTGRES_URL: postgresql://oko_test:synthetic-ci-only@127.0.0.1:5432/oko_test
+        run: ./scripts/check python --files tests/reader/test_postgres_migrations.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-reports-postgres
+          path: .scratch/check-runs/
+          if-no-files-found: error
   check:
     name: Full checks
     if: always()
-    needs: [build, tests]
+    needs: [build, tests, postgres]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -158,7 +189,8 @@ jobs:
         env:
           BUILD_RESULT: ${{ needs.build.result }}
           TEST_RESULT: ${{ needs.tests.result }}
-        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success
+          POSTGRES_RESULT: ${{ needs.postgres.result }}
+        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success && test "$POSTGRES_RESULT" = success
       - uses: actions/download-artifact@v4
         with:
           name: ci-shard-plan

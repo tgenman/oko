@@ -5,7 +5,7 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from oko.storage.reader_versions import ReadingConnection
+    from oko.storage.connection import ReadingConnection
 
 
 class TransactionAborted(RuntimeError):

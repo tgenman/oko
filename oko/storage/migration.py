@@ -156,7 +156,7 @@ def prepare(source: Path, destination: Path, *, legacy: bool=False) -> dict[str,
             compatibility=None
             if legacy:
                 from oko.storage.migration_compatibility import normalize
-                from oko.storage.reader_versions import ReadingConnection
+                from oko.storage.connection import ReadingConnection
                 validated=stack.enter_context(closing(ReadingConnection(':memory:')))
                 validated.row_factory=sqlite3.Row
                 original.backup(validated)
