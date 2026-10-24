@@ -125,7 +125,8 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publicat
             return False
         eventually(paused)
         item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
-        assert datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp() == captions.calls[0][1] + 900
+        retry_at = datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp()
+        assert retry_at == captions.calls[0][1] + 900
         client.post('/api/v3/materials/' + item['id'] + '/retry')
         client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
         add(client, 'https://rss.test/feed')
@@ -137,10 +138,11 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publicat
             return False
         eventually(independent)
         assert len(captions.calls) == 1
+        clock.advance(1)  # Some wall time passes before restart, independently of polling.
     clock.tick = 0  # A new monotonic origin must not expire the durable pause.
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
         heartbeat(client)
-        clock.advance(899)
+        clock.advance(retry_at - clock.wall - 1)
         time.sleep(.1)
         assert len(captions.calls) == 1
         assert (client.get('/api/v3/youtube').json()['admission']=='paused')

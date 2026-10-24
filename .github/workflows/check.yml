@@ -55,6 +55,15 @@ jobs:
           required=$(python3 scripts/check tools --tools-needed --base "$CHECK_BASE")
           case "$required" in true|false) ;; *) echo "Invalid tool selection" >&2; exit 1 ;; esac
           echo "required=$required" >> "$GITHUB_OUTPUT"
+      - name: Restore and save successful file timing hints
+        continue-on-error: true
+        if: matrix.suite != 'node' && (matrix.suite != 'tools' || steps.selection.outputs.required == 'true')
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .scratch/check-cache/test-timings
+          key: test-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.suite }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            test-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.suite }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-
       - uses: ./.github/actions/setup
         if: matrix.suite != 'tools' || steps.selection.outputs.required == 'true'
       - uses: actions/download-artifact@v4

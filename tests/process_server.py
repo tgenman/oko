@@ -11,6 +11,20 @@ def fault(point: str) -> None:
         os._exit(79)
 
 
+class HeldPresenceBody:
+    """Pin the crash-before-registration-body interleaving in process tests."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        async def held(message):
+            if message['type'] == 'http.response.body':
+                await asyncio.Event().wait()
+            await send(message)
+        target = scope.get('path') == '/api/v3/client-sessions' and scope.get('method') == 'POST'
+        await self.app(scope, receive, held if target else send)
+
+
 class ResistantSource(DemoSource):
     async def fetch(self, publication):
         import sys
@@ -41,6 +55,9 @@ if __name__ == '__main__':
             options.update(clock=tick, wall_clock=tick)
         if origin:
             options['ai_transport'] = OwnedServerTransport(origin)
-        return create_app(root, **options)
+        app = create_app(root, **options)
+        if os.environ.get('OKO_TEST_HOLD_PRESENCE_BODY') == '1':
+            app.add_middleware(HeldPresenceBody)
+        return app
     entrypoint.create_app = fixture_app
     entrypoint.run(fault=fault, source=ResistantSource() if os.environ.get('OKO_TEST_FAULT') == 'resist_cancel' else None)

@@ -3,7 +3,7 @@ import {mkdtemp,writeFile,rm,stat} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-export async function batchTests(args:string[]) {
+export async function batchTests(args:string[], timings:Record<string,number>={}) {
   let directory:string|undefined;
   try {
 
@@ -16,11 +16,20 @@ export async function batchTests(args:string[]) {
         directory=await mkdtemp(path.join(os.tmpdir(),'oko-browser-batches-'));
         const groups=Array.from({length:workers},()=>({files:[] as string[],size:0}));
         const weighted=await Promise.all(files.map(async file=>({file,size:(await stat(file)).size})));
-        weighted.sort((a,b)=>b.size-a.size||a.file.localeCompare(b.file));
+        const measured=weighted.map(value=>({value,seconds:timings[value.file]??timings[path.relative(process.cwd(),value.file).split(path.sep).join('/')]}))
+          .filter((entry):entry is {value:{file:string;size:number};seconds:number}=>typeof entry.seconds==='number'&&Number.isFinite(entry.seconds)&&entry.seconds>0&&entry.seconds<=86400);
+        const rates=measured.map(entry=>entry.seconds/Math.max(1,entry.value.size)).sort((a,b)=>a-b);
+        const middle=Math.floor(rates.length/2);
+        const scale=rates.length?(rates.length%2?rates[middle]!:((rates[middle-1]!+rates[middle]!)/2)):1;
+        const hints=new Map(measured.map(entry=>[entry.value.file,entry.seconds]));
+        const cost=(value:{file:string;size:number})=>Math.max(.001,hints.get(value.file)??Math.max(1,value.size)*scale);
+        weighted.sort((a,b)=>cost(b)-cost(a)||a.file.localeCompare(b.file));
         for(const value of weighted) {
           const group=groups.reduce((a,b)=>a.size<=b.size?a:b);
-          group.files.push(value.file);group.size+=value.size;
+          group.files.push(value.file);group.size+=cost(value);
         }
+        const sizes=new Map(weighted.map(value=>[value.file,value.size]));
+        for(const group of groups)group.files.sort((a,b)=>(sizes.get(b)??0)-(sizes.get(a)??0)||a.localeCompare(b));
         const batches=await Promise.all(groups.map(async(group,index)=>{
           const filename=path.join(directory!,`batch-${index}.cjs`);
           await writeFile(filename,group.files.map(file=>`try {require(${JSON.stringify(path.resolve(file))});} catch(error) {process.exitCode=1;require('node:test').test(${JSON.stringify('load '+file)},()=>{throw error;});}`).join('\n'));
