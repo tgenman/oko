@@ -18,7 +18,8 @@ from typing import Any
 
 from oko.storage.publications import Publications, PUBLICATION_COLUMNS
 from oko.storage.media import MediaFiles
-from oko.storage.reader_versions import ReaderVersions, ReadingConnection
+from oko.storage.reader_versions import ReaderVersions
+from oko.storage.connection import ReadingConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.storage.composition import FolderContents, ReadingComposition

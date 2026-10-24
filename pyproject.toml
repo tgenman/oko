@@ -15,6 +15,7 @@ dependencies = [
     "youtube-transcript-api==1.2.4",
     "yt-dlp==2026.8.19",
     "beautifulsoup4 (==4.14.3)",
+    "psycopg[binary]==3.3.6",
 ]
 
 [dependency-groups]
