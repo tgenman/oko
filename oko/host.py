@@ -2,7 +2,7 @@
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-import sqlite3
+from oko.storage.database import DATABASE_ERRORS
 import time
 
 import httpx
@@ -30,7 +30,8 @@ class Host:
 
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 admitted: Callable[[], bool], should_stop: Callable[[], bool], source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> None:
+                 admitted: Callable[[], bool], should_stop: Callable[[], bool], source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> None:
+        self._database_url = database_url
         self.execution = Execution(admitted)
         self.codex=codex_client or LocalCodex()
         self.collection=CollectionWorker(self.execution,source,clock,fault,source_feed,rss_enabled,rss_transport,telegram_client,youtube_captions,youtube_history,wall_clock)
@@ -90,13 +91,13 @@ class Host:
     async def run(self) -> None:
         journal_context = active_journal.set(self.execution.diagnostics)
         try:
-            self.execution._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock)
+            self.execution._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock, database_url=self._database_url)
             self.execution.enabled = self.execution._store.work_enabled()
             self.collection.initialize()
             viewed = {row['id'] for row in self.execution._store.db.execute('SELECT id FROM items WHERE viewed=1')}
             if viewed and self.execution.diagnostics:
                 self.execution.diagnostics.forget_materials(viewed)
-        except (sqlite3.DatabaseError,OSError,ValueError) as error:
+        except (*DATABASE_ERRORS,OSError,ValueError) as error:
             record_caught('runtime.run')
             self.execution._error = str(error) if str(error).startswith('Telegram:') else 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'
         crons=[asyncio.create_task(worker.run()) for worker in (self.collection,self.filters,self.summaries)]

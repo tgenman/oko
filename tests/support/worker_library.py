@@ -13,8 +13,9 @@ from tests.support.codex import CodexService
 from tests.support.filters import transport
 
 
-def worker_library(root, *, text='Useful text', fault=lambda _:None):
-    store=Store(root,fault)
+def worker_library(root, *, text='Useful text', fault=lambda _:None, database_url=None):
+    store=Store(root,fault,database_url=database_url)
+    if database_url is not None:store.set_work_enabled(True)
     store.subscriptions.ensure_demo()
     store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
     store.subscriptions.update_settings('oko','global',Overrides(processor='llamacpp',theses=True,prompt_filters='Keep useful text'))

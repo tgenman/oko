@@ -3,10 +3,10 @@
 Only the synchronous versioned reader opens this scope. Nothing survives it;
 write paths use the same accessors against current storage without a snapshot.
 """
+from oko.storage.database import Database, Row
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-import sqlite3
 from collections.abc import Iterator
 from typing import Any
 
@@ -15,12 +15,12 @@ from oko.storage.reading import reading_value
 
 @dataclass
 class Inputs:
-    db: sqlite3.Connection
-    items: dict[str, sqlite3.Row] = field(default_factory=dict)
-    jobs: dict[str, dict[str, sqlite3.Row]] = field(default_factory=dict)
-    media_jobs: dict[str,list[sqlite3.Row]] = field(default_factory=dict)
-    feeds: dict[str, sqlite3.Row] = field(default_factory=dict)
-    settings: dict[tuple[str, str], list[sqlite3.Row]] = field(default_factory=dict)
+    db: Database
+    items: dict[str, Row] = field(default_factory=dict)
+    jobs: dict[str, dict[str, Row]] = field(default_factory=dict)
+    media_jobs: dict[str,list[Row]] = field(default_factory=dict)
+    feeds: dict[str, Row] = field(default_factory=dict)
+    settings: dict[tuple[str, str], list[Row]] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
 
@@ -28,7 +28,7 @@ class Inputs:
 _current: ContextVar[Inputs | None] = ContextVar('material_inputs', default=None)
 
 
-def current(db: sqlite3.Connection) -> Inputs | None:
+def current(db: Database) -> Inputs | None:
     value = _current.get()
     return value if value is not None and value.db is db else None
 
@@ -38,7 +38,7 @@ _FEED = 'SELECT f.*,b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_
 
 
 @reading_value
-def item(db: sqlite3.Connection, identity: str) -> sqlite3.Row | None:
+def item(db: Database, identity: str) -> Row | None:
     value = current(db)
     return value.items.get(identity) if value and identity in value.items else db.execute('SELECT * FROM items WHERE id=?', (identity,)).fetchone()
 
@@ -48,7 +48,7 @@ def item(db: sqlite3.Connection, identity: str) -> sqlite3.Row | None:
 
 
 @reading_value
-def jobs(db: sqlite3.Connection, identity: str) -> dict[str, sqlite3.Row]:
+def jobs(db: Database, identity: str) -> dict[str, Row]:
     value = current(db)
     return value.jobs.get(identity, {}) if value and identity in value.items else {r['kind']: r for r in db.execute('SELECT * FROM jobs WHERE item=?', (identity,))}
 
@@ -56,7 +56,7 @@ def jobs(db: sqlite3.Connection, identity: str) -> dict[str, sqlite3.Row]:
 
 
 @reading_value
-def feed(db: sqlite3.Connection, identity: str) -> dict[str, Any]:
+def feed(db: Database, identity: str) -> dict[str, Any]:
     value = current(db)
     row = value.feeds.get(identity) if value and identity in value.feeds else db.execute(_FEED+' WHERE f.id=?', (identity,)).fetchone()
     if row is None:
@@ -70,12 +70,12 @@ def feed(db: sqlite3.Connection, identity: str) -> dict[str, Any]:
     return result
 
 
-def settings(db: sqlite3.Connection, scope: str, owner: str) -> list[sqlite3.Row]:
+def settings(db: Database, scope: str, owner: str) -> list[Row]:
     value = current(db)
     return value.settings.get((scope, owner), []) if value and (scope,owner) in value.settings else list(db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (scope,owner)))
 
 
-def state(db: sqlite3.Connection, key: str) -> str | None:
+def state(db: Database, key: str) -> str | None:
     value = current(db)
     if value is not None and key in value.state_keys:
         return value.state.get(key)
@@ -84,7 +84,7 @@ def state(db: sqlite3.Connection, key: str) -> str | None:
 
 
 @contextmanager
-def material_inputs(db: sqlite3.Connection, identities: set[str]) -> Iterator[None]:
+def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
     """Six indexed reads for up to one API batch; independent of foreign data."""
     value = Inputs(db)
     ids = sorted(identities)

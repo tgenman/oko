@@ -1,3 +1,4 @@
+from oko.storage.database import expect_row, Connection, Row
 from oko.collection.external_media import saved_external, expected_incomplete
 from oko.collection.adapters import ExternalKey, ExternalReference, Platform, MediaReference, PublicationContent, PublicationMetadata
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ from oko.storage.publications import Publications, PUBLICATION_COLUMNS
 from oko.storage.media import MediaFiles
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage.connection import ReadingConnection
+from oko.storage.postgres_connection import PostgresConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.storage.composition import FolderContents, ReadingComposition
@@ -48,7 +50,7 @@ class WorkSummary:
 
 
 class Store:
-    """SQLite owns lifecycle and migrated publications; files hold local media."""
+    """The database owns durable work and publications; files hold local media."""
     def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
                                auto_read: bool | None) -> dict[str,Any]:
         with self.db:
@@ -58,73 +60,83 @@ class Store:
             self.publications.changed_adapter(feed)
         return result
 
-    def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None) -> None:
         self.root, self.fault = root, fault
         self.wall_clock = wall_clock
         self.clock = clock
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        from oko.storage.bootstrap import prepare
-        prepare(root)
-        self.db = ReadingConnection(root / 'state.sqlite')
-        self.db.row_factory = sqlite3.Row
-        ReaderVersions.functions(self.db,self.clock,self.wall_clock)
-        self.db.execute('PRAGMA secure_delete=ON')
-        self.db.execute('PRAGMA journal_mode=DELETE')
-        if self.db.execute('PRAGMA quick_check').fetchone()[0]!='ok':
-            raise sqlite3.DatabaseError('integrity')
-        publication_columns=','.join(name+' '+declaration for name,declaration in PUBLICATION_COLUMNS.items())
-        self.db.executescript('''CREATE TABLE IF NOT EXISTS items (
-          id TEXT PRIMARY KEY,source_id TEXT UNIQUE,url TEXT,published REAL,
-          viewed INTEGER DEFAULT 0,complete INTEGER DEFAULT 0,feed_id TEXT,
-          members TEXT DEFAULT '[]',published_known INTEGER DEFAULT 1,source_order INTEGER,'''+publication_columns+''');
-        CREATE TABLE IF NOT EXISTS jobs (
-          id INTEGER PRIMARY KEY,kind TEXT,item TEXT DEFAULT '',status TEXT DEFAULT 'pending',
-          attempt INTEGER DEFAULT 0,next REAL DEFAULT 0,generation INTEGER DEFAULT 0,error TEXT,
-          manual_once INTEGER DEFAULT 0,problem_code TEXT,retry_at REAL,retry_delay REAL NOT NULL DEFAULT 0,wait_scope TEXT,
-          UNIQUE(kind,item));
-        CREATE TABLE IF NOT EXISTS execution_settings (job INTEGER PRIMARY KEY,generation INTEGER,signature TEXT,parameters TEXT);
-        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT);
-        CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY,signature TEXT);
-        CREATE TABLE IF NOT EXISTS source_deleted (item TEXT PRIMARY KEY);
-        ''')
-        self.db.execute('CREATE INDEX IF NOT EXISTS items_viewed_ids ON items(id) WHERE viewed=1')
-        self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
-        self.db.execute('CREATE INDEX IF NOT EXISTS jobs_item ON jobs(item)')
-        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_running ON jobs(kind,item) WHERE status='running'")
-        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_active ON jobs(status,kind,item) WHERE status IN ('pending','running') OR error IS NOT NULL")
-        self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
-        self.db.execute('CREATE INDEX IF NOT EXISTS items_feed_all ON items(feed_id,id)')
-        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
-        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_kind_item ON jobs(kind,item,next,id) WHERE status='pending'")
-        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_problems ON jobs(kind,item) WHERE problem_code IS NOT NULL OR error IS NOT NULL")
-        JobRepository.install(self.db)
-        self.jobs = JobRepository(self)
-        self.subscriptions = SubscriptionRepository(self.db, self.fault, wall_clock=self.wall_clock)
-        self.publications = Publications(self)
-        self.media = MediaFiles(self)
-        self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock)
-        self.filters = FilterResults(self)
-        self.processing = ProcessingState(self)
-        self.reading = ReadingComposition(self)
-        self.read_sync = ReadSync(self)
-        self.youtube = YouTubeAccess(self)
-        self.problems = Problems(self)
-        for name in ('content', 'staging'):
-            (root / name).mkdir(exist_ok=True)
-        with self.db:
-            collection_jobs.interrupt(self)
-            self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
-            self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
-            self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
-        collection_jobs.recover(self)
-        self.recover_files()
-        if self.db.execute("SELECT 1 FROM items WHERE feed_id='demo' LIMIT 1").fetchone():
-            self.subscriptions.ensure_demo()
-        self.read_versions = ReaderVersions(self)
-        self.subscriptions.watch_configuration()
-        self.processing.recover()
-        with self.db:self.jobs.backfill_processing_inputs()
-        self.read_sync.recover()
+        self.db: Connection
+        try:
+            if database_url is not None:
+                self.db = PostgresConnection(database_url, clock=clock, wall_clock=wall_clock)
+                self.db.claim_store()
+            else:
+                from oko.storage.bootstrap import prepare
+                prepare(root)
+                self.db = ReadingConnection(root / 'state.sqlite')
+                self.db.row_factory = sqlite3.Row
+                ReaderVersions.functions(self.db,self.clock,self.wall_clock)
+                self.db.execute('PRAGMA secure_delete=ON')
+                self.db.execute('PRAGMA journal_mode=DELETE')
+                if expect_row(self.db.execute('PRAGMA quick_check').fetchone())[0]!='ok':
+                    raise sqlite3.DatabaseError('integrity')
+                publication_columns=','.join(name+' '+declaration for name,declaration in PUBLICATION_COLUMNS.items())
+                self.db.executescript('''CREATE TABLE IF NOT EXISTS items (
+                  id TEXT PRIMARY KEY,source_id TEXT UNIQUE,url TEXT,published REAL,
+                  viewed INTEGER DEFAULT 0,complete INTEGER DEFAULT 0,feed_id TEXT,
+                  members TEXT DEFAULT '[]',published_known INTEGER DEFAULT 1,source_order INTEGER,'''+publication_columns+''');
+                CREATE TABLE IF NOT EXISTS jobs (
+                  id INTEGER PRIMARY KEY,kind TEXT,item TEXT DEFAULT '',status TEXT DEFAULT 'pending',
+                  attempt INTEGER DEFAULT 0,next REAL DEFAULT 0,generation INTEGER DEFAULT 0,error TEXT,
+                  manual_once INTEGER DEFAULT 0,problem_code TEXT,retry_at REAL,retry_delay REAL NOT NULL DEFAULT 0,wait_scope TEXT,
+                  UNIQUE(kind,item));
+                CREATE TABLE IF NOT EXISTS execution_settings (job INTEGER PRIMARY KEY,generation INTEGER,signature TEXT,parameters TEXT);
+                CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT);
+                CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY,signature TEXT);
+                CREATE TABLE IF NOT EXISTS source_deleted (item TEXT PRIMARY KEY);
+                ''')
+                self.db.execute('CREATE INDEX IF NOT EXISTS items_viewed_ids ON items(id) WHERE viewed=1')
+                self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
+                self.db.execute('CREATE INDEX IF NOT EXISTS jobs_item ON jobs(item)')
+                self.db.execute("CREATE INDEX IF NOT EXISTS jobs_running ON jobs(kind,item) WHERE status='running'")
+                self.db.execute("CREATE INDEX IF NOT EXISTS jobs_active ON jobs(status,kind,item) WHERE status IN ('pending','running') OR error IS NOT NULL")
+                self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
+                self.db.execute('CREATE INDEX IF NOT EXISTS items_feed_all ON items(feed_id,id)')
+                self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
+                self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_kind_item ON jobs(kind,item,next,id) WHERE status='pending'")
+                self.db.execute("CREATE INDEX IF NOT EXISTS jobs_problems ON jobs(kind,item) WHERE problem_code IS NOT NULL OR error IS NOT NULL")
+                JobRepository.install(self.db)
+            self.jobs = JobRepository(self)
+            self.subscriptions = SubscriptionRepository(self.db, self.fault, wall_clock=self.wall_clock)
+            self.publications = Publications(self)
+            self.media = MediaFiles(self)
+            self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock)
+            self.filters = FilterResults(self)
+            self.processing = ProcessingState(self)
+            self.reading = ReadingComposition(self)
+            self.read_sync = ReadSync(self)
+            self.youtube = YouTubeAccess(self)
+            self.problems = Problems(self)
+            for name in ('content', 'staging'):
+                (root / name).mkdir(exist_ok=True)
+            with self.db:
+                collection_jobs.interrupt(self)
+                self.db.execute("UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE status='running')")
+                self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
+                self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
+            collection_jobs.recover(self)
+            self.recover_files()
+            if self.db.execute("SELECT 1 FROM items WHERE feed_id='demo' LIMIT 1").fetchone():
+                self.subscriptions.ensure_demo()
+            self.read_versions = ReaderVersions(self)
+            self.subscriptions.watch_configuration()
+            self.processing.recover()
+            with self.db:self.jobs.backfill_processing_inputs()
+            self.read_sync.recover()
+        except BaseException:
+            if hasattr(self, 'db'):
+                self.db.close()
+            raise
 
     def recover_files(self) -> None:
         # No uncommitted publication/file output is promoted on restart.
@@ -188,7 +200,7 @@ class Store:
                     assert plan.fingerprint is not None
                     self.publications.publish(item,plan.content,plan.fingerprint,effects)
                     self.db.execute('UPDATE items SET complete=1 WHERE id=?',(item,))
-                row=self.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone()
+                row=expect_row(self.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone())
                 if publication.published_known and not row['published_known']:
                     self.db.execute('UPDATE items SET published=?,published_known=1,published_at=? WHERE id=?',(publication.published,publication.published,item))
                 if publication.id in enrolled:
@@ -209,7 +221,7 @@ class Store:
                 if envelope:
                     self.subscriptions.history.telegram_state(feed,envelope.selection)
                 for item in history_items:
-                    row=self.db.execute('SELECT complete FROM items WHERE id=?',(item,)).fetchone()
+                    row=expect_row(self.db.execute('SELECT complete FROM items WHERE id=?',(item,)).fetchone())
                     if self.publications.source_deleted(item):
                         self.subscriptions.history.failed(item,unavailable=True)
                     elif row['complete']:
@@ -291,11 +303,11 @@ class Store:
     def ready_sources(self, feeds: list[str]) -> int:
         if not feeds:
             return 0
-        return int(self.db.execute("""SELECT count(*) FROM json_each(?) f WHERE
+        return int(expect_row(self.db.execute("""SELECT count(*) FROM json_each(?) f WHERE
             NOT EXISTS (SELECT 1 FROM jobs j WHERE j.item=CASE f.value WHEN 'demo' THEN '' ELSE f.value END
                 AND j.status IN ('pending','running') AND j.kind!='read')
             AND NOT EXISTS (SELECT 1 FROM items i JOIN jobs j ON j.item=i.id WHERE i.feed_id=f.value
-                AND j.status IN ('pending','running') AND j.kind!='read')""",(json.dumps(feeds),)).fetchone()[0])
+                AND j.status IN ('pending','running') AND j.kind!='read')""",(json.dumps(feeds),)).fetchone())[0])
 
 
     def publication(self, item: str) -> Publication | None:
@@ -324,7 +336,7 @@ class Store:
             missing=[row for row in media if row['storage_key'] and not (self.root/row['storage_key']).is_file() or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
             if missing:
                 error=SourceError('Локальный файл вложения недоступен',code='media-unavailable',retryable=False)
-                content=json.loads(self.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()[0])
+                content=json.loads(expect_row(self.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone())[0])
                 content['extra']['_reader']['source_manifest']['post_web_unavailable']=True
                 for row in missing:
                     row.update(status='unavailable',reason=error.label,storage_key=None)
@@ -401,7 +413,7 @@ class Store:
                 self.subscriptions.details.record(feed, 'marked_read')
             self.problems.forget_materials(affected, self.wall_clock())
             for member in members:
-                row = self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone()
+                row = expect_row(self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone())
                 for feed in memberships[member]:
                     self.read_sync.eligible(feed,json.loads(row['members']),'viewed')
                 self.subscriptions.history.viewed(member)
@@ -465,7 +477,7 @@ class Store:
             material['display_text'] = display
         return material
 
-    def saved_publication(self, row: sqlite3.Row) -> dict[str, Any] | None:
+    def saved_publication(self, row: Row) -> dict[str, Any] | None:
         """Saved publication facts without reader-specific text projections."""
         item = row['id']
         settings = self.subscriptions.effective('feed', row['feed_id'])
@@ -509,7 +521,7 @@ class Store:
             CASE WHEN jobs.kind IN ('discover','read','feed-delete') THEN NULLIF(jobs.item,'')
                 WHEN jobs.kind='download_media' THEN (SELECT i.feed_id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE m.id=jobs.item)
                 ELSE items.feed_id END AS feed,
-            min(jobs.next) AS next,sum(jobs.error IS NOT NULL) AS errors
+            min(jobs.next) AS next,sum(CASE WHEN jobs.error IS NOT NULL THEN 1 ELSE 0 END) AS errors
             FROM jobs LEFT JOIN items ON items.id=jobs.item
             WHERE jobs.status IN ('pending','running')
             GROUP BY jobs.kind,jobs.status,jobs.problem_code,feed ORDER BY min(jobs.id)""").fetchall()

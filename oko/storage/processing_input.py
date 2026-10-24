@@ -1,4 +1,5 @@
 """Relevant publication inputs and feed rules, independent of downloaded bytes."""
+from oko.storage.database import expect_row
 from copy import deepcopy
 import hashlib
 import json
@@ -51,7 +52,7 @@ def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
         groups.setdefault(block.get('source_publication_id',item),[]).append(block)
     result=[]
     for identity,parts in groups.items():
-        record=store.db.execute('SELECT title,url,published FROM items WHERE id=?',(identity,)).fetchone()
+        record=expect_row(store.db.execute('SELECT title,url,published FROM items WHERE id=?',(identity,)).fetchone())
         text='\n\n'.join(part['text'] for part in parts if part['type']=='text')
         quotes=[part for part in parts if part['type']=='quote']
         quote=ReplyPreview(text='\n\n'.join(part['text'] for part in quotes),
@@ -125,7 +126,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
 
 
 def snapshot(store: 'Store', item: str) -> None:
-    row=store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
+    row=expect_row(store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone())
     metadata=json.loads(row[0])
     rules=live_settings(store,item)
     current_revision=revision(store,item)

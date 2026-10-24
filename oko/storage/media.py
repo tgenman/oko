@@ -118,7 +118,7 @@ class MediaFiles:
     def begin(self, identity: str, attempt: str, revalidate: bool) -> MediaDownload | None:
         store = self.store
         row = store.db.execute('''SELECT m.*,i.platform,i.external_id,i.url FROM media_files m JOIN items i ON i.id=m.publication_id
-            WHERE m.id=? AND i.viewed=0 AND (m.status='pending_download' OR m.status='ready' AND ?) ''', (identity,revalidate)).fetchone()
+            WHERE m.id=? AND i.viewed=0 AND (m.status='pending_download' OR m.status='ready' AND ?=1) ''', (identity,revalidate)).fetchone()
         if row is None:
             return None
         temporary = store.root/'staging'/'_media'/(attempt+'-'+secrets.token_hex(8))

@@ -125,7 +125,7 @@ def response(request):
     return httpx.Response(200, text=f'<article><p>Открылась библиотека на 24 места.</p><img src="https://{request.url.host}/image.png"></article>')
 
 
-def build_app(root, token, *, persistent=False, public_url=None,collection=True,processing_delay=0):
+def build_app(root, token, *, persistent=False, public_url=None,collection=True,processing_delay=0,database_url=None):
     def youtube_state():
         path=root/'fixture-youtube-state'
         return path.read_text() if path.is_file() else ''
@@ -194,7 +194,7 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
                 return await publication_models.handle_async_request(request)
         return await models.handle_async_request(request)
     ai=httpx.MockTransport(delayed_model)
-    return create_app(root, token=token, rss_enabled=collection, persistent=persistent, public_url=public_url,
+    return create_app(root, token=token, rss_enabled=collection, persistent=persistent, public_url=public_url, database_url=database_url,
                      rss_transport=httpx.MockTransport(external), telegram_client=BrowserTelegram(), ai_transport=ai, codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=Captions(),
                      wall_clock=lambda:time.time()+{'error':11,'missing':22,'ready':33}.get(youtube_state(),0),

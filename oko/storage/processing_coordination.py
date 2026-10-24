@@ -1,4 +1,5 @@
 """Current processing work and reconciliation of dependent reader results."""
+from oko.storage.sqlite_schema import is_sqlite
 from oko.storage import material_read
 from oko.storage.reading import retry_time
 from dataclasses import dataclass
@@ -22,19 +23,20 @@ class ProcessingState:
         self.store = store
         self._repairs: set[str] = set()
         self.theses = SummaryResults(store)
-        store.db.executescript("""
-        CREATE TABLE IF NOT EXISTS processing_dirty (item TEXT PRIMARY KEY);
-        CREATE TABLE IF NOT EXISTS processing_stage_dirty (kind TEXT,item TEXT,PRIMARY KEY(kind,item));
-        CREATE TRIGGER IF NOT EXISTS processing_item_added AFTER INSERT ON items
-          WHEN NEW.viewed=0 BEGIN INSERT INTO processing_dirty VALUES (NEW.id) ON CONFLICT(item) DO NOTHING; END;
-        CREATE TRIGGER IF NOT EXISTS processing_item_changed AFTER UPDATE OF complete,members,viewed,feed_id ON items
-          WHEN NEW.complete IS NOT OLD.complete OR NEW.members IS NOT OLD.members
-            OR NEW.viewed IS NOT OLD.viewed OR NEW.feed_id IS NOT OLD.feed_id
-          BEGIN INSERT INTO processing_dirty VALUES (NEW.id) ON CONFLICT(item) DO NOTHING; END;
-        CREATE TRIGGER IF NOT EXISTS processing_filter_changed AFTER UPDATE OF status,generation ON jobs
-          WHEN NEW.kind='filter' AND (NEW.status IS NOT OLD.status OR NEW.generation IS NOT OLD.generation)
-          BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
-        """)
+        if is_sqlite(store.db):
+            store.db.executescript("""
+            CREATE TABLE IF NOT EXISTS processing_dirty (item TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS processing_stage_dirty (kind TEXT,item TEXT,PRIMARY KEY(kind,item));
+            CREATE TRIGGER IF NOT EXISTS processing_item_added AFTER INSERT ON items
+              WHEN NEW.viewed=0 BEGIN INSERT INTO processing_dirty VALUES (NEW.id) ON CONFLICT(item) DO NOTHING; END;
+            CREATE TRIGGER IF NOT EXISTS processing_item_changed AFTER UPDATE OF complete,members,viewed,feed_id ON items
+              WHEN NEW.complete IS NOT OLD.complete OR NEW.members IS NOT OLD.members
+                OR NEW.viewed IS NOT OLD.viewed OR NEW.feed_id IS NOT OLD.feed_id
+              BEGIN INSERT INTO processing_dirty VALUES (NEW.id) ON CONFLICT(item) DO NOTHING; END;
+            CREATE TRIGGER IF NOT EXISTS processing_filter_changed AFTER UPDATE OF status,generation ON jobs
+              WHEN NEW.kind='filter' AND (NEW.status IS NOT OLD.status OR NEW.generation IS NOT OLD.generation)
+              BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
+            """)
     def waiting(self, item: str, kind: Literal['filter', 'theses'], now: float, wall_now: float) -> ProcessingWait | None:
         row = material_read.jobs(self.store.db,item).get(kind)
         if not row or row['status'] != 'pending' or not row['error']:

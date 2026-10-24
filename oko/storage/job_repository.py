@@ -1,9 +1,10 @@
 """Attempt identity, conditional transitions and saved execution parameters."""
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row, Database
 import json
 import shutil
 from oko.domain.collection import CollectionEffects
 from pathlib import Path
-import sqlite3
 from typing import Any
 from collections.abc import Callable,Iterator
 from contextlib import contextmanager
@@ -28,7 +29,9 @@ class JobRejected(Exception):
 
 class JobRepository:
     @staticmethod
-    def install(db: sqlite3.Connection) -> None:
+    def install(db: Database) -> None:
+        if not is_sqlite(db):
+            return
         columns={row[1] for row in db.execute('PRAGMA table_info(jobs)')}
         for name,declaration in (('retry_at','REAL'),('retry_delay','REAL NOT NULL DEFAULT 0'),('wait_scope','TEXT'),('payload',"TEXT NOT NULL DEFAULT '{}'")):
             if name not in columns:db.execute('ALTER TABLE jobs ADD COLUMN '+name+' '+declaration)
@@ -234,7 +237,7 @@ class JobRepository:
             self.store.db.execute("INSERT INTO state VALUES ('job-dispatch-generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(generation),))
             self.store.db.execute('UPDATE execution_settings SET generation=? WHERE job=? AND generation=?', (generation, row['id'], row['generation']))
             self.store.db.execute("UPDATE jobs SET status='running',attempt=attempt+1,generation=? WHERE id=?", (generation, row['id']))
-        current = self.store.db.execute('SELECT * FROM jobs WHERE id=?', (row['id'],)).fetchone()
+        current = expect_row(self.store.db.execute('SELECT * FROM jobs WHERE id=?', (row['id'],)).fetchone())
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
 
@@ -359,7 +362,7 @@ class JobRepository:
                                     self.store.read_sync.eligible(feed, members, 'saved')
                     request = self.store.read_sync._request(config, binding, profiles.get(binding['role']))
                     if request is not None:
-                        state = db.execute('SELECT signature,waiting FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
+                        state = expect_row(db.execute('SELECT signature,waiting FROM telegram_read_state WHERE feed=?', (feed,)).fetchone())
                         if request['eligible'] or request['read_history'] or state['waiting']:
                             signature = self.store.read_sync.signature(request)
                             if state['signature'] != signature:
@@ -498,9 +501,9 @@ class JobRepository:
             if not waiting:
                 store.db.execute("UPDATE media_files SET status='pending_download',reason='' WHERE id=? AND status!='ready'", (row['item'],))
 
-        row=store.db.execute("SELECT content FROM items WHERE id=? AND platform='youtube'",(item,)).fetchone()
-        if row and captions_allowed:
-            content=json.loads(row['content'])
+        youtube_row=store.db.execute("SELECT content FROM items WHERE id=? AND platform='youtube'",(item,)).fetchone()
+        if youtube_row and captions_allowed:
+            content=json.loads(youtube_row['content'])
             subtitles=youtube_media.subtitle_id(content)
             if subtitles and content['extra']['youtube'].get('captions')!='not_requested':
                 resource=store.db.execute("SELECT status FROM media_files WHERE id=?",(subtitles,)).fetchone()
@@ -530,7 +533,7 @@ class JobRepository:
             ON CONFLICT(kind,item) DO UPDATE SET status='pending',manual_once=1,generation=generation+1,
             next=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>? THEN jobs.next ELSE 0 END,
             retry_at=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>? THEN jobs.retry_at ELSE NULL END
-            WHERE jobs.status IN ('done','cancelled') OR (? AND jobs.status IN ('failed','unavailable'))""",
+            WHERE jobs.status IN ('done','cancelled') OR (?=1 AND jobs.status IN ('failed','unavailable'))""",
             (identity,store.wall_clock(),store.wall_clock(),manual))
 
 

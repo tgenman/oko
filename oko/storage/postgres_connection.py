@@ -1,0 +1,141 @@
+"""Native PostgreSQL connection with the repository transaction ownership rules.
+
+Repository SQL is compiled explicitly to PostgreSQL; values remain bound. Schema installation belongs to
+release migrations, never to reader startup or repository construction.
+"""
+from _thread import RLock
+from collections.abc import Callable, Sequence, Mapping
+from typing import Any, Literal
+
+import time
+
+import psycopg
+from psycopg.pq import TransactionStatus
+
+from oko.storage.rows import Record
+from oko.storage.postgres_sql import Queries
+from oko.storage.postgres_migrations import verify, schema_lock_key
+from oko.storage.postgres_schema import MIGRATIONS
+
+
+def _records(cursor: psycopg.Cursor[Any]) -> Callable[[Sequence[Any]], Record]:
+    columns = tuple(column.name for column in cursor.description or ())
+    return lambda values: Record(columns, values)
+
+
+class PostgresConnection:
+    def __init__(self, dsn: str, *, clock: Callable[[], float] = time.monotonic, wall_clock: Callable[[], float] = time.time) -> None:
+        self._clock, self._wall_clock = clock, wall_clock
+        self._db = psycopg.connect(dsn, autocommit=True, row_factory=_records)
+        try:
+            verify(self._db, MIGRATIONS)
+        except BaseException:
+            self._db.close()
+            raise
+        schema_columns: dict[str, set[str]] = {}
+        for row in self._db.execute('SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=current_schema()'):
+            schema_columns.setdefault(row[0], set()).add(row[1])
+        self._queries = Queries({table: frozenset(columns) for table, columns in schema_columns.items()})
+        self.access_lock = RLock()
+        self.transaction_depth = 0
+        self.transaction_failed = False
+        self.commit_callbacks: list[Callable[[], None]] = []
+        self.before_commit: Callable[[], None] | None = None
+        self.membership_feeds: set[str] = set()
+        self.membership_folders: set[str] = set()
+
+    def claim_store(self) -> None:
+        # Data roots can differ while pointing to one PostgreSQL schema. Only
+        # one Store may recover and dispatch its persisted work at a time.
+        schema_key = schema_lock_key(self._db)
+        shared = self._db.execute('SELECT pg_try_advisory_lock_shared(%s)', (schema_key,)).fetchone()
+        if not shared or not shared[0]:
+            raise ValueError('A schema migration is running')
+        # Recheck after acquiring the lease: migration may have committed after
+        # the initial connection verification and before this lock acquisition.
+        verify(self._db, MIGRATIONS)
+        locked = self._db.execute('SELECT pg_try_advisory_lock(hashtextextended(current_schema(),%s))',
+                                  (0x4F4B4F53544F5245,)).fetchone()
+        if not locked or not locked[0]:
+            raise ValueError('Another Oko reader owns this database schema')
+
+    @property
+    def in_transaction(self) -> bool:
+        return self._db.info.transaction_status != TransactionStatus.IDLE
+
+    def begin(self) -> None:
+        if not self.in_transaction:
+            self._db.execute('BEGIN')
+
+    def execute(self, query: str, parameters: Sequence[Any] | Mapping[str, Any] = ()) -> psycopg.Cursor[Record]:
+        # Match repository implicit DML transactions while keeping plain reads idle.
+        compiled = self._queries.compile(query)
+        command = compiled.split(None, 1)[0].upper()
+        if command in ('INSERT', 'UPDATE', 'DELETE'):
+            self.begin()
+        self._db.execute("SELECT set_config('oko.clock',%s,false),set_config('oko.wall',%s,false)", (str(self._clock()),str(self._wall_clock())))
+        bound = {key: int(value) if isinstance(value, bool) else value for key, value in parameters.items()} if isinstance(parameters, Mapping) else tuple(int(value) if isinstance(value, bool) else value for value in parameters)
+        return self._db.execute(compiled, bound)
+
+    def executemany(self, query: str, parameters: Sequence[Sequence[Any]]) -> None:
+        compiled = self._queries.compile(query)
+        if compiled.split(None, 1)[0].upper() not in ('INSERT','UPDATE','DELETE'):
+            raise ValueError('Batch execution requires a repository write')
+        self.begin()
+        self._db.execute("SELECT set_config('oko.clock',%s,false),set_config('oko.wall',%s,false)", (str(self._clock()),str(self._wall_clock())))
+        with self._db.cursor() as cursor:
+            cursor.executemany(compiled,
+                               (tuple(int(value) if isinstance(value, bool) else value for value in row) for row in parameters))
+
+    def executescript(self, query: str, /) -> None:
+        raise RuntimeError('Install PostgreSQL schema through release migrations')
+
+    def __enter__(self) -> 'PostgresConnection':
+        self.access_lock.acquire()
+        return self
+
+    def after_commit(self, callback: Callable[[], None]) -> None:
+        if self.transaction_depth:
+            self.commit_callbacks.append(callback)
+        else:
+            callback()
+
+    def flush(self) -> None:
+        if self.in_transaction and self.before_commit is not None:
+            self.before_commit()
+
+    def commit(self) -> None:
+        if self.transaction_depth:
+            return
+        try:
+            self.flush()
+            self._db.commit()
+        except BaseException:
+            self.rollback()
+            raise
+        callbacks, self.commit_callbacks = self.commit_callbacks, []
+        for callback in callbacks:
+            callback()
+
+    def rollback(self) -> None:
+        if self.transaction_depth:
+            self.transaction_failed = True
+            return
+        self._db.rollback()
+        self.commit_callbacks.clear()
+        self.membership_feeds.clear()
+        self.membership_folders.clear()
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Literal[False]:
+        try:
+            self.commit() if exc_type is None else self.rollback()
+        finally:
+            self.access_lock.release()
+        return False
+
+    def close(self) -> None:
+        self._db.close()
+        self.commit_callbacks.clear()
+        self.before_commit = None
+        self.membership_feeds.clear()
+        self.membership_folders.clear()

@@ -25,13 +25,15 @@ class ProcessClock:
         temporary.replace(self.path)
 
 
-def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = '', clock: ProcessClock | None = None, api_only: bool = False, web_media: bool = False):
+def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = '', clock: ProcessClock | None = None, api_only: bool = False, web_media: bool = False, database_url_file: Path | None = None):
     env = dict(os.environ, PYTHONPATH=str(ROOT), OKO_TEST_FAULT=fault, OKO_TEST_MODEL_ORIGIN=model_origin,
                OKO_TEST_CLOCK=str(clock.path) if clock else '', OKO_TEST_WEB_MEDIA='1' if web_media else '')
+    if database_url_file is not None:
+        env.pop('OKO_TEST_POSTGRES_URL', None)
     logs = root / 'process-logs'
     logs.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(dir=logs, prefix='server-', suffix='.log', delete=False) as output:
-        process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--data', str(root), '--no-browser', *([] if web_media else ['--demo']), '--lease', lease, '--grace', grace, *(['--api-only'] if api_only else [])], env=env, stdout=output, stderr=subprocess.STDOUT)
+        process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--data', str(root), '--no-browser', *([] if web_media else ['--demo']), '--lease', lease, '--grace', grace, *(['--api-only'] if api_only else []), *(['--database-url-file', str(database_url_file)] if database_url_file else [])], env=env, stdout=output, stderr=subprocess.STDOUT)
         process.log_path = Path(output.name)
     return process
 

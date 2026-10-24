@@ -189,6 +189,7 @@ def prepare(source: Path, destination: Path, *, legacy: bool=False) -> dict[str,
                 from oko.storage.store import Store
                 target_store=Store(destination,lambda _:None)
                 try:
+                    assert isinstance(target_store.db, sqlite3.Connection)
                     integrity=target_store.db.execute('PRAGMA quick_check').fetchone()[0]
                     foreign_keys=[list(row) for row in target_store.db.execute('PRAGMA foreign_key_check')]
                     group_guard(target_store.db)

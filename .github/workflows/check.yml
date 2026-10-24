@@ -149,6 +149,7 @@ jobs:
           if-no-files-found: ignore
   postgres:
     name: PostgreSQL integration
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -168,15 +169,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - name: Verify migrations against actual PostgreSQL
+      - uses: actions/download-artifact@v4
+        with:
+          name: checked-frontend
+          path: oko/frontend_build/
+      - name: Use launchable system Chrome or install Chromium
+        run: |
+          oko_ci_chrome=$(command -v google-chrome || true)
+          if [ -n "$oko_ci_chrome" ] && OKO_BROWSER_EXECUTABLE="$oko_ci_chrome" node --import tsx --input-type=module -e "import {launchBrowser} from './scripts/browser-launch.mts'; const browser=await launchBrowser(); await browser.close();"; then
+            printf 'OKO_BROWSER_EXECUTABLE=%s\n' "$oko_ci_chrome" >> "$GITHUB_ENV"
+          else
+            npx playwright install --with-deps chromium
+          fi
+      - name: Verify migrations and reader against actual PostgreSQL
         env:
+          OKO_TEST_ARTIFACT_DIR: .scratch/postgres-browser-artifacts
           OKO_TEST_POSTGRES_URL: postgresql://oko_test:synthetic-ci-only@127.0.0.1:5432/oko_test
-        run: ./scripts/check python --files tests/reader/test_postgres_migrations.py
+        run: ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_browser.py tests/reader/test_postgres_cli.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: check-reports-postgres
-          path: .scratch/check-runs/
+          path: |
+            .scratch/check-runs/
+            .scratch/postgres-browser-artifacts/
           if-no-files-found: error
   check:
     name: Full checks
