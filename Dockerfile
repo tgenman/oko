@@ -16,6 +16,8 @@ RUN npm run build && npm run build:check
 RUN uv sync --frozen --no-dev --python /usr/local/bin/python
 
 FROM python:3.13.9-slim-bookworm AS runtime
+ARG OKO_RELEASE_SHA=development
+LABEL org.opencontainers.image.source="https://github.com/tgenman/oko" org.opencontainers.image.revision=$OKO_RELEASE_SHA
 RUN groupadd --gid 10001 oko && useradd --uid 10001 --gid 10001 --no-create-home oko
 WORKDIR /app
 COPY --from=build /app /app

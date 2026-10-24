@@ -181,11 +181,19 @@ jobs:
           else
             npx playwright install --with-deps chromium
           fi
+      - name: Enable the distribution Linux sandbox without relaxing global AppArmor
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap apparmor-profiles apparmor-utils
+          if [ -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]; then
+            sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+            sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          fi
       - name: Verify migrations and reader against actual PostgreSQL
         env:
           OKO_TEST_ARTIFACT_DIR: .scratch/postgres-browser-artifacts
           OKO_TEST_POSTGRES_URL: postgresql://oko_test:synthetic-ci-only@127.0.0.1:5432/oko_test
-        run: ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_browser.py tests/reader/test_postgres_cli.py
+        run: ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_browser.py tests/reader/test_postgres_cli.py tests/processing/test_codex_linux.py tests/processing/test_codex_bridge.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

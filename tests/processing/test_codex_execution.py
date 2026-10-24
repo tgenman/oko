@@ -11,6 +11,7 @@ def test_isolated_exec_passes_explicit_model_effort_and_speed(tmp_path,monkeypat
     from oko.processing import codex
     seen=[]
     monkeypatch.setattr(codex,'supported_binary',lambda: Path('/synthetic/codex'))
+    monkeypatch.setattr(codex,'sandbox_command',lambda binary,work,auth: ['/usr/bin/sandbox-exec','-p','synthetic-policy',str(binary)])
     async def run(args,prompt,directory):
         seen.append((args,prompt,directory))
         return 0, (json.dumps(dict(type='item.completed',item=dict(type='agent_message',text='{}')))+'\n'+json.dumps(dict(type='turn.completed'))).encode()
@@ -37,6 +38,7 @@ def test_current_cli_empty_queue_is_allowed_but_persisted_work_is_rejected(tmp_p
     from oko.processing import codex
     from oko.processing.contracts import ProcessingError
     monkeypatch.setattr(codex, 'supported_binary', lambda: Path('/synthetic/codex'))
+    monkeypatch.setattr(codex,'sandbox_command',lambda binary,work,auth: ['/usr/bin/sandbox-exec','-p','synthetic-policy',str(binary)])
     async def run(args, prompt, directory):
         with sqlite3.connect(directory / 'queue_1.sqlite') as db:
             db.execute('CREATE TABLE queued_items (payload TEXT)')

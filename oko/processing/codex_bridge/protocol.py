@@ -18,9 +18,17 @@ class BridgeConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
     host: Literal['127.0.0.1'] = '127.0.0.1'
     port: int = Field(default=8767, ge=1, le=65535)
+    socket_path: Path | None = None
     token_file: Path
     scratch_root: Path
     release: str = Field(min_length=1, max_length=200)
+
+    @field_validator('socket_path')
+    @classmethod
+    def absolute_socket(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError('helper socket path must be absolute')
+        return value
 
 
 class JobRequest(BaseModel):

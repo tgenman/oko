@@ -1,0 +1,90 @@
+name: Publish Linux release
+on:
+  workflow_run:
+    workflows: [Checks]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: publish-oko-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      IMAGE: ghcr.io/tgenman/oko
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: ./.github/actions/setup
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate with this job's temporary package token
+        env:
+          PACKAGE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$PACKAGE_TOKEN" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Verify private package and distinguish absent tags from unknown failures
+        id: existing
+        env:
+          PACKAGE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 deployment/registry-state.py --sha "$RELEASE_SHA" --output .scratch/release/before.json
+      - name: Build the checked commit for the production architecture
+        if: steps.existing.outputs.present != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:${{ env.RELEASE_SHA }}
+          build-args: OKO_RELEASE_SHA=${{ env.RELEASE_SHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Load an existing release for the same smoke checks
+        if: steps.existing.outputs.present == 'true'
+        run: |
+          docker pull "$IMAGE@${{ steps.existing.outputs.digest }}"
+          docker tag "$IMAGE@${{ steps.existing.outputs.digest }}" "$IMAGE:$RELEASE_SHA"
+      - name: Verify architecture, revision and runtime launch
+        run: |
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE:$RELEASE_SHA")" = linux/amd64
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE:$RELEASE_SHA")" = "$RELEASE_SHA"
+          docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -c 'from oko.reader.app import create_app; from oko.storage.postgres_schema import MIGRATIONS; assert MIGRATIONS[-1].version==len(MIGRATIONS)'
+          docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -m oko --help
+          docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -m oko.processing.codex_bridge --help
+      - name: Exercise a running locked-down container without external networking
+        run: |
+          trap 'docker rm -f oko-release-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name oko-release-smoke --network none --read-only --cap-drop ALL --security-opt no-new-privileges --init --tmpfs /data:uid=10001,gid=10001,mode=0700 --tmpfs /tmp:mode=1777 "$IMAGE:$RELEASE_SHA" --api-only --demo --host 127.0.0.1 --port 8765 --data /data --no-browser --initially-disabled
+          for attempt in $(seq 1 30); do
+            state=$(docker inspect --format '{{.State.Health.Status}}' oko-release-smoke)
+            if [ "$state" = healthy ]; then break; fi
+            if [ "$state" = unhealthy ]; then docker logs oko-release-smoke; exit 1; fi
+            sleep 2
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' oko-release-smoke)" = healthy
+      - name: Publish once after image verification
+        if: steps.existing.outputs.present != 'true'
+        run: docker push "$IMAGE:$RELEASE_SHA"
+      - name: Record digest and recheck package privacy
+        env:
+          PACKAGE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 deployment/registry-state.py --sha "$RELEASE_SHA" --require-present --output .scratch/release/after.json
+          digest=$(python3 -c 'import json; print(json.load(open(".scratch/release/after.json"))["digest"])')
+          .venv/bin/python deployment/release-manifest.py --sha "$RELEASE_SHA" --digest "$digest" --output .scratch/release/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oko-release-${{ env.RELEASE_SHA }}
+          path: .scratch/release/manifest.json
+          if-no-files-found: error
