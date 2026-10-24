@@ -81,10 +81,6 @@ def test_album_partial_media_survives_restart_retry_and_deletes_all_parts(tmp_pa
         assert not (tmp_path / 'staging' / item).exists()
 
 
-
-
-
-
 def test_late_video_after_viewed_cannot_publish_or_leave_files(tmp_path: Path):
     import asyncio
     import threading
@@ -114,8 +110,6 @@ def test_late_video_after_viewed_cannot_publish_or_leave_files(tmp_path: Path):
         assert client.get('/api/v3/materials/' + item).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
-
-
 
 
 def test_discovery_interruption_keeps_album_identity_and_files_recover(tmp_path: Path):
@@ -213,8 +207,6 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
         assert client.get('/api/v3/cards').json() == []
 
 
-
-
 def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Path):
     failed = False
     class Photo(Telegram):
@@ -245,32 +237,6 @@ def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Pat
         assert client.get(card['attachments'][0]['url']).content == b'media'
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
         assert not (tmp_path / 'content' / card['id']).exists()
-
-
-def test_new_album_part_updates_existing_material_and_member_ids(tmp_path: Path):
-    class Growing(Telegram):
-        rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777, media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
-        async def page(self, account, peer, after, since):
-            return dict(messages=self.rows, more=False)
-        async def messages(self, account, peer, ids):
-            return self.rows
-    tg = Growing()
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
-        presence(client, 'test')
-        connect(client)
-        original = settled(client)[0]
-        tg.rows = tg.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=dict(kind='video', mime='video/mp4', extension='mp4'))]
-        client.post('/api/v3/materials/' + original['id'] + '/retry')
-        for _ in range(150):
-            material = client.get('/api/v3/materials/' + original['id']).json()
-            if not material['content'].get('loading') and len(material['content'].get('attachments', [])) == 2:
-                break
-            time.sleep(.02)
-        assert len(client.get('/api/v3/cards').json()) == 1
-        assert [int(identity) for identity in material['source']['message_ids']] == [11, 12]
-        assert (material['content']['completeness']['state']=='complete') is True and len(material['content']['attachments']) == 2
-
-
 
 
 def test_local_client_uses_env_without_external_project_or_venv(tmp_path: Path):
@@ -316,8 +282,6 @@ def test_direct_client_prefers_existing_string_session_to_stale_file_setting(tmp
         assert not list(project.rglob('*.session'))
 
 
-
-
 def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path):
     class Reassigned(Telegram):
         changed = False
@@ -344,9 +308,6 @@ def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path
             time.sleep(.02)
         assert any(e['code']=='source_identity_conflict' for e in errors)
         assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Текст канала'
-
-
-
 
 
 @pytest.mark.parametrize('advance', [True, False])

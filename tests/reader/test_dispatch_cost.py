@@ -112,7 +112,7 @@ def test_status_of_pending_files_does_not_query_each_publication(tmp_path):
     assert costs[1]['vm']<=costs[0]['vm']*20,costs
 
 
-def test_source_readiness_ignores_unrelated_pending_media(tmp_path):
+def test_source_readiness_and_idle_dispatch_ignore_foreign_pending_media(tmp_path):
     costs=[]
     for foreign in (26,400):
         store,feeds=_pending_files(tmp_path/str(foreign),foreign)
@@ -125,10 +125,13 @@ def test_source_readiness_ignores_unrelated_pending_media(tmp_path):
                 assert store.ready_sources([feeds[0]])==1
             finally:
                 store.db.set_progress_handler(None,0)
-            costs.append(steps[0])
+            dispatch,job=_steps(store,feeds=[feeds[0]])
+            assert job is None
+            costs.append((steps[0],dispatch))
         finally:
             store.db.close()
-    assert costs[1]<=costs[0]+2000,costs
+    assert costs[1][0]<=costs[0][0]+2000,costs
+    assert costs[1][1]<=costs[0][1]+2000,costs
 
 
 def test_readiness_waits_for_viewed_publication_cleanup(tmp_path):
@@ -146,21 +149,6 @@ def test_readiness_waits_for_viewed_publication_cleanup(tmp_path):
         assert store.ready_sources([feeds[0]])==1
     finally:
         store.db.close()
-
-
-def test_empty_collection_dispatch_skips_pending_media_backlog(tmp_path):
-    costs=[]
-    for foreign in (26,400):
-        store,feeds=_pending_files(tmp_path/str(foreign),foreign)
-        try:
-            with store.db:
-                store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch'")
-            steps,job=_steps(store,feeds=[feeds[0]])
-            assert job is None
-            costs.append(steps)
-        finally:
-            store.db.close()
-    assert costs[1]<=costs[0]+2000,costs
 
 
 def test_empty_dispatch_with_linked_articles_grows_linearly(tmp_path):
