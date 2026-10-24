@@ -1,0 +1,50 @@
+{
+  "snapshot": {
+    "source": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko",
+    "checkout": "/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-dv25ctos/checkout",
+    "head": "94fd2324c0f4bcfb3ba9603c6899f00ab344415d",
+    "tree": "849d77ea7d940a1815917d573976133f8b6de120"
+  },
+  "test_groups": {
+    "Python": {
+      "status": "PASS",
+      "counts": {
+        "total": 901,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 901
+      },
+      "duration_seconds": 137.5692
+    },
+    "Node": {
+      "status": "PASS",
+      "counts": {
+        "total": 113,
+        "passed": 113,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "duration_seconds": 1.1634
+    },
+    "Playwright": {
+      "status": "PASS",
+      "counts": {
+        "total": 223,
+        "passed": 221,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 2
+      },
+      "duration_seconds": 129.6621
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 154.55,
+  "code_sha256": {
+    "oko/storage/migration.py": "df9e60d4e5b7691f23c290d2e3ea385e433a66354c4a4699371ecdf3bc259bcf",
+    "oko/storage/migration_compatibility.py": "8bc0fd0419243ca50f827a87431a268c10e7960b006a95d0f03506ecd97f9e9e",
+    "tests/reader/test_legacy_migration.py": "e23e37dc9a6300567af8fb8f10174b02e1adbe075651a47495291f379afffe1f"
+  }
+}
