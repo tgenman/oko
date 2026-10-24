@@ -15,6 +15,33 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Restore successful aggregate timing hints
+        id: timings
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .scratch/check-cache/ci-timings.json
+          key: ci-shard-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ci-shard-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-
+      - name: Bootstrap previous python timing hints
+        if: steps.timings.outputs.cache-matched-key == ''
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .scratch/check-cache/test-timings
+          key: test-timings-v1-${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            test-timings-v1-${{ runner.os }}-${{ runner.arch }}-python-${{ hashFiles('uv.lock', 'package-lock.json') }}-
+      - name: Bootstrap previous browser timing hints
+        if: steps.timings.outputs.cache-matched-key == ''
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .scratch/check-cache/test-timings
+          key: test-timings-v1-${{ runner.os }}-${{ runner.arch }}-browser-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            test-timings-v1-${{ runner.os }}-${{ runner.arch }}-browser-${{ hashFiles('uv.lock', 'package-lock.json') }}-
       - uses: ./.github/actions/setup
       - name: Regenerate and compare API without cached evidence
         env:
@@ -22,6 +49,13 @@ jobs:
         run: |
           node --import tsx scripts/generate-api.mts check --fresh
           ./scripts/check contracts build syntax lint types browser-types diff entrypoint
+      - name: Plan all CI shard files once
+        run: python3 scripts/ci_shards.py plan --output .scratch/ci-shards/plan.json --browser-workers 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-shard-plan
+          path: .scratch/ci-shards/plan.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: checked-frontend
@@ -34,14 +68,22 @@ jobs:
           path: .scratch/check-runs/
           if-no-files-found: ignore
   tests:
-    name: ${{ matrix.suite }} checks
+    name: ${{ matrix.job }} checks
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      max-parallel: 7
       matrix:
-        suite: [python, node, browser, tools]
+        include:
+          - {job: python-1, suite: python, sharded: true}
+          - {job: python-2, suite: python, sharded: true}
+          - {job: browser-1, suite: browser, sharded: true}
+          - {job: browser-2, suite: browser, sharded: true}
+          - {job: latency, suite: browser, sharded: true}
+          - {job: node, suite: node, sharded: false}
+          - {job: tools, suite: tools, sharded: false}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,13 +99,18 @@ jobs:
           echo "required=$required" >> "$GITHUB_OUTPUT"
       - name: Restore and save successful file timing hints
         continue-on-error: true
-        if: matrix.suite != 'node' && (matrix.suite != 'tools' || steps.selection.outputs.required == 'true')
+        if: matrix.suite == 'tools' && steps.selection.outputs.required == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .scratch/check-cache/test-timings
           key: test-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.suite }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             test-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.suite }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-
+      - uses: actions/download-artifact@v4
+        if: matrix.sharded
+        with:
+          name: ci-shard-plan
+          path: .scratch/ci-shards/
       - uses: ./.github/actions/setup
         if: matrix.suite != 'tools' || steps.selection.outputs.required == 'true'
       - uses: actions/download-artifact@v4
@@ -84,8 +131,11 @@ jobs:
           else
             npx playwright install --with-deps chromium
           fi
-      - if: matrix.suite != 'tools'
-        run: ./scripts/check ${{ matrix.suite }}
+      - if: matrix.sharded
+        name: Run the assigned files and retain shard identity
+        run: ./scripts/check ${{ matrix.suite }} --ci-plan .scratch/ci-shards/plan.json --ci-job ${{ matrix.job }} --browser-workers 4 --compact
+      - if: matrix.suite == 'node'
+        run: ./scripts/check node
       - if: matrix.suite == 'tools' && steps.selection.outputs.required == 'true'
         name: Test development tools only when their inputs changed
         env:
@@ -94,7 +144,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: check-reports-${{ matrix.suite }}
+          name: check-reports-${{ matrix.job }}
           path: .scratch/check-runs/
           if-no-files-found: ignore
   check:
@@ -103,8 +153,31 @@ jobs:
     needs: [build, tests]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Require every check group to succeed
         env:
           BUILD_RESULT: ${{ needs.build.result }}
           TEST_RESULT: ${{ needs.tests.result }}
         run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-shard-plan
+          path: .scratch/ci-shards/
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: check-reports-*
+          path: .scratch/ci-results/
+      - name: Require complete disjoint coverage and aggregate successful timings
+        run: python3 scripts/ci_shards.py verify --plan .scratch/ci-shards/plan.json --reports .scratch/ci-results --timings .scratch/check-cache/ci-timings.json > .scratch/ci-shards/coverage.json
+      - name: Save successful aggregate timing hints
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .scratch/check-cache/ci-timings.json
+          key: ci-shard-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-coverage-audit
+          path: .scratch/ci-shards/
+          if-no-files-found: error
