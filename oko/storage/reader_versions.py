@@ -36,7 +36,7 @@ class ReadingConnection(sqlite3.Connection):
             return
         rows=self.execute('SELECT identity,scope,owner,sort,hidden,digest FROM reader_lists WHERE pending=1').fetchall()
         for identity,scope,owner,sort,hidden,previous in rows:
-            ids=[row[0] for row in self.execute(ReaderVersions._ids(':scope',':owner',':sort',':hidden'),dict(scope=scope,owner=owner,sort=sort,hidden=hidden))]
+            ids=[row[0] for row in self.execute(ReaderVersions._ids(scope,':owner',':sort',':hidden'),dict(scope=scope,owner=owner,sort=sort,hidden=hidden))]
             digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
             self.execute('UPDATE reader_lists SET version=version+?,changed=CASE WHEN ? THEN oko_reader_time() ELSE changed END,digest=?,pending=0 WHERE identity=?',
                          (int(digest!=previous),int(digest!=previous),digest,identity))
@@ -185,10 +185,15 @@ class ReaderVersions:
 
     @staticmethod
     def _ids(scope: str, owner: str, sort: str, hidden: str) -> str:
+        membership = {
+            'all': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id)',
+            'feed': f'i.id IN (SELECT m.publication_id FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.feed_id={owner})',
+            'folder': f'i.id IN (SELECT m.publication_id FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE owner_feed.folder_id={owner})',
+        }[scope]
         return f"""SELECT i.id FROM items i JOIN feeds f ON f.id=i.feed_id
             LEFT JOIN reader_visibility v ON v.item=i.id
             WHERE i.viewed=0 AND ({hidden}=1 OR coalesce(v.hidden,0)=0)
-              AND EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND ({scope}='all' OR ({scope}='feed' AND m.feed_id={owner}) OR ({scope}='folder' AND owner_feed.folder_id={owner})))
+              AND {membership}
             ORDER BY CASE WHEN {sort}='importance' THEN CASE f.importance WHEN 'high' THEN -2 WHEN 'elevated' THEN -1 ELSE 0 END ELSE 0 END,
               CASE WHEN {sort}!='importance' THEN NOT i.published_known ELSE 0 END,
               CASE WHEN {sort}='importance' THEN -i.published WHEN i.published_known=0 THEN 0 WHEN {sort}='oldest' THEN i.published ELSE -i.published END,
@@ -387,7 +392,7 @@ class ReaderVersions:
 
     def ids(self, options: dict[str, Any]) -> list[str]:
         target=options['target']
-        sql=self._ids(':scope',':owner',':sort',':hidden')
+        sql=self._ids(target['scope'],':owner',':sort',':hidden')
         return [r[0] for r in self.db.execute(sql,dict(scope=target['scope'],owner=target.get('feed_id',target.get('folder_id','')),sort=options['sort'],hidden=int(options['show_hidden'])))]
 
     def list_version(self, options: dict[str, Any]) -> sqlite3.Row:
@@ -413,7 +418,8 @@ class ReaderVersions:
             self.db.execute('INSERT INTO reader_youtube_time SELECT 1,blocked_until>? FROM youtube_access WHERE id=1 ON CONFLICT(id) DO UPDATE SET paused=excluded.paused WHERE paused IS NOT excluded.paused',(wall,))
             self.db.execute('DELETE FROM reader_problems WHERE rowid IN (SELECT rowid FROM reader_problems WHERE finished<=? ORDER BY finished LIMIT 200)',(wall-86400,))
             if now >= self._next_action_cleanup:
-                self.db.execute('DELETE FROM reader_action_results WHERE rowid IN (SELECT rowid FROM reader_action_results WHERE completed<=? AND sequence NOT IN (SELECT max(sequence) FROM reader_action_results GROUP BY identity) ORDER BY completed LIMIT 200)',(wall-86400,))
+                from oko.storage.problem_links import cleanup
+                cleanup(self.db, wall - 86400)
                 self._next_action_cleanup=now+60
             body=json.dumps(metadata,sort_keys=True,separators=(',',':'))
             self.db.execute('INSERT INTO reader_runtime VALUES (1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE body IS NOT excluded.body',(body,))

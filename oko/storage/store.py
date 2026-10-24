@@ -94,6 +94,7 @@ class Store:
         CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY,signature TEXT);
         CREATE TABLE IF NOT EXISTS source_deleted (item TEXT PRIMARY KEY);
         ''')
+        self.db.execute('CREATE INDEX IF NOT EXISTS items_viewed_ids ON items(id) WHERE viewed=1')
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
         self.db.execute('CREATE INDEX IF NOT EXISTS jobs_item ON jobs(item)')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_running ON jobs(kind,item) WHERE status='running'")
@@ -353,7 +354,7 @@ class Store:
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('feed-status:' + feed, json.dumps(state)))
 
     def source_statuses(self) -> list[dict[str, Any]]:
-        return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key LIKE 'feed-status:%'")]
+        return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key >= 'feed-status:' AND key < 'feed-status;'")]
 
     def ready_sources(self, feeds: list[str]) -> int:
         if not feeds:

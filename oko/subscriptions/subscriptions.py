@@ -122,6 +122,7 @@ class Subscriptions:
           importance TEXT DEFAULT 'normal', initial_days INTEGER DEFAULT 1,
           public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER,
           telegram_peer INTEGER,telegram_account TEXT,telegram_username TEXT);
+        CREATE INDEX IF NOT EXISTS feeds_folder ON feeds(folder_id);
         CREATE TABLE IF NOT EXISTS settings (scope TEXT, owner TEXT, field TEXT, value TEXT,
           PRIMARY KEY(scope,owner,field));
         ''')
