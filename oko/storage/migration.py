@@ -1,5 +1,5 @@
 """Offline preparation of a separately validated store. Never switches an instance."""
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack, closing
 from collections.abc import Iterator
 import argparse
 import fcntl
@@ -23,6 +23,9 @@ def group_guard(db: sqlite3.Connection) -> dict[str, Any]:
     """Fail closed for unknown Telegram identity, including empty bindings."""
     tables={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conflicts=[]
+    from oko.storage.migration_compatibility import certificates,encoded
+    try:retained=certificates(db)
+    except (ValueError,TypeError,KeyError) as error:raise MigrationRefused(str(error)) from error
     if 'feeds' not in tables or 'items' not in tables or 'state' not in tables:
         raise MigrationRefused('Unsupported source schema; no source data were changed')
     columns={row[1] for row in db.execute('PRAGMA table_info(feeds)')}
@@ -66,6 +69,11 @@ def group_guard(db: sqlite3.Connection) -> dict[str, Any]:
                 ('telegram_avatars','feed','feeds'))
     for table,column,owner in references:
         if table not in tables or owner not in tables:continue
+        if table=='history_members' and column=='item':
+            for row in db.execute('SELECT h.feed,h.item FROM history_members h LEFT JOIN items i ON i.id=h.item WHERE i.id IS NULL'):
+                if (table,encoded([row[0],row[1]])) not in retained:
+                    conflicts.append(dict(kind='unproven_owner',table=table,column=column,value=row[1]))
+            continue
         for row in db.execute('SELECT DISTINCT r.'+quote(column)+' FROM '+quote(table)+
                 ' r LEFT JOIN '+quote(owner)+' o ON o.id=r.'+quote(column)+
                 ' WHERE r.'+quote(column)+' IS NOT NULL AND o.id IS NULL'):
@@ -81,7 +89,8 @@ def group_guard(db: sqlite3.Connection) -> dict[str, Any]:
             job_owner=owners.get(row[1])
             identity='demo' if row[1]=='discover' and row[2]=='' else row[2]
             if job_owner is None or job_owner not in tables or db.execute('SELECT 1 FROM '+quote(job_owner)+' WHERE id=?',(identity,)).fetchone() is None:
-                conflicts.append(dict(kind='unproven_job_owner',job=row[0],operation=row[1],value=row[2]))
+                if ('jobs',encoded([row[0]])) not in retained:
+                    conflicts.append(dict(kind='unproven_job_owner',job=row[0],operation=row[1],value=row[2]))
     if conflicts:
         raise MigrationRefused(json.dumps(dict(reason='group_or_unknown_data',conflicts=conflicts),ensure_ascii=False))
     return dict(telegram_types='channels_only',group_data='absent',checked_tables=sorted(tables))
@@ -133,16 +142,26 @@ def table_digest(db: sqlite3.Connection, table: str) -> str:
     return hashlib.sha256('\n'.join(rows).encode()).hexdigest()
 
 
-def prepare(source: Path, destination: Path) -> dict[str, Any]:
+def prepare(source: Path, destination: Path, *, legacy: bool=False) -> dict[str, Any]:
     source,destination=source.resolve(),destination.resolve()
     if source==destination or source in destination.parents or destination in source.parents or destination.exists():
         raise MigrationRefused('Destination must be a new separate directory')
     with offline_owner(source):
-        with sqlite3.connect((source/'state.sqlite').as_uri()+'?mode=ro',uri=True) as original:
+        with ExitStack() as stack:
+            original=stack.enter_context(closing(sqlite3.connect((source/'state.sqlite').as_uri()+'?mode=ro',uri=True)))
             original.row_factory=sqlite3.Row
             if original.execute('PRAGMA quick_check').fetchone()[0]!='ok':
                 raise MigrationRefused('Source integrity check failed')
-            guard=group_guard(original)
+            validated=original
+            compatibility=None
+            if legacy:
+                from oko.storage.migration_compatibility import normalize
+                from oko.storage.reader_versions import ReadingConnection
+                validated=stack.enter_context(closing(ReadingConnection(':memory:')))
+                validated.row_factory=sqlite3.Row
+                original.backup(validated)
+                compatibility=normalize(validated)
+            guard=group_guard(validated)
             marker=original.execute("SELECT value FROM state WHERE key='publication-pipeline'").fetchone()
             if marker is None or marker[0]!='complete':
                 raise MigrationRefused('Pre-Publication schema requires the previous verified format converter')
@@ -151,17 +170,17 @@ def prepare(source: Path, destination: Path) -> dict[str, Any]:
                 if row['storage_key'] not in files:
                     raise MigrationRefused('Ready media file missing or unsafe: '+row['id'])
             source_digest=file_hash(source/'state.sqlite')
-            tables=guard['checked_tables']
+            tables=[row[0] for row in original.execute("SELECT name FROM sqlite_master WHERE type='table'")]
             counts={table:original.execute('SELECT count(*) FROM '+quote(table)).fetchone()[0] for table in tables}
             setting_tables=[table for table in ('settings','folders','telegram_profiles','telegram_bindings','initial_history') if table in tables]
             settings={table:table_digest(original,table) for table in setting_tables}
             identities={table:[row[0] for row in original.execute('SELECT id FROM '+quote(table)+' ORDER BY id')] for table in ('feeds','items','media_files')}
             # Repeat after exclusive offline ownership and immediately before copying.
-            group_guard(original)
+            group_guard(validated)
             destination.mkdir(mode=0o700,parents=True)
             try:
                 with sqlite3.connect(destination/'state.sqlite') as target:
-                    original.backup(target)
+                    validated.backup(target)
                 for relative in files:
                     path=destination/relative
                     path.parent.mkdir(parents=True,exist_ok=True)
@@ -172,6 +191,7 @@ def prepare(source: Path, destination: Path) -> dict[str, Any]:
                 try:
                     integrity=target_store.db.execute('PRAGMA quick_check').fetchone()[0]
                     foreign_keys=[list(row) for row in target_store.db.execute('PRAGMA foreign_key_check')]
+                    group_guard(target_store.db)
                     if integrity!='ok' or foreign_keys:
                         raise MigrationRefused('Destination integrity/relations check failed')
                     target_ids={table:[row[0] for row in target_store.db.execute('SELECT id FROM '+quote(table)+' ORDER BY id')] for table in identities}
@@ -189,7 +209,7 @@ def prepare(source: Path, destination: Path) -> dict[str, Any]:
                 if any(file_hash(destination/name)!=digest for name,digest in files.items()):
                     raise MigrationRefused('Copied file verification failed')
                 report=dict(source=str(source),destination=str(destination),verified=True,switched=False,group_guard=guard,
-                    source_counts=counts,ids={table:{identity:identity for identity in values} for table,values in identities.items()},
+                    source_counts=counts,compatibility=compatibility,ids={table:{identity:identity for identity in values} for table,values in identities.items()},
                     files=files,recalculate=recalculate,conflicts=[],source_unchanged=True,
                     settings=dict(tables=settings,verified=preserved_settings==settings,profile_lifecycle='Profiles require verification after startup; durable fields preserved'),results={row['id']:dict(filter=bool(json.loads(row['filtered_content'])),summary=bool(json.loads(row['summarized_content']))) for row in results},history='Source retained; no cleanup performed')
                 (destination/'migration-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
@@ -204,9 +224,10 @@ def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source',type=Path)
     parser.add_argument('destination',type=Path)
+    parser.add_argument('--legacy',action='store_true',help='Restore proven legacy metadata and retain terminal history with audit copies')
     args=parser.parse_args()
     try:
-        report=prepare(args.source,args.destination)
+        report=prepare(args.source,args.destination,legacy=args.legacy)
     except (ValueError,OSError,sqlite3.Error) as error:
         print(json.dumps(dict(verified=False,error=str(error)),ensure_ascii=False))
         return 1
