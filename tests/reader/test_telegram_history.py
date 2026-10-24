@@ -36,47 +36,6 @@ def test_count_selects_whole_album_and_resumes_without_live_count(tmp_path):
         assert client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']['progress']['loaded']==2
 
 
-def test_snapshot_and_sparse_group_pages_resume_before_older_pages(tmp_path):
-    import asyncio
-    class Sparse(Archive):
-        def __init__(self):
-            super().__init__()
-            self.blocked=True
-            self.calls=[]
-        async def info(self,account,peer,topic_id=None):
-            return dict(peer=-1001234567890,title='Общее',kind='group',forum=True,topic_id=topic_id)
-        async def history_page(self,account,peer,upper,before,since,**scope):
-            self.calls.append((upper,before,scope.get('topic_id')))
-            if before==5:
-                if self.blocked: await asyncio.Event().wait()
-                return dict(messages=[],upper=6,next_before=3,more=True)
-            if before==3:
-                return dict(messages=[m for m in self.rows if m['id']==2],upper=6,next_before=1,more=False)
-            return dict(messages=[m for m in self.rows if m['id']==6],upper=6,next_before=5,more=True)
-    archive=Sparse()
-    def open_reader(): return TestClient(create_app(tmp_path,token='test',telegram_client=archive),headers=HEADERS)
-    with open_reader() as client:
-        presence(client, 'reader')
-        feed=connected_feed(client, connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=False,initial_history=dict(mode='count',count=2))))
-        for _ in range(100):
-            h=client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
-            if any(before==5 for _,before,_ in archive.calls):break
-            time.sleep(.02)
-        assert h['state']=='discovering'
-        assert h['progress']['available']==1
-        assert h['progress']['loaded']==0
-    archive.blocked=False
-    archive.rows.append(dict(id=7,date=1759350007,text='live',group=None,media=None))
-    with open_reader() as client:
-        presence(client, 'reader')
-        for _ in range(200):
-            h=client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
-            if h['state']=='complete':break
-            time.sleep(.02)
-        assert h['progress']['loaded']==2
-        assert all(topic is None for _,_,topic in archive.calls)
-        assert any(upper==6 and before==3 for upper,before,_ in archive.calls)
-        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()}=={2,6,7}
 
 def test_count_history_keeps_safe_numeric_read_boundary(tmp_path):
     class ReadArchive(Archive):
@@ -101,45 +60,42 @@ def test_count_history_keeps_safe_numeric_read_boundary(tmp_path):
         assert archive.acks==[]
 
 
-def test_archive_error_does_not_delay_live_and_survives_restart(tmp_path):
+def test_archive_error_and_fixed_boundary_survive_restart_before_the_next_window(tmp_path):
     from oko.collection.contracts import SourceError
+    from tests.support.reader import wait_for
     class FailingArchive(Archive):
-        def __init__(self):
-            super().__init__()
-            self.failed = False
-            self.live_calls = 0
-        async def history_page(self, account, peer, upper, before, since, **scope):
-            if before:
-                self.failed = True
-                raise SourceError('Архив временно недоступен', 600)
-            return await super().history_page(account, peer, upper, before, since, **scope)
-        async def page(self, *args, **kwargs):
-            self.live_calls += 1
-            if self.failed and not any(m['id'] == 7 for m in self.rows):
-                self.rows.append(dict(id=7, date=1759350007, text='live', group=None, media=None))
-            return await super().page(*args, **kwargs)
-    archive = FailingArchive()
-    def reader(): return TestClient(create_app(tmp_path, token='test', telegram_client=archive), headers=HEADERS)
+        broken=True
+        async def history_page(self,account,peer,upper,before,since,**scope):
+            if before and self.broken:
+                if not any(row['id']==7 for row in self.rows):
+                    self.rows.append(dict(id=7,date=1759350007,text='live',group=None,media=None))
+                raise SourceError('Архив временно недоступен',600)
+            return await super().history_page(account,peer,upper,before,since,**scope)
+    archive=FailingArchive()
+    def reader():
+        return TestClient(create_app(tmp_path,token='test',telegram_client=archive),headers=HEADERS)
     with reader() as client:
-        presence(client, 'reader')
-        feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=False, initial_history=dict(mode='count', count=5))))
-        for _ in range(150):
-            cards = client.get('/api/v3/cards').json()
-            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if any([int(identity) for identity in c['source']['message_ids']] == [7] for c in cards): break
-            time.sleep(.02)
-        assert any([int(identity) for identity in c['source']['message_ids']] == [7] for c in cards)
-        assert history['progress']['discovery_problem']['message'] == 'Архив временно недоступен'
-        assert __import__('datetime').datetime.fromisoformat(history['progress']['discovery_problem']['retry_at'].replace('Z','+00:00')).timestamp() > time.time()
-        assert client.get('/api/v3/diagnostics').json()['groups']
+        presence(client,'reader')
+        feed=connected_feed(client,connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=False,initial_history=dict(mode='count',count=5))))
+        def history():
+            return client.get('/api/v3/settings/feed/'+feed['id']).json()['feed']['history']
+        failed=wait_for(client,lambda: value if (value:=history())['state']=='waiting' else None)
+        assert failed['progress']['discovery_problem']['message']=='Архив временно недоступен'
+        assert not failed['progress']['scan_complete']
+        retry=failed['progress']['discovery_problem']['retry_at']
     with reader() as client:
-        presence(client, 'reader')
-        history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-        assert history['progress']['discovery_problem']['message'] == 'Архив временно недоступен'
-        assert __import__('datetime').datetime.fromisoformat(history['progress']['discovery_problem']['retry_at'].replace('Z','+00:00')).timestamp() > time.time()
+        presence(client,'reader')
+        saved=history()
+        assert saved['state']=='waiting' and saved['progress']['discovery_problem']['retry_at']==retry
+        archive.broken=False
+        client.post('/api/v3/collect')
+        wait_for(client,lambda:history()['state']=='complete')
+        assert all(card['source']['message_ids']!=['7'] for card in client.get('/api/v3/cards').json())
+        client.post('/api/v3/collect')
+        wait_for(client,lambda:any(card['source']['message_ids']==['7'] for card in client.get('/api/v3/cards').json()))
 
 
-def test_count_metadata_manifest_finishes_before_content_and_never_replaces_deleted_member(tmp_path):
+def test_count_discovery_accepts_ready_content_without_refetching_each_message(tmp_path):
     class ManifestArchive(Archive):
         def __init__(self):
             self.rows = [dict(id=n, date=1759350000+n, text=str(n), group=None, media=None) for n in (1,2,3,4)]
@@ -163,10 +119,10 @@ def test_count_metadata_manifest_finishes_before_content_and_never_replaces_dele
             if history['state'] == 'complete': break
             time.sleep(.02)
         assert not archive.early_content
-        assert history['progress']['loaded'] == 2
+        assert history['progress']['loaded'] == 3
         assert history['progress']['available'] == 3
-        assert history['progress']['unavailable'] == 1
-        assert set(archive.content) == {2,3,4}
+        assert history['progress']['unavailable'] == 0
+        assert archive.content == []
         assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()} == {2,3,4}
 
 

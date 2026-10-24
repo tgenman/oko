@@ -1,7 +1,7 @@
 """Linked articles remain independent publications at the reader HTTP boundary."""
 import httpx
 
-from tests.support.publication_pipeline import migrated_root
+from tests.support.publication_pipeline import publication_root
 from tests.support.app import create_app
 from tests.support.rss import import_feed, wait_cards
 from tests.support.reader import presence
@@ -11,7 +11,7 @@ HEADERS={'Authorization':'Bearer test-token'}
 
 
 def test_rss_ready_excerpt_without_article_url_is_saved_without_a_fetch(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         return httpx.Response(200,text='<rss><channel><title>Feed</title><item><guid>entry-1</guid><title>News</title><description>Own excerpt</description></item></channel></rss>')
     with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
@@ -21,7 +21,7 @@ def test_rss_ready_excerpt_without_article_url_is_saved_without_a_fetch(tmp_path
         card=wait_cards(client)[0]
         material=client.get('/api/v3/materials/'+card['id']).json()
         assert material['content']['text']=='Own excerpt'
-        assert material['content']['previous_versions']==[]
+        assert 'previous_versions' not in material['content']
         import sqlite3
         with sqlite3.connect(root/'state.sqlite') as db:
             assert db.execute('SELECT platform FROM items WHERE id=?',(card['id'],)).fetchone()==('rss',)
@@ -29,7 +29,7 @@ def test_rss_ready_excerpt_without_article_url_is_saved_without_a_fetch(tmp_path
 
 
 def test_two_rss_records_with_one_url_keep_distinct_guid_identities(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         return httpx.Response(200,text='<rss><channel><item><guid>two</guid><link>https://web.example/shared</link><description>Two</description></item><item><guid>one</guid><link>https://web.example/shared</link><description>One</description></item></channel></rss>')
     with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
@@ -51,7 +51,7 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
     import sqlite3
     import json
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     media_started,media_release=threading.Event(),threading.Event()
     async def response(request):
@@ -71,7 +71,7 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
         try:
             import_feed(client)
             presence(client,'rss')
-            card=wait_cards(client)[0]
+            card=wait_cards(client,idle=False)[0]
             assert client.get('/api/v3/materials/'+card['id']).json()['content']['text']=='Own excerpt'
             assert started.wait(3)
             release.set()
@@ -105,7 +105,7 @@ def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp
     import json
     from tests.support.models import model_transport
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     release=threading.Event()
     calls=[]
     native=model_transport([])
@@ -147,7 +147,7 @@ def test_filter_uses_article_with_context_but_only_changes_roots_derived_content
     import sqlite3
     from tests.support.models import model_transport
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     native=model_transport([])
     def model(request):
@@ -189,7 +189,7 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
     import sqlite3
     from tests.support.reader import wait_for
     from tests.support.subscriptions import add_source
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         if request.url.host=='web.example':
             return httpx.Response(200,text='<article>Shared article</article>')
@@ -217,7 +217,7 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
 def test_rss_replayed_record_replaces_a_removed_link_and_its_context(tmp_path):
     from tests.support.reader import wait_for
     import sqlite3
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     linked=[True]
     def response(request):
         if request.url.host=='web.example':
@@ -239,7 +239,7 @@ def test_rss_replayed_record_replaces_a_removed_link_and_its_context(tmp_path):
 
 def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_path):
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     missing=[True]
     def response(request):
         if request.url.host=='web.example':
@@ -266,7 +266,7 @@ def test_empty_rss_excerpt_waits_for_article_then_processes_its_actual_input(tmp
     import json
     from tests.support.models import model_transport
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     release=threading.Event()
     calls=[]
     native=model_transport([])
@@ -290,7 +290,7 @@ def test_empty_rss_excerpt_waits_for_article_then_processes_its_actual_input(tmp
             client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True})
             import_feed(client)
             presence(client,'rss')
-            card=wait_cards(client)[0]
+            card=wait_cards(client,idle=False)[0]
             assert not calls and card['theses']['result'] is None
             release.set()
             updated=wait_for(client,lambda:(value if (value:=client.get('/api/v3/materials/'+card['id']).json())['theses']['result'] and value['theses']['result']['points'] else None))
@@ -302,7 +302,7 @@ def test_empty_rss_excerpt_waits_for_article_then_processes_its_actual_input(tmp
 
 def test_explicit_rss_replay_can_collect_a_previously_read_record_again(tmp_path):
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         return httpx.Response(200,text='<rss><channel><item><guid>entry</guid><description>Again</description></item></channel></rss>')
     with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
@@ -325,7 +325,7 @@ def test_restricted_telegram_retains_own_source_without_copying_article_into_it(
     from tests.support.telegram import configure_fast_web
     from tests.support.telegram_web import page,mark_post_unavailable
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     restricted=[False]
     def response(request):
         if request.url.host=='api.telegra.ph':
@@ -351,7 +351,7 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
     import threading
     import sqlite3
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release,returned=threading.Event(),threading.Event(),threading.Event()
     async def response(request):
         if request.url.host=='web.example':
@@ -369,7 +369,7 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
         try:
             import_feed(client)
             presence(client,'rss')
-            card=wait_cards(client)[0]
+            card=wait_cards(client,idle=False)[0]
             assert started.wait(3)
             client.post('/api/v3/materials/'+card['id']+'/viewed')
             release.set()
@@ -387,7 +387,7 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
 def test_article_host_wait_blocks_new_jobs_across_restart_but_not_other_hosts(tmp_path):
     from tests.support.reader import wait_for
     from tests.support.subscriptions import add_source
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     def response(request):
         if request.url.host=='feeds.example':
@@ -422,7 +422,7 @@ def test_article_host_wait_blocks_new_jobs_across_restart_but_not_other_hosts(tm
 
 def test_regular_rss_window_refreshes_an_existing_linked_article(tmp_path):
     from tests.support.reader import wait_for
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     body=['First article text']
     def response(request):
         if request.url.host=='web.example':

@@ -40,8 +40,8 @@ def test_v3_contract_covers_all_real_reader_routes_and_responses(tmp_path):
 
 
 def test_real_settings_diagnostics_and_exact_history_obey_contract(tmp_path):
-    from tests.support.subscriptions import saved_sources
-    saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=synthetic','Synthetic','Без папки')])
+    from tests.support.subscriptions import configured_sources
+    configured_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa','Synthetic','Без папки')])
     spec = bundled()
     headers = {'Authorization':'Bearer synthetic'}
     with TestClient(create_app(tmp_path, token='synthetic')) as client:
@@ -54,6 +54,9 @@ def test_real_settings_diagnostics_and_exact_history_obey_contract(tmp_path):
         validate_reply(spec, '/api/v3/diagnostics', 'post', response)
         assert response.json()['entry']['message'] == 'example'
         feed = client.get('/api/v3/subscriptions', headers=headers).json()['feeds'][0]['id']
+        from tests.support.presence import presence
+        presence(client,'contract')
+        assert client.delete(f'/api/v3/feeds/{feed}/history',headers=headers).status_code == 200
         response = client.post(f'/api/v3/feeds/{feed}/history',json={'mode':'count','count':'9007199254740993'},headers=headers)
         assert response.status_code == 200
         validate_reply(spec,'/api/v3/feeds/{identity}/history','post',response)

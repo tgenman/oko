@@ -11,8 +11,7 @@ from typing import Any
 
 from oko.collection.adapters import AdapterException,AdapterErrorKind,PublicationContent
 from oko.collection.adapter_errors import source_error
-from oko.collection.contracts import (SourceError,SourceManifest,Material,FetchRequirements,
-    Publication,FetchResources,FetchResult,DiscoveryResult,ReplyPreview)
+from oko.collection.contracts import SourceError, SourceManifest, Material, Publication, FetchResult, DiscoveryResult, ReplyPreview
 from oko.collection.telegram.adapter import TelegramWebAdapter,reference,publication_reference,finish_window
 from oko.collection.telegram.contracts import HistoryEnvelope,HistorySelection
 from oko.collection.telegram.source import TelegramSource
@@ -26,7 +25,7 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
         manifest = manifest.model_copy(update={'preview_fragment': previous.source_manifest.preview_fragment})
     reply = manifest.post.get('reply_preview')
     title, text = value.metadata.title, str(manifest.post['text'])
-    reason = 'Вложения ещё не загружены' if value.media else ''
+    reason = 'Вложения ещё не загружены' if value.media else '; '.join(issue.message for issue in value.issues if issue.kind!=AdapterErrorKind.notice)
     if manifest.post_web_unavailable and text.strip():
         preview = manifest.preview_fragment or ''
         headline = next((line.strip(' \t\r\u2063\u200b\ufeff') for line in preview.splitlines() if any(char.isalnum() for char in line)), '')
@@ -61,7 +60,6 @@ def publication(value: PublicationContent) -> Publication:
 class TelegramWebSource(TelegramSource):
     """Collect descriptions through the common API; Store schedules every file."""
     independent_media = True
-    fetch_requirements=FetchRequirements()
 
     def publication_adapter(self) -> TelegramWebAdapter:
         if not hasattr(self, '_publication_adapter'):
@@ -89,9 +87,8 @@ class TelegramWebSource(TelegramSource):
                 selection=previous.selection.model_copy(update={'scan_complete':True,'paused':False,'enrolled_ids':()})
                 return DiscoveryResult((),previous.model_copy(update={'selection':selection,'position':state}).encode(),self.observation())
             if previous and previous.selection.scan_complete:
-                # Preserve the existing restriction-reclassification behavior
-                # until the storage migration: observe only the public page
-                # already used by a normal refresh, never enroll older items.
+                # Recheck restrictions in the observed public window without
+                # enrolling older publications.
                 from oko.collection.telegram.web import WebTelegram
                 assert isinstance(self.client, WebTelegram)
                 upper = state.get('observed_after', 0)
@@ -131,12 +128,9 @@ class TelegramWebSource(TelegramSource):
             scan_complete=complete, warnings=warnings, oldest=min((min(p.members) for p in result), default=None))
         envelope = HistoryEnvelope(adapter='web', selection=selection, position=state)
         return DiscoveryResult(result + observations, envelope.encode(), self.observation(),
-                               continuation=.1 if not complete else None)
+                               continuation=0 if not complete else None)
 
-    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult:
-        stage = resources.staging
-        if stage and not stage.admitted():
-            raise asyncio.CancelledError
+    async def fetch(self, publication: Publication) -> FetchResult:
         api = self.publication_adapter()
         try:
             value = await api.fetch(reference(publication.url))
@@ -146,7 +140,7 @@ class TelegramWebSource(TelegramSource):
             raise SourceError('Не удалось разобрать публикацию Telegram', code='malformed_publication', retryable=False)
         teaser = material(value, publication.teaser)
         # A failed file cannot stop retries of unfinished article metadata.
-        issues = [issue for issue in value.issues if issue.media_key is None and issue.kind!=AdapterErrorKind.notice]
+        issues = [issue for issue in value.issues if issue.kind!=AdapterErrorKind.notice]
         priority = {AdapterErrorKind.source_wait:3,AdapterErrorKind.temporary:2}
         issue = max(issues,key=lambda issue:(priority.get(issue.kind,1),issue.retry_at.timestamp() if issue.retry_at else 0),default=None)
         partial_error = source_error(AdapterException(issue)) if issue else None

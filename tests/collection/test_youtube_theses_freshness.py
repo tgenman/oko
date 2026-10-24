@@ -1,4 +1,4 @@
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 import json
 import httpx
@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 from oko.collection.contracts import Material, Publication
 from oko.storage.store import Store
 from tests.support.reader import HEADERS, wait_for
@@ -106,18 +106,17 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
 
 def test_changed_caption_text_requires_new_theses(tmp_path):
     class SavedCaptions:
-        fetch_requirements = FetchRequirements()
         changes = None
         text = 'First saved transcript'
 
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication(VIDEO, 'https://www.youtube.com/watch?v=' + VIDEO, 1800000000)]), 'one')
 
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material('Video', self.text, captions='available'))
 
     # Synthetic revisions exercise text freshness without querying real subtitles.
-    saved_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'a'*22, 'Video', 'Видео')])
+    configured_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'a'*22, 'Video', 'Видео')])
     with TestClient(create_app(tmp_path, token='test'), headers=HEADERS) as client:
         feed = client.get('/api/v3/subscriptions').json()['feeds'][0]['id']
     source, calls = SavedCaptions(), []
@@ -135,45 +134,3 @@ def test_changed_caption_text_requires_new_theses(tmp_path):
                     for r in calls if r.url.path == '/v1/chat/completions']
         assert [r['sources'][0]['text'] for r in requests] == [original['content']['text'], source.text]
         assert requests[0]['sources'][0]['version'] != requests[1]['sources'][0]['version']
-
-
-@pytest.mark.parametrize('interrupted', [False, True])
-def test_previous_caption_signature_is_upgraded_without_model_call(tmp_path, interrupted):
-    captions, calls = Captions(), []
-    options = dict(token='test', rss_enabled=True, rss_transport=transport(),
-                   youtube_captions=captions, ai_transport=model_transport(calls))
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp'})
-        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
-                   'model': 'local:latest', 'local_execution': True})
-        subscribe(client)
-        presence(client, 'reader')
-        original = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
-
-    # Seed the previously persisted format; acceptance is checked through HTTP.
-    store = Store(tmp_path, lambda point: None)
-    try:
-        signature = store.processing.theses._signature(original['id'], legacy=True)
-        path = store.path(original['id']).parent / 'theses.md'
-        raw, text = path.read_text().split('\n\n', 1)
-        header = json.loads(raw)
-        header['signature'] = signature
-        path.write_text(json.dumps(header) + '\n\n' + text)
-        with store.db:
-            store.db.execute('UPDATE thesis_inputs SET signature=? WHERE item=?', (signature, original['id']))
-        if interrupted:
-            def fault(point):
-                if point == 'after_theses_move':
-                    raise OSError('Interrupted signature upgrade')
-            store.fault = fault
-            with pytest.raises(OSError, match='Interrupted signature upgrade'):
-                store.processing.recover()
-    finally:
-        store.db.close()
-
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        presence(client, 'reader')
-        material = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
-        assert material['theses']['result'] == original['theses']['result']
-        assert sum(r.url.path == '/v1/chat/completions' for r in calls) == 1
-        assert captions.calls == [VIDEO]

@@ -2,13 +2,13 @@
 import asyncio
 import time
 
-from oko.collection.telegram.source import TelegramSource
+from oko.collection.telegram.client_channel_source import TelegramClientSource
 from tests.support.telegram import Telegram
 
 
 def test_discovery_returns_detached_metadata_and_continuation():
     class Client(Telegram):
-        metadata = dict(peer=-1001234567890, username='first', usernames=['first'], avatar='first-image')
+        metadata = dict(peer=-1001234567890, username='first', usernames=['first'], avatar='first-image',kind='channel',title='Fixture')
 
         async def info(self, account, peer):
             return self.metadata
@@ -18,17 +18,20 @@ def test_discovery_returns_detached_metadata_and_continuation():
 
     async def check():
         client = Client()
-        source = TelegramSource(client, 'fixture', -1001234567890, 1)
-        first = await source.discover(None)
+        source = TelegramClientSource(client, 'fixture', -1001234567890, 1)
+        source.initial_history=dict(mode='count',count=1,run='fixture')
+        pending=await source.discover(None)
+        assert pending.continuation is not None
+        first = await source.discover(pending.cursor)
         assert [p.id for p in first.publications] == ['11']
-        assert first.continuation == 0
+        assert first.continuation is None
         fetched = await source.fetch(first.publications[0])
         client.metadata['username'] = 'second'
         client.metadata['usernames'].append('second')
         client.metadata['avatar'] = None
         second = await source.discover(first.cursor)
         assert second.continuation is None
-        assert first.observation.identity.as_info() == dict(peer=-1001234567890, username='first', usernames=['first'], avatar='first-image')
+        assert first.observation.identity.as_info() == dict(peer=-1001234567890, username='first', usernames=['first'], avatar='first-image',kind='channel')
         assert fetched.observation.identity == first.observation.identity
         assert second.observation.identity.as_info()['avatar'] is None
         del client.metadata['avatar']
@@ -38,41 +41,6 @@ def test_discovery_returns_detached_metadata_and_continuation():
     asyncio.run(check())
 
 
-def test_history_returns_progress_and_detached_partial_error_together():
-    from oko.collection.contracts import SourceError
-    from oko.collection.telegram.contracts import HistoryEnvelope
-    from tests.support.telegram_history import Archive
-
-    class Client(Archive):
-        error = SourceError('Account limited', 0)
-        failed = False
-
-        async def history_page(self, account, peer, upper, before, since, **scope):
-            if before:
-                self.failed = True
-                self.error.remote_type = 'FloodWaitError'
-                raise self.error
-            return await super().history_page(account, peer, upper, before, since)
-
-        async def page(self, account, peer, after, since, **scope):
-            if self.failed:
-                self.error.label = 'A later attempt'
-            return await super().page(account, peer, after, since)
-
-    async def check():
-        source = TelegramSource(Client(), 'fixture', -1001234567890, 1)
-        source.initial_history = dict(mode='count', count=10, since=None, paused=False)
-        initial = await source.discover(None)
-        live = await source.discover(initial.cursor)
-        limited = await source.discover(live.cursor)
-        assert limited.publications == ()
-        assert limited.continuation == .1
-        assert limited.retry_error.remote_type == 'FloodWaitError'
-        assert HistoryEnvelope.decode(limited.cursor, adapter='client').selection.error == 'Account limited'
-        await source.discover(limited.cursor)
-        assert limited.retry_error.label == 'Account limited'
-
-    asyncio.run(check())
 
 
 def test_configuration_detaches_history_and_keeps_youtube_discovery_cache():
@@ -89,16 +57,17 @@ def test_configuration_detaches_history_and_keeps_youtube_discovery_cache():
 
     async def check():
         sources = Sources(None, 'demo', True, httpx.MockTransport(reply), None, NoCaptions(), None)
-        history = dict(mode='date', since=0)
-        settings = SourceSettings('video', 'youtube', 'https://www.youtube.com/feeds/videos.xml', 1, history)
+        history = dict(mode='count',count=1,run='fixture')
+        settings = SourceSettings('video', 'youtube', 'https://www.youtube.com/feeds/videos.xml?channel_id='+('UC'+'a'*22), 1, history)
         updates = sources.configure([settings])
         assert updates.created == ('video',)
         assert sources.description('video').startswith('YouTube:')
-        history['since'] = 4_000_000_000
-        result = await sources.sources['video'].discover(None)
+        history['count'] = 500
+        initial = await sources.sources['video'].discover(None)
+        result = await sources.sources['video'].discover(initial.cursor)
         assert [p.id for p in result.publications] == [VIDEO]
         # Applying the unchanged original settings must not discard cached titles.
-        original = SourceSettings('video', 'youtube', settings.url, 1, dict(mode='date', since=0))
+        original = SourceSettings('video', 'youtube', settings.url, 1, dict(mode='count',count=1,run='fixture'))
         assert sources.configure([original]).created == ()
         plain = Publication(VIDEO, 'https://www.youtube.com/watch?v='+VIDEO, 0)
         loaded = await sources.sources['video'].fetch(plain)

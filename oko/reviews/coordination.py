@@ -81,10 +81,6 @@ class ProcessingCoordination:
         CREATE TRIGGER IF NOT EXISTS processing_filter_changed AFTER UPDATE OF status,generation ON jobs
           WHEN NEW.kind='filter' AND (NEW.status IS NOT OLD.status OR NEW.generation IS NOT OLD.generation)
           BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
-        CREATE TRIGGER IF NOT EXISTS processing_filter_restored AFTER INSERT ON filter_restores
-          BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
-        CREATE TRIGGER IF NOT EXISTS processing_restore_changed AFTER UPDATE ON filter_restores
-          BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
         """)
         # Fixed domain operations, private to this module; no plugin registry.
         self._operations = {
@@ -107,16 +103,6 @@ class ProcessingCoordination:
 
     def recover(self) -> None:
         """Only startup scans the whole library, including interrupted file moves."""
-        self.store.db.executescript("""
-        CREATE TRIGGER IF NOT EXISTS processing_version_added AFTER INSERT ON content_versions
-          BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
-        CREATE TRIGGER IF NOT EXISTS processing_version_changed AFTER UPDATE OF fingerprint ON content_versions
-          WHEN NEW.fingerprint IS NOT OLD.fingerprint
-          BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
-        CREATE TRIGGER IF NOT EXISTS processing_current_changed AFTER UPDATE ON content_current
-          WHEN NEW.number IS NOT OLD.number
-          BEGIN INSERT INTO processing_dirty VALUES (NEW.item) ON CONFLICT(item) DO NOTHING; END;
-        """)
         with self.store.db:
             self.store.db.execute('INSERT OR IGNORE INTO processing_dirty SELECT id FROM items WHERE viewed=0')
         self.sync()
@@ -144,10 +130,7 @@ class ProcessingCoordination:
             # No suspension: changes made by this reconciliation are included
             # before removing its dirty marker. Interrupted passes retain it.
             with self.store.db:
-                canonical=self.store.publications.reconcile(item)
-            if not canonical:
-                self.store.filters.sync([item])
-                self.theses.sync([item])
+                self.store.publications.reconcile(item)
             with self.store.db:
                 self.store.db.execute('DELETE FROM processing_dirty WHERE item=?', (item,))
 
@@ -155,7 +138,8 @@ class ProcessingCoordination:
         """One independent periodic pass; the preceding stage only sets status."""
         status='pending_filtering' if kind=='filter' else 'pending_summary'
         items=[row[0] for row in self.store.db.execute(
-            'SELECT id FROM items WHERE platform IS NOT NULL AND viewed=0 AND status=?',(status,))]
+            """SELECT i.id FROM items i WHERE i.platform IS NOT NULL AND i.viewed=0 AND i.status=?
+                AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.item=i.id AND j.kind=? AND j.status!='cancelled')""",(status,kind))]
         operation=self.store.filters if kind=='filter' else self.theses
         for item in items:
             operation.sync([item])

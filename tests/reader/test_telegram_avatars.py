@@ -61,9 +61,9 @@ def test_web_avatar_is_saved_locally_without_browser_cdn_access(tmp_path):
 def test_sdk_downloads_small_avatar_once_per_photo_revision(tmp_path, monkeypatch):
     import asyncio
     import json
-    from tests.support.telegram_forum_sdk import forum_sdk
+    from tests.support.telegram_sdk import channel_sdk
     from oko.collection.telegram.source import LocalTelegram
-    env, trace = forum_sdk(tmp_path,monkeypatch)
+    env, trace = channel_sdk(tmp_path,monkeypatch)
     photo_id = tmp_path/'photo-id'
     photo_id.write_text('123')
     monkeypatch.setenv('SDK_AVATAR_FILE',str(photo_id))

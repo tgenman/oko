@@ -5,7 +5,7 @@ import sqlite3
 import httpx
 import pytest
 
-from tests.support.publication_pipeline import migrated_root
+from tests.support.publication_pipeline import publication_root
 from tests.reviews.test_processing_coordination import coordinated_transport
 from tests.support.app import create_app
 from tests.support.presence import presence
@@ -33,7 +33,7 @@ def setup(client):
 
 
 def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     photo=['first']
     def source(request):
@@ -67,7 +67,7 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
 
 
 def test_hidden_has_empty_blocks_original_and_no_restore_or_summary(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Реклама: купите курс.')])) )
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
@@ -75,7 +75,7 @@ def test_hidden_has_empty_blocks_original_and_no_restore_or_summary(tmp_path):
         card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards?show_hidden=true').json() if (c['filter']['result'] or {}).get('hidden')),None))
         row=stored(root,card['id'])
         assert row['status']=='filter_out' and row['filtered_content']['blocks']==[]
-        assert card['filter']['result']['can_restore'] is False
+        assert 'can_restore' not in card['filter']['result']
         assert row['filtered_content']['reason']
         assert row['content']['blocks'][0]['text']=='Реклама: купите курс.'
         assert not any(c['operation']=='theses' for c in calls)
@@ -83,7 +83,7 @@ def test_hidden_has_empty_blocks_original_and_no_restore_or_summary(tmp_path):
 
 
 def test_confirmed_empty_input_completes_without_model(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     text=['']
     photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/image.jpg\')"></a>'
@@ -114,7 +114,7 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
 
 def test_unavailable_input_waits_without_model_and_processes_when_retrieved(tmp_path):
     from tests.support.telegram_web import mark_post_unavailable
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     available=[False]
     def source(request):
@@ -136,7 +136,7 @@ def test_unavailable_input_waits_without_model_and_processes_when_retrieved(tmp_
 def test_rule_change_rejects_late_filter_and_uses_one_new_feed_snapshot(tmp_path):
     import asyncio
     import threading
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     started,release=threading.Event(),threading.Event()
     native=coordinated_transport(calls)
@@ -178,7 +178,7 @@ def test_rule_change_rejects_late_filter_and_uses_one_new_feed_snapshot(tmp_path
 def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_path):
     import asyncio
     import threading
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     calls=[]
     native=coordinated_transport(calls)
@@ -197,6 +197,7 @@ def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_
             configure_fast_web(client)
             client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
             feed=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()['feed_id']
+            wait_for(client,lambda:any(card['availability']=='available' for card in client.get('/api/v3/cards').json()))
             client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
             client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':False})
             client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'Filter'})
@@ -215,7 +216,7 @@ def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_
 def test_processing_does_not_wait_for_the_media_lane(tmp_path):
     import asyncio
     import threading
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     calls=[]
     async def source(request):
@@ -243,7 +244,7 @@ def test_processing_does_not_wait_for_the_media_lane(tmp_path):
 
 
 def test_article_retrieval_error_is_not_sent_as_publication_text(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     broken=[True]
     native=coordinated_transport(calls)
@@ -276,7 +277,7 @@ def test_article_retrieval_error_is_not_sent_as_publication_text(tmp_path):
 
 @pytest.mark.parametrize('invalid',['quote_removal','unknown_reference'])
 def test_invalid_model_output_does_not_become_a_result(tmp_path,invalid):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     native=coordinated_transport(calls)
     broken=[True]
@@ -309,7 +310,7 @@ def test_invalid_model_output_does_not_become_a_result(tmp_path,invalid):
 
 def test_local_retry_records_the_model_actually_used_and_ready_result_survives_choice_change(tmp_path):
     from tests.support.models import model_transport
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     selected=['local:latest']
     broken=[True]
     sent=[]
@@ -344,7 +345,7 @@ def test_local_retry_records_the_model_actually_used_and_ready_result_survives_c
 
 
 def test_failed_regeneration_retains_only_current_results_across_restart(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     broken=[False]
     text=['Original text']
@@ -360,6 +361,7 @@ def test_failed_regeneration_retains_only_current_results_across_restart(tmp_pat
         card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
         item=card['id']
         accepted=stored(root,item)
+        assert client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:new','local_execution':True}).status_code==200
         broken[0]=True
         assert client.post('/api/v3/materials/'+item+'/regenerate').status_code==200
         wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['diagnostic_message'])
@@ -377,7 +379,7 @@ def test_failed_regeneration_retains_only_current_results_across_restart(tmp_pat
 
 
 def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])) )
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
@@ -414,7 +416,7 @@ def test_codex_future_choices_preserve_results_and_explicit_regeneration_uses_ne
     class Choices(CodexService):
         async def catalog(self):
             return [dict(model=model,display_name=model,default=model=='synthetic',reasoning_efforts=['low','high'],default_reasoning_effort='low',fast_supported=True) for model in ('synthetic','synthetic-next')]
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     model=Choices()
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])) )
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,codex_client=model),headers=HEADERS) as client:
@@ -439,3 +441,25 @@ def test_codex_future_choices_preserve_results_and_explicit_regeneration_uses_ne
         metadata=stored(root,item)['processing_metadata']['summary']
         assert metadata['fast'] is True and metadata['reasoning_effort']=='high'
         assert len(model.inputs)==count+1
+
+
+def test_persisted_empty_job_completes_without_a_model_after_restart(tmp_path):
+    from tests.support.storage import database
+    root=publication_root(tmp_path)
+    calls=[]
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'')])))
+    options=dict(token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        setup(client)
+        item=settled(client)[0]['id']
+        wait_for(client,lambda:stored(root,item)['status']=='ready')
+    with database(root) as db:
+        db.execute("UPDATE items SET filtered_content='{}',summarized_content='{}',processing_metadata='{}',status='pending_filtering' WHERE id=?",(item,))
+        db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE kind='filter' AND item=?",(item,))
+        db.execute("DELETE FROM jobs WHERE kind='theses' AND item=?",(item,))
+        db.execute('DELETE FROM thesis_inputs WHERE item=?',(item,))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        row=wait_for(client,lambda:row if (row:=stored(root,item))['status']=='ready' else None)
+        assert row['processing_metadata']['filter']['reason']=='no_input'
+        assert row['processing_metadata']['summary']['reason']=='no_input'
+        assert calls==[]

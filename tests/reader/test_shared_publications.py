@@ -2,7 +2,7 @@
 import httpx
 import pytest
 
-from tests.support.publication_pipeline import migrated_root
+from tests.support.publication_pipeline import publication_root
 from tests.support.app import create_app
 from tests.support.reader import HEADERS,wait_for
 from tests.support.presence import presence
@@ -14,7 +14,7 @@ from tests.support.models import model_transport
 
 @pytest.fixture
 def shared(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         return httpx.Response(200,text=feed_xml().replace(VIDEO,'lmnopqrstuv') if any(value.endswith('c'*22) for value in request.url.params.values()) else feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
     class Captions:
@@ -63,7 +63,7 @@ def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
 
 def test_viewed_native_publication_can_be_collected_again_from_explicit_history(tmp_path):
     from tests.support.telegram import Telegram,connect_request
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     with TestClient(create_app(root,token='test',api_only=True,telegram_client=Telegram()),headers=HEADERS) as client:
         presence(client,'reader')
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
@@ -102,14 +102,22 @@ def test_shared_publication_respects_all_source_permissions_and_uses_one_result(
 
 
 def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_path):
-    import time,sqlite3
+    import time,sqlite3,asyncio,threading
     from tests.support.telegram import Telegram,connect_request
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     tick=[100.]
     numbers=[1,2,3]
+    locating=threading.Event()
     class Client(Telegram):
         async def page(self,*args):
             return dict(messages=[dict(id=n,date=time.time()-60,text='Post '+str(n),group=None,media=None) for n in numbers],more=False,gap=None)
+        async def history_page(self,account,peer,upper,before,since):
+            if before:
+                locating.set()
+                await asyncio.Event().wait()
+            rows=(await self.page())['messages']
+            latest=max(rows,key=lambda row:row['id'])
+            return dict(messages=[latest],upper=latest['id'],next_before=latest['id'],more=True)
         async def messages(self,account,peer,ids):
             return [m for m in (await self.page())['messages'] if m['id'] in ids]
     with TestClient(create_app(root,token='test',api_only=True,telegram_client=Client(),clock=lambda:tick[0],lease=10000,grace=10000),headers=HEADERS) as client:
@@ -122,10 +130,17 @@ def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_pa
             with sqlite3.connect(root/'state.sqlite') as db:
                 return bool(db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()[0])
         wait_for(client,cursor_saved)
+        tick[0]+=1
+        assert locating.wait(2)
         assert client.get('/api/v3/cards').json()==[]
         assert client.delete('/api/v3/feeds/'+feed+'/history').status_code==200
         tick[0]+=1
-        wait_for(client,lambda:client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']['progress']['scan_complete'])
+        def cancelled_cursor_saved():
+            from oko.collection.telegram.contracts import HistoryEnvelope
+            with sqlite3.connect(root/'state.sqlite') as db:
+                token=db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()[0]
+            return HistoryEnvelope.decode(token,adapter='client').position.get('initial_complete')
+        wait_for(client,cancelled_cursor_saved)
         numbers.append(4)
         tick[0]+=1
         assert client.post('/api/v3/collect').status_code==200
@@ -136,7 +151,7 @@ def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_pa
 
 def test_shared_media_download_continues_after_its_original_feed_is_deleted(tmp_path):
     import asyncio,threading
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     async def response(request):
         if request.url.path=='/feeds/videos.xml':
@@ -189,33 +204,12 @@ def test_shared_card_owner_and_importance_order_match_full_and_selective_http(sh
     assert before['data']['ids']!=after['data']['ids'] and before['version']!=after['version']
 
 
-def test_offline_migration_merges_only_proven_same_external_keys(tmp_path):
-    from oko.storage.migration import migrate_publications
-    from tests.support.youtube import History
-    source=tmp_path/'legacy'
-    def response(request):
-        return httpx.Response(200,text=feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
-    options=dict(token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response),youtube_history=History([VIDEO]))
-    with TestClient(create_app(source,**options),headers=HEADERS) as client:
-        presence(client,'reader')
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        for channel in (CHANNEL,'UC'+'b'*22):
-            add_sources(client,[('https://www.youtube.com/feeds/videos.xml?channel_id='+channel,channel,'Inbox')])
-        old=wait_for(client,lambda:(cards if len(cards:=client.get('/api/v3/cards').json())==2 and all(c['availability']=='available' for c in cards) else None))
-    report=migrate_publications(source,tmp_path/'converted')
-    assert report['success'],report
-    mappings=[m for m in report['publications'] if m['old_id'] in {c['id'] for c in old}]
-    assert len(mappings)==2 and len({m['new_id'] for m in mappings})==1
-    with TestClient(create_app(tmp_path/'converted'/'storage',**options),headers=HEADERS) as client:
-        cards=client.get('/api/v3/cards').json()
-        assert len(cards)==1
-        assert [f['count'] for f in client.get('/api/v3/reading-composition').json()['feeds']]==[1,1]
 
 
 def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(tmp_path):
     from oko.storage.store import Store
     from tests.support.telegram import Telegram,connect_request
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     options=dict(token='test',api_only=True,telegram_client=Telegram())
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         presence(client,'reader')

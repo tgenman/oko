@@ -1,11 +1,11 @@
-from oko.collection.external_media import saved_external, expected_incomplete, telegraph_partial
+from oko.collection.external_media import saved_external, expected_incomplete
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, Platform, MediaReference, PublicationContent, PublicationMetadata
 from datetime import datetime, timezone
-from oko.collection.telegram.reading import saved_telegraph
+from oko.collection.telegram.reading import saved_preview
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links, youtube_media
 from oko.reviews import publication_input
-from oko.storage.reading import reading_value, saved_document, retry_time, reader_now
+from oko.storage.reading import reading_value, retry_time, reader_now
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
 import hashlib
@@ -19,9 +19,7 @@ import time
 from collections.abc import Callable
 from typing import Any, Literal
 
-from oko.storage.aggregate_upgrade import remove_aggregates
-from oko.storage.versions import Versions
-from oko.storage.publications import Publications
+from oko.storage.publications import Publications, PUBLICATION_COLUMNS
 from oko.storage.media import MediaFiles
 from oko.storage.reader_versions import ReaderVersions, ReadingConnection
 from oko.storage.problems import Problems
@@ -31,7 +29,7 @@ from oko.collection.telegram.read_sync import ReadSync
 from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
-from oko.collection.contracts import ReplyPreview, SourceError, SourceDeleted, Attachment, Image, Material, Publication, DownloadStage, StagedPayload, SourceManifest
+from oko.collection.contracts import ReplyPreview, SourceError, SourceDeleted, Material, Publication, SourceManifest
 from oko.subscriptions.subscriptions import Subscriptions
 from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
@@ -72,74 +70,38 @@ class Store:
         self.wall_clock = wall_clock
         self.clock = clock
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from oko.storage.bootstrap import prepare
+        prepare(root)
         self.db = ReadingConnection(root / 'state.sqlite')
         self.db.row_factory = sqlite3.Row
         ReaderVersions.functions(self.db,self.clock,self.wall_clock)
-        # Reject unsupported topic migration before any PRAGMA/schema/data write.
-        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feeds'").fetchone():
-            columns = {r['name'] for r in self.db.execute('PRAGMA table_info(feeds)')}
-            if 'telegram_topic' in columns and self.db.execute('SELECT 1 FROM feeds WHERE telegram_topic IS NOT NULL').fetchone():
-                self.db.close()
-                raise sqlite3.DatabaseError('Telegram: требуется ручная миграция фидов отдельных тем; данные не изменены')
         self.db.execute('PRAGMA secure_delete=ON')
         self.db.execute('PRAGMA journal_mode=DELETE')
-        if self.db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+        if self.db.execute('PRAGMA quick_check').fetchone()[0]!='ok':
             raise sqlite3.DatabaseError('integrity')
-        self.db.executescript('''
-        CREATE TABLE IF NOT EXISTS items (
-          id TEXT PRIMARY KEY, source_id TEXT UNIQUE, url TEXT,
-          published REAL, viewed INTEGER DEFAULT 0, complete INTEGER DEFAULT 0,
-          feed_id TEXT DEFAULT 'demo', UNIQUE(feed_id,url));
+        publication_columns=','.join(name+' '+declaration for name,declaration in PUBLICATION_COLUMNS.items())
+        self.db.executescript('''CREATE TABLE IF NOT EXISTS items (
+          id TEXT PRIMARY KEY,source_id TEXT UNIQUE,url TEXT,published REAL,
+          viewed INTEGER DEFAULT 0,complete INTEGER DEFAULT 0,feed_id TEXT,
+          members TEXT DEFAULT '[]',published_known INTEGER DEFAULT 1,source_order INTEGER,'''+publication_columns+''');
         CREATE TABLE IF NOT EXISTS jobs (
-          id INTEGER PRIMARY KEY, kind TEXT, item TEXT DEFAULT '',
-          status TEXT DEFAULT 'pending', attempt INTEGER DEFAULT 0,
-          next REAL DEFAULT 0, generation INTEGER DEFAULT 0, error TEXT,
+          id INTEGER PRIMARY KEY,kind TEXT,item TEXT DEFAULT '',status TEXT DEFAULT 'pending',
+          attempt INTEGER DEFAULT 0,next REAL DEFAULT 0,generation INTEGER DEFAULT 0,error TEXT,
+          manual_once INTEGER DEFAULT 0,problem_code TEXT,retry_at REAL,retry_delay REAL NOT NULL DEFAULT 0,wait_scope TEXT,
           UNIQUE(kind,item));
-        CREATE TABLE IF NOT EXISTS execution_settings (
-          job INTEGER PRIMARY KEY, generation INTEGER, signature TEXT, parameters TEXT);
-        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY, signature TEXT);
+        CREATE TABLE IF NOT EXISTS execution_settings (job INTEGER PRIMARY KEY,generation INTEGER,signature TEXT,parameters TEXT);
+        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT);
+        CREATE TABLE IF NOT EXISTS thesis_inputs (item TEXT PRIMARY KEY,signature TEXT);
+        CREATE TABLE IF NOT EXISTS source_deleted (item TEXT PRIMARY KEY);
         ''')
-        columns = {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}
-        if 'manual_once' not in {row['name'] for row in self.db.execute('PRAGMA table_info(jobs)')}:
-            self.db.execute('ALTER TABLE jobs ADD COLUMN manual_once INTEGER DEFAULT 0')
-            self.db.commit()
-        if 'problem_code' not in {row['name'] for row in self.db.execute('PRAGMA table_info(jobs)')}:
-            self.db.execute('ALTER TABLE jobs ADD COLUMN problem_code TEXT')
-            self.db.commit()
-        if 'members' not in columns:
-            self.db.execute("ALTER TABLE items ADD COLUMN members TEXT DEFAULT '[]'")
-            self.db.commit()
-        if 'feed_id' not in columns:
-            self.db.execute("ALTER TABLE items ADD COLUMN feed_id TEXT DEFAULT 'demo'")
-            self.db.commit()
-        global_url_index = any(
-            index['unique'] and [column['name'] for column in self.db.execute(
-                'SELECT name FROM pragma_index_info(?)', (index['name'],))] == ['url']
-            for index in self.db.execute('PRAGMA index_list(items)').fetchall())
-        if global_url_index:
-            # Rebuild in one transaction. IDs, tombstones, paths and jobs retain
-            # their identities; a crash exposes either the old or new schema.
-            with self.db:
-                self.db.execute('BEGIN IMMEDIATE')
-                self.db.execute('''CREATE TABLE items_scoped (
-                  id TEXT PRIMARY KEY, source_id TEXT UNIQUE, url TEXT,
-                  published REAL, viewed INTEGER DEFAULT 0, complete INTEGER DEFAULT 0,
-                  feed_id TEXT DEFAULT 'demo', members TEXT DEFAULT '[]', UNIQUE(feed_id,url))''')
-                self.db.execute('INSERT INTO items_scoped SELECT id,source_id,url,published,viewed,complete,feed_id,members FROM items')
-                self.db.execute('DROP TABLE items')
-                self.db.execute('ALTER TABLE items_scoped RENAME TO items')
-        if 'published_known' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
-            self.db.execute('ALTER TABLE items ADD COLUMN published_known INTEGER DEFAULT 1')
-            self.db.commit()
-        if 'source_order' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
-            self.db.execute('ALTER TABLE items ADD COLUMN source_order INTEGER')
-            self.db.commit()
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
         self.db.execute('CREATE INDEX IF NOT EXISTS jobs_item ON jobs(item)')
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_running ON jobs(kind,item) WHERE status='running'")
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_active ON jobs(status,kind,item) WHERE status IN ('pending','running') OR error IS NOT NULL")
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_feed ON items(feed_id,id) WHERE viewed=0')
+        self.db.execute('CREATE INDEX IF NOT EXISTS items_feed_all ON items(feed_id,id)')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
+        self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_kind_item ON jobs(kind,item,next,id) WHERE status='pending'")
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_problems ON jobs(kind,item) WHERE problem_code IS NOT NULL OR error IS NOT NULL")
         self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
         self.publications = Publications(self)
@@ -159,10 +121,6 @@ class Store:
             self.db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE status='running'")
             self.db.execute("UPDATE jobs SET next=0 WHERE status='pending'")
         collection_jobs.recover(self)
-        self.versions = Versions(self)
-        self.publications.recover()
-        self.versions.recover()
-        remove_aggregates(self)
         self.recover_files()
         if self.db.execute("SELECT 1 FROM items WHERE feed_id='demo' LIMIT 1").fetchone():
             self.subscriptions.ensure_demo()
@@ -172,26 +130,12 @@ class Store:
         self.read_sync.recover()
 
     def recover_files(self) -> None:
-        # Never promote orphaned output: the pending fetch must produce a fresh result.
-        for p in (self.root / 'staging').iterdir():
-            row = self.db.execute('SELECT viewed FROM items WHERE id=?', (p.name,)).fetchone()
-            if row and row['viewed']:
-                continue  # The durable deletion job owns retries and error reporting.
-            shutil.rmtree(p) if p.is_dir() else p.unlink()
-        for p in (self.root / 'content').iterdir():
-            row = self.db.execute('SELECT * FROM items WHERE id=?', (p.name,)).fetchone()
-            if row and row['viewed']:
-                continue
-            if row is None or not row['complete']:
-                shutil.rmtree(p)
-        with self.db:
-            for row in self.db.execute('SELECT * FROM items WHERE complete=1 AND viewed=0').fetchall():
-                if row['platform'] is None and not self.path(row['id']).is_file():
-                    self.db.execute('UPDATE items SET complete=0 WHERE id=?', (row['id'],))
-                    self.db.execute("UPDATE jobs SET status='pending' WHERE kind='fetch' AND item=?", (row['id'],))
+        # No uncommitted publication/file output is promoted on restart.
+        staging=self.root/'staging'
+        for path in staging.iterdir():
+            if path.name not in ('_media','_telegram'):
+                shutil.rmtree(path) if path.is_dir() else path.unlink()
 
-    def path(self, item: str) -> Path:
-        return self.versions.path(item)
 
     def pause_history(self, feed: str, paused: bool) -> dict[str, Any]:
         self.subscriptions.check_owner('feed', feed)
@@ -217,165 +161,111 @@ class Store:
         with self.db:
             for row in self.db.execute('''SELECT DISTINCT i.id FROM items i JOIN media_files m ON m.publication_id=i.id
                 WHERE i.feed_id=? AND i.viewed=0''', (feed,)).fetchall():
-                self.media.retry(row['id'])
+                self.media.retry(row['id'],revalidate_ready=False)
         discovery = '' if feed == 'demo' else feed
         active = self.db.execute("""SELECT 1 FROM jobs WHERE kind='discover' AND item=?
-            AND (status='running' OR (status='pending' AND error IS NULL))""", (discovery,)).fetchone()
-        if active:
-            return
+            AND (status='running' OR (status='pending' AND error IS NULL AND next<=?))""", (discovery,self.clock())).fetchone()
         with self.db:
             history = self.subscriptions.history.status(feed)
             if history and not history.get('cancelled'):
                 self.subscriptions.history.pause(feed, False)
-            self.enqueue_discovery(feed)
-            self.db.execute("""UPDATE jobs SET status='pending',next=CASE
-                WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' THEN next ELSE 0 END,
-                generation=generation+1 WHERE kind='discover' AND item=? AND status!='running'""", (discovery,))
+            if not active:
+                self.enqueue_discovery(feed)
+                self.db.execute("""UPDATE jobs SET status='pending',next=CASE
+                    WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' OR (wait_scope IS NOT NULL AND retry_at>?) THEN next ELSE 0 END,
+                    retry_at=CASE WHEN wait_scope IS NOT NULL AND retry_at>? THEN retry_at ELSE NULL END,
+                    generation=generation+1 WHERE kind='discover' AND item=? AND status!='running'""", (self.wall_clock(),self.wall_clock(),discovery))
             for row in self.db.execute("""SELECT i.id,i.members,j.error,j.status FROM items i JOIN jobs j ON j.item=i.id AND j.kind='fetch'
                     WHERE i.feed_id=? AND i.viewed=0 AND j.status!='running'""", (feed,)).fetchall():
                 material = self.material(row['id'])
                 unavailable = self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone()
-                if material and not row['error'] and not unavailable and not self._needs_collection(row['id']):
+                manifest=SourceManifest.model_validate_json(json.dumps(self.original(row['id'])[0]['source_manifest'])) if material and material.get('complete') and self.original(row['id'])[0].get('source_manifest') else None
+                if material and not row['error'] and not unavailable and (material.get('full',False) or expected_incomplete(manifest)) and not self._needs_collection(row['id']):
                     continue
-                if row['members'] != '[]' and material and material['full']:
+                if row['members'] != '[]' and material and material.get('full',False):
                     continue
-                if row['error'] or unavailable or not material or not material['full']:
-                    self.youtube.reset(row['id'])
+                if row['error'] or unavailable or not material or not material.get('full',False):
                     self.db.execute("""UPDATE jobs SET manual_once=CASE WHEN (status='done' AND error IS NOT NULL)
                         OR item IN (SELECT item FROM source_deleted) THEN 1 ELSE manual_once END, status='pending',next=CASE
-                        WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' THEN next ELSE 0 END,
-                        generation=generation+1 WHERE kind='fetch' AND item=?""", (row['id'],))
+                        WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' OR (wait_scope IS NOT NULL AND retry_at>?) THEN next ELSE 0 END,
+                        retry_at=CASE WHEN wait_scope IS NOT NULL AND retry_at>? THEN retry_at ELSE NULL END,
+                        generation=generation+1 WHERE kind='fetch' AND item=?""", (self.wall_clock(),self.wall_clock(),row['id']))
             self.processing.retry_failed(feed)
 
-    def cursor_key(self, feed: str, namespace: str) -> str:
-        return 'cursor:' + namespace + ':' + feed if namespace else 'cursor' if feed == 'demo' else 'cursor:' + feed
+    def cursor(self, feed: str = 'demo') -> str | None:
+        row=self.db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()
+        return str(row[0]) or None if row else None
 
-    def cursor(self, feed: str = 'demo', namespace: str = '') -> str | None:
-        if self.publications.feed(feed):
-            return str(self.db.execute('SELECT cursor FROM feeds WHERE id=?', (feed,)).fetchone()[0]) or None
-        row = self.db.execute("SELECT value FROM state WHERE key=?", (self.cursor_key(feed, namespace),)).fetchone()
-        return row[0] if row else None
-
-    def discovered(self, publications: list[Publication], cursor: str, job: Job, feed: str = 'demo', namespace: str = '', *, description: str | None = None, successful: bool = True) -> None:
+    def discovered(self,publications: list[Publication],cursor: str,job: Job,feed: str = 'demo',namespace: str = '',*,description: str | None = None,successful: bool = True,source_order: tuple[ExternalKey,...] = ()) -> None:
         if not self.valid(job):
             return
-        target = self.publications.feed(feed)
-        plans = self.publications.plan(feed, publications) if target else {}
+        plans=self.publications.plan(feed,publications)
         with self.db:
-            history_items = []
-            envelope = HistoryEnvelope.decode(cursor, adapter='client' if namespace == 'telegram' else 'web') if namespace in ('telegram', 'telegram-web') else None
-            selection = json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
-            history_ids = set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_ids', selection.get('history_enroll', [])))
-            for p in publications:
-                item = hashlib.sha256((feed + ':' + p.id).encode()).hexdigest()[:32]
-                if not target and p.observed_only and not self.db.execute('SELECT 1 FROM items WHERE id=?', (item,)).fetchone():
+            history_items=[]
+            envelope=HistoryEnvelope.decode(cursor,adapter='client' if namespace=='telegram' else 'web') if namespace in ('telegram','telegram-web') else None
+            selection=json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
+            enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
+            ordered=source_order
+            known={ExternalKey(platform,row['external_id']):row['source_order'] for platform in {key.platform for key in ordered}
+                for row in self.db.execute("SELECT external_id,source_order FROM items WHERE platform=? AND source_order IS NOT NULL AND external_id IN (SELECT value FROM json_each(?))",
+                    (platform.value,json.dumps([key.external_id for key in ordered if key.platform==platform])))}
+            anchor=next((index for index in reversed(range(len(ordered))) if ordered[index] in known),None)
+            # Positive ranks leave room for later uploads and earlier history.
+            base_order=known[ordered[anchor]]+anchor if anchor is not None else 1_000_000_000
+            orders={key:base_order-index for index,key in enumerate(ordered)}
+            for publication in publications:
+                plan=plans.get(publication.id)
+                if plan is None:
                     continue
-                source_id = p.id if feed == 'demo' else feed + ':' + p.id
-                existing = self.db.execute('SELECT id,source_id,url FROM items WHERE source_id=?', (source_id,)).fetchone()
-                if target:
-                    plan = plans.get(p.id)
-                    if plan is None:
-                        continue
-                    item, source_id = plan.item, plan.source_id
-                    existing = self.db.execute('SELECT id,source_id,url FROM items WHERE id=?', (item,)).fetchone()
-                if envelope and p.members and not existing:
-                    placeholders = ','.join('?' for _ in p.members)
-                    matches = self.db.execute(f"SELECT DISTINCT i.id,i.source_id,i.url FROM items i JOIN json_each(i.members) m WHERE i.feed_id=? AND m.value IN ({placeholders})", (feed,*p.members)).fetchall()
-                    if len(matches)>1:
-                        raise ValueError('Conflicting Telegram album membership')
-                    if matches:
-                        existing = matches[0]
-                        item,source_id = existing['id'],existing['source_id']
-                if existing and existing['url'] != p.url:
-                    if envelope or target:
-                        self.db.execute('UPDATE items SET url=? WHERE id=?', (p.url,existing['id']))
-                    elif not (p.members and p.id.startswith('album:')):
-                        source_id = feed + ':' + p.url
-                        item = hashlib.sha256(source_id.encode()).hexdigest()[:32]
-                inserted = self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members,published_known) VALUES (?,?,?,?,?,?,?)',
-                                (item, source_id, p.url, p.published, feed, json.dumps(p.members), p.published_known))
-                if target:
-                    if p.adapter_reference is None:
-                        raise ValueError('Adapter did not return a publication external key')
-                    self.publications.identify(item, p.adapter_reference)
-                    self.db.execute('INSERT OR IGNORE INTO feed_publications VALUES (?,?)', (feed, item))
-                if p.teaser and (inserted.rowcount or target and plans.get(p.id) and plans[p.id].content is not None):
-                    planned = plans.get(p.id)
-                    if target:
-                        assert planned and planned.content and planned.fingerprint
-                        self.publications.publish(item,planned.content,planned.fingerprint)
-                    else:
-                        prepared=self.versions.prepare(item,p.teaser)
-                        self.versions.publish(item,prepared,False)
-                    self.db.execute('UPDATE items SET complete=1 WHERE id=?', (item,))
-                row = self.db.execute('SELECT * FROM items WHERE source_id=?', (source_id,)).fetchone()
-                if row and p.published_known and not row['published_known']:
-                    self.db.execute('UPDATE items SET published=?,published_known=1 WHERE id=?', (p.published, row['id']))
-                    if target:
-                        self.db.execute('UPDATE items SET published_at=? WHERE id=?', (p.published, row['id']))
-                if row and p.id in history_ids:
-                    history_items.append(row['id'])
-                if row and row['viewed'] and namespace=='telegram-web':
-                    self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(sorted(set(json.loads(row['members'])) | set(p.members))),row['id']))
-                needs_fetch = (p.teaser is None or p.teaser.adapter_content is None or p.teaser.adapter_content.needs_fetch) if target else not envelope or bool(row and self._needs_collection(row['id'],p.teaser))
-                if target and row and p.members and set(p.members)!=set(json.loads(row['members'])):
+                item=plan.item
+                self.db.execute('INSERT OR IGNORE INTO items(id,source_id,url,published,feed_id,members,published_known) VALUES (?,?,?,?,?,?,?)',
+                    (item,plan.source_id,publication.url,publication.published,feed,json.dumps(publication.members),publication.published_known))
+                if publication.adapter_reference is None:
+                    raise ValueError('Adapter did not return a publication external key')
+                rank=orders.get(publication.adapter_reference.key)
+                if rank is not None and not publication.published_known:
+                    self.db.execute('UPDATE items SET source_order=? WHERE id=? AND source_order IS NOT ?',(rank,item,rank))
+                self.publications.identify(item,publication.adapter_reference)
+                self.db.execute('INSERT OR IGNORE INTO feed_publications VALUES (?,?)',(feed,item))
+                if plan.content is not None:
+                    assert plan.fingerprint is not None
+                    self.publications.publish(item,plan.content,plan.fingerprint)
+                    self.db.execute('UPDATE items SET complete=1 WHERE id=?',(item,))
+                row=self.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone()
+                if publication.published_known and not row['published_known']:
+                    self.db.execute('UPDATE items SET published=?,published_known=1,published_at=? WHERE id=?',(publication.published,publication.published,item))
+                if publication.id in enrolled:
+                    history_items.append(item)
+                needs_fetch=publication.teaser is None or publication.teaser.adapter_content is None or publication.teaser.adapter_content.needs_fetch
+                if publication.members and set(publication.members)!=set(json.loads(row['members'])):
                     needs_fetch=True
-                if target and p.observed_only:
-                    needs_fetch = bool(row and self._needs_collection(row['id'],p.teaser))
-                if row and not row['viewed'] and needs_fetch and not self.db.execute("SELECT 1 FROM source_deleted WHERE item=?", (row['id'],)).fetchone():
-                    members = sorted(set(json.loads(row['members'])) | set(p.members))
-                    if members != json.loads(row['members']):
-                        self.db.execute('UPDATE items SET members=? WHERE id=?', (json.dumps(members), row['id']))
-                        self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (row['id'],))
-                    self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done' AND (jobs.error IS NULL OR jobs.problem_code IS NULL)", (row['id'],))
-            if 'youtube_history' in selection:
-                # A new prefix can overlap an older, longer selection. Reorder
-                # retained history after that prefix instead of keeping colliding ranks.
-                positions = {feed + ':' + entry['id']: rank for rank, entry in enumerate(selection['youtube_history']['entries'])}
-                rows = self.db.execute('SELECT id,source_id,source_order FROM items WHERE feed_id=? ORDER BY source_order,id', (feed,)).fetchall()
-                prefix = sorted((row for row in rows if row['source_id'] in positions), key=lambda row: positions[row['source_id']])
-                retained = [row for row in rows if row['source_order'] is not None and row['source_id'] not in positions]
-                self.db.executemany('UPDATE items SET source_order=? WHERE id=?',
-                                    [(rank, row['id']) for rank, row in enumerate(prefix + retained) if row['source_order'] != rank])
-            if 'history_ids' in selection:
-                self.subscriptions.history.freeze(feed, history_items)
-                if 'warnings' in selection:
-                    self.subscriptions.history.warnings(feed, selection['warnings'])
-            if envelope and self.subscriptions.history.status(feed):
-                self.subscriptions.history.enroll(feed, history_items, envelope.selection.scan_complete)
-                self.subscriptions.history.telegram_state(feed, envelope.selection)
-            if 'history_enroll' in selection or envelope:
-                if not envelope:
-                    self.subscriptions.history.enroll(feed, history_items, selection['scan_complete'])
+                if publication.observed_only:
+                    needs_fetch=self._needs_collection(item,publication.teaser)
+                if needs_fetch and not self.publications.source_deleted(item):
+                    members=sorted(set(json.loads(row['members']))|set(publication.members))
+                    if members!=json.loads(row['members']):
+                        self.db.execute('UPDATE items SET members=? WHERE id=?',(json.dumps(members),item))
+                        self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?",(item,))
+                    self.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1 WHERE jobs.status='done' AND (jobs.error IS NULL OR jobs.problem_code IS NULL)",(item,))
+            if envelope or 'history_enroll' in selection:
+                self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
+                if envelope:
+                    self.subscriptions.history.telegram_state(feed,envelope.selection)
                 for item in history_items:
-                    row = self.db.execute('SELECT viewed,complete FROM items WHERE id=?', (item,)).fetchone()
-                    if row['viewed']:
-                        self.subscriptions.history.viewed(item)
-                    elif self.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (item,)).fetchone():
-                        self.subscriptions.history.failed(item, unavailable=True)
-                    elif self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status='done'", (item,)).fetchone():
-                        material = self.material(item)
-                        if material:
-                            self.subscriptions.history.saved(item, material.get('full', False))
-                    elif target and row['complete']:
-                        self.subscriptions.history.saved(item, bool(self.original(item)[0].get('full')))
+                    row=self.db.execute('SELECT complete FROM items WHERE id=?',(item,)).fetchone()
+                    if self.publications.source_deleted(item):
+                        self.subscriptions.history.failed(item,unavailable=True)
+                    elif row['complete']:
+                        self.subscriptions.history.saved(item,bool(self.original(item)[0].get('full')))
             if selection:
-                self.subscriptions.history.discovery_state(feed, selection)
-            if envelope:
-                candidates = self.db.execute("SELECT item FROM jobs WHERE kind='fetch' AND status='done' AND (error IS NULL OR problem_code IS NULL) AND item IN (SELECT id FROM items WHERE feed_id=? AND viewed=0 AND members!='[]' AND id NOT IN (SELECT item FROM source_deleted))", (feed,)).fetchall()
-                for candidate in ([] if target else candidates):
-                    if self._needs_collection(candidate['item']):
-                        self.db.execute("UPDATE jobs SET status='pending',next=0,error=NULL,generation=generation+1 WHERE kind='fetch' AND item=?", (candidate['item'],))
-                if namespace == 'telegram':
-                    self.read_sync.observed(feed, tuple(m for p in publications for m in p.members), cursor)
+                self.subscriptions.history.discovery_state(feed,selection)
+            if envelope and namespace=='telegram':
+                self.read_sync.observed(feed,tuple(member for publication in publications for member in publication.members),cursor)
             if successful:
-                self.subscriptions.details.record(feed, 'updated')
-            self.subscriptions.details.description(feed, description)
+                self.subscriptions.details.record(feed,'updated')
+            self.subscriptions.details.description(feed,description)
             self.fault('before_discovery_commit')
-            if target:
-                self.db.execute('UPDATE feeds SET cursor=?,description=COALESCE(?,description) WHERE id=?', (cursor, description, feed))
-            else:
-                self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.cursor_key(feed, namespace), cursor))
+            self.db.execute('UPDATE feeds SET cursor=?,description=COALESCE(?,description) WHERE id=?',(cursor,description,feed))
             self.finish(job)
 
     def source_http_until(self, scope: str) -> float:
@@ -400,15 +290,10 @@ class Store:
         material = self.material(item)
         if not material or not material.get('complete',True):
             return True
-        canonical = self.publications.owns(item)
-        header, _ = self.original(item) if material and not material['full'] else ({}, '')
+        header, _ = self.original(item) if material and not material.get('full',False) else ({}, '')
         linked_partial = expected_incomplete(SourceManifest.model_validate_json(json.dumps(header['source_manifest']))) if header.get('source_manifest') else False
-        if not canonical and not material['full'] and not (linked_partial or material.get('external_only') or material.get('post_web_unavailable') and not material.get('reason')):
-            return True
-        if material['full']:
+        if material.get('full',False):
             return bool(observed and observed.source_manifest and observed.source_manifest.post_web_unavailable and not material.get('post_web_unavailable'))
-        if not canonical and not self.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status='done' AND error IS NULL", (item,)).fetchone():
-            return True
         if not observed or not observed.source_manifest:
             return False
         header, _ = self.original(item)
@@ -431,13 +316,12 @@ class Store:
     def retry_material(self, item: str) -> bool:
         if not self._has_unviewed(item):
             return False
-        if self.publications.active:
-            with self.db:
-                publication_links.retry(self,item)
         with self.db:
-            self.youtube.reset(item)
-            self.media.retry(item)
+            publication_links.retry(self,item)
+        with self.db:
+            self.media.retry(item,revalidate_ready=False)
             self.enqueue_fetch(item)
+            self.db.execute("UPDATE jobs SET manual_once=1 WHERE kind='fetch' AND item=?",(item,))
         return True
 
     def enqueue_fetch(self, item: str) -> None:
@@ -450,19 +334,19 @@ class Store:
 
     @reading_value
     def item_feed(self, item: str) -> str:
-        row = self.db.execute('SELECT feed_id FROM items WHERE id=?', (item,)).fetchone()
+        row = material_read.item(self.db,item)
         if row is None:
             owner = self.media.owner(item)
-            row = self.db.execute('SELECT feed_id FROM items WHERE id=?', (owner,)).fetchone()
+            row = material_read.item(self.db,owner) if owner else None
         if row is None:
             raise LookupError('Publication not found')
-        if row[0] is None:
+        if row['feed_id'] is None:
             root=self.db.execute('''SELECT i.feed_id FROM publication_links l JOIN items i ON i.id=l.source_publication_id
                 WHERE l.target_publication_id=? AND i.viewed=0 AND i.feed_id IS NOT NULL ORDER BY i.id LIMIT 1''',(item,)).fetchone()
             if root:
                 return str(root[0])
             return ''
-        return str(row[0])
+        return str(row['feed_id'])
 
     def feed_status(self, feed: str, **state: Any) -> None:
         with self.db:
@@ -472,9 +356,13 @@ class Store:
         return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key LIKE 'feed-status:%'")]
 
     def ready_sources(self, feeds: list[str]) -> int:
-        return sum(1 for feed in feeds if not self.db.execute(
-            "SELECT 1 FROM jobs WHERE status IN ('pending','running') AND kind!='read' AND (item=? OR item IN (SELECT id FROM items WHERE feed_id=?))",
-            ('' if feed == 'demo' else feed, feed)).fetchone())
+        if not feeds:
+            return 0
+        return int(self.db.execute("""SELECT count(*) FROM json_each(?) f WHERE
+            NOT EXISTS (SELECT 1 FROM jobs j WHERE j.item=CASE f.value WHEN 'demo' THEN '' ELSE f.value END
+                AND j.status IN ('pending','running') AND j.kind!='read')
+            AND NOT EXISTS (SELECT 1 FROM items i JOIN jobs j ON j.item=i.id WHERE i.feed_id=f.value
+                AND j.status IN ('pending','running') AND j.kind!='read')""",(json.dumps(feeds),)).fetchone()[0])
 
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None) -> Job | None:
         query = "SELECT * FROM jobs WHERE status='pending' AND next<=? AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL)"
@@ -488,24 +376,37 @@ class Store:
             placeholders = ','.join('?' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('?' for _ in dependencies) or "''"
-            query += f" AND kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND (i.feed_id IN ({placeholders}) OR i.feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=i.id AND root.viewed=0 AND root.feed_id IN ({dependency_keys}))))"
+            # CROSS JOIN keeps dependencies root→link→article; reordering multiplies roots by feedless items.
+            query += f""" AND kind='download_media' AND item IN (
+                SELECT m.id FROM items i JOIN media_files m ON m.publication_id=i.id
+                    WHERE i.viewed=0 AND i.feed_id IN ({placeholders})
+                UNION SELECT m.id FROM items root CROSS JOIN publication_links l ON l.source_publication_id=root.id
+                    CROSS JOIN items i ON i.id=l.target_publication_id JOIN media_files m ON m.publication_id=i.id
+                    WHERE root.viewed=0 AND root.feed_id IN ({dependency_keys}) AND i.viewed=0 AND i.feed_id IS NULL)"""
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('?' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('?' for _ in dependencies) or "''"
-            query += f" AND (kind IN ('delete','feed-delete') OR (kind IN ('discover','read') AND item IN ({placeholders})) OR (kind='fetch' AND item IN (SELECT id FROM items WHERE feed_id IN ({placeholders}) OR feed_id IS NULL AND EXISTS (SELECT 1 FROM publication_links l JOIN items root ON root.id=l.source_publication_id WHERE l.target_publication_id=items.id AND root.viewed=0 AND root.feed_id IN ({dependency_keys})))))"
+            query += f""" AND id IN (
+                SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
+                UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('discover','read') AND item IN ({placeholders})
+                UNION SELECT id FROM jobs WHERE status='pending' AND kind='fetch' AND item IN (
+                    SELECT own.id FROM items own WHERE own.viewed=0 AND own.feed_id IN ({placeholders})
+                    UNION SELECT i.id FROM items root CROSS JOIN publication_links l ON l.source_publication_id=root.id
+                        CROSS JOIN items i ON i.id=l.target_publication_id
+                        WHERE root.viewed=0 AND root.feed_id IN ({dependency_keys}) AND i.feed_id IS NULL AND i.viewed=0))"""
         if media_only:
-            subtitles="""SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id
+            subtitles="""SELECT 1 FROM media_files m JOIN items i ON i.id=m.publication_id
                 JOIN json_each(i.content,'$.blocks') b ON json_extract(b.value,'$.media_id')=m.id
-                WHERE json_extract(b.value,'$.role')='subtitles'"""
-            query += ' AND item '+('IN' if captions_only else 'NOT IN')+' ('+subtitles+')'
+                WHERE m.id=jobs.item AND i.platform='youtube' AND json_extract(b.value,'$.role')='subtitles'"""
+            query += ' AND '+('EXISTS' if captions_only else 'NOT EXISTS')+' ('+subtitles+')'
         if not include_deletions:
             query += " AND kind NOT IN ('delete','feed-delete')"
         blocked_history = """SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed
             WHERE (h.paused=1 OR (h.scan_complete=0 AND (json_extract(h.selection,'$.mode')='count'
                 OR h.feed IN (SELECT id FROM feeds WHERE transport='rss'))))"""
-        # The legacy schema permits NULL IDs: retain IN's three-valued semantics
+        # NULL job items must retain IN's three-valued semantics
         # for those rows. Ordinary publications use an indexed membership lookup.
         query += f""" AND NOT (kind='fetch' AND CASE
             WHEN jobs.item IS NULL OR EXISTS (SELECT 1 FROM history_members WHERE item IS NULL)
@@ -535,24 +436,12 @@ class Store:
         row = self.db.execute('SELECT status,generation,kind,item FROM jobs WHERE id=?', (job.id,)).fetchone()
         return bool(row and row['status'] == 'running' and row['generation'] == job.generation and row['kind'] == job.kind and row['item'] == job.item)
 
-    def download_stage(self, job: Job, admitted: Callable[[], bool] | None = None) -> DownloadStage:
-        if not self.valid(job):
-            raise ValueError('expired download job')
-        directory = self.root/'staging'/'_downloads'/(str(job.id)+'-'+str(job.generation)+'-'+secrets.token_hex(8))
-        directory.mkdir(parents=True,mode=0o700)
-        return DownloadStage(directory,job.id,job.generation,admitted or (lambda:self.valid(job)))
 
-    def _retained_payload(self, path: Path, staging: DownloadStage | None) -> bytes | StagedPayload:
-        if staging is None:
-            return path.read_bytes()
-        retained = staging.path/('retained-'+path.name)
-        os.link(path,retained)
-        return StagedPayload(retained,retained.stat().st_size,self.versions.file_digest(retained))
 
-    def publication(self, item: str, staging: DownloadStage | None = None) -> Publication | None:
+    def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM items WHERE id=? AND viewed=0', (item,)).fetchone()
-        if row and row['platform'] is not None:
-            header, text = (self.publications.original(item) if row['content']!='{}' else saved_document(self.path(item))) if row['complete'] else ({},'')
+        if row:
+            header, text = self.publications.original(item) if row['complete'] else ({},'')
             refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
                 for m in self.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,)) if m['source_locator'])
             last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
@@ -563,95 +452,78 @@ class Store:
                 source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
                 reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None,adapter_content=last_description) if row['complete'] else None
             return Publication(row['source_id'].split(':',1)[1],row['url'],row['published'],teaser,tuple(json.loads(row['members'])),bool(row['published_known']),adapter_reference=last_description.metadata.reference)
-        fallback = self.material(item) if row else None
-        teaser = Material(fallback['title'], fallback['text'], fallback.get('full', False), images=tuple(Image(Path(url).name, (self.path(item).parent / Path(url).name).read_bytes()) for url in fallback.get('images', []) if (self.path(item).parent / Path(url).name).is_file()), captions=fallback.get('captions'), description=fallback.get('description', ''), reply_preview=ReplyPreview.model_validate(fallback['reply_preview']) if fallback.get('reply_preview') else None, attachments=tuple(Attachment(Path(a['url']).name, self._retained_payload(self.path(item).parent / Path(a['url']).name, staging), a['kind'], a['mime']) for a in fallback.get('attachments', []) if (self.path(item).parent / Path(a['url']).name).is_file())) if fallback else None
-        if teaser and fallback:
-            header = json.loads(self.path(item).read_text().split('\n\n',1)[0]) if self.path(item).is_file() else {}
-            manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if 'source_manifest' in header else None
-            teaser = replace(teaser, reason=fallback.get('reason', ''), source_manifest=manifest)
-        return Publication(row['source_id'] if row['feed_id'] == 'demo' else row['source_id'].split(':', 1)[1], row['url'], row['published'], teaser, tuple(json.loads(row['members'])), bool(row['published_known'])) if row else None
+        return None
 
-    def save(self, job: Job, material: Material, now: float | None = None, staging: DownloadStage | None = None) -> None:
-        item = job.item
-        if not self.valid(job) or not self._has_unviewed(item):
+    def save(self, job: Job, material: Material) -> None:
+        if not self.valid(job) or not self._has_unviewed(job.item):
             return
-        previous = self.material(item)
-        if material.source_manifest and material.source_manifest.post_web_unavailable and previous and (previous['text'].strip() or previous['attachments'] or previous['images']):
-            header, _ = self.original(item)
-            names = [a['name'] for a in header.get('attachments', [])]
-            manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else material.source_manifest
-            names.extend(r.name for r in manifest.resources if r.status == 'loaded')
-            if any(not (self.path(item).parent / name).is_file() for name in names):
+        previous = self.publication(job.item)
+        if material.source_manifest and material.source_manifest.post_web_unavailable:
+            media=[dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id=?',(job.item,))]
+            missing=[row for row in media if row['storage_key'] and not (self.root/row['storage_key']).is_file() or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
+            if missing:
+                error=SourceError('Локальный файл вложения недоступен',code='media-unavailable',retryable=False)
+                content=json.loads(self.db.execute('SELECT content FROM items WHERE id=?',(job.item,)).fetchone()[0])
+                content['extra']['_reader']['source_manifest']['post_web_unavailable']=True
+                for row in missing:
+                    row.update(status='unavailable',reason=error.label,storage_key=None)
+                self.media.project_header(content,media)
                 with self.db:
-                    self._finish_fetch(job, replace(material, collection_error=SourceError('Локальный файл вложения недоступен', code='media-unavailable')), self.clock() if now is None else now)
+                    if not self.valid(job):
+                        return
+                    for row in missing:
+                        self.db.execute("UPDATE media_files SET status='unavailable',reason=?,storage_key=NULL WHERE id=?",(error.label,row['id']))
+                    self.db.execute('UPDATE items SET content=? WHERE id=?',(json.dumps(content,ensure_ascii=False),job.item))
+                    self._finish_fetch(job,replace(material,collection_error=error))
+                    self.read_versions.media_changed(job.item)
                 return
-            retained = self.publication(item)
+        if (material.source_manifest and material.source_manifest.post_web_unavailable
+                and previous and previous.teaser and previous.teaser.source_manifest):
+            retained = previous.teaser
+            manifest = retained.source_manifest
+            assert manifest is not None
             accept_preview = (material.source_manifest.preview_fragment is not None
                 and (manifest.preview_fragment is not None or
                      manifest.post.get('text') == material.source_manifest.post.get('text')
-                     and not manifest.articles and all(r.status == 'unsupported' and r.sha256 is None
+                     and all(r.status == 'unsupported' and r.sha256 is None
                          and r.reason == 'Пост не поддерживается публичным предпросмотром' for r in manifest.resources)))
-            if retained and retained.teaser and not accept_preview:
-                material = replace(retained.teaser, full=False, members=material.members,
-                    source_manifest=manifest.model_copy(update={'post_web_unavailable':True}), collection_error=material.collection_error)
-        if self.publications.owns(item):
-            canonical=self.publications.prepare(item,material,self.root/'content'/item/'1')
-            fingerprint=publication_input.digest(canonical[0])
-            self.fault('after_file_move')
-            with self.db:
-                if not self.valid(job) or not self._has_unviewed(item):
-                    return
-                if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
-                    self.publications.identify(item,material.adapter_content.metadata.reference)
-                self.publications.publish(item,canonical,fingerprint)
-                self.db.execute('UPDATE items SET complete=1,members=? WHERE id=?', (json.dumps(material.members), item))
-                self._finish_fetch(job, material, self.clock() if now is None else now)
-            self.publications.recover(item)
-            self.processing.sync()
-            with self.db:
-                self.publications.status(item)
-            return
-        if previous and previous.get('full', False) and not material.full and not material.collection_error and material.source_manifest and telegraph_partial(material.source_manifest) and not material.source_manifest.download_partial:
-            with self.db:
-                self.finish(job)
-                self.subscriptions.history.saved(job.item, True)
-            return
-        if material.members and previous and previous.get('full', False) and (not material.full or material.collection_error) and not (expected_incomplete(material.source_manifest) and not material.collection_error):
-            error = material.collection_error or SourceError(material.reason or 'Повторная загрузка не завершена',
-                retryable=not bool(material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources)))
-            if error.retryable and material.source_manifest and any(r.status == 'unsupported' for r in material.source_manifest.resources):
-                error = SourceError(material.reason or error.label, retryable=False)
-            with self.db:
-                self._finish_fetch(job, replace(material, collection_error=error), self.clock() if now is None else now)
-            return
-        prepared = self.versions.prepare(item, material, job, staging)
+            if (retained.text.strip() or any(resource.status=='loaded' for resource in manifest.resources)) and not accept_preview:
+                material = replace(retained, full=False, members=material.members,
+                    source_manifest=manifest.model_copy(update={'post_web_unavailable':True}),
+                    adapter_content=None, collection_error=material.collection_error)
+        intent=self.db.execute('SELECT manual_once FROM jobs WHERE id=?',(job.id,)).fetchone()
+        old_media={row['id']:dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id=?',(job.item,))} if intent and intent[0] else {}
+        prepared=self.publications.prepare(job.item,material)
+        fingerprint=publication_input.digest(prepared[0])
         self.fault('after_file_move')
         with self.db:
-            self.versions.publish(item, prepared, True)
-            self.db.execute('UPDATE items SET complete=1 WHERE id=? AND viewed=0', (item,))
-            if material.source_manifest and material.source_manifest.source_url:
-                self.db.execute('UPDATE items SET url=? WHERE id=?', (material.source_manifest.source_url,item))
+            if not self.valid(job) or not self._has_unviewed(job.item):
+                return
+            if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
+                self.publications.identify(job.item,material.adapter_content.metadata.reference)
+            self.publications.publish(job.item,prepared,fingerprint)
+            self.db.execute('UPDATE items SET complete=1 WHERE id=?',(job.item,))
             if material.members:
-                self.db.execute('UPDATE items SET members=? WHERE id=? AND viewed=0', (json.dumps(material.members), item))
-            self._finish_fetch(job, material, self.clock() if now is None else now)
+                self.db.execute('UPDATE items SET members=? WHERE id=?',(json.dumps(material.members),job.item))
+            for row in prepared[1]:
+                old=old_media.get(row['id'])
+                if row['status']=='ready' and old and not (row['resource_identity'] is not None and old['source_locator']!=row['source_locator']):
+                    self.media.revalidate(row['id'])
+            self._finish_fetch(job,material)
         self.processing.sync()
+        with self.db:
+            self.publications.status(job.item)
 
-    def _finish_fetch(self, job: Job, material: Material, now: float) -> None:
+    def _finish_fetch(self, job: Job, material: Material) -> None:
         error = material.collection_error
         if not error or not self.subscriptions.history.member(job.item):
             self.subscriptions.history.saved(job.item, material.full)
         if not error:
             self.db.execute('DELETE FROM source_deleted WHERE item=?', (job.item,))
             self.finish(job)
-        elif self.publications.owns(job.item):
+        else:
             collection_jobs.fail(self,job,error.adapter_issue or AdapterIssue(error.code or 'fetch-failed',error.label,
                 AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent))
-        elif isinstance(error, SourceDeleted):
-            self._record_fetch_removal(job, error.label)
-        else:
-            self._record_fetch_failure(job, error.label,
-                error.code or job.kind+':'+(error.remote_type or type(error).__name__), now+error.delay,
-                terminal=not error.retryable, forced_wait=error.remote_type=='FloodWaitError')
 
     def _record_fetch_removal(self, job: Job, label: str) -> None:
         self.db.execute('INSERT OR IGNORE INTO source_deleted VALUES (?)', (job.item,))
@@ -659,20 +531,13 @@ class Store:
         self.finish(job)
         self.db.execute("UPDATE jobs SET error=?,problem_code='source-deleted' WHERE id=?", (label, job.id))
 
-    def _record_fetch_failure(self, job: Job, label: str, code: str, retry_at: float, *, terminal: bool, forced_wait: bool) -> None:
-        # Participate in the caller's transaction: a saved copy, history outcome
-        # and retry intent must commit together. Only success/removal clears intent.
-        row = self.db.execute('SELECT manual_once FROM jobs WHERE id=?', (job.id,)).fetchone()
-        once = bool(row and row[0])
-        self.subscriptions.history.failed(job.item)
-        self.db.execute("""UPDATE jobs SET status=?,next=?,error=?,problem_code=?
-            WHERE id=? AND generation=? AND status='running'""",
-            ('done' if terminal or (once and not forced_wait) else 'pending', retry_at, label, code, job.id, job.generation))
 
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
 
     def viewed(self, item: str) -> bool:
+        if self.db.execute("SELECT 1 FROM jobs WHERE kind='delete' AND item=?",(item,)).fetchone():
+            return True
         return self.viewed_set(self.reading.members(item))
 
     def viewed_set(self, members: list[str]) -> bool:
@@ -691,19 +556,9 @@ class Store:
                 for feed in memberships[member]:
                     self.read_sync.eligible(feed,json.loads(row['members']),'viewed')
                 self.subscriptions.history.viewed(member)
-                if self.publications.owns(member):
-                    self.db.execute('DELETE FROM feed_publications WHERE publication_id=?',(member,))
-                    publication_links.prune(self,{member})
-                    self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND viewed=0',(member,))
-                    continue
-                self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (member,))
-                self.db.execute('DELETE FROM retained_theses WHERE item=?', (member,))
-                self.filters.forget(member)
-                self.youtube.reset(member)
-                self.versions.forget(member)
-                self.db.execute('UPDATE items SET viewed=1,complete=0,published=NULL WHERE id=?', (member,))
-                self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'", (member,))
-                self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('delete',?)", (member,))
+                self.db.execute('DELETE FROM feed_publications WHERE publication_id=?',(member,))
+                publication_links.prune(self,{member})
+                self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND viewed=0',(member,))
         self.read_sync.sync()
         self.processing.sync()
         self.fault('after_viewed_commit')
@@ -729,12 +584,10 @@ class Store:
             self.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE (item=? OR item IN (SELECT id FROM items WHERE feed_id=?)) AND kind NOT IN ('delete','feed-delete')", (feed, feed))
             for item in items:
                 self.filters.forget(item)
-                self.youtube.reset(item)
-                self.versions.forget(item)
+                self.db.execute('DELETE FROM source_deleted WHERE item=?',(item,))
                 if self.publications.owns(item):
                     self.publications.forget(item)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item=?', (item,))
-                self.db.execute('DELETE FROM retained_theses WHERE item=?', (item,))
                 # This is local cleanup, not viewed(): never create read eligibility.
                 self.db.execute('UPDATE items SET viewed=1,complete=0 WHERE id=?', (item,))
                 self.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,generation=generation+1", (item,))
@@ -751,10 +604,10 @@ class Store:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?))', (feed, feed))
             self.db.execute('DELETE FROM jobs WHERE item=? OR item IN (SELECT id FROM items WHERE feed_id=?)', (feed, feed))
             self.db.execute('DELETE FROM items WHERE feed_id=?', (feed,))
-            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state', 'telegram_read_topics'):
+            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
                 self.db.execute(f'DELETE FROM {table} WHERE feed=?', (feed,))
             self.db.execute("DELETE FROM settings WHERE scope='feed' AND owner=?", (feed,))
-            self.db.execute('DELETE FROM state WHERE key IN (?,?,?)', ('cursor:'+feed, 'cursor:telegram:'+feed, 'feed-status:'+feed))
+            self.db.execute('DELETE FROM state WHERE key=?', ('feed-status:'+feed,))
             self.subscriptions.telegram.release(feed)
             self.db.execute('DELETE FROM feed_details WHERE feed=?', (feed,))
             self.db.execute('DELETE FROM feeds WHERE id=?', (feed,))
@@ -771,24 +624,17 @@ class Store:
         with self.db:
             self.db.execute('DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item=?)', (job.item,))
             self.finish(job)
-            if self.publications.active:
-                self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL ",(job.item,))
+            self.db.execute("DELETE FROM items WHERE id=? AND viewed=1 AND platform IS NOT NULL ",(job.item,))
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
-        if job.kind in ('fetch','filter','theses') and self.publications.owns(job.item):
+        if job.kind in ('discover','fetch','filter','theses'):
             with self.db:
-                collection_jobs.fail(self, job, issue or AdapterIssue(code or 'fetch-failed', error,
+                collection_jobs.fail(self,job,issue or AdapterIssue(code or 'collection-failed',error,
                     AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
             return
         with self.db:
-            if job.kind == 'fetch':
-                self._record_fetch_failure(job, error, code or job.kind, 0 if code == 'ai-permission' else now+delay,
-                    terminal=terminal, forced_wait=(code or '').endswith('FloodWaitError'))
-                return
-            row = self.db.execute('SELECT manual_once FROM jobs WHERE id=?',(job.id,)).fetchone()
-            once = row and row[0] and not (code or '').endswith('FloodWaitError')
             self.db.execute("UPDATE jobs SET status=?,next=?,error=?,problem_code=? WHERE id=? AND generation=? AND status='running'",
-                            ('done' if once or terminal else 'pending', 0 if code == 'ai-permission' else now + delay, error, code or job.kind, job.id, job.generation))
+                ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation))
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
         with self.db:
@@ -803,16 +649,20 @@ class Store:
             selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})) OR item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.feed_id IN ({placeholders})))"
             params = (*feeds, *feeds, *feeds)
         with self.db:
-            collection_jobs.interrupt(self,feeds)
+            # A configuration cancellation is not a failed discovery request.
+            self.db.execute(f"""UPDATE jobs SET status='pending',generation=generation+1,
+                next=CASE WHEN wait_scope IS NULL THEN 0 ELSE next END,
+                retry_at=CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END
+                WHERE kind='discover' AND {selection}""",params)
+            collection_jobs.interrupt(self,feeds,backoff=False)
             self.db.execute(f"UPDATE execution_settings SET generation=generation+1 WHERE job IN (SELECT id FROM jobs WHERE {selection})", params)
             self.db.execute(f"UPDATE jobs SET status='pending',generation=generation+1 WHERE {selection}", params)
 
     @reading_value
     def original(self, item: str) -> tuple[dict[str, Any], str]:
         own=material_read.item(self.db,item)
-        canonical=bool(own and own['platform'] is not None and own['content']!='{}')
-        header,text=self.publications.original(item) if canonical else saved_document(self.path(item))
-        if canonical:
+        header,text=self.publications.original(item)
+        if own:
             if own and 'youtube' in json.loads(own['content']).get('extra',{}):
                 projected=youtube_media.add_input(self,json.loads(own['content']))
                 text='\n\n'.join(block['text'] for block in projected['blocks'] if block['type']=='text' and block.get('role')=='body')
@@ -830,7 +680,7 @@ class Store:
         if material and material['complete']:
             display = material['text']
             filtered = material['filter']
-            if filtered['status'] == 'done' and not filtered['restored']:
+            if filtered['status'] == 'done':
                 for fragment in filtered['removed']:
                     display = display.replace(fragment, '')
             material['display_text'] = display
@@ -851,8 +701,7 @@ class Store:
         try:
             header, text = self.original(item)
             filtered = self.filters.read(item)
-            previous=[] if row['platform'] is not None else self.versions.previous(item)
-            base.update(changed=bool(previous), previous=previous, source_deleted=self.versions.deleted(item),
+            base.update(changed=bool(header.get('changed')), source_deleted=self.publications.source_deleted(item),
                 filter=filtered, title=header['title'], theses=self.processing.theses.read(item),
                 provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
                 version=self.content_version(item), loading=bool(self.db.execute(
@@ -861,10 +710,10 @@ class Store:
                 full=header.get('full', True) and (not header.get('members') or set(header['members']) == set(base['members'])),
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{item}/media/{a.get('media_id',a['name'])}"), kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
-                images=[] if row['platform'] is not None else [f'/api/v3/materials/{item}/images/{p.name}' for p in sorted(self.path(item).parent.glob('image-*'))])
+                images=[])
             base.update(saved_external(header, f'/api/v3/materials/{item}'))
             base['loading'] = base['loading'] or row['platform'] is not None and self.media.loading(item)
-            linked=saved_telegraph(header, f'/api/v3/materials/{item}')
+            linked=saved_preview(header)
             if row['platform']=='telegram':
                 linked=publication_links.reading(self,item,self.publications.original(item)[1]) or linked
             base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=linked)
@@ -887,7 +736,7 @@ class Store:
             GROUP BY jobs.kind,jobs.status,jobs.problem_code,feed ORDER BY min(jobs.id)""").fetchall()
         now, wall = self.clock(), self.wall_clock()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
-                    row['problem_code'] or ('legacy-'+row['kind'] if row['errors'] else None),
+                    row['problem_code'] or (row['kind']+'-failed' if row['errors'] else None),
                     retry_time(row['next'],now,wall) if row['status']=='pending' and row['errors'] and row['next'] else None)
                 for row in rows]
 
@@ -918,17 +767,6 @@ class Store:
         row = self.db.execute('SELECT parameters FROM execution_settings WHERE job=? AND generation=?', (job.id, job.generation)).fetchone()
         return json.loads(row[0]) if row else None
 
-    @reading_value
-    def derivative_provenance(self, path: Path, signature: str | None) -> dict[str, Any] | None:
-        if signature is None:
-            return None
-        try:
-            header, _ = saved_document(path)
-            if header['signature'] == signature:
-                return header.get('provenance') or dict(model=None)
-        except (OSError, ValueError, KeyError):
-            record_caught('store.derivative_provenance')
-        return None
 
     def work_enabled(self) -> bool:
         row = self.db.execute("SELECT value FROM state WHERE key='work-enabled'").fetchone()
@@ -979,22 +817,27 @@ class Store:
             self.processing.invalidate(scope, owner)
         self.processing.sync()
 
+    @reading_value
     def content_version(self, item: str) -> str:
-        version=self.versions.version(item)
-        if self.publications.active:
-            youtube=self.db.execute("SELECT json_extract(content,'$.extra.youtube') FROM items WHERE id=? AND platform='youtube'",(item,)).fetchone()
-            if youtube and youtube[0]:
-                data=json.loads(youtube[0])
-                version=hashlib.sha256(json.dumps([version,data.get('captions'),data.get('captions_digest')]).encode()).hexdigest()
-            linked=self.db.execute('''SELECT i.id,i.complete,json_extract(i.content,'$.extra._input_hash') FROM publication_links l JOIN items i ON i.id=l.target_publication_id
-                LEFT JOIN content_current c ON c.item=i.id LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
-                WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()
-            if linked:
-                return hashlib.sha256(json.dumps([version,[tuple(row) for row in linked]]).encode()).hexdigest()
-        return version
+        def input_value(row: Any) -> list[Any]:
+            content=json.loads(row['content'])
+            youtube=content.get('extra',{}).get('youtube',{})
+            return [row['title'],publication_input.blocks(content),json.loads(row['media_ids']),youtube.get('captions_digest')]
+        own=material_read.item(self.db,item)
+        return publication_input.digest([input_value(own) if own else None,
+            [(row['id'],input_value(row)) for row in publication_links.children(self,item) if row['complete']]])
 
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
         if not want_captions:
+            rows=self.db.execute("""SELECT DISTINCT i.id,m.status FROM items i JOIN media_files m ON m.publication_id=i.id
+                WHERE i.feed_id=? AND i.viewed=0 AND m.resource_key='youtube:subtitles'""",(feed,)).fetchall()
+            with self.db:
+                self.db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL
+                    WHERE kind='download_media' AND status IN ('pending','running') AND item IN
+                    (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.feed_id=? AND m.resource_key='youtube:subtitles')""",(feed,))
+                for row in rows:
+                    if row['status']=='pending_download':
+                        self.enqueue_fetch(row['id'])
             return
         # This runs in the reader loop. Admission needs only the saved caption
         # state, not a reader material with filters, theses and provenance.
@@ -1002,59 +845,22 @@ class Store:
             AND NOT EXISTS (SELECT 1 FROM jobs WHERE kind='fetch' AND item=items.id AND status IN ('pending','running'))""", (feed,)).fetchall()
         for row in rows:
             try:
-                if row['platform'] is not None and row['content']!='{}':
-                    header=json.loads(row['content'])['extra']['_reader']
-                else:
-                    with self.path(row['id']).open() as source:
-                        header = json.loads(source.readline())
+                header=json.loads(row['content']).get('extra',{}).get('_reader',{})
             except (OSError, ValueError):
                 record_caught('store.prepare_youtube')
                 continue
             if header.get('captions') == 'not_requested':
                 self.retry_material(row['id'])
 
-    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, finish: bool = True, *, provenance: dict[str, Any] | None | Literal['execution'] = 'execution') -> None:
-        """Commit a validated AI result; callers own admission and input signature."""
-        if self.publications.owns(job.item):
-            if not self.valid(job):
-                return
-            origin=self.execution_provenance(job) if provenance=='execution' else provenance
-            with self.db:
-                self.publications.accept_result(job.item,job.kind,signature,result,origin)
-                if finish:
-                    self.finish(job)
-                if job.kind=='filter':
-                    self.read_versions.sync_filter(job.item,bool(result['hidden']))
+    def save_derivative(self, job: Job, signature: str, result: dict[str, Any], text: str, *, finish: bool = True, provenance: Any = 'execution') -> None:
+        if not self.valid(job) or not self._has_unviewed(job.item):
             return
-        stage = None
-        if job.kind in ('filter', 'theses'):
-            stage = self.root / 'staging' / job.item
-            stage.mkdir(exist_ok=True)
-            filename = job.kind + '.md'
-            destination = self.path(job.item).parent / filename
-            pending = stage / filename
-        else:
-            raise ValueError('Unknown derivative')
-        provenance = self.execution_provenance(job) if provenance == 'execution' else provenance
-        header=dict(signature=signature,result=result,provenance=provenance)
-        if self.publications.owns(job.item) and isinstance(provenance,dict):
-            header['execution']=provenance
-            header['provenance']={key:value for key,value in provenance.items() if key!='parameters'}
-        with pending.open('w', encoding='utf-8') as output:
-            output.write(json.dumps(header, ensure_ascii=False) + '\n\n' + text)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(pending, destination)
-        if stage is not None:
-            stage.rmdir()
-        fd = os.open(destination.parent, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        self.fault('after_' + job.kind + '_move')
-        if finish:
-            with self.db:
+        if signature!=publication_input.signature(self,job.item,job.kind):
+            return
+        origin=self.execution_provenance(job) if provenance=='execution' else provenance
+        with self.db:
+            self.publications.accept_result(job.item,job.kind,signature,result,origin)
+            if finish:
                 self.finish(job)
-                if job.kind == 'filter':
-                    self.read_versions.sync_filter(job.item, bool(result['hidden']) and not self.filters.read(job.item).get('restored', False))
+            if job.kind=='filter':
+                self.read_versions.sync_filter(job.item,bool(result['hidden']))

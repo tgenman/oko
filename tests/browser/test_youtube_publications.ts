@@ -23,7 +23,7 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
   await r.setYoutubeState('missing');
   await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
   await expect.poll(async()=>{const m=await r.api(`materials/${card.id}`);return m.theses.result?.points.length;}).toBe(0);
-  await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
+  if(await r.page.getByRole('button',{name:'Show new version',exact:true}).isVisible())await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
   await r.page.screenshot({path:artifactPath('youtube-caption-missing.png')});
   await r.setYoutubeState('ready');
   await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();

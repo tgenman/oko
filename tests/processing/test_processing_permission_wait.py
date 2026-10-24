@@ -12,6 +12,7 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', api_only=True, clock=clock, codex_client=model), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         configure_codex(client)
+        clock.now+=1
         items = [card['id'] for card in client.get('/api/v3/cards').json()]
 
         def blocked_materials():
@@ -32,5 +33,6 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         assert db.execute("SELECT sum(attempt) FROM jobs WHERE kind='theses'").fetchone()[0] == before
         assert not model.inputs
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
+        clock.now+=1
         wait_for(client, lambda: client.get('/api/v3/materials/'+item).json()['theses']['result'])
         assert model.inputs

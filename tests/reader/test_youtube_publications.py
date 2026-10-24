@@ -6,7 +6,7 @@ import threading
 import httpx
 import pytest
 
-from tests.support.publication_pipeline import migrated_root
+from tests.support.publication_pipeline import publication_root
 from tests.support.app import create_app
 from tests.support.reader import HEADERS,wait_for
 from tests.support.presence import presence
@@ -17,7 +17,7 @@ from tests.support.v3 import TestClient
 
 @pytest.mark.parametrize('high_importance',[False,True])
 def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path,high_importance):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     captions_calls=[]
     class Captions:
@@ -60,7 +60,7 @@ def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tm
     import sqlite3
     from oko.collection.contracts import SourceError
     for name,missing in [('missing',True),('error',False)]:
-        root=migrated_root(tmp_path/name)
+        root=publication_root(tmp_path/name)
         class Captions:
             async def fetch(self,video):
                 if missing:
@@ -93,7 +93,7 @@ def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tm
 
 
 def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls=[]
     class Captions:
         async def fetch(self,video):
@@ -136,7 +136,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
 
 
 def test_youtube_metadata_refresh_keeps_caption_file_and_accepted_processing(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     phase=[False]
     captions_calls=[]
     class Captions:
@@ -161,7 +161,7 @@ def test_youtube_metadata_refresh_keeps_caption_file_and_accepted_processing(tmp
         count=sum(request.url.path=='/v1/chat/completions' for request in models)
         phase[0]=True
         client.post('/api/v3/collect')
-        updated=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['title']=='New title' and any(a['kind']=='image' for a in m['content']['attachments']) else None))
+        updated=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['title']=='New title' and not m['content']['loading'] and any(a['kind']=='image' for a in m['content']['attachments']) else None))
         assert updated['content']['text']=='Stable original captions.'
         assert updated['theses']['result']==original['theses']['result']
         assert next(a['url'] for a in updated['content']['attachments'] if a['kind']=='file')==caption_url
@@ -172,7 +172,7 @@ def test_youtube_metadata_refresh_keeps_caption_file_and_accepted_processing(tmp
 
 def test_manual_caption_revalidation_rotates_only_changed_file_and_results(tmp_path):
     import time
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     wall=[time.time()]
     text=['First captions.']
     calls=[]
@@ -223,7 +223,7 @@ def test_manual_caption_revalidation_rotates_only_changed_file_and_results(tmp_p
 def test_failed_caption_revalidation_keeps_verified_file_and_results(tmp_path):
     import time
     from oko.collection.contracts import SourceError
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     wall=[time.time()]
     broken=[False]
     class Captions:
@@ -256,7 +256,7 @@ def test_failed_caption_revalidation_keeps_verified_file_and_results(tmp_path):
 
 def test_caption_absence_then_reappearance_never_reuses_a_previous_file_url(tmp_path):
     import time
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     wall=[time.time()]
     text=['First captions.']
     class Captions:

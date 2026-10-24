@@ -23,7 +23,7 @@ from oko.collection.youtube.history import HistoryClient
 
 @dataclass(frozen=True)
 class TelegramAccess:
-    kind: Literal['web', 'client', 'legacy_client']
+    kind: Literal['web', 'client']
     username: str | None = None
     account: str | None = None
     peer: int | None = None
@@ -39,7 +39,6 @@ class SourceSettings:
     deleting: bool = False
     telegram: TelegramAccess | None = None
     want_captions: bool = False
-    independent_media: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,30 +70,30 @@ class Sources:
                 continue
             config = deepcopy(supplied)
             access = config.telegram
-            if config.deleting or access and access.kind == 'legacy_client':
+            if config.deleting:
                 continue
             previous = self.sources.get(config.feed)
             source: RSSSource | TelegramSource
             if config.transport == 'youtube' and self._rss_enabled:
-                youtube_type=YouTubeAdapterSource if config.independent_media else YouTubeSource
+                youtube_type=YouTubeAdapterSource
                 source = previous if type(previous) is youtube_type else youtube_type(
-                    config.url, config.initial_days, self._captions, self._publication_transport if config.independent_media else self._transport, self._history)
+                    config.url, config.initial_days, self._captions, self._publication_transport, self._history)
                 captions.append((config.feed, config.want_captions))
             elif access and access.kind == 'web':
                 assert access.username is not None
-                web_type=TelegramWebSource if config.independent_media else TelegramSource
+                web_type=TelegramWebSource
                 source = previous if type(previous) is web_type else web_type(
                     WebTelegram(access.username, self._telegram_transport), '', 0, config.initial_days, access.username,
                     http_transport=self._telegram_transport)
             elif config.transport == 'telegram' and self._telegram and access and access.peer:
                 assert access.account is not None
-                client_type=TelegramClientSource if config.independent_media else TelegramSource
+                client_type=TelegramClientSource
                 source = previous if type(previous) is client_type else client_type(
                     self._telegram, access.account, access.peer, config.initial_days, access.username,
                     http_transport=self._telegram_transport)
             elif config.transport == 'rss' and self._rss_enabled:
-                source_type = RSSAdapterSource if config.independent_media else RSSSource
-                source = previous if type(previous) is source_type else source_type(config.url, config.initial_days, self._publication_transport if config.independent_media else self._transport)
+                source_type = RSSAdapterSource
+                source = previous if type(previous) is source_type else source_type(config.url, config.initial_days, self._publication_transport)
             else:
                 continue
             active.add(config.feed)
@@ -110,8 +109,6 @@ class Sources:
             source.initial_history = deepcopy(config.initial_history)
             if isinstance(source, YouTubeSource):
                 source.want_captions = config.want_captions
-            if isinstance(source, TelegramWebSource):
-                source.independent_media = config.independent_media
             self.sources[config.feed] = source
             self._settings[config.feed] = config
         for identity in set(self.sources) - active:
@@ -127,8 +124,8 @@ class Sources:
         source = self.sources.get(feed)
         return source.adapter if isinstance(source, TelegramSource) else None
 
-    def has_captions(self) -> bool:
-        return any(isinstance(source,YouTubeAdapterSource) for source in self.sources.values())
+    def caption_feeds(self) -> list[str]:
+        return [feed for feed,source in self.sources.items() if isinstance(source,YouTubeAdapterSource)]
 
     def article_source(self) -> WebArticleSource:
         return WebArticleSource(WebAdapter(self._publication_transport))
@@ -145,4 +142,4 @@ class Sources:
             return source.publication_adapter()
         if isinstance(source,TelegramClientSource):
             return source.publication_adapter()
-        return source.publication_adapter() if isinstance(source, TelegramWebSource) and source.independent_media else None
+        return source.publication_adapter() if source is not None else None

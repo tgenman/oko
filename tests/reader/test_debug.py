@@ -1,6 +1,5 @@
-from oko.collection.contracts import FetchRequirements, FetchResources
 from tests.support.presence import presence, close_presence
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 import time
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -33,12 +32,11 @@ def test_failed_clear_keeps_debug_history(tmp_path):
 
 def test_debug_captures_background_traceback_and_survives_restart(tmp_path):
     class Broken:
-        fetch_requirements = FetchRequirements()
         changes = None
         async def discover(self, cursor):
             raise RuntimeError('broken collector test-secret')
 
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             raise AssertionError('not reached')
 
     with TestClient(create_app(tmp_path, source=Broken(), token='test-secret'), headers=HEADERS) as client:
@@ -77,13 +75,12 @@ def test_unexpected_http_error_is_visible_and_shutdown_cancellation_is_not(tmp_p
     import threading
 
     class Waiting:
-        fetch_requirements = FetchRequirements()
         changes = None
         started = threading.Event()
         async def discover(self, cursor):
             self.started.set()
             await asyncio.Event().wait()
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             raise AssertionError('not reached')
 
     source = Waiting()
@@ -153,7 +150,7 @@ def test_handled_api_errors_record_once_and_disk_failure_does_not_break_reader(t
 
 
 def test_same_source_error_in_two_feeds_is_not_merged(tmp_path):
-    saved_sources(tmp_path, [('https://source.test/one', 'A', 'Без папки'), ('https://source.test/two', 'B', 'Без папки')])
+    configured_sources(tmp_path, [('https://source.test/one', 'A', 'Без папки'), ('https://source.test/two', 'B', 'Без папки')])
     import httpx
     def reply(request):
         return httpx.Response(500)
@@ -167,7 +164,8 @@ def test_same_source_error_in_two_feeds_is_not_merged(tmp_path):
             time.sleep(.02)
         assert len(groups) == 2
         assert groups[0]['source'] != groups[1]['source']
-        assert groups[0]['message'] == groups[1]['message']
+        assert all('500' in group['message'] for group in groups)
+        assert {url for url in ('https://source.test/one','https://source.test/two') if any(url in group['message'] for group in groups)}=={'https://source.test/one','https://source.test/two'}
         assert all(g['count'] == 1 for g in groups)
 
 

@@ -1,10 +1,11 @@
+from tests.support.source import save_material
 """Cost and response parity of the actual browser opening endpoint."""
 import json
 import os
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
-from oko.collection.contracts import Material, Image
+from tests.support.source import SyntheticMaterial,Image
 from oko.processing.llamacpp import ProcessorConfig
 from oko.storage.store import Store, Job
 from oko.subscriptions.subscriptions import Overrides
@@ -31,12 +32,14 @@ def prepared(root, count, processed):
             assert job is not None and job.kind=='fetch'
             # Select the fixture's own first fetch, without relying on generated IDs.
             items[0]=job.item
-            store.save(job,Material('Saved title',f'Saved text {index}\nAdvertisement',captions='available',images=(Image('image-1.png',b'fixture'),)))
+            save_material(store,job,SyntheticMaterial('Saved title',f'Saved text {index}\nAdvertisement',captions='available',images=(Image('image-1.png',b'fixture'),)))
+            store.processing.sync_stage('filter')
             filter_job=claim('filter')
             assert filter_job is not None and filter_job.kind=='filter'
             signature=store.filters.signature(filter_job.item)
             store.save_derivative(filter_job,signature,dict(hidden=False,reason='ad',removed=['Advertisement']),'filtered',provenance=None)
             store.processing.sync()
+            store.processing.sync_stage('theses')
             thesis_job=claim('theses')
             assert thesis_job is not None and thesis_job.kind=='theses'
             signature=store.processing.theses.signature(thesis_job.item)
@@ -66,7 +69,7 @@ def test_open_read_budget_and_parity(tmp_path,count,processed):
         if processed:
             assert legacy['theses']['result']['points']
             assert legacy['filter']['result']['removed']==['Advertisement']
-            assert legacy['content']['images'] and legacy['content']['previous_versions']==[]
+            assert any(media['kind']=='image' for media in legacy['content']['attachments']) and 'previous_versions' not in legacy['content']
         cost.update(selects=sum(q.lstrip().upper().startswith(('SELECT','WITH')) for q in statements),
                     writes=sum(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE','REPLACE')) for q in statements),
                     max_file_reads=max(files.values(),default=0))
@@ -113,7 +116,7 @@ def test_split_text_http_parity(tmp_path,kind,complete):
         assert_text_parity(resource['data'],legacy)
 
 
-@pytest.mark.parametrize('kind',['demo','rss','youtube','telegram-web','telegram-client','telegram-legacy'])
+@pytest.mark.parametrize('kind',['demo','rss','youtube','telegram-web','telegram-client'])
 @pytest.mark.parametrize('complete',[False,True])
 def test_split_text_projection_parity_for_source_kinds(tmp_path,kind,complete):
     # Both real projection paths, with independent SQLite/files per case.
@@ -160,17 +163,3 @@ def test_idle_check_only_compares_versions(tmp_path,count):
         assert cost['sql']<=2,queries
         assert cost['content_opens']==cost['content_stats']==0
         assert not any(q.lstrip().upper().startswith(('UPDATE','DELETE','INSERT')) for q in queries)
-
-
-def test_previous_versions_do_not_repeat_current_lookup_outside_http(tmp_path):
-    _,items=library(tmp_path,[1])
-    store=Store(tmp_path,lambda _:None)
-    try:
-        with store.db:
-            store.db.executemany('INSERT INTO content_versions VALUES (?,?,?,?)',[(items[0],n,'a'*64,1) for n in range(2,1002)])
-        queries=[]
-        store.db.set_trace_callback(queries.append)
-        assert len(store.versions.previous(items[0]))==1000
-        assert len(queries)<=2,queries
-    finally:
-        store.db.close()

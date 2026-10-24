@@ -1,5 +1,5 @@
 """Independent execution observed through the reader HTTP interface."""
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 import time
 
 from fastapi.testclient import TestClient
@@ -119,12 +119,11 @@ def test_neutral_last_close_cancels_resistant_external_wait_and_prevents_late_co
 
     started, release = threading.Event(), threading.Event()
     class Source:
-        fetch_requirements = FetchRequirements()
         changes = None
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication('late', 'https://synthetic.test/late', 100)]), 'done')
 
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             started.set()
             while not release.is_set():
                 try:

@@ -140,27 +140,3 @@ def test_removed_member_requires_recount_and_restart_requires_fresh_preview(tmp_
         assert result.json()['details']['preview']['publications_count'] == 2
         assert len(client.get('/api/v3/cards').json()) == 2
         assert client.post('/api/v3/folders/missing/completion/preview').status_code == 404
-
-
-
-
-
-
-def test_unreadable_original_still_belongs_to_folder_completion(tmp_path):
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={})
-        presence(client, 'a')
-        originals = wait_cards(client, 3)
-        broken = originals[0]['id']
-        # Corrupt the external content file; observe everything through the reader.
-        (tmp_path / 'content' / broken / '1' / 'original.md').write_text('unreadable')
-        assert client.get('/api/v3/materials/' + broken).status_code == 404
-        assert len(client.get('/api/v3/cards').json()) == 2
-        assert next(f['count'] for f in client.get('/api/v3/folders').json() if f['id'] == 'demo') == 3
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
-        assert preview['cards_count'] == 2 and preview['publications_count'] == 3
-        assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/v3/cards').json() == []
-        for original in originals:
-            assert client.get('/api/v3/materials/' + original['id']).status_code == 404
-        assert client.post('/api/v3/folders/demo/completion/preview').json()['publications_count'] == 0

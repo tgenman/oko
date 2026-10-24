@@ -60,11 +60,11 @@ def test_youtube_credentials_and_errors_do_not_expose_secrets(tmp_path):
 
 
 def test_connection_errors_and_history_conflicts_have_canonical_receipts(tmp_path):
-    from tests.support.subscriptions import saved_sources
-    saved_sources(tmp_path, [('https://source.test/old','Old','Saved')])
+    from tests.support.subscriptions import configured_sources
+    configured_sources(tmp_path, [('https://source.test/old','Old','Saved')],history=False)
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
         feed=client.get('/api/v3/subscriptions').json()['feeds'][0]
-        assert feed['history']=={'state':'absent','legacy_since':None}
+        assert feed['history']=={'state':'absent'}
         for method,body in [('patch',{'paused':True}),('delete',None)]:
             response=client.request(method,'/api/v3/feeds/'+feed['id']+'/history',**({'json':body} if body else {}),headers={'X-Oko-Action':method+'-history'})
             assert response.status_code==409, response.text
@@ -84,7 +84,7 @@ def test_connection_errors_and_history_conflicts_have_canonical_receipts(tmp_pat
             assert client.post(path,json={'opml':'<opml><body/></opml>'}).status_code in (404,405)
 
 
-def test_youtube_archive_controls_survive_restart_and_do_not_replay_viewed(tmp_path):
+def test_youtube_archive_controls_survive_restart_and_allow_explicit_replay(tmp_path):
     from tests.support.youtube import History, PNG
     from tests.support.feed_url import YOUTUBE
     import time
@@ -95,7 +95,7 @@ def test_youtube_archive_controls_survive_restart_and_do_not_replay_viewed(tmp_p
         assert response.status_code==200,response.text
         feed=response.json()['id'];path='/api/v3/feeds/'+feed+'/history'
         assert client.patch(path,json={'paused':True}).status_code==409
-        assert client.patch(path,json={'paused':False}).json()['history']['state']=='not_started'
+        assert client.patch(path,json={'paused':False}).json()['history']['state'] in ('not_started','discovering')
         assert client.delete(path).json()['history']['state']=='cancelled'
         assert client.patch(path,json={'paused':False}).status_code==409
         response=client.post(path,json={'mode':'count','count':'2'})
@@ -120,7 +120,7 @@ def test_youtube_archive_controls_survive_restart_and_do_not_replay_viewed(tmp_p
             if state['state']=='complete':break
             time.sleep(.01)
         assert state['state']=='complete'
-        assert len(client.get('/api/v3/cards').json())==1
+        assert len(client.get('/api/v3/cards').json())==2
     with reader() as client:
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['history']['selection']=={'mode':'count','count':'2'}
         assert client.get('/api/v3/materials/'+viewed).status_code==404

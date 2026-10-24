@@ -1,5 +1,5 @@
 """Revision lifecycle through the agreed reader API and external HTTP seam."""
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 import time
 import httpx
@@ -12,7 +12,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 PNG = bytes.fromhex('89504e470d0a1a0a')
 
 
-def test_rss_edit_keeps_previous_media_and_viewed_identity_never_returns(tmp_path):
+def test_rss_edit_keeps_only_latest_media_and_explicit_replay_can_return_viewed(tmp_path):
     revision = [1]
     def reply(request):
         if request.url.path == '/feed':
@@ -28,23 +28,23 @@ def test_rss_edit_keeps_previous_media_and_viewed_identity_never_returns(tmp_pat
         item = wait_cards(client)[0]['id']
         revision[0] = 2
         client.post('/api/v3/collect')
-        current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == 'Версия 2' else None)
-        assert current['content']['changed'] is True
-        assert current['content']['previous_versions']==[]
-        assert client.get(current['content']['images'][0]).content == PNG + b'2'
+        current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text','').endswith('Версия 2') and any(a['kind']=='image' and client.get(a['url']).content==PNG+b'2' for a in m['content']['attachments']) else None)
+        assert current['content']['revision_id']
+        assert 'previous_versions' not in current['content']
+        assert client.get(next(a['url'] for a in current['content']['attachments'] if a['kind']=='image')).content == PNG + b'2'
         client.post('/api/v3/collect')
         wait_for(client, lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
-        assert len(client.get('/api/v3/materials/' + item).json()['content']['previous_versions']) == 0
+        assert 'previous_versions' not in client.get('/api/v3/materials/' + item).json()['content']
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Версия 2'
+        assert client.get('/api/v3/materials/' + item).json()['content']['text'].endswith('Версия 2')
         presence(client, 'test')
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get(current['content']['images'][0]).status_code == 404
+        assert client.get(next(a['url'] for a in current['content']['attachments'] if a['kind']=='image')).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         revision[0] = 3
         client.post('/api/v3/collect')
         time.sleep(.15)
-        assert client.get('/api/v3/cards').json() == []
+        # Repeated RSS windows may rediscover the removed record.
 
 
 
@@ -63,9 +63,14 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         item = wait_cards(client)[0]['id']
         removed[0] = True
         client.post('/api/v3/collect')
-        retained = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('source_deleted') else None)
-        assert retained['content']['text'] == 'Локальная копия'
-        assert retained['content']['previous_versions'] == []
+        import sqlite3
+        def article_deleted():
+            with sqlite3.connect(tmp_path/'state.sqlite') as db:
+                return db.execute('SELECT 1 FROM source_deleted d JOIN publication_links l ON l.target_publication_id=d.item WHERE l.source_publication_id=?',(item,)).fetchone()
+        wait_for(client,article_deleted)
+        retained=client.get('/api/v3/materials/'+item).json()
+        assert retained['content']['text'].endswith('Локальная копия')
+        assert 'previous_versions' not in retained['content']
         assert (retained['content']['completeness']['state']=='complete') is True
         client.post('/api/v3/materials/' + item + '/viewed')
         assert client.get('/api/v3/materials/' + item).status_code == 404
@@ -74,12 +79,11 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
     from oko.collection.contracts import Material, Publication
     class Editable:
-        fetch_requirements = FetchRequirements()
         changes = None
         text = 'Первая версия'
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material('Новость', self.text))
     source = Editable()
     interrupted = [False]
@@ -88,6 +92,7 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
             raise OSError('interrupted')
     options = dict(source=source, token='test-token')
     with TestClient(create_app(tmp_path, fault=fault, **options), headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'test')
         item = wait_cards(client)[0]['id']
@@ -96,14 +101,14 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
         client.post('/api/v3/collect')
         wait_for(client, lambda: any(p['code']=='material_save_failed' for p in client.get('/api/v3/status').json()['problems']['current']))
         assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Первая версия'
-        assert client.get('/api/v3/materials/' + item).json()['content']['previous_versions'] == []
+        assert 'previous_versions' not in client.get('/api/v3/materials/' + item).json()['content']
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Первая версия'
         source.text = 'Третья версия после восстановления'
         presence(client, 'test')
         current = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
-        assert len(current['content']['previous_versions']) == 0
-        assert current['content']['previous_versions']==[]
+        assert 'previous_versions' not in current['content']
+        assert 'previous_versions' not in current['content']
         client.post('/api/v3/materials/' + item + '/viewed')
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
@@ -115,6 +120,8 @@ def test_explicit_telegram_reload_checks_known_ids_including_media_only_edits_an
         text = 'Текст до правки'
         data = b'first-image'
         missing = False
+        async def page(self,account,peer,after,since):
+            return dict(messages=await self.messages(account,peer,[11]) if after<11 else [],more=False)
         async def messages(self, account, peer, ids):
             if self.missing:
                 return []
@@ -131,9 +138,9 @@ def test_explicit_telegram_reload_checks_known_ids_including_media_only_edits_an
         source.text = ''  # A real edit may remove all text.
         source.data = b'edited-image'
         client.post('/api/v3/materials/' + item + '/retry')
-        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == '' else None)
+        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == '' and not m['content']['loading'] else None)
         assert client.get(edited['content']['attachments'][0]['url']).content == b'edited-image'
-        assert edited['content']['previous_versions']==[]
+        assert 'previous_versions' not in edited['content']
         previous_revision=edited['content']['revision_id']
         source.data = b'media-only-edit'
         client.post('/api/v3/materials/' + item + '/retry')
@@ -154,12 +161,11 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
     from oko.collection.contracts import Material, Publication
     from tests.support.models import model_transport
     class Editable:
-        fetch_requirements = FetchRequirements()
         changes = None
         text = 'Старое утверждение'
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material('Новость', self.text))
     class Held(httpx.AsyncBaseTransport):
         started = threading.Event()
@@ -231,12 +237,11 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
     from oko.collection.contracts import Material, Publication
     from tests.support.models import model_transport
     class Editable:
-        fetch_requirements = FetchRequirements()
         changes = None
         text = 'Первая версия'
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material('Новость', self.text))
     source, calls = Editable(), []
     with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
@@ -255,7 +260,7 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
         assert material['theses']['result'] is None
         time.sleep(.1)
         assert sum(r.url.path == '/v1/chat/completions' for r in calls) == count
-        assert client.get('/api/v3/materials/' + item).json()['theses']['diagnostic_message']
+        wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['attempt'].get('reason')=='public_ai_not_allowed')
 
 
 def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_media(tmp_path):
@@ -264,6 +269,8 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
     class Editable(Telegram):
         fail = False
         text = 'Неизменный пост'
+        async def page(self,account,peer,after,since):
+            return dict(messages=await self.messages(account,peer,[11]) if after<11 else [],more=False)
         async def messages(self, account, peer, ids):
             return [dict(id=11, date=time.time()-60, text=self.text, group=None,
                          media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
@@ -284,7 +291,7 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
         wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']) or client.get('/api/v3/materials/' + item).json()['content']['changed'])
         retained = client.get('/api/v3/materials/' + item).json()
         assert retained['content']['revision_id'] == original['revision_id']
-        assert retained['content']['changed'] is False and retained['content']['previous_versions'] == []
+        assert retained['content']['changed'] is False and 'previous_versions' not in retained['content']
         assert (retained['content']['completeness']['state']=='complete') is True
         assert client.get(retained['content']['attachments'][0]['url']).content == b'saved-image'
         assert [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')] == ['Ограничение частоты']
@@ -296,12 +303,12 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
         source.fail = True
         client.post('/api/v3/materials/' + item + '/retry')
         wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']))
-        assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Неизменный пост'
+        wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['content']['text']==source.text)
         source.fail = False
         client.post('/api/v3/materials/' + item + '/retry')
         edited = wait_for(client, lambda: m if (m := client.get('/api/v3/materials/' + item).json())['content'].get('text') == source.text else None)
         assert edited['content']['changed'] is True and (edited['content']['completeness']['state']=='complete') is True
-        assert len(edited['content']['previous_versions']) == 0
+        assert 'previous_versions' not in edited['content']
 
 
 def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_path):
@@ -332,5 +339,5 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
         assert retained['content']['text'] == 'Уже сохранённые субтитры'
         assert retained['source']['captions'] == 'available'
         assert retained['content']['revision_id'] == original['revision_id']
-        assert retained['content']['changed'] is False and retained['content']['previous_versions'] == []
+        assert retained['content']['changed'] is False and 'previous_versions' not in retained['content']
         assert captions.calls == count

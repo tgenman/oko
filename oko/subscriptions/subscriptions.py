@@ -111,6 +111,7 @@ class FolderConflict(ValueError):
 
 class Subscriptions:
     def __init__(self, db: sqlite3.Connection, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
+        self._feed_batch: dict[str,dict[str,Any]] | None=None
         self.db = db
         self.history = History(db)
         db.executescript('''
@@ -119,27 +120,11 @@ class Subscriptions:
           id TEXT PRIMARY KEY, identity TEXT UNIQUE, title TEXT, kind TEXT, folder_id TEXT,
           original_urls TEXT, connection TEXT, transport TEXT,
           importance TEXT DEFAULT 'normal', initial_days INTEGER DEFAULT 1,
-          public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER);
+          public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER,
+          telegram_peer INTEGER,telegram_account TEXT,telegram_username TEXT);
         CREATE TABLE IF NOT EXISTS settings (scope TEXT, owner TEXT, field TEXT, value TEXT,
           PRIMARY KEY(scope,owner,field));
         ''')
-
-        with db:
-            db.execute('BEGIN IMMEDIATE')
-            columns = {row['name'] for row in db.execute('PRAGMA table_info(feeds)')}
-            for column, sql_type in [('telegram_peer', 'INTEGER'), ('telegram_account', 'TEXT'), ('telegram_username', 'TEXT'), ('telegram_topic', 'INTEGER')]:
-                if column not in columns:
-                    db.execute(f'ALTER TABLE feeds ADD COLUMN {column} {sql_type}')
-            if 'telegram_username' not in columns:
-                # Infer only while upgrading legacy storage. A new connection's
-                # explicit absence of a public username must remain authoritative.
-                for row in db.execute("SELECT * FROM feeds WHERE kind='telegram' AND telegram_peer IS NOT NULL").fetchall():
-                    candidates = ([row['identity'].removeprefix('telegram:')]
-                                  if row['identity'].startswith('telegram:') else []) + json.loads(row['original_urls'])
-                    username = next((name.lstrip('@') for name in candidates
-                                     if re.fullmatch(r'@?[a-zA-Z][a-zA-Z0-9_]{3,31}', name)), None)
-                    db.execute('UPDATE feeds SET telegram_username=? WHERE id=?', (username, row['id']))
-                fault('before_telegram_username_commit')
 
         self.details = FeedDetails(db, wall_clock)
         self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
@@ -234,14 +219,44 @@ class Subscriptions:
         if transport is not None:
             conditions.append('transport=?')
             parameters.append(transport)
-        query = 'SELECT id FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
-        return [self._feed(row['id']) for row in self.db.execute(query, parameters)]
+        query = 'SELECT * FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
+        rows=list(self.db.execute(query,parameters))
+        identities=[row['id'] for row in rows]
+        if not identities:
+            return []
+        bindings=self.telegram.bindings(identities)
+        profiles=self.telegram.profiles() if any(b['kind']=='client' for b in bindings.values()) else {}
+        histories=self.history.statuses(identities)
+        avatars={row['feed']:row['digest'] for row in self.db.execute('SELECT feed,digest FROM telegram_avatars WHERE feed IN (SELECT value FROM json_each(?))',(json.dumps(identities),))}
+        batch={}
+        for row in rows:
+            binding=bindings.get(row['id'])
+            profile=profiles.get(binding['role']) if binding and binding['kind']=='client' else None
+            batch[row['id']]=self._feed_value(row,binding,histories.get(row['id']),avatars.get(row['id']),profile)
+        previous=self._feed_batch
+        self._feed_batch=batch
+        try:
+            # Prime the existing request-local @reading_value cache. No values
+            # remain on Subscriptions after this synchronous assembly.
+            return [self._feed(identity) for identity in identities]
+        finally:
+            self._feed_batch=previous
 
     @reading_value
     def _feed(self, identity: str) -> dict[str, Any]:
-        row = self.db.execute('SELECT * FROM feeds WHERE id=?', (identity,)).fetchone()
+        if self._feed_batch is not None and identity in self._feed_batch:
+            return self._feed_batch[identity]
+        row=self.db.execute('SELECT * FROM feeds WHERE id=?',(identity,)).fetchone()
         if row is None:
             raise LookupError('Фид не найден')
+        binding=self.telegram.binding(identity)
+        avatar=self.db.execute('SELECT digest FROM telegram_avatars WHERE feed=?',(identity,)).fetchone() if row['kind']=='telegram' else None
+        profile=self.telegram.profile(binding['role']) if binding and binding['kind']=='client' else None
+        return self._feed_value(row,binding,self.history.status(identity),avatar[0] if avatar else None,profile)
+
+    @staticmethod
+    def _feed_value(row: sqlite3.Row, binding: dict[str,Any] | None, history: dict[str,Any] | None,
+                    avatar: str | None, profile: dict[str,Any] | None) -> dict[str,Any]:
         feed = dict(row)
         # The existing reader DTO contains subscription settings only. New
         # persistence fields are consumed by the publication collection path.
@@ -249,30 +264,13 @@ class Subscriptions:
         for field in FEED_COLUMNS:
             feed.pop(field, None)
         feed.pop('telegram_topic', None)
-        avatar = self.db.execute('SELECT digest FROM telegram_avatars WHERE feed=?', (feed['id'],)).fetchone() if feed['kind'] == 'telegram' else None
         if avatar:
-            feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar[0]
+            feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar
         feed['original_urls'] = json.loads(feed['original_urls'])
-        binding = self.telegram.binding(feed['id'])
         if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
-            profile = self.telegram.profile(binding['role'])
             if not profile or profile['state'] != 'ready':
                 feed['connection'] = 'unavailable'
-        feed['initial_history'] = self.history.status(feed['id'])
-        if feed['initial_history'] is None:
-            namespace = 'telegram:' if feed['transport'] == 'telegram' else ''
-            saved = self.db.execute('SELECT value FROM state WHERE key=?', ('cursor:' + namespace + feed['id'],)).fetchone()
-            try:
-                cursor = json.loads(saved['value']) if saved else {}
-            except json.JSONDecodeError:
-                cursor = {}  # Adapters may own opaque, non-JSON cursors.
-            if feed['transport']=='telegram' and saved:
-                try:
-                    feed['legacy_since'] = HistoryEnvelope.decode(saved['value'],adapter='client').selection.since
-                except SourceError:
-                    feed['legacy_since'] = None
-            else:
-                feed['legacy_since'] = cursor.get('since') if isinstance(cursor,dict) else None
+        feed['initial_history'] = history
         for field in ('public_ai', 'read_history', 'auto_read'):
             feed[field] = None if feed[field] is None else bool(feed[field])
         return feed
@@ -285,7 +283,7 @@ class Subscriptions:
         if old:
             return old
         title = body.title or urlsplit(body.url).hostname or 'RSS'
-        identity_id = self.new_feed_id(key(identity))
+        identity_id = self.new_feed_id()
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             folder = self.ensure_folder(body.folder)
@@ -296,8 +294,8 @@ class Subscriptions:
             self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
 
-    def new_feed_id(self, legacy_id: str) -> str:
-        return str(uuid4()) if self.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone() else legacy_id
+    def new_feed_id(self) -> str:
+        return str(uuid4())
 
     def existing_feed(self, url: str) -> dict[str, Any] | None:
         identity, _, _ = identify(url)
@@ -344,6 +342,21 @@ class Subscriptions:
         if details or scope != 'feed':
             self.check_owner(scope, owner)
         feed = (self._feed(owner) if details else material_read.feed(self.db,owner)) if scope == 'feed' else None
+        return self._effective_value(scope,owner,feed)
+
+    def effective_feeds(self) -> dict[str,dict[str,Any]]:
+        feeds=self.feeds()
+        identities=json.dumps([feed['id'] for feed in feeds])
+        folders=json.dumps(list({feed['folder_id'] for feed in feeds}))
+        settings: dict[tuple[str,str],list[sqlite3.Row]]={}
+        for row in self.db.execute("""SELECT scope,owner,field,value FROM settings WHERE (scope='oko' AND owner='global')
+                OR (scope='feed' AND owner IN (SELECT value FROM json_each(?)))
+                OR (scope='folder' AND owner IN (SELECT value FROM json_each(?)))""",(identities,folders)):
+            settings.setdefault((row['scope'],row['owner']),[]).append(row)
+        return {feed['id']:self._effective_value('feed',feed['id'],feed,settings) for feed in feeds}
+
+    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | sqlite3.Row | None,
+                         settings: dict[tuple[str,str],list[sqlite3.Row]] | None = None) -> dict[str,Any]:
         chain = [('oko', 'global')]
         if scope == 'feed':
             assert feed is not None
@@ -357,14 +370,14 @@ class Subscriptions:
             values['theses']['value'] = True
         overrides = {}
         for level, identity in chain:
-            for row in self._settings(level, identity):
+            for row in self._settings(level,identity) if settings is None else settings.get((level,identity),[]):
                 if row['field'] not in defaults:
                     continue
                 value = json.loads(row['value'])
                 values[row['field']] = dict(value=value, scope=level, owner=identity)
                 if (level, identity) == (scope, owner):
                     overrides[row['field']] = value
-        result = dict(effective=values, overrides=overrides)
+        result: dict[str,Any] = dict(effective=values, overrides=overrides)
         if scope == 'feed':
             assert feed is not None
             result['feed'] = feed

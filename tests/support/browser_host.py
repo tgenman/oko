@@ -74,16 +74,8 @@ def main():
                     result = {}
                 elif command['op'] == 'prepare-publications':
                     from oko.storage.store import Store
-                    from oko.storage.migration import migrate_publications
-                    root = Path(command['data'])
-                    source, destination = root/'migration-source', root/'migration'
-                    store = Store(source, lambda _: None)
+                    store=Store(Path(command['data']),lambda _:None)
                     store.db.close()
-                    report = migrate_publications(source, destination)
-                    if not report['success']:
-                        raise ValueError('Synthetic publication migration failed')
-                    for path in (destination/'storage').iterdir():
-                        path.rename(root/path.name)
                     result = {}
                 elif command['op'] == 'start':
                     scenario = Scenario(command['data'], command['token'], bool(command.get('persistent')), hostname=command.get('hostname', '127.0.0.1'),collection=bool(command.get('collection',1)),processing_delay=command.get('processing_delay',0))

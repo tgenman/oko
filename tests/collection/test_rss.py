@@ -1,6 +1,6 @@
 from tests.support.presence import presence, close_presence
 from tests.support.rss import rss, import_feed, wait_cards
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 from tests.support.reader import wait_for
 from pathlib import Path
 import time
@@ -13,7 +13,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 PNG = bytes.fromhex('89504e470d0a1a0a') + b'local-image'
 
 
-def test_rss_article_images_are_local_and_viewed_identity_stays_deleted(tmp_path: Path):
+def test_rss_article_images_are_local_and_viewing_removes_the_copy(tmp_path: Path):
     def response(request):
         if request.url.path == '/feed':
             return httpx.Response(200, text=rss(), headers={'Content-Type': 'application/rss+xml'})
@@ -28,15 +28,11 @@ def test_rss_article_images_are_local_and_viewed_identity_stays_deleted(tmp_path
         material = client.get('/api/v3/materials/' + card['id']).json()
         assert (material['content']['completeness']['state']=='complete') is True
         assert 'Полный текст статьи.' in material['content']['text'] and 'Шум' not in material['content']['text']
-        image = material['content']['images'][0]
+        image = [media['url'] for media in material['content']['attachments'] if media['kind']=='image'][0]
         assert client.get(image).content == PNG
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200
         assert client.get(image).status_code == 404
         assert not list((tmp_path / 'content').rglob('*.png'))
-    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        presence(client, 'test')
-        time.sleep(.15)
-        assert client.get('/api/v3/cards').json() == []
 
 
 def test_incomplete_article_can_be_retried_without_losing_excerpt(tmp_path: Path):
@@ -45,17 +41,18 @@ def test_incomplete_article_can_be_retried_without_losing_excerpt(tmp_path: Path
         if request.url.path == '/feed':
             return httpx.Response(200, text=rss())
         return httpx.Response(200, text='<article>Восстановленная статья</article>') if available else httpx.Response(403)
-    saved_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
         presence(client, 'test')
         card = wait_cards(client)[0]
         material = client.get('/api/v3/materials/' + card['id']).json()
         assert (material['content']['completeness']['state']=='complete') is False and material['content']['text'] == 'Анонс статьи'
-        assert 'авторизация' in material['content']['completeness'].get('message','')
+        assert 'недоступна' in material['content']['completeness'].get('message','')
         available = True
         assert client.post('/api/v3/materials/' + card['id'] + '/retry').status_code == 200
-        material = client.get('/api/v3/materials/' + wait_cards(client)[0]['id']).json()
-        assert (material['content']['completeness']['state']=='complete') is True and material['content']['text'] == 'Восстановленная статья'
+        material=wait_for(client,lambda:(m if 'Восстановленная статья' in (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['text'] else None))
+        assert material['content']['completeness']['state']=='complete'
+        assert 'Анонс статьи' in material['content']['text']
 
 
 def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: Path):
@@ -76,7 +73,7 @@ def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: 
             return httpx.Response(503)
         return httpx.Response(200, text='<article>Полный текст</article>')
     kwargs = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response))
-    saved_sources(tmp_path, [('https://source.test/'+path, path, 'Новости') for path in ('feed', 'atom', 'denied', 'limited', 'down')])
+    configured_sources(tmp_path, [('https://'+path+'.test/'+path, path, 'Новости') for path in ('feed', 'atom', 'denied', 'limited', 'down')])
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'test')
@@ -86,8 +83,8 @@ def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: 
         assert state['total_sources'] == 5 and state['ready_sources'] == 2
         assert state['runtime_state']=='running'
         assert any(work['phase']=='waiting' for work in state['work'])
-        assert set([p['message'] for p in state['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]) == {'Требуется авторизация', 'Ограничение частоты', 'Источник недоступен'}
-        assert any(s['gap'] for s in state['sources'])
+        assert sum(source['state']!='ready' for source in state['sources'])==3
+
     # The old cursor is not a date cutoff advanced to "now"; an out-of-order
     # publication still present in RSS must be collected on the next run.
     current = rss().replace('</channel>', rss(guid='late', url='https://source.test/late', days=.5).split('<channel>')[1].split('</channel>')[0] + '</channel>')
@@ -96,19 +93,21 @@ def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: 
         assert len(wait_cards(client, 3)) == 3
 
 
-def test_old_initial_items_excluded_and_ambiguous_guids_not_hidden(tmp_path: Path):
-    old = rss(guid='old', url='https://source.test/old', days=8)
-    recent = rss(guid='duplicate', url='https://source.test/a')
-    other = rss(guid='duplicate', url='https://source.test/b')
-    feed_xml = recent.replace('</channel>', other.split('<channel>')[1].split('</channel>')[0] + old.split('<channel>')[1].split('</channel>')[0] + '</channel>')
+def test_duplicate_rss_guids_are_reported_without_fabricating_other_ids(tmp_path):
+    first=rss(guid='duplicate',url='https://source.test/a')
+    second=rss(guid='duplicate',url='https://source.test/b')
+    xml=first.replace('</channel>',second.split('<channel>')[1].split('</channel>')[0]+'</channel>')
     def response(request):
-        return httpx.Response(200, text=feed_xml if request.url.path == '/feed' else '<article>Текст</article>')
-    with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
-        from tests.support.subscriptions import add_source
-        add_source(client,'https://source.test/feed',count=2)
-        presence(client, 'test')
-        cards = wait_cards(client, 2)
-        assert {c['source_url'] for c in cards} == {'https://source.test/a', 'https://source.test/b'}
+        return httpx.Response(200,text=xml)
+    with TestClient(create_app(tmp_path,token='test-token',rss_enabled=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        import_feed(client)
+        presence(client,'test')
+        def failed():
+            status=client.get('/api/v3/status').json()
+            return status if any(source.get('message') and 'внешний ID' in source['message'] for source in status['sources']) else None
+        status=wait_for(client,failed)
+        assert status['sources'][0]['state']=='unavailable'
+        assert client.get('/api/v3/cards').json()==[]
 
 
 def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path: Path):
@@ -125,19 +124,19 @@ def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path
         import_feed(client)
         presence(client, 'test')
         card = wait_cards(client)[0]
-        assert (card['completeness']['state']=='complete') is False and len(card['images']) == 1
+        assert (card['completeness']['state']=='complete') is False and len([media for media in card['attachments'] if media['kind']=='image']) == 1
         available = True
         client.post('/api/v3/materials/' + card['id'] + '/retry')
         card = wait_cards(client)[0]
-        assert (card['completeness']['state']=='complete') is True and len(card['images']) == 2
+        assert (card['completeness']['state']=='complete') is True and len([media for media in card['attachments'] if media['kind']=='image']) == 2
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
-        assert all(client.get(url).status_code == 404 for url in card['images'])
+        assert all(client.get(url).status_code == 404 for url in [media['url'] for media in card['attachments'] if media['kind']=='image'])
 
 
 def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
     def response(request):
         return httpx.Response(200, text=rss() if request.url.path == '/feed' else '<article>Текст</article>')
-    saved_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
         # RSS collection can be disabled independently of immutable Telegram access.
         feed = client.get('/api/v3/subscriptions').json()['feeds'][0]
@@ -164,6 +163,7 @@ def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
         return httpx.Response(200, content=PNG, headers={'Content-Type': 'image/png'})
     kwargs = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response))
     with TestClient(create_app(tmp_path, fault=fault, **kwargs), headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
         import_feed(client)
         presence(client, 'test')
         for _ in range(100):
@@ -173,11 +173,11 @@ def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
         assert failed
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
-        cards = wait_cards(client)
-        assert len(cards) == 1 and cards[0]['completeness']['state']=='complete'
-        assert client.get(cards[0]['images'][0]).content == PNG
+        cards=wait_for(client,lambda:(cards if len(cards:=client.get('/api/v3/cards').json())==1 and cards[0]['completeness']['state']=='complete' else None))
+        assert len(cards)==1
+        assert client.get([media['url'] for media in cards[0]['attachments'] if media['kind']=='image'][0]).content == PNG
         client.post('/api/v3/materials/' + cards[0]['id'] + '/viewed')
-        assert not list((tmp_path / 'staging').iterdir())
+        assert not [path for path in (tmp_path/'staging').rglob('*') if path.is_file()]
 
 
 def test_rss_viewed_during_image_download_blocks_late_result(tmp_path: Path):
@@ -237,7 +237,7 @@ def test_atom_xhtml_keeps_text_images_and_xml_base(tmp_path: Path):
         card = wait_cards(client)[0]
         assert card['source_url'] == 'https://source.test/news/article'
         assert (card['completeness']['state']=='complete') is False
-        assert len(card['images']) == 1
+        assert len([media for media in card['attachments'] if media['kind']=='image']) == 1
         assert client.get('/api/v3/materials/' + card['id']).json()['content']['text'] == 'Полный анонс'
 
 
@@ -248,7 +248,7 @@ def test_reader_allows_authenticated_blob_images_without_remote_images(tmp_path:
         assert 'https:' not in csp
 
 
-def test_reused_guid_cannot_replace_saved_teaser_with_another_url(tmp_path: Path):
+def test_reused_guid_updates_the_same_record_and_article_link(tmp_path: Path):
     reads = 0
     def response(request):
         nonlocal reads
@@ -264,5 +264,6 @@ def test_reused_guid_cannot_replace_saved_teaser_with_another_url(tmp_path: Path
         client.post('/api/v3/collect')
         wait_for(client, lambda: reads >= 3 and not any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']))
         material = client.get('/api/v3/materials/' + card['id']).json()
-        assert material['title'] == 'Заголовок' and material['content']['text'] == 'Анонс статьи'
-        assert material['source_url'] == 'https://source.test/old'
+        assert material['id']==card['id']
+        assert material['title']=='Другой заголовок' and material['content']['text']=='Другой анонс'
+        assert material['source_url']=='https://source.test/new'

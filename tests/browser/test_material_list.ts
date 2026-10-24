@@ -58,7 +58,7 @@ test('date groups, saved sorting and displayed hidden card count use current row
   await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false})]);
   await expect(r.page.locator('.date-group')).toHaveText(['Today','Yesterday','Unknown date']);
   await expect(r.page.locator('#count-label')).toHaveText('3');
-  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/v3/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/v3/cards')!.body![0],{...t.replies.get('/api/v3/cards')!.body![0],id:'hidden',filter:{status:'done',hidden:true,restored:false,reason:'Синтетический фильтр',removed:[]}},...t.replies.get('/api/v3/cards')!.body!.slice(1)]});});
+  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/v3/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/v3/cards')!.body![0],{...t.replies.get('/api/v3/cards')!.body![0],id:'hidden',filter:{status:'done',hidden:true,reason:'Синтетический фильтр',removed:[]}},...t.replies.get('/api/v3/cards')!.body!.slice(1)]});});
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('#count-label')).toHaveText('4');
@@ -84,7 +84,7 @@ test('opened YouTube material preserves description separately from captions', a
 test('current video description and previous captions remain available independently', async () => {
  const r=await reader(); try {
   await r.page.addInitScript(()=>readerTransport.replies.set('/api/v3/materials/video/versions/1',{body:{title:'Прежнее видео',text:'Прежние субтитры',full:true,reason:'',images:[],attachments:[]}}));
-  await r.start([material('video',{description:'Текущее описание',text:'Текущие субтитры',previous:[{url:'/api/v3/materials/video/versions/1'}]})]);
+  await r.start([material('video',{description:'Текущее описание',text:'Текущие субтитры'})]);
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#title')).toHaveText('video');
   await expect(r.page.locator('#description')).toHaveText('Текущее описание');

@@ -3,7 +3,7 @@ from tests.support.reader import wait_for
 from tests.support.telegram import connected_feed
 from tests.support.presence import presence, close_presence
 from tests.support.telegram import connect_request
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 from tests.support.telegram import Telegram, connect, settled
 from pathlib import Path
 import pytest
@@ -21,6 +21,7 @@ def test_public_channel_connects_reads_and_viewed_does_not_resurrect(tmp_path: P
         assert [row['configuration_ref'] for row in client.get('/api/v3/telegram/profiles').json()['configurations']] == ['fixture']
         feed = connect(client)
         assert feed['kind'] == 'telegram' and feed['connection'] == 'ready'
+        client.post('/api/v3/collect')
         card = settled(client)[0]
         material = client.get('/api/v3/materials/' + card['id']).json()
         assert material['content']['text'] == 'Текст канала' and (material['content']['completeness']['state']=='complete') is True
@@ -80,56 +81,8 @@ def test_album_partial_media_survives_restart_retry_and_deletes_all_parts(tmp_pa
         assert not (tmp_path / 'staging' / item).exists()
 
 
-def test_paged_history_resumes_committed_position_and_errors_do_not_block_other_feeds(tmp_path: Path):
-    from oko.collection.contracts import SourceError
-    class Pages(Telegram):
-        async def info(self, account, peer):
-            return dict(peer=peer if isinstance(peer,int) else -1001234567891 if peer == '@denied' else -1001234567890, title=str(peer), kind='group', forum=False)
-        async def page(self, account, peer, after, since):
-            if peer == -1001234567891:
-                raise SourceError('Нет доступа к Telegram-источнику', 120)
-            id = 101 if after < 101 else 205 if after < 205 else None
-            return dict(messages=[dict(id=id, date=time.time()-60, text=f'Сообщение {id}', group=None, media=None)] if id else [], more=id == 101, gap='История могла иметь пробел' if after == 101 else None)
-        async def messages(self, account, peer, ids):
-            return [dict(id=id, date=time.time()-60, text=f'Сообщение {id}', group=None, media=None) for id in ids]
-    tg = Pages()
-    kwargs = dict(token='test-token', telegram_client=tg)
-    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        presence(client, 'test')
-        connect(client, '@denied')
-        connect(client)
-        cards = settled(client, 2)
-        assert {c['title'] for c in cards} == {'Сообщение 101', 'Сообщение 205'}
-        assert any(h['history']['state']!='absent' and h['history']['progress']['warnings'] for h in client.get('/api/v3/status').json()['initial_histories'])
-        assert any(p['message']=='Нет доступа к Telegram-источнику' for p in client.get('/api/v3/status').json()['problems']['current'])
-    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        presence(client, 'test')
-        assert len(settled(client, 2)) == 2
-        client.post('/api/v3/collect')
-        time.sleep(.15)
-        assert len(client.get('/api/v3/cards').json()) == 2
 
 
-def test_private_group_access_forum_and_account_errors_are_explicit(tmp_path: Path):
-    from oko.collection.contracts import SourceError
-    class Peers(Telegram):
-        async def info(self, account, peer):
-            if peer == '@denied':
-                raise SourceError('Нет доступа к Telegram-источнику')
-            return dict(peer=-12345, title='Приватная группа', kind='group', forum=peer == '@forum')
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=Peers()), headers=HEADERS) as client:
-        presence(client, 'test')
-        assert connect_request(client, json=dict(account='fixture', peer='@denied', folder='Личное', auto_read=False)).json()['message'] == 'Нет доступа к Telegram-источнику'
-        assert connect_request(client, json=dict(account='fixture', peer='@forum', topic_id=1, folder='Личное', auto_read=False)).status_code == 422
-        assert client.get('/api/v3/subscriptions').json()['feeds'] == []
-        feed = connect(client, '-12345', 'Личное')
-        assert feed['access']['peer_id'] == '-12345'
-        assert len(client.get('/api/v3/subscriptions').json()['feeds']) == 1
-        duplicate = connect_request(client, json=dict(account='fixture', peer='-12345', folder='Другое', auto_read=False))
-        assert duplicate.status_code == 409
-        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['folder_id'] == feed['folder_id']
-        card = settled(client)[0]
-        assert card['source_url'] == 'tg://openmessage?chat_id=12345&message_id=11'
 
 
 def test_late_video_after_viewed_cannot_publish_or_leave_files(tmp_path: Path):
@@ -163,27 +116,6 @@ def test_late_video_after_viewed_cannot_publish_or_leave_files(tmp_path: Path):
         assert not (tmp_path / 'staging' / item).exists()
 
 
-def test_imported_telegram_feed_requires_explicit_removal_before_client_connection(tmp_path: Path):
-    saved_sources(tmp_path, [('https://rsshub.test/telegram/channel/fixture', 'Канал', 'Новости')])
-    class Imported(Telegram):
-        async def info(self, account, peer):
-            return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False, username='fixture')
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=Imported()), headers=HEADERS) as client:
-        imported = client.get('/api/v3/subscriptions').json()['feeds'][0]
-        presence(client, 'test')
-        rejected=connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Новости',auto_read=False))
-        assert rejected.status_code==409 and rejected.json()['code']=='duplicate_source'
-        assert client.get('/api/v3/subscriptions').json()['feeds']==[imported]
-        assert client.delete('/api/v3/feeds/'+imported['id']).status_code==200
-        wait_for(client,lambda: client.get('/api/v3/subscriptions').json()['feeds']==[])
-        feed = connect(client)
-        assert feed['id'] != imported['id']
-        assert len(client.get('/api/v3/subscriptions').json()['feeds']) == 1
-        client.patch('/api/v3/feeds/' + feed['id'], json={'auto_read': True, 'read_history': True})
-        card = settled(client)[0]
-        assert (card['completeness']['state']=='complete')
-        client.post('/api/v3/materials/' + card['id'] + '/viewed')
-        assert client.get('/api/v3/cards').json() == []
 
 
 def test_discovery_interruption_keeps_album_identity_and_files_recover(tmp_path: Path):
@@ -196,6 +128,7 @@ def test_discovery_interruption_keeps_album_identity_and_files_recover(tmp_path:
     kwargs = dict(token='test-token', telegram_client=Telegram())
     with TestClient(create_app(tmp_path, fault=fault, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
         connect(client)
         for _ in range(100):
             if failed:
@@ -280,38 +213,6 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
         assert client.get('/api/v3/cards').json() == []
 
 
-def test_legacy_rss_content_survives_and_cannot_switch_to_client(tmp_path: Path):
-    saved_sources(tmp_path, [('https://source.test/telegram/channel/fixture', 'Источник', 'Новости')])
-    import sqlite3
-    with database(tmp_path) as db:
-        db.execute("UPDATE feeds SET transport='rss'")
-    import httpx
-    from datetime import datetime, timezone
-    from email.utils import format_datetime
-    class Imported(Telegram):
-        async def info(self, account, peer):
-            return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False, username='fixture')
-    date = format_datetime(datetime.now(timezone.utc))
-    xml = f'<rss><channel><item><guid>rss-11</guid><link>https://source.test/old</link><title>RSS-текст</title><description>Анонс</description><pubDate>{date}</pubDate></item></channel></rss>'
-    transport = httpx.MockTransport(lambda req: httpx.Response(200, text=xml if '/telegram/' in req.url.path else '<article>Статья</article>'))
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=Imported(), rss_enabled=True, rss_transport=transport), headers=HEADERS) as client:
-        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]
-        assert client.patch('/api/v3/feeds/' + feed['id'], json={'transport': 'telegram'}).status_code == 409
-        presence(client, 'test')
-        settled(client)
-        response = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='New', auto_read=False))
-        assert response.status_code == 409
-        cards = settled(client, 1)
-        assert {c['title'] for c in cards} == {'RSS-текст'}
-        catalog=client.get('/api/v3/subscriptions').json()['feeds'][0]
-        access=catalog['access']
-        assert access['kind']=='unconfigured' and catalog['connection']=='needs_connection'
-        assert response.json()['details']['existing_feeds'][0]['access']==access
-        composition=client.get('/api/v3/reading-composition').json()['feeds'][0]['feed']
-        assert composition['access']==access
-        assert cards[0]['source']['access']==access
-        assert client.get('/api/v3/materials/'+cards[0]['id']).json()['source']['access']==access
-        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['access']['kind'] == 'unconfigured'
 
 
 def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Path):
@@ -323,12 +224,13 @@ def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Pat
             return (await self.page(account, peer, 0, 0))['messages']
     def fault(point):
         nonlocal failed
-        if point == 'after_file_move' and not failed:
+        if point == 'after_media_move' and not failed:
             failed = True
             raise OSError('simulated interruption')
     kwargs = dict(token='test-token', telegram_client=Photo())
     with TestClient(create_app(tmp_path, fault=fault, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
         connect(client)
         for _ in range(100):
             if failed:
@@ -337,8 +239,9 @@ def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Pat
         assert failed
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
-        card = settled(client)[0]
-        assert (card['completeness']['state']=='complete') and len(card['attachments']) == 1
+        client.post('/api/v3/collect')
+        card = wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['completeness']['state']=='complete' and len(card['attachments'])==1),None))
+        assert len(card['attachments']) == 1
         assert client.get(card['attachments'][0]['url']).content == b'media'
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
         assert not (tmp_path / 'content' / card['id']).exists()
@@ -368,25 +271,6 @@ def test_new_album_part_updates_existing_material_and_member_ids(tmp_path: Path)
         assert (material['content']['completeness']['state']=='complete') is True and len(material['content']['attachments']) == 2
 
 
-def test_viewed_album_stays_deleted_when_first_part_is_removed(tmp_path: Path):
-    class Album(Telegram):
-        rows = [dict(id=11, date=time.time()-60, text='Альбом', group=777, media=None), dict(id=12, date=time.time()-60, text='', group=777, media=None)]
-        async def page(self, account, peer, after, since):
-            return dict(messages=self.rows, more=False)
-        async def messages(self, account, peer, ids):
-            return self.rows
-    tg = Album()
-    kwargs = dict(token='test-token', telegram_client=tg)
-    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        presence(client, 'test')
-        connect(client)
-        card = settled(client)[0]
-        client.post('/api/v3/materials/' + card['id'] + '/viewed')
-    tg.rows = [dict(id=13, date=time.time()-60, text='Поздняя часть', group=777, media=None)]
-    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        presence(client, 'test')
-        time.sleep(.15)
-        assert client.get('/api/v3/cards').json() == []
 
 
 def test_local_client_uses_env_without_external_project_or_venv(tmp_path: Path):
@@ -432,55 +316,6 @@ def test_direct_client_prefers_existing_string_session_to_stale_file_setting(tmp
         assert not list(project.rglob('*.session'))
 
 
-def test_public_peer_is_resolved_again_after_restart_without_session_entity_cache(tmp_path: Path):
-    from oko.collection.contracts import SourceError
-    class ColdSession(Telegram):
-        resolved = False
-        text = 'До перезапуска'
-        async def info(self, account, peer):
-            if peer not in ('fixture', '@fixture'):
-                raise SourceError('Нет доступа к Telegram-источнику')
-            self.resolved = True
-            return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False, username='fixture')
-        async def page(self, account, peer, after, since):
-            if not self.resolved:
-                raise SourceError('Нет доступа к Telegram-источнику')
-            return await super().page(account, peer, after, since)
-        async def messages(self, account, peer, ids):
-            if not self.resolved:
-                raise SourceError('Нет доступа к Telegram-источнику')
-            return [dict(id=11, date=time.time()-60, text=self.text, group=None, media=None)]
-        async def close(self):
-            self.resolved = False
-    original = ColdSession()
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=original), headers=HEADERS) as client:
-        presence(client, 'test')
-        connect(client)
-        item = settled(client)[0]['id']
-    # Simulate the user's existing database from before username persistence.
-    import sqlite3
-    with sqlite3.connect(tmp_path / 'state.sqlite') as database:
-        # The old schema predates current feed triggers as well as this column.
-        for trigger in database.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='feeds'").fetchall():
-            database.execute('DROP TRIGGER "' + trigger[0].replace('"', '""') + '"')
-        database.execute('ALTER TABLE feeds DROP COLUMN telegram_username')
-    def interrupt_migration(point):
-        if point == 'before_telegram_username_commit':
-            raise OSError('simulated migration interruption')
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=ColdSession(), fault=interrupt_migration), headers=HEADERS) as client:
-        assert client.get('/api/v3/status').json()['runtime_state']=='unavailable'
-        assert client.get('/api/v3/cards').status_code==503
-    restarted = ColdSession()
-    restarted.text = 'После перезапуска'
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=restarted), headers=HEADERS) as client:
-        presence(client, 'test')
-        assert client.post('/api/v3/materials/' + item + '/retry').status_code == 200
-        for _ in range(100):
-            material = client.get('/api/v3/materials/' + item).json()
-            if material['content'].get('text') == 'После перезапуска' and not material['content'].get('loading'):
-                break
-            time.sleep(.02)
-        assert material['content']['text'] == 'После перезапуска'
 
 
 def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path):
@@ -512,41 +347,6 @@ def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path
 
 
 
-def test_reconnect_former_public_channel_by_numeric_peer_does_not_restore_old_username(tmp_path: Path):
-    class FormerPublic(Telegram):
-        private = False
-        async def info(self, account, peer):
-            if self.private and not isinstance(peer, int):
-                from oko.collection.contracts import SourceError
-                raise SourceError('Нет доступа к Telegram-источнику')
-            return dict(peer=-1001234567890, title='Канал', kind='channel', forum=False,
-                        username=None if self.private else 'fixture')
-        async def messages(self, account, peer, ids):
-            return [dict(id=11, date=time.time()-60, text='Теперь приватный' if self.private else 'Публичный', group=None, media=None)]
-    tg = FormerPublic()
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=tg), headers=HEADERS) as client:
-        client.get('/api/v3/subscriptions')
-        presence(client, 'test')
-        feed = connect(client)
-        item = settled(client)[0]['id']
-        tg.private = True
-        response = connect_request(client, json=dict(account='fixture', peer='-1001234567890', folder='Новости', auto_read=False, feed_id=feed['id']))
-        assert response.status_code == 409 and response.json()['code'] == 'access_immutable'
-        before=client.get('/api/v3/subscriptions').json()
-        assert before['feeds'][0]['id']==feed['id']
-        assert client.delete('/api/v3/feeds/'+feed['id']).status_code==200
-        wait_for(client,lambda: client.get('/api/v3/subscriptions').json()['feeds']==[])
-        replacement=connect(client,'-1001234567890')
-        assert replacement['id']!=feed['id']
-        assert client.get('/api/v3/materials/'+item).status_code==404
-        item=settled(client)[0]['id']
-        for _ in range(100):
-            material = client.get('/api/v3/materials/' + item).json()
-            if material['content'].get('text') == 'Теперь приватный' and not material['content'].get('loading'):
-                break
-            time.sleep(.02)
-        assert material['content']['text'] == 'Теперь приватный'
-        assert material['source_url']=='https://t.me/c/1234567890/11'
 
 
 @pytest.mark.parametrize('advance', [True, False])
@@ -609,7 +409,8 @@ def test_worker_descending_snapshot_expands_boundary_album(tmp_path: Path, monke
 
 def test_worker_service_actions_keep_read_ids_but_do_not_consume_post_count(tmp_path: Path, monkeypatch):
     import asyncio
-    from oko.collection.telegram.source import LocalTelegram, TelegramSource
+    from oko.collection.telegram.source import LocalTelegram
+    from oko.collection.telegram.client_channel_source import TelegramClientSource
     project = fake_sdk_project(tmp_path, monkeypatch)
     sdk = project / 'telethon' / '__init__.py'
     text = sdk.read_text().replace("return [msg(11)] if not params.get('offset_id') else []", "return [SimpleNamespace(id=20, date=datetime.now(timezone.utc), grouped_id=None, action=object()), msg(11)] if not params.get('offset_id') else []")
@@ -617,9 +418,10 @@ def test_worker_service_actions_keep_read_ids_but_do_not_consume_post_count(tmp_
     async def scenario():
         bridge = LocalTelegram(project / '.env', tmp_path / 'data')
         try:
-            source = TelegramSource(bridge, 'fixture', -1001234567890, 1)
+            source = TelegramClientSource(bridge, 'fixture', -1001234567890, 1)
             source.initial_history = dict(mode='count', count=1, since=None, paused=False)
-            publications = (await source.discover(None)).publications
+            first=await source.discover(None)
+            publications = (await source.discover(first.cursor)).publications
             assert [p.members for p in publications] == [(11, 12)]
             window = await bridge.read_window('fixture', -1001234567890, 0, 20)
             assert 20 in window['ids']

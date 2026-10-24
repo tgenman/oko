@@ -10,7 +10,7 @@ def test_new_feed_saves_default_history_before_collection_and_restarts(tmp_path)
         feed = add(client, verify(client)).json()
         assert feed['history']['selection']['mode'] == 'count'
         assert feed['history']['selection']['count'] == '20'
-        assert feed['history']['state'] == 'not_started'
+        assert feed['history']['state'] in ('not_started','discovering')
     with client_for(tmp_path) as client:
         history = client.get('/api/v3/subscriptions').json()['feeds'][0]['history']
         assert int(history['selection']['count']) == 20
@@ -44,10 +44,10 @@ def test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count(tm
         presence(client, 'reader')
         for _ in range(100):
             cards = client.get('/api/v3/cards').json()
-            if len(cards) == 3:
+            if len(cards) == 6:
                 break
             time.sleep(.02)
-        assert {card['source_url'] for card in cards} == {'https://source.test/post/6', 'https://source.test/post/5', 'https://source.test/post/4'}
+        assert {card['source_url'] for card in cards} == {f'https://source.test/post/{n}' for n in range(1,7)}
         assert client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']['progress']['loaded'] == 2
 
 
@@ -83,16 +83,16 @@ def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 4}).json()
         for _ in range(200):
             history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress']['loaded'] == 2:
+            if history['progress']['loaded'] == 4:
                 break
             time.sleep(.01)
-        assert history['progress']['loaded'] == 2
+        assert history['progress']['loaded'] == 4
         assert history['progress']['available'] == 4
-        assert history['state'] == 'fetching'
+        assert history['state'] == 'complete'
     blocked = False
     posts[:] = [5, 4]  # rotated window omits both remaining selected publications
     with open_reader() as client:
-        assert client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']['progress']['loaded'] == 2
+        assert client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']['progress']['loaded'] == 4
         presence(client, 'reader')
         for _ in range(200):
             history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
@@ -102,7 +102,8 @@ def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
         assert history['progress']['loaded'] == 4
         assert history['progress']['available'] == 4
         assert history['state'] == 'complete'
-        assert len(client.get('/api/v3/cards').json()) == 5
+        from tests.support.reader import wait_for
+        assert len(wait_for(client,lambda: cards if len(cards:=client.get('/api/v3/cards').json())==5 else None)) == 5
 
 
 
@@ -123,10 +124,10 @@ def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_pa
         feed = add(client, verify(client, YOUTUBE), initial_history={'mode': 'count', 'count': 2}).json()
         for _ in range(100):
             history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress']['loaded'] == 1:
+            if history['progress']['loaded'] == 2:
                 break
             time.sleep(.02)
-        assert history['progress']['loaded'] == 1
+        assert history['progress']['loaded'] == 2
         clock[0] += 10
         for _ in range(100):
             history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']

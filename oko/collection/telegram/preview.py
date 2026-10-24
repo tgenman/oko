@@ -7,11 +7,10 @@ import httpcore
 import httpx
 
 from oko.collection import request_observation as observation
-from oko.collection.contracts import DownloadStage, SourceError
+from oko.collection.contracts import SourceError
 
 
-async def fragment(username: str, message: str, transport: httpx.AsyncBaseTransport | None,
-                   staging: DownloadStage | None) -> tuple[str, str]:
+async def fragment(username: str, message: str, transport: httpx.AsyncBaseTransport | None) -> tuple[str, str]:
     url = f'https://t.me/{username}/{message}'
     try:
         async with asyncio.timeout(30), httpx.AsyncClient(transport=transport, timeout=20,
@@ -31,13 +30,9 @@ async def fragment(username: str, message: str, transport: httpx.AsyncBaseTransp
                         response.raise_for_status()
                         data = bytearray()
                         async for part in response.aiter_bytes():
-                            if staging and not staging.admitted():
-                                raise asyncio.CancelledError
                             data.extend(part)
                             if len(data) > 2 * 1024 * 1024:
                                 raise ValueError('metadata response too large')
-                if staging and not staging.admitted():
-                    raise asyncio.CancelledError
                 document = BeautifulSoup(bytes(data), 'html.parser')
                 identities = [str(node.get('data-telegram-post', '')).lower()
                               for node in document.select('script[data-telegram-post]')]

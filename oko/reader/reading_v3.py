@@ -23,7 +23,7 @@ def media_url(value: str) -> wire.MediaUrl:
 
 
 def completeness(full: bool, reason: str, external_only: bool = False, post_web_unavailable: bool = False) -> wire.ContentCompleteness:
-    return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='post_web_unavailable' if post_web_unavailable and not reason else 'external_attachment' if external_only else 'legacy', message=reason))
+    return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='post_web_unavailable' if post_web_unavailable and not reason else 'external_attachment' if external_only else 'source_incomplete', message=reason))
 
 
 def provenance(value: facts.UnknownProvenance | facts.CodexProvenance | facts.LocalProvenance | None) -> wire.Provenance:
@@ -31,7 +31,7 @@ def provenance(value: facts.UnknownProvenance | facts.CodexProvenance | facts.Lo
         return wire.Provenance(wire.CodexResultProvenance(kind='codex', model=value.model, reasoning_effort=value.reasoning_effort, fast=value.fast))
     if isinstance(value, facts.LocalProvenance) and value.processor == 'llamacpp':
         return wire.Provenance(wire.LocalResultProvenance(kind='local', processor_id='llamacpp', model=wire.LocalModel(wire.KnownLocalModel(state='known', name=value.model) if value.model else wire.UnknownLocalModel(state='unknown'))))
-    return wire.Provenance(wire.UnknownResultProvenance(kind='unknown', reason='legacy'))
+    return wire.Provenance(wire.UnknownResultProvenance(kind='unknown', reason='not_recorded'))
 
 
 def attempt(status: str, error: str | None, waiting: ProcessingWait | None = None) -> wire.UnfinishedProcessingAttempt:
@@ -50,7 +50,7 @@ def filter_state(value: facts.Filter | None, waiting: ProcessingWait | None) -> 
     if value is None:
         return wire.FilterState(wire.FilterAttemptState(attempt=attempt('off', None), diagnostic_message=None, result=None))
     message = value.error if isinstance(value.error, str) else None
-    result = wire.FilterResult(can_restore=False, hidden=value.hidden, removed=value.removed, restored=value.restored, reason=value.reason, provenance=provenance(None)) if value.status == 'done' else None
+    result = wire.FilterResult(hidden=value.hidden, removed=value.removed, reason=value.reason, provenance=provenance(None)) if value.status == 'done' else None
     if result is not None:
         return wire.FilterState(wire.FilterReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
     return wire.FilterState(wire.FilterAttemptState(attempt=attempt(value.status, message, waiting), diagnostic_message=message, result=None))
@@ -94,7 +94,7 @@ def saved_filter(runtime: Runtime, item: str, value: facts.Filter | None) -> wir
     current=runtime.require_store()
     filtered = filter_state(value, runtime.processing_wait(item, 'filter'))
     if filtered.root.result is not None:
-        saved = current.publications.provenance(item,'filter') if current.publications.owns(item) else current.derivative_provenance(current.path(item).parent / 'filter.md', current.filters.signature(item))
+        saved = current.publications.provenance(item,'filter')
         if saved:
             from pydantic import TypeAdapter
             origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
@@ -107,7 +107,7 @@ def common(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed) -> 
     source: wire.DemoSourceReference | wire.RssSourceReference | wire.YoutubeSourceReference | wire.TelegramSourceReference
     fid, url = wire.FeedId(value.feed_id), wire.SourceUrl(value.url)
     owner = feed.root
-    if isinstance(owner, (wire.TelegramWebSubscriptionFeed, wire.TelegramClientSubscriptionFeed, wire.TelegramLegacyClientSubscriptionFeed, wire.TelegramUnconfiguredSubscriptionFeed)):
+    if isinstance(owner, (wire.TelegramWebSubscriptionFeed, wire.TelegramClientSubscriptionFeed, wire.TelegramUnconfiguredSubscriptionFeed)):
         source = wire.TelegramSourceReference(kind='telegram', feed_id=fid, source_url=url, access=wire.TelegramAccess(owner.access), message_ids=[wire.TelegramMessageId(str(n)) for n in value.members] if isinstance(value.members, list) else [])
     elif owner.kind == 'youtube':
         source = wire.YoutubeSourceReference(kind='youtube', feed_id=fid, source_url=url, captions=value.captions if isinstance(value.captions, str) else 'not_requested')
@@ -139,17 +139,12 @@ def card(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed, share
         post_web_unavailable=value.post_web_unavailable, external_attachments=[wire.ExternalAttachment(**a.model_dump()) for a in value.external_attachments],
         external_attachment_kinds=list(dict.fromkeys(a.kind for a in value.external_attachments)),
         loading=value.loading is True, completeness=completeness(value.full, value.reason, value.external_only, value.post_web_unavailable),
-        revision_id=wire.RevisionId(value.version), version=current.versions.number(value.id), changed=value.changed is True,
+        revision_id=wire.RevisionId(value.version), version=1, changed=value.changed is True,
         source_deleted=value.source_deleted is True,
         images=[media_url(url) for url in value.images] if isinstance(value.images, list) else [],
-        attachments=attachments(value.attachments) if isinstance(value.attachments, list) else [],
-        previous_versions=[previous_reference(p) for p in value.previous] if isinstance(value.previous, list) else []))
+        attachments=attachments(value.attachments) if isinstance(value.attachments, list) else []))
 
 
-def previous_reference(value: facts.Previous) -> wire.PreviousVersionReference:
-    if not isinstance(value.number, int) or not isinstance(value.version, str):
-        raise ValueError('Previous version lacks its identity')
-    return wire.PreviousVersionReference(number=value.number, revision_id=wire.RevisionId(value.version), url=media_url(value.url))
 
 
 def missing(resource: wire.AffectedResource) -> ApiError:
@@ -172,7 +167,9 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
         saved = runtime.require_store().subscriptions
-        return {v['id']: project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds(identity)}
+        rows=saved.feeds() if identity is None else saved.feeds(identity)
+        bindings=saved.telegram.bindings([row['id'] for row in rows])
+        return {v['id']:project.subscription(facts.SubscriptionFeed.model_validate(v),bindings.get(v['id'])) for v in rows}
 
     def composition() -> wire.ReadingComposition:
         current = runtime.require_store()
@@ -249,29 +246,17 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
                 reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
                 post_web_unavailable=projected.post_web_unavailable, external_attachments=projected.external_attachments, images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
                 loading=projected.loading, changed=projected.changed, source_deleted=projected.source_deleted,
-                revision_id=projected.revision_id, version=projected.version, previous_versions=[])
+                revision_id=projected.revision_id, version=projected.version)
             return wire.ReadableMaterial(wire.AvailableReadableMaterial(**shared, availability='available', content=content))
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:
         identity(item)
         current = runtime.require_store()
-        if number is None and current.publications.owns(item):
-            value = current.media.file(item,name) if kind=='media' else None
-            if value is None:
-                raise ApiError(404, wire.ErrorEnvelope(wire.MediaUnavailableError(code='media_unavailable', message='Вложение недоступно', details=wire.MediaUnavailableErrorDetails(material_id=identity(item), name=name), command_id=None, diagnostic_id=None)))
-            path,mime = value
-            return Response(path.read_bytes(),media_type=mime,headers={'Content-Disposition':'inline'})
-        raw = current.versions.read(item, number) if number is not None else current.material(item)
-        material = facts.Version.model_validate(raw) if number is not None and raw else facts.Material.model_validate(raw) if raw else None
-        images = material.images if material and isinstance(material.images, list) else []
-        attached = material.attachments if material and isinstance(material.attachments, list) else []
-        path = (current.versions.path(item, number) if number is not None else current.path(item)).parent / name
-        image = kind == 'images' and any(url.endswith('/' + name) for url in images)
-        attachment = next((a for a in attached if a.url.endswith('/' + name)), None) if kind == 'media' else None
-        if Path(name).name != name or not (image or attachment) or not path.is_file():
-            raise ApiError(404, wire.ErrorEnvelope(wire.MediaUnavailableError(code='media_unavailable', message='Вложение недоступно', details=wire.MediaUnavailableErrorDetails(material_id=identity(item), name=name), command_id=None, diagnostic_id=None)))
-        mime = attachment.mime if attachment else {'.png':'image/png','.jpg':'image/jpeg','.gif':'image/gif','.webp':'image/webp'}[path.suffix]
-        return Response(path.read_bytes(), media_type=mime, headers={'Content-Disposition':'inline'})
+        value=current.media.file(item,name) if kind=='media' else None
+        if value is None:
+            raise ApiError(404,wire.ErrorEnvelope(wire.MediaUnavailableError(code='media_unavailable',message='Вложение недоступно',details=wire.MediaUnavailableErrorDetails(material_id=identity(item),name=name),command_id=None,diagnostic_id=None)))
+        path,mime=value
+        return Response(path.read_bytes(),media_type=mime,headers={'Content-Disposition':'inline'})
 
     @router.get('/api/v3/materials/{item}/images/{name}')
     async def image(item: str, name: str) -> Response:
@@ -364,8 +349,6 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
                 await runtime.retry_theses(value.material_id.root)
             elif isinstance(value, wire.CommandRetryFilter):
                 await runtime.retry_filter(value.material_id.root)
-            elif isinstance(value, wire.CommandRestoreFilter):
-                raise ApiError(410, wire.ErrorEnvelope(wire.ActionInvalidError(code='action_invalid',message='Restore removed',details=wire.ActionInvalidErrorDetails(reason='feature_removed'),command_id=None,diagnostic_id=None)))
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     @router.post('/api/v3/materials/{item}/viewed', response_model=wire.CommandAcknowledgement)

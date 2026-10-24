@@ -1,3 +1,4 @@
+from tests.support.source import publication_packet
 """Feed information through HTTP and atomic storage lifecycle boundaries."""
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -12,15 +13,15 @@ from oko.storage.store import Store
 from tests.support.app import create_app
 from tests.support.filters import FilterSource, setup_filters, transport
 from tests.support.reader import HEADERS, wait_for
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 
 
 def stamp(value):
     return datetime.fromtimestamp(value, timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
-def test_feed_title_folder_atomicity_noops_legacy_dates_and_restart(tmp_path):
-    saved_sources(tmp_path, [('https://one.test/feed', 'One', 'First'), ('https://two.test/feed', 'Two', 'Second')])
+def test_feed_title_folder_atomicity_noops_and_restart(tmp_path):
+    configured_sources(tmp_path, [('https://one.test/feed', 'One', 'First'), ('https://two.test/feed', 'Two', 'Second')])
     clock = [1800000000.]
     app = lambda: create_app(tmp_path, token='test', api_only=True, wall_clock=lambda: clock[0])
     with TestClient(app(), headers=HEADERS) as client:
@@ -29,14 +30,15 @@ def test_feed_title_folder_atomicity_noops_legacy_dates_and_restart(tmp_path):
         feed = one['id']
         path = '/api/v3/settings/feed/' + feed
         activity = lambda: client.get(path).json()['activity']
-        assert activity() == dict(created=None, modified=None, updated=None, marked_read=None, unread=0, description=None)
+        initial=activity()
+        assert initial['created'] is not None and initial['unread']==0
         assert client.patch('/api/v3/feeds/' + feed, json={'title':'One'}).status_code == 200
-        assert activity()['modified'] is None
+        assert activity()['modified']==initial['modified']
         # All validation precedes any write, including title and Modified.
         bad = client.patch('/api/v3/feeds/' + feed, json={'title':'New', 'folder_id':'missing'})
         assert bad.status_code == 400
         assert client.get(path).json()['feed']['title'] == 'One'
-        assert activity()['modified'] is None
+        assert activity()['modified']==initial['modified']
         for title in ('', '   ', 'a'*201, None):
             assert client.patch('/api/v3/feeds/' + feed, json={'title':title}).status_code in (400, 422)
         assert client.patch(path, json={'originals':False}).status_code == 200
@@ -62,7 +64,7 @@ def test_feed_title_folder_atomicity_noops_legacy_dates_and_restart(tmp_path):
         saved = client.get(path).json()
         assert saved['feed']['title'] == 'Renamed'
         assert saved['feed']['folder_id'] == two['folder_id']
-        assert saved['activity']['created'] is None
+        assert saved['activity']['created']==initial['created']
         assert saved['activity']['modified'] == stamp(clock[0])
 
 
@@ -164,7 +166,7 @@ def test_stale_and_rolled_back_discovery_cannot_advance_date(tmp_path):
     store.enqueue_discovery()
     job = store.next_job(0)
     assert job
-    publications = [Publication('one', 'https://example.test/one', 1800000000.)]
+    publications = [publication_packet(Publication('one', 'https://example.test/one', 1800000000.))]
     with pytest.raises(RuntimeError, match='Synthetic crash'):
         store.discovered(publications, 'one', job, description='Uncommitted')
     assert store.subscriptions.details.snapshot('demo')['updated'] is None

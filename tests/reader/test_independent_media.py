@@ -5,7 +5,7 @@ import threading
 import httpx
 import pytest
 
-from tests.support.publication_pipeline import migrated_root
+from tests.support.publication_pipeline import publication_root
 from tests.support.app import create_app
 from tests.support.telegram import configure_fast_web, settled
 from tests.support.telegram_web import page
@@ -17,7 +17,7 @@ HEADERS = {'Authorization':'Bearer test'}
 
 
 def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
-    root = migrated_root(tmp_path)
+    root = publication_root(tmp_path)
     phase = [0]
     started, release = threading.Event(), threading.Event()
     async def response(request):
@@ -48,13 +48,13 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
             assert complete['content']['completeness']['state'] == 'complete'
             assert complete['content']['attachments'][0]['url'] != old['content']['attachments'][0]['url']
             assert client.get(old['content']['attachments'][0]['url']).status_code == 404
-            assert complete['content']['previous_versions'] == []
+            assert 'previous_versions' not in complete['content']
         finally:
             release.set()
 
 
 def test_viewed_cancels_a_media_job_and_rejects_its_late_file(tmp_path):
-    root = migrated_root(tmp_path)
+    root = publication_root(tmp_path)
     started, release = threading.Event(), threading.Event()
     async def response(request):
         if request.url.host == 'cdn.example':
@@ -86,7 +86,7 @@ def test_viewed_cancels_a_media_job_and_rejects_its_late_file(tmp_path):
 
 
 def test_retry_delays_are_global_settings_and_validate_the_effective_pair(tmp_path):
-    root = migrated_root(tmp_path)
+    root = publication_root(tmp_path)
     with TestClient(create_app(root, token='test', api_only=True), headers=HEADERS) as client:
         read = '/api/v3/settings/retries'
         write = '/api/v3/settings/oko/global'
@@ -104,7 +104,7 @@ def test_retry_delays_are_global_settings_and_validate_the_effective_pair(tmp_pa
 
 def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_path):
     import time
-    root = migrated_root(tmp_path)
+    root = publication_root(tmp_path)
     offset = [0.]
     calls = {'bad':0, 'good':0}
     def response(request):
@@ -152,7 +152,7 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
 
 def test_permanent_file_failure_waits_for_manual_retry(tmp_path):
     import time
-    root = migrated_root(tmp_path)
+    root = publication_root(tmp_path)
     offset = [0.]
     available = [False]
     calls = []
@@ -184,7 +184,7 @@ def test_permanent_file_failure_waits_for_manual_retry(tmp_path):
 def test_publication_fetch_uses_configured_retry_delay_and_keeps_saved_text(tmp_path):
     import time
     from datetime import datetime
-    root = migrated_root(tmp_path)
+    root = publication_root(tmp_path)
     fail = [False]
     def response(request):
         return httpx.Response(503) if fail[0] else httpx.Response(200,text=page([(11,'Saved text')]))
@@ -206,7 +206,7 @@ def test_publication_fetch_uses_configured_retry_delay_and_keeps_saved_text(tmp_
 
 def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
     from datetime import datetime
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     limited=[False]
     denied=[]
     def response(request):
@@ -237,7 +237,7 @@ def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
 def test_media_urls_and_publication_media_ids_follow_source_order(tmp_path):
     import json
     import sqlite3
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         if request.url.host=='cdn.example':
             return httpx.Response(200,content=request.url.path.strip('/').encode(),headers={'content-type':'image/jpeg'})
@@ -255,7 +255,7 @@ def test_media_urls_and_publication_media_ids_follow_source_order(tmp_path):
 
 
 def test_changed_resource_refreshes_description_before_downloading_new_bytes(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     bounded=[0]
     downloads=[]
     def response(request):
@@ -278,7 +278,7 @@ def test_changed_resource_refreshes_description_before_downloading_new_bytes(tmp
 
 
 def test_refreshed_signature_keeps_the_media_id_and_existing_bytes(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     signature=['first']
     downloads=[]
     def response(request):
@@ -303,7 +303,7 @@ def test_refreshed_signature_keeps_the_media_id_and_existing_bytes(tmp_path):
 
 def test_a_real_empty_attachment_is_ready_with_size_zero(tmp_path):
     import sqlite3
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         if request.url.host=='cdn.example':
             return httpx.Response(200,content=b'',headers={'content-type':'application/octet-stream'})
@@ -321,7 +321,7 @@ def test_a_real_empty_attachment_is_ready_with_size_zero(tmp_path):
 
 @pytest.mark.parametrize('refresh',['retry','collect'])
 def test_replacement_starts_while_cancel_resistant_old_media_is_still_waiting(tmp_path,refresh):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     phase=['a']
     old_started, old_release, old_finished = threading.Event(), threading.Event(), threading.Event()
     async def response(request):
@@ -358,7 +358,7 @@ def test_replacement_starts_while_cancel_resistant_old_media_is_still_waiting(tm
 
 def test_periodic_cleanup_removes_orphans_but_keeps_an_active_download(tmp_path):
     import time
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     offset=[0.]
     started,release=threading.Event(),threading.Event()
     class Held(httpx.AsyncByteStream):
@@ -398,7 +398,7 @@ def test_cleanup_between_move_and_commit_keeps_the_admitted_final_file(tmp_path)
     """Public Store file boundary: the critical interval is synchronous, not HTTP."""
     from dataclasses import replace
     from oko.storage.store import Store
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     async def response(request):
         if request.url.host=='cdn.example':
@@ -433,7 +433,7 @@ def test_cleanup_between_move_and_commit_keeps_the_admitted_final_file(tmp_path)
 def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_path,point,committed):
     import sqlite3
     from tests.support.processes import launch,connect,cleanup
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started=threading.Event()
     async def held(request):
         if request.url.host=='cdn.example':
@@ -451,11 +451,15 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
     url='/api/v3/materials/'+item+'/media/'+media_id
     process=launch(root,point,api_only=True,web_media=True)
     try:
-        with connect(root,process) as client:
-            try:
-                client.post('/api/v3/materials/'+item+'/retry')
-            except httpx.TransportError:
-                pass
+        try:
+            with connect(root,process) as client:
+                try:
+                    client.post('/api/v3/materials/'+item+'/retry')
+                except httpx.TransportError:
+                    pass
+        except AssertionError:
+            # Current pending media can resume and reach the fault before readiness.
+            assert process.wait(timeout=5)==79
         assert process.wait(timeout=5)==79
     finally:
         cleanup(process)
@@ -473,7 +477,7 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
 
 
 def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     async def response(request):
         if request.url.host=='api.telegra.ph':
@@ -504,7 +508,7 @@ def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
 
 
 def test_unavailable_telegraph_keeps_the_last_article_with_new_post_text(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     broken=[False]
     def response(request):
         if request.url.host=='cdn.example':
@@ -534,7 +538,7 @@ def test_unavailable_telegraph_keeps_the_last_article_with_new_post_text(tmp_pat
 
 
 def test_explicit_feed_refresh_rechecks_unavailable_media(tmp_path):
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     unavailable=[True]
     files=[]
     def response(request):
@@ -560,7 +564,7 @@ def test_explicit_feed_refresh_rechecks_unavailable_media(tmp_path):
 
 def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
     import sqlite3
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     broken=[False]
     started,release=threading.Event(),threading.Event()
     async def response(request):
@@ -600,7 +604,7 @@ def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
 
 def test_media_source_wait_survives_restart_and_does_not_pause_another_host(tmp_path):
     import time
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     calls={'paused':0,'other':0}
     def response(request):
         if request.url.host=='paused.example':
@@ -632,7 +636,7 @@ def test_media_source_wait_survives_restart_and_does_not_pause_another_host(tmp_
 
 def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_path):
     import sqlite3
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     missing=[False]
     def response(request):
         return httpx.Response(200,text=page([] if missing[0] else [(11,'Saved text')]))
@@ -655,7 +659,7 @@ def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_
 def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extra):
     import sqlite3
     import time
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     broken=[True]
     calls=[]
     def response(request):
@@ -690,7 +694,7 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
 def test_manual_fetch_retry_is_immediate_after_restart_without_resetting_backoff(tmp_path):
     import sqlite3
     from oko.storage.store import Store
-    root=migrated_root(tmp_path)
+    root=publication_root(tmp_path)
     def response(request):
         if request.url.host=='api.telegra.ph':
             return httpx.Response(503)

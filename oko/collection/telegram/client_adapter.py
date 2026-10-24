@@ -72,7 +72,7 @@ class TelegramClientAdapter:
         info=await self.client.info(self.account,self.peer)
         if info.get('peer')!=self.peer:
             raise SourceError('Telegram вернул другой канал',code='source_identity_conflict',retryable=False)
-        if info.get('kind')!='channel':
+        if info.get('kind')!='channel' or info.get('forum',False):
             raise SourceError('Этот адаптер поддерживает только каналы Telegram',code='telegram-channel-required',retryable=False)
         self.info=info
 

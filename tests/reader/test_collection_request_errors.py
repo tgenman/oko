@@ -8,7 +8,7 @@ from tests.support.app import create_app
 from tests.support.presence import presence
 from tests.support.reader import wait_for
 from tests.support.rss import rss, wait_cards
-from tests.support.subscriptions import saved_sources
+from tests.support.subscriptions import configured_sources
 
 
 HEADERS = {'Authorization': 'Bearer test-token'}
@@ -35,7 +35,7 @@ def test_swallowed_article_http_failure_keeps_original_exception_and_url(tmp_pat
             return httpx.Response(200, text=rss())
         return httpx.Response(503, text='Private response body must never enter diagnostics')
 
-    saved_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, api_only=True,
                               rss_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         presence(client, 'reader')
@@ -69,7 +69,7 @@ def test_attachment_redirect_timeout_retains_both_redacted_addresses(tmp_path: P
             return httpx.Response(302, headers={'Location': final})
         raise httpx.ReadTimeout('Synthetic read timeout', request=request)
 
-    saved_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, api_only=True,
                               rss_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         presence(client, 'reader')
@@ -107,7 +107,7 @@ class YouTubeTranscriptApi:
     monkeypatch.setenv('PYTHONPATH', str(package.parent) + os.pathsep + os.environ.get('PYTHONPATH', ''))
     clock = Clock()
     root = tmp_path / 'reader'
-    saved_sources(root, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Канал', 'Новости')])
+    configured_sources(root, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}', 'Канал', 'Новости')])
     def respond(request):
         return httpx.Response(200, text=feed_xml()) if request.url.host == 'www.youtube.com' else httpx.Response(200, content=PNG, headers={'Content-Type': 'image/png'})
     with TestClient(create_app(root, token='test-token', rss_enabled=True, api_only=True,
@@ -135,7 +135,7 @@ def test_original_request_message_and_traceback_have_explicit_byte_limits(tmp_pa
             return httpx.Response(200, text=rss())
         raise httpx.ReadTimeout(long_message, request=request)
 
-    saved_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'Источник', 'Новости')])
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, api_only=True,
                               rss_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         presence(client, 'reader')

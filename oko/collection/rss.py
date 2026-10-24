@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import httpx
 from oko.collection import request_observation as observation
 from oko.collection.adapters import MediaReference
-from oko.collection.contracts import Material, Publication, Image, SourceError, SourceDeleted, DiscoveryResult, FetchResult, FetchResources, FetchRequirements, SourceObservation
+from oko.collection.contracts import Material, Publication, SourceError, SourceDeleted, DiscoveryResult, FetchResult, SourceObservation
 
 
 def normalized(url: str) -> str:
@@ -203,7 +203,6 @@ def entries(raw: bytes, base: str, *, strict: bool = False, diagnostics: list[st
 
 
 class RSSSource:
-    fetch_requirements = FetchRequirements()
     changes = 'RSS: повторно проверяются статьи в доступном окне фида; 404/410 сохраняют локальную копию. Исчезновение из окна не означает удаление.'
     def __init__(self, url: str, initial_days: int, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.url, self.initial_days, self.transport = normalized(url), initial_days, transport
@@ -244,132 +243,12 @@ class RSSSource:
                         raise SourceError('Превышен размер материала')
                 return bytes(data), str(response.url), response.headers.get('content-type', '').split(';')[0]
 
-    async def read_entries(self) -> list[Entry]:
-        raw, url, _ = await self.download(self.url)
-        result = entries(raw, url)
-        self.description = feed_description(raw)
-        return result
 
-    async def discover(self, cursor: str | None) -> DiscoveryResult:
-        previous = json.loads(cursor) if cursor else None
-        if self.initial_history and (self.initial_history.get('run') or not (previous and 'history_ids' in previous)):
-            return await self._discover_rss_history(previous)
-        return await self._discover_window(previous)
 
-    async def _discover_window(self, previous: dict[str, Any] | None) -> DiscoveryResult:
-        batch = await self.read_entries()
-        if self.initial_history:
-            if previous and 'history_ids' in previous:
-                excluded = set(previous['excluded'])
-                chosen = [e for e in batch if e.publication.id not in excluded]
-                next_cursor = previous
-            else:
-                selection = self.initial_history
-                unique = list({e.publication.id: e for e in batch}.values())
-                known_dates = [e.publication.published for e in unique if e.publication.published_known]
-                descending = all(a >= b for a, b in zip(known_dates, known_dates[1:]))
-                has_unknown = any(not e.publication.published_known for e in unique)
-                # When a date is absent only the producer's order can place it.
-                ordered = unique if has_unknown else sorted(unique, key=lambda e: e.publication.published, reverse=True)
-                chosen = ordered[:selection['count']] if selection['mode'] == 'count' else [e for e in unique if not e.publication.published_known or e.publication.published >= selection['since']]
-                warnings = []
-                if selection['mode'] == 'date':
-                    warnings.append('RSS отдаёт ограниченное окно: полнота истории за период не подтверждена')
-                elif has_unknown and (len(known_dates) < 2 or not descending):
-                    warnings.append('Порядок RSS неоднозначен: точность выбора последних N не подтверждена')
-                selected = {e.publication.id for e in chosen}
-                next_cursor = {'history_ids': list(selected), 'excluded': [e.publication.id for e in batch if e.publication.id not in selected], 'since': time.time(), 'warnings': warnings}
-            self.gap = ' · '.join(next_cursor.get('warnings', [])) or None
-            return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in chosen]), json.dumps(next_cursor), SourceObservation(self.gap, self.changes, description=self.description))
-        cutoff = previous['since'] if previous else time.time() - self.initial_days * 86400
-        self.gap = None
-        if not batch or min(e.publication.published for e in batch) > cutoff:
-            self.gap = 'RSS отдаёт ограниченное окно: полнота истории за период не подтверждена'
-        # Keep the original import boundary. RSS order/dates are not a cursor:
-        # replaying the finite window also captures delayed and out-of-order items.
-        return DiscoveryResult(tuple([Publication(e.publication.id, e.publication.url, e.publication.published, Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'), published_known=e.publication.published_known) for e in batch if not e.publication.published_known or e.publication.published >= cutoff]), json.dumps({'since': cutoff}), SourceObservation(self.gap, self.changes, description=self.description))
 
-    async def _discover_rss_history(self, previous: dict[str, Any] | None) -> DiscoveryResult:
-        from oko.collection.rss_history import RSSHistory
-        assert self.initial_history is not None
-        walk = RSSHistory(self.url, self.initial_history, previous)
-        if walk.complete:
-            batch = await self.read_entries()
-            chosen = walk.updates(batch)
-        else:
-            try:
-                raw, final, _ = await self.download(walk.url)
-                batch = entries(raw, final)
-                if walk.requests == 0:
-                    self.description = feed_description(raw)
-                chosen = walk.accept(batch, raw, final)
-            except (SourceError, ValueError, httpx.InvalidURL) as error:
-                record_caught('rss.history')
-                walk.fail(error.label if isinstance(error, SourceError) else 'Недопустимый адрес источника')
-                chosen = []
-        self.gap = ' · '.join(walk.warnings) or None
-        publications = tuple(Publication(e.publication.id, e.publication.url, e.publication.published,
-            Material(e.title, self.excerpt(e.excerpt), False, 'Анонс сохранён; загрузка статьи ожидается'),
-            published_known=e.publication.published_known) for e in chosen)
-        return DiscoveryResult(publications, json.dumps(walk.cursor()),
-            SourceObservation(self.gap, self.changes, description=self.description),
-            continuation=None if walk.complete else 0.)
 
     @staticmethod
     def excerpt(html: str) -> str:
         parser = Article()
         parser.feed('<article>' + html + '</article>')
         return parser.text
-
-    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult:
-        try:
-            batch = await self.read_entries()
-        except SourceError:
-            record_caught('rss.fetch')
-            batch = []
-        entry = next((e for e in batch if e.publication.url == publication.url), None)
-        title, excerpt = (entry.title, entry.excerpt) if entry else (publication.teaser.title, publication.teaser.text) if publication.teaser else ('Статья', '')
-        fallback = Article()
-        fallback.feed('<article>' + excerpt + '</article>')
-        text = fallback.text
-        images: list[Image] = []
-        full, reason = False, 'Полный текст не извлечён; доступен анонс'
-        collection_error: SourceError | None = None
-        urls = fallback.images
-        base = publication.url
-        try:
-            raw, base, _ = await self.download(publication.url, purpose='publication')
-            article = Article()
-            article.feed(raw.decode('utf-8', errors='replace'))
-            if article.article and article.text:
-                text, urls, full, reason = article.text, article.images, True, ''
-        except SourceDeleted as error:
-            collection_error = error
-            if publication.teaser and publication.teaser.full:
-                raise
-            reason = 'Публикация недоступна; доступен анонс'
-        except SourceError as error:
-            collection_error = error
-            record_caught('rss.fetch')
-            if publication.teaser and publication.teaser.full:
-                raise
-            reason = error.label + '; доступен анонс'
-        unique_urls = list(dict.fromkeys(urls))
-        if len(unique_urls) > 30:
-            full, reason = False, 'Не все изображения сохранены (лимит 30)'
-        for position, url in enumerate(unique_urls[:30]):
-            try:
-                raw, _, mime = await self.download(urljoin(base, url), 10_000_000, purpose='attachment')
-                signatures = {'image/png': b'\x89PNG\r\n\x1a\n', 'image/jpeg': b'\xff\xd8\xff', 'image/gif': b'GIF8', 'image/webp': b'RIFF'}
-                if mime not in signatures or not raw.startswith(signatures[mime]):
-                    raise SourceError('Неподдерживаемое изображение')
-                suffix = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp'}[mime]
-                images.append(Image(f'image-{position}.{suffix}', raw))
-            except SourceError as error:
-                record_caught('rss.fetch')
-                if not isinstance(error, SourceDeleted):
-                    collection_error = collection_error or error
-                full, reason = False, 'Не все изображения сохранены'
-                if publication.teaser:
-                    images.extend(image for image in publication.teaser.images if image.name.startswith(f'image-{position}.'))
-        return FetchResult(Material(title, text, full, reason, tuple(images), collection_error=collection_error), SourceObservation(self.gap, self.changes, description=self.description))

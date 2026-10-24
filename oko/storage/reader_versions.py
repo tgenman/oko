@@ -56,7 +56,7 @@ class ReadingConnection(sqlite3.Connection):
                 folders.add(row[0])
             self.execute("UPDATE reader_lists SET pending=1 WHERE scope='all' OR (scope='feed' AND owner=?)",(feed,))
         for folder in folders:
-            self.execute("""UPDATE reader_folder_counts SET visible=(SELECT count(DISTINCT i.id)
+            self.execute("""UPDATE reader_folder_counts SET visible=(SELECT count(DISTINCT m.publication_id)
                 FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id JOIN items i ON i.id=m.publication_id
                 LEFT JOIN reader_visibility v ON v.item=i.id WHERE f.folder_id=folder AND i.viewed=0 AND coalesce(v.hidden,0)=0) WHERE folder=?""",(folder,))
             self.execute("UPDATE reader_lists SET pending=1 WHERE scope='folder' AND owner=?",(folder,))
@@ -214,23 +214,22 @@ class ReaderVersions:
             self.db.execute('BEGIN IMMEDIATE')
             for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reader_v_%'").fetchall():
                 self.db.execute('DROP TRIGGER "' + row[0].replace('"','""') + '"')
-            if self.store.publications.active:
-                for event,alias in [('INSERT','NEW'),('DELETE','OLD')]:
-                    self._trigger('shared_'+event,event,'feed_publications',
-                        f'SELECT oko_memberships_changed({alias}.feed_id);'+self._bump('navigation',"'navigation'")+
-                        'INSERT OR IGNORE INTO processing_dirty VALUES ('+alias+'.publication_id);')
-                    self._trigger('membership_items_'+event,event,'items',f'SELECT oko_memberships_changed({alias}.feed_id);',alias+'.platform IS NOT NULL')
-                shared="SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id=NEW.id;"
-                self._trigger('membership_items_UPDATE','UPDATE','items',shared+
-                    'SELECT oko_memberships_changed(OLD.feed_id);SELECT oko_memberships_changed(NEW.feed_id);',
-                    'NEW.platform IS NOT NULL AND (NEW.viewed IS NOT OLD.viewed OR NEW.feed_id IS NOT OLD.feed_id OR NEW.published IS NOT OLD.published OR NEW.published_known IS NOT OLD.published_known OR NEW.source_order IS NOT OLD.source_order)')
-                self._trigger('membership_visibility','UPDATE','reader_visibility',
-                    'SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id=NEW.item;',
-                    'NEW.hidden IS NOT OLD.hidden')
-                self._trigger('membership_folder','UPDATE','feeds',
-                    '''SELECT oko_memberships_changed(NEW.id);SELECT oko_folder_memberships_changed(OLD.folder_id);
-                    SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id IN (SELECT id FROM items WHERE feed_id=NEW.id);''',
-                    'NEW.folder_id IS NOT OLD.folder_id OR NEW.importance IS NOT OLD.importance')
+            for event,alias in [('INSERT','NEW'),('DELETE','OLD')]:
+                self._trigger('shared_'+event,event,'feed_publications',
+                    f'SELECT oko_memberships_changed({alias}.feed_id);'+self._bump('navigation',"'navigation'")+
+                    'INSERT OR IGNORE INTO processing_dirty VALUES ('+alias+'.publication_id);')
+                self._trigger('membership_items_'+event,event,'items',f'SELECT oko_memberships_changed({alias}.feed_id);',alias+'.platform IS NOT NULL')
+            shared="SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id=NEW.id;"
+            self._trigger('membership_items_UPDATE','UPDATE','items',shared+
+                'SELECT oko_memberships_changed(OLD.feed_id);SELECT oko_memberships_changed(NEW.feed_id);',
+                'NEW.platform IS NOT NULL AND (NEW.viewed IS NOT OLD.viewed OR NEW.feed_id IS NOT OLD.feed_id OR NEW.published IS NOT OLD.published OR NEW.published_known IS NOT OLD.published_known OR NEW.source_order IS NOT OLD.source_order)')
+            self._trigger('membership_visibility','UPDATE','reader_visibility',
+                'SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id=NEW.item;',
+                'NEW.hidden IS NOT OLD.hidden')
+            self._trigger('membership_folder','UPDATE','feeds',
+                '''SELECT oko_memberships_changed(NEW.id);SELECT oko_folder_memberships_changed(OLD.folder_id);
+                SELECT oko_memberships_changed(feed_id) FROM feed_publications WHERE publication_id IN (SELECT id FROM items WHERE feed_id=NEW.id);''',
+                'NEW.folder_id IS NOT OLD.folder_id OR NEW.importance IS NOT OLD.importance')
             self._trigger('counts', 'UPDATE', 'reader_feed_counts',
                 "UPDATE reader_folder_counts SET visible=visible+NEW.visible-OLD.visible WHERE folder=(SELECT folder_id FROM feeds WHERE id=NEW.feed);"
                 + self._feed_lists('NEW.feed'),
@@ -265,14 +264,8 @@ class ReaderVersions:
                 UPDATE reader_feed_counts SET visible=visible+OLD.hidden-NEW.hidden
                 WHERE feed=(SELECT feed_id FROM items WHERE id=NEW.item AND viewed=0);''', 'NEW.hidden IS NOT OLD.hidden')
             for event, alias in [('INSERT','NEW'),('UPDATE','NEW'),('DELETE','OLD')]:
-                self._trigger('current_'+event,event,'content_current',self._material(alias+'.item'),
-                              'NEW.number IS NOT OLD.number' if event=='UPDATE' else '')
-                guard='NEW.number IS NOT OLD.number AND (SELECT fingerprint FROM content_versions WHERE item=NEW.item AND number=NEW.number) IS NOT (SELECT fingerprint FROM content_versions WHERE item=OLD.item AND number=OLD.number)' if event=='UPDATE' else ''
-                self._trigger('current_parts_'+event,event,'content_current',self._related(alias+'.item'),guard)
                 self._trigger('deleted_'+event,event,'source_deleted',self._bump('material',alias+'.item') + status,
                     'NEW.item IS NOT OLD.item' if event=='UPDATE' else '')
-                self._trigger('restored_'+event,event,'filter_restores',self._bump('filter',alias+'.item')+self._bump('card',alias+'.item') + f'UPDATE reader_visibility SET hidden=0 WHERE item={alias}.item;',
-                    'NEW.version IS NOT OLD.version' if event=='UPDATE' else '')
                 self._trigger('filter_input_'+event,event,'filter_inputs',self._bump('filter',alias+'.item')+self._bump('theses',alias+'.item')+self._bump('card',alias+'.item'),
                     'NEW.signature IS NOT OLD.signature' if event=='UPDATE' else '')
             for event, alias in [('INSERT','NEW'),('DELETE','OLD')]:
@@ -361,14 +354,6 @@ class ReaderVersions:
                     WHERE h.item={alias}.item AND h.outcome IN ('retrying','unavailable')
                     ON CONFLICT(kind,identity) DO UPDATE SET version=version+1,changed=excluded.changed;""",
                     f"{alias}.kind='fetch'" + (' AND NEW.error IS NOT OLD.error' if event=='UPDATE' else f' AND {alias}.error IS NOT NULL'))
-                value=f"CASE WHEN json_valid({alias}.value) THEN coalesce(json_extract({alias}.value,'$.selection.since'),json_extract({alias}.value,'$.since')) END"
-                guard=f"{alias}.key LIKE 'cursor:%'"
-                if event=='UPDATE':
-                    before="CASE WHEN json_valid(OLD.value) THEN coalesce(json_extract(OLD.value,'$.selection.since'),json_extract(OLD.value,'$.since')) END"
-                    guard+=' AND ('+value+' IS NOT ('+before+'))'
-                self._trigger('cursor_'+event,event,'state',f"""INSERT INTO reader_entities SELECT 'feed',f.id,1,oko_reader_time() FROM feeds f
-                    WHERE {alias}.key IN ('cursor:'||f.id,'cursor:telegram:'||f.id) AND NOT EXISTS (SELECT 1 FROM initial_history WHERE feed=f.id)
-                    ON CONFLICT(kind,identity) DO UPDATE SET version=version+1,changed=excluded.changed;""",guard)
             self._trigger('state_update','UPDATE','state',status,"NEW.value IS NOT OLD.value AND (NEW.key='work-enabled' OR NEW.key LIKE 'feed-status:%' OR NEW.key='processor:codex')")
 
     def sync_filter(self, item: str, hidden: bool) -> None:

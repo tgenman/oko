@@ -62,34 +62,15 @@ class TelegramAccess:
             db.execute('CREATE TABLE IF NOT EXISTS telegram_source_claims (kind TEXT, value TEXT, PRIMARY KEY(kind,value))')
             db.execute('''CREATE TABLE IF NOT EXISTS telegram_claim_owners (
                 kind TEXT, value TEXT, feed TEXT, evidence TEXT, PRIMARY KEY(kind,value,feed))''')
-            for row in db.execute("SELECT * FROM feeds WHERE kind='telegram'").fetchall():
-                if db.execute('SELECT 1 FROM telegram_bindings WHERE feed=?', (row['id'],)).fetchone():
-                    continue
-                if row['telegram_account'] and row['transport'] == 'telegram':
-                    binding = dict(kind='legacy_client', alias=row['telegram_account'], peer_id=str(row['telegram_peer']) if row['telegram_peer'] else None, source_locator=row['identity'])
-                else:
-                    binding = dict(kind='unconfigured', source_locator=row['identity'])
-                self.put_binding(row['id'], binding)
-                claims: list[tuple[str, str]] = []
-                if row['telegram_peer']:
-                    claims.append(('peer', str(row['telegram_peer'])))
-                if row['telegram_username']:
-                    claims.append(('username', row['telegram_username'].lower()))
-                if row['identity'].startswith('telegram:'):
-                    claims.append(('username', row['identity'].removeprefix('telegram:').lower()))
-                for url in json.loads(row['original_urls']):
-                    try:
-                        kind, value = locator(url)
-                        claims.append((kind, str(value)))
-                    except ValueError:
-                        pass
-                for claim in claims:
-                    self.claim(row['id'], claim, 'saved binding')
-            # A saved verified identity is not evidence for the next process.
             db.execute("UPDATE telegram_profiles SET state='unavailable',message='Требуется проверка сессии после запуска'")
 
-    def bindings(self) -> dict[str, dict[str, Any]]:
-        return {row['feed']: json.loads(row['binding']) for row in self.db.execute('SELECT feed,binding FROM telegram_bindings')}
+    def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
+        query='SELECT feed,binding FROM telegram_bindings'
+        params: tuple[str,...]=()
+        if feeds is not None:
+            query+=' WHERE feed IN (SELECT value FROM json_each(?))'
+            params=(json.dumps(feeds),)
+        return {row['feed']:json.loads(row['binding']) for row in self.db.execute(query,params)}
 
     def profiles(self) -> dict[str, dict[str, Any]]:
         return {row['role']: dict(row) for row in self.db.execute('SELECT * FROM telegram_profiles')}
@@ -120,17 +101,10 @@ class TelegramAccess:
                 raise TelegramConflict('profile_in_use', dict(role=role), 'Профиль используется фидами')
             if self.db.execute('SELECT 1 FROM telegram_profiles WHERE role!=? AND user_id=?', (role, user_id)).fetchone():
                 raise TelegramConflict('profile_account_conflict', dict(role=role), 'Для двух ролей нужны разные аккаунты')
-            # Legacy aliases are mapped only by this explicit user action.
-            aliases = {old['account'], account} if old and old['user_id'] == user_id else {account}
             self.db.execute('''INSERT INTO telegram_profiles VALUES (?,?,?,?,?,?,?)
                 ON CONFLICT(role) DO UPDATE SET account=excluded.account,user_id=excluded.user_id,
                 generation=excluded.generation,state=excluded.state,checked=excluded.checked,message=NULL''',
                 (role, account, user_id, generation + 1, 'ready', checked, None))
-            for row in self.db.execute("SELECT * FROM feeds WHERE kind='telegram'").fetchall():
-                binding = self.binding(row['id'])
-                if binding and binding['kind'] == 'legacy_client' and binding['alias'] in aliases and row['telegram_peer']:
-                    self.put_binding(row['id'], dict(kind='client', role=role, account_user_id=str(user_id), peer_id=str(row['telegram_peer'])))
-                    self.modified(row['id'])
         return self.profile(role) or {}
 
     def checked(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
@@ -173,7 +147,7 @@ class TelegramAccess:
             duplicates = self.conflicts(claims, info.get('peer'))
             if duplicates:
                 raise TelegramConflict('duplicate_source', self.duplicates(duplicates), 'Источник уже подключён')
-            identity = subscriptions.new_feed_id(secrets.token_urlsafe(24))
+            identity = subscriptions.new_feed_id()
             folder_id = subscriptions.ensure_folder(folder)
             profile = self.profile(binding['role']) if binding['kind'] == 'client' else None
             self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,
@@ -196,29 +170,6 @@ class TelegramAccess:
     def duplicates(self, feeds: list[str]) -> dict[str, Any]:
         return dict(existing_feeds=[dict(feed_id=feed, title=self.db.execute('SELECT title FROM feeds WHERE id=?', (feed,)).fetchone()[0], access=self.binding(feed)) for feed in feeds])
 
-    def adopt(self, feed: str, profile: dict[str, Any], info: dict[str, Any], auto_read: bool, subscriptions: Any) -> dict[str, Any]:
-        subscriptions.check_owner('feed', feed)
-        row = self.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
-        binding = self.binding(feed)
-        if binding and ((binding['kind'] == 'legacy_client' and binding['alias'] != profile['account']) or (binding['kind'] == 'client' and binding['account_user_id'] != str(profile['user_id']))):
-            raise TelegramConflict('access_immutable', dict(feed_id=feed), 'Сохранённый аккаунт нельзя заменить другим профилем')
-        if row['kind'] != 'telegram' or row['transport'] == 'rss' or row['connection'] == 'deleting' or (binding and binding['kind'] == 'web') or (row['telegram_peer'] and row['telegram_peer'] != info['peer']) or (binding and binding.get('role', profile['role']) != profile['role']):
-            raise TelegramConflict('access_immutable', dict(feed_id=feed), 'Для другой привязки удалите фид и добавьте заново')
-        with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
-            claims = self.claims(info)
-            owners = [owner for owner in self.conflicts(claims, info.get('peer')) if owner != feed]
-            if owners:
-                raise TelegramConflict('duplicate_source', self.duplicates(owners), 'Источник уже подключён')
-            next_binding = dict(kind='client', role=profile['role'], account_user_id=str(profile['user_id']), peer_id=str(info['peer']))
-            if binding != next_binding or row['auto_read'] != auto_read or row['transport'] != 'telegram' or row['telegram_peer'] != info['peer'] or row['telegram_username'] != info.get('username') or row['connection'] != 'connected':
-                self.modified(feed)
-            self.put_binding(feed, next_binding)
-            self.db.execute("UPDATE feeds SET telegram_peer=?,telegram_account=COALESCE(telegram_account,?),telegram_username=?,transport='telegram',connection='connected',auto_read=? WHERE id=?", (info['peer'], profile['account'], info.get('username'), auto_read, feed))
-            for claim in claims:
-                self.claim(feed, claim, 'explicit legacy confirmation')
-        result: dict[str, Any] = subscriptions.feeds(feed)[0]
-        return result
 
     def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
                       auto_read: bool | None, subscriptions: Any) -> dict[str,Any]:

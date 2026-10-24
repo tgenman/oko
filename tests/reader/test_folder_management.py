@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
-from tests.support.subscriptions import saved_sources, add_source
+from tests.support.subscriptions import configured_sources, add_source
 from tests.support.rss import rss
 from jsonschema import Draft202012Validator
 from pathlib import Path
@@ -26,7 +26,7 @@ def validate_reply(spec, path, method, response):
 
 
 def test_rename_preserves_legacy_identity_settings_and_feed_links_after_restart(tmp_path):
-    saved_sources(tmp_path, [('https://source.test/feed', 'Alpha', 'Old'), ('https://b.test/feed', 'Beta', 'Other')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'Alpha', 'Old'), ('https://b.test/feed', 'Beta', 'Other')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         catalog = client.get('/api/v3/subscriptions').json()
         original = next(f for f in catalog['folders'] if f['title'] == 'Old')
@@ -73,7 +73,7 @@ def test_new_rss_folders_use_opaque_ids_and_resolve_renamed_titles(tmp_path):
 
 @pytest.mark.parametrize('connection', ['needs_connection', 'deleting', 'unavailable'])
 def test_nonempty_folder_blocks_deletion_even_without_visible_items(tmp_path, connection):
-    saved_sources(tmp_path, [('https://source.test/feed', 'Alpha', 'Folder')])
+    configured_sources(tmp_path, [('https://source.test/feed', 'Alpha', 'Folder')])
     with database(tmp_path) as db:
         db.execute('UPDATE feeds SET connection=?', (connection,))
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
@@ -92,7 +92,7 @@ def test_nonempty_folder_blocks_deletion_even_without_visible_items(tmp_path, co
 
 
 def test_empty_folder_deletion_cleans_settings_and_rechecks_new_members(tmp_path):
-    saved_sources(tmp_path, [('https://a.test/feed', 'A', 'Empty'), ('https://b.test/feed', 'B', 'Other')])
+    configured_sources(tmp_path, [('https://a.test/feed', 'A', 'Empty'), ('https://b.test/feed', 'B', 'Other')])
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         catalog = client.get('/api/v3/subscriptions').json()
         empty, other = (next(f for f in catalog['folders'] if f['title'] == title)['id'] for title in ['Empty', 'Other'])

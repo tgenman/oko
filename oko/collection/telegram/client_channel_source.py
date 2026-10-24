@@ -4,7 +4,7 @@ from typing import Any
 
 from oko.collection.adapters import AdapterException,AdapterIssue,AdapterErrorKind,ExternalKey,ExternalReference,Platform,PublicationContent
 from oko.collection.adapter_errors import source_error
-from oko.collection.contracts import DiscoveryResult,FetchResult,FetchResources,FetchRequirements,Publication,SourceObservation,SourceIdentity,Material
+from oko.collection.contracts import DiscoveryResult, FetchResult, Publication, SourceObservation, SourceIdentity, Material
 from oko.collection.telegram.source import TelegramSource
 from oko.collection.telegram.client_adapter import TelegramClientAdapter,encode,publication_reference,finish_window
 from oko.collection.telegram.channel_source import material
@@ -12,19 +12,6 @@ from oko.collection.telegram.contracts import HistoryEnvelope,HistorySelection
 from oko.collection.telegram.web import WebTelegram
 
 
-def legacy_cursor(cursor: str, peer: int, selection: dict[str,Any]) -> str:
-    if not cursor:
-        return ''
-    previous=HistoryEnvelope.decode(cursor,adapter='client')
-    after=previous.position.get('after',0)
-    complete=previous.selection.scan_complete
-    upper=previous.position.get('upper',after) or after
-    if type(after) is not int or type(upper) is not int or after<0 or upper<0:
-        raise ValueError('Invalid legacy Telegram cursor boundary')
-    token=encode(peer,after+1,after,done=True) if complete else encode(peer,upper,upper)
-    return HistoryEnvelope(adapter='client',selection=previous.selection,position=dict(
-        telegram_client_adapter=token,run=selection.get('run','initial'),count=selection.get('count') or 1,
-        locating=not complete,initial_complete=complete,scan_complete=complete)).encode()
 
 
 def projected(value: PublicationContent, previous: Material | None = None) -> Material:
@@ -36,7 +23,6 @@ def projected(value: PublicationContent, previous: Material | None = None) -> Ma
 
 
 class TelegramClientSource(TelegramSource):
-    fetch_requirements=FetchRequirements()
 
     def publication_adapter(self) -> TelegramClientAdapter:
         if not hasattr(self,'_api'):
@@ -78,7 +64,7 @@ class TelegramClientSource(TelegramSource):
             if 'telegram_client_adapter' not in state or state.get('run')!=run:
                 metadata=await api.resolve_feed('https://t.me/'+(self.username or str(self.peer)))
                 state=dict(telegram_client_adapter=metadata.latest_cursor,run=run,count=selection.get('count'),locating=selection.get('mode')=='count')
-                return DiscoveryResult((),saved(),self._observation(),continuation=.1)
+                return DiscoveryResult((),saved(),self._observation(),continuation=0)
             feed=ExternalReference(ExternalKey(Platform.telegram,str(self.peer)),api._url())
             if state.get('locating'):
                 state['telegram_client_adapter']=await api.cursor_before(feed,state['telegram_client_adapter'],state['count']-1)
@@ -100,11 +86,11 @@ class TelegramClientSource(TelegramSource):
             if not page.has_more:
                 state['initial_complete']=True
             self.gap='; '.join(state['warnings']) or None
-            return DiscoveryResult(tuple(publications),saved(tuple(state['history_enroll']),tuple(state['warnings'])),self._observation(),continuation=.1 if page.has_more else None)
+            return DiscoveryResult(tuple(publications),saved(tuple(state['history_enroll']),tuple(state['warnings'])),self._observation(),continuation=0 if page.has_more else None)
         except AdapterException as error:
             raise source_error(error)
 
-    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult:
+    async def fetch(self, publication: Publication) -> FetchResult:
         try:
             # This feed's verified native peer and saved message membership are
             # the proof; an old public username may have changed since collection.

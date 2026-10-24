@@ -3,7 +3,8 @@ from copy import deepcopy
 import hashlib
 import json
 from typing import Any, TYPE_CHECKING
-from oko.storage import material_read, youtube_media
+from oko.storage import material_read, youtube_media, publication_links
+from oko.storage.reading import reading_value
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -19,10 +20,9 @@ def blocks(content: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def content(store: 'Store', item: str) -> dict[str, Any]:
-    row=store.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()
-    own=youtube_media.add_input(store,json.loads(row[0])) if row else {}
-    linked=store.db.execute('''SELECT i.id,i.content FROM publication_links l JOIN items i ON i.id=l.target_publication_id
-        WHERE l.source_publication_id=? AND i.complete=1 AND i.viewed=0 ORDER BY i.discovered_at,i.id''',(item,)).fetchall()
+    row=material_read.item(store.db,item)
+    own=youtube_media.add_input(store,json.loads(row['content'])) if row else {}
+    linked=[row for row in publication_links.children(store,item) if row['complete']]
     if not linked:
         return own
     for block in own.get('blocks',[]):
@@ -72,10 +72,10 @@ def awaiting_input(content: dict[str, Any]) -> bool:
 def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) -> bool:
     if any(block.get('text','').strip() for block in blocks(selected)):
         return False
-    return store.db.execute('''SELECT 1 FROM publication_links l JOIN items i ON i.id=l.target_publication_id
-        WHERE l.source_publication_id=? AND i.viewed=0 AND i.complete=0 LIMIT 1''',(item,)).fetchone() is not None
+    return any(not row['complete'] for row in publication_links.children(store,item))
 
 
+@reading_value
 def live_settings(store: 'Store', item: str) -> dict[str, Any]:
     feed=store.item_feed(item)
     current=store.subscriptions.effective('feed',feed,details=False)
@@ -97,12 +97,13 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
     if not row or row['viewed'] or row['feed_id'] is None or not row['complete'] or row['content']=='{}':
         return None
-    rules=live_settings(store,item)
-    values=rules['values']
+    current=store.subscriptions.effective('feed',row['feed_id'],details=False)
+    values={key:value['value'] for key,value in current['effective'].items()}
     youtube=row['platform']=='youtube'
-    summary=values['theses'] or youtube and rules['importance']=='high'
+    summary=values['theses'] or youtube and current['feed']['importance']=='high'
     if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not summary:
         return None
+    rules=live_settings(store,item)
     selected_content=json.loads(row['content']) if youtube else content(store,item)
     if youtube and selected_content.get('extra',{}).get('youtube',{}).get('captions')=='available' and not youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content)):
         return None

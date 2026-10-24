@@ -61,8 +61,8 @@ import time
 @pytest.mark.parametrize('text,media,restricted,expected', [
     ('', AUDIO, True, 'external_attachment'),
     ('', VIDEO, True, 'external_attachment'),
-    ('Own text', '', True, 'legacy'),
-    ('', '', False, 'legacy'),
+    ('Own text', '', True, 'source_incomplete'),
+    ('', '', False, 'source_incomplete'),
 ])
 def test_whole_post_marker_does_not_override_other_cases(tmp_path, text, media, restricted, expected):
     def response(request):
@@ -116,7 +116,7 @@ def test_later_content_is_collected_and_previous_version_keeps_post_restriction(
         assert content['text'] == text[0]
         assert content['post_web_unavailable'] is False
         assert content['completeness']['state'] == 'complete'
-        assert content['previous_versions']==[]
+        assert 'previous_versions' not in content
 
 
 def test_unknown_unsupported_post_is_reclassified_only_after_source_confirmation(tmp_path):

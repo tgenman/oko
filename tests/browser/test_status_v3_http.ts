@@ -76,7 +76,7 @@ test('lost command response stays unknown until receipt reconciliation and is ne
  expect(puts).toBe(1);
 });
 
-test('typed profile recovery selects the exact role and historical reconnect has no executable control',async()=>{
+test('typed profile recovery selects the exact role',async()=>{
  const r=await fixtureReader();try{
   const baseline=await r.api('v3/status');
   if(!baseline||typeof baseline!=='object')throw new Error('Missing RuntimeStatus');
@@ -87,12 +87,6 @@ test('typed profile recovery selects the exact role and historical reconnect has
   await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','telegram-profiles');
   await expect(r.page.locator('#telegram-profile-personal')).toBeFocused();
   await r.page.locator('#settings-close').click();
-  await r.page.evaluate(base=>readerTransport.replies.set('/api/v3/status',{body:{...base,problems:{current:[{id:'legacy-source',code:'legacy_problem',raw_code:'source-reconnect',command_id:null,title:'Прежний источник',message:'old-alias',consequence:'Saved content remains',affected:[],recovery:[],created_at:new Date().toISOString(),state:'current'}],recent:[],count:1,updated_at:new Date().toISOString()}}}),baseline);
-  await expect(r.page.locator('#status-panel')).toContainText('Прежний источник');
-  await r.page.locator('.status-details summary').click();
-  await expect(r.page.locator('#status-panel')).toContainText('old-alias');
-  await expect(r.page.locator('.status-action')).toHaveCount(0);
-  await expect(r.page.locator('#status-panel')).not.toContainText('Personal Account');
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

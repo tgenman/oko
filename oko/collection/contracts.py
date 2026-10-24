@@ -1,3 +1,4 @@
+from oko.collection.adapters import PublicationAdapter
 from dataclasses import dataclass
 from copy import deepcopy
 from typing import Any, Protocol, Literal, TYPE_CHECKING
@@ -7,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, JsonValue, Field
 
 if TYPE_CHECKING:
-    from oko.collection.adapters import PublicationContent, ExternalReference, AdapterIssue
+    from oko.collection.adapters import PublicationContent, ExternalReference, ExternalKey, AdapterIssue
 
 
 @dataclass(frozen=True)
@@ -20,27 +21,6 @@ class Publication:
     published_known: bool = True
     observed_only: bool = False
     adapter_reference: 'ExternalReference | None' = None
-
-
-@dataclass(frozen=True)
-class Image:
-    name: str
-    data: bytes
-
-
-@dataclass(frozen=True)
-class DownloadStage:
-    path: Path
-    job: int
-    generation: int
-    admitted: Callable[[], bool] = lambda: True
-
-
-@dataclass(frozen=True)
-class StagedPayload:
-    path: Path
-    size: int
-    sha256: str
 
 
 class ExternalMedia(BaseModel):
@@ -72,33 +52,14 @@ class ResourceManifest(BaseModel):
     external: ExternalMedia | None = None
 
 
-class ArticleManifest(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
-    url: str
-    title: str | None = None
-    text: str | None = None
-    resource_keys: tuple[str, ...] = ()
-    reason: str = ''
-
-
 class SourceManifest(BaseModel):
     preview_fragment: str | None = None
     preview_error: str = ''
-    download_partial: bool = False
     post_web_unavailable: bool = False
     source_url: str | None = None
-    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
+    model_config = ConfigDict(extra='ignore', strict=True, frozen=True)
     post: dict[str, JsonValue]
     resources: tuple[ResourceManifest, ...] = ()
-    articles: tuple[ArticleManifest, ...] = ()
-
-
-@dataclass(frozen=True)
-class Attachment:
-    name: str
-    data: bytes | StagedPayload
-    kind: str
-    mime: str
 
 
 class ReplyPreview(BaseModel):
@@ -114,8 +75,6 @@ class Material:
     text: str
     full: bool = True
     reason: str = ''
-    images: tuple[Image, ...] = ()
-    attachments: tuple[Attachment, ...] = ()
     members: tuple[int, ...] = ()
     captions: str | None = None
     collection_error: 'SourceError | None' = None
@@ -167,6 +126,7 @@ class DiscoveryResult:
     observation: SourceObservation = SourceObservation()
     continuation: float | None = None
     retry_error: 'SourceError | None' = None
+    source_order: tuple['ExternalKey', ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'publications', deepcopy(self.publications))
@@ -177,17 +137,8 @@ class CaptionsClient(Protocol):
     async def fetch(self, video: str) -> str | None: ...
 
 
-@dataclass(frozen=True)
-class FetchRequirements:
-    staging: bool = False
-    captions: bool = False
 
 
-@dataclass(frozen=True)
-class FetchResources:
-    staging: DownloadStage | None = None
-    captions: CaptionsClient | None = None
-    request_captions: bool = True
 
 
 @dataclass(frozen=True)
@@ -201,13 +152,12 @@ class FetchResult:
 
 class Source(Protocol):
     @property
-    def fetch_requirements(self) -> FetchRequirements: ...
-
-    @property
     def changes(self) -> str | None: ...
 
     async def discover(self, cursor: str | None) -> DiscoveryResult: ...
-    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult: ...
+    async def fetch(self, publication: Publication) -> FetchResult: ...
+
+    def publication_adapter(self) -> PublicationAdapter: ...
 
 
 class SourceError(Exception):

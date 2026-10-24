@@ -13,10 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class InitialHistory(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    mode: Literal['count', 'date'] = 'count'
+    mode: Literal['count'] = 'count'
     count: int | None = Field(default=20, ge=1)
-    date: str | None = None
-    timezone: str = 'UTC'
 
     @field_validator('count', mode='before')
     @classmethod
@@ -28,27 +26,13 @@ class InitialHistory(BaseModel):
 
     @model_validator(mode='after')
     def valid_boundary(self) -> 'InitialHistory':
-        try:
-            zone = ZoneInfo(self.timezone)
-        except (ZoneInfoNotFoundError, ValueError):
-            raise ValueError('Неизвестный часовой пояс') from None
-        if self.mode == 'count':
-            if self.count is None or self.date is not None:
-                raise ValueError('Укажите количество публикаций от 1')
-        else:
-            if self.count is not None or self.date is None:
-                raise ValueError('Выберите дату вместо количества')
-            try:
-                day = date.fromisoformat(self.date)
-            except ValueError:
-                raise ValueError('Неверная дата') from None
-            if day > datetime.now(zone).date():
-                raise ValueError('Дата не может быть в будущем')
+        if self.count is None:
+            raise ValueError('Укажите количество публикаций от 1')
         return self
 
     def selection(self) -> dict[str, Any]:
         result = self.model_dump()
-        result['since'] = datetime.combine(date.fromisoformat(self.date), time(), ZoneInfo(self.timezone)).timestamp() if self.date else None
+        result['since']=None
         return result
 
 
@@ -56,15 +40,10 @@ class History:
     def __init__(self, db: sqlite3.Connection) -> None:
         self.db = db
         db.executescript('''
-        CREATE TABLE IF NOT EXISTS initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0,scan_complete INTEGER DEFAULT 1);
         CREATE TABLE IF NOT EXISTS history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));
         ''')
         db.execute('CREATE INDEX IF NOT EXISTS history_members_item ON history_members(item)')
-        if 'scan_complete' not in {r['name'] for r in db.execute('PRAGMA table_info(initial_history)')}:
-            db.execute('ALTER TABLE initial_history ADD COLUMN scan_complete INTEGER DEFAULT 1')
-        # Legacy manual pauses are removed; an explicitly cancelled run stays stopped.
-        with db:
-            db.execute("UPDATE initial_history SET paused=0 WHERE paused=1 AND coalesce(json_extract(selection,'$.cancelled'),0)=0")
 
     def member(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM history_members WHERE item=?', (item,)).fetchone() is not None
@@ -95,16 +74,14 @@ class History:
         selection = json.loads(row['selection'])
         selection['warnings'] = cursor.get('warnings', selection.get('warnings', []))
         selection['discovery_error'] = cursor.get('history_error')
-        if 'rss_history' in cursor:
-            selection['stop_reason'] = cursor.get('stop_reason')
+        selection['stop_reason'] = cursor.get('stop_reason',selection.get('stop_reason'))
         selection['discovery_retry_at'] = cursor.get('history_retry_at')
-        if 'youtube_history' in cursor or 'youtube_adapter' in cursor or 'rss_history' in cursor:
-            selection['waiting'] = cursor.get('history_waiting', False)
-            selection['requests'] = cursor.get('history_requests', 0)
+        selection['waiting'] = cursor.get('history_waiting', False)
+        selection['requests'] = cursor.get('history_requests', selection.get('requests',0))
         self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
 
     def configure(self, feed: str, selection: InitialHistory) -> None:
-        self.db.execute('INSERT INTO initial_history(feed,selection) VALUES (?,?)', (feed, json.dumps(selection.selection())))
+        self.db.execute('INSERT INTO initial_history(feed,selection) VALUES (?,?)', (feed, json.dumps(dict(selection.selection(),run=secrets.token_hex(16)))))
 
     def start(self, feed: str, selection: InitialHistory) -> dict[str, Any]:
         current = self.status(feed)
@@ -170,14 +147,35 @@ class History:
         row = self.db.execute('SELECT * FROM initial_history WHERE feed=?', (feed,)).fetchone()
         if not row:
             return None
-        result: dict[str, Any] = json.loads(row['selection'])
-        result['count_text'] = str(result['count']) if result['count'] is not None else None
         counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome,count(*) n FROM history_members WHERE feed=? GROUP BY outcome', (feed,))}
+        errors = [dict(item=r['item'],message=r['error']) for r in self.db.execute("SELECT h.item,(SELECT j.error FROM jobs j WHERE j.item=h.item AND j.kind='fetch') AS error FROM history_members h WHERE h.feed=? AND h.outcome IN ('retrying','unavailable')",(feed,)) if r['error'] is not None]
+        return self._status(row,counts,errors)
+
+    def statuses(self, feeds: list[str]) -> dict[str,dict[str,Any]]:
+        if not feeds:
+            return {}
+        selected=json.dumps(feeds)
+        rows=self.db.execute('SELECT * FROM initial_history WHERE feed IN (SELECT value FROM json_each(?))',(selected,)).fetchall()
+        counts: dict[str,dict[str,int]]={}
+        for row in self.db.execute('SELECT feed,outcome,count(*) n FROM history_members WHERE feed IN (SELECT value FROM json_each(?)) GROUP BY feed,outcome',(selected,)):
+            counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
+        errors: dict[str,list[dict[str,Any]]]={}
+        for row in self.db.execute("""SELECT h.feed,h.item,j.error FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch'
+                WHERE h.feed IN (SELECT value FROM json_each(?)) AND h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL""",(selected,)):
+            errors.setdefault(row['feed'],[]).append(dict(item=row['item'],message=row['error']))
+        return {row['feed']:self._status(row,counts.get(row['feed'],{}),errors.get(row['feed'],[])) for row in rows}
+
+    @staticmethod
+    def _status(row: sqlite3.Row, counts: dict[str,int], errors: list[dict[str,Any]]) -> dict[str,Any]:
+        result: dict[str, Any] = json.loads(row['selection'])
+        result.pop('date',None)
+        result.pop('timezone',None)
+        result['count_text'] = str(result['count']) if result['count'] is not None else None
         loaded = counts.get('loaded', 0) + counts.get('incomplete', 0)
         result.update(loaded=loaded, viewed=counts.get('viewed', 0), incomplete=counts.get('incomplete', 0), available=sum(counts.values()), paused=bool(row['paused']), frozen=bool(row['frozen'] and row['scan_complete']))
         result['retrying'] = counts.get('retrying', 0)
         result['unavailable'] = counts.get('unavailable', 0)
-        result['errors'] = [dict(item=r['item'], message=r['error']) for r in self.db.execute("SELECT h.item,(SELECT j.error FROM jobs j WHERE j.item=h.item AND j.kind='fetch') AS error FROM history_members h WHERE h.feed=? AND h.outcome IN ('retrying','unavailable')", (feed,)) if r['error'] is not None]
+        result['errors'] = errors
         result['scan_complete'] = bool(row['scan_complete'])
         result['state'] = 'pending' if not row['frozen'] else 'loading' if counts.get('pending', 0) or counts.get('retrying', 0) or not row['scan_complete'] else 'done'
         if row['frozen'] and not result['scan_complete'] and result['mode'] == 'count':

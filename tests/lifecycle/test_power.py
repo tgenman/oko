@@ -68,7 +68,7 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
     import asyncio
     import threading
     import time
-    from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, Material, Publication
+    from oko.collection.contracts import DiscoveryResult, FetchResult, Material, Publication
     from tests.support.presence import presence
     from tests.support.reader import wait_for
 
@@ -76,13 +76,12 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
 
     class Source:
         changes = None
-        fetch_requirements = FetchRequirements()
         attempts = 0
 
         async def discover(self, cursor):
             return DiscoveryResult((Publication('article', 'https://synthetic.test/article', time.time()),), 'done')
 
-        async def fetch(self, publication, resources):
+        async def fetch(self, publication):
             self.attempts += 1
             if self.attempts == 1:
                 started.set()
@@ -111,6 +110,7 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
         assert all(card['availability'] != 'available' for card in cards)
         assert 'Must never be accepted' not in client.get('/api/v3/materials/' + cards[0]['id']).text
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
+        client.post('/api/v3/collect')  # Explicit retry advances the interrupted fetch deadline.
         ready = wait_for(client, lambda: [c for c in client.get('/api/v3/cards').json() if c['availability'] == 'available'])
         assert ready[0]['title'] == 'Fresh result'
 

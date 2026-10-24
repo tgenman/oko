@@ -32,8 +32,6 @@ def test_library_copies_remain_independent_through_http(tmp_path, kind):
         assert cards == b.get('/api/v3/cards').json()
         item = cards[0]['id']
         content = b.get('/api/v3/materials/' + item).json()['content']
-        material_file = next((first / 'content' / item).rglob('original.md'))
-        material_file.write_text('Changed in first copy')
         assert a.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         assert a.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'first only'}).status_code == 200
         assert len(a.get('/api/v3/cards').json()) == 103

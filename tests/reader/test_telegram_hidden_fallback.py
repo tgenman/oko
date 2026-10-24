@@ -44,7 +44,7 @@ def test_existing_false_error_clears_without_inventing_an_author_edit(tmp_path):
         content = client.get(path).json()['content']
         assert content['text'] == original
         assert content['completeness']['state'] == 'complete'
-        assert content['previous_versions'] == []
+        assert 'previous_versions' not in content
         assert content['changed'] is False
         assert client.get('/api/v3/status').json()['problems']['count'] == 0
 
@@ -79,4 +79,4 @@ def test_removing_a_real_unsupported_iframe_is_still_an_author_edit(tmp_path):
         content = client.get(path).json()['content']
         assert content['completeness']['state'] == 'complete'
         assert content['changed'] is True
-        assert len(content['previous_versions']) == 0
+        assert 'previous_versions' not in content

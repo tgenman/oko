@@ -5,14 +5,12 @@ from typing import Any
 
 from oko.collection.adapters import AdapterException,PublicationContent
 from oko.collection.adapter_errors import source_error
-from oko.collection.contracts import (DiscoveryResult,FetchResources,FetchResult,FetchRequirements,
-    Material,Publication,SourceObservation)
+from oko.collection.contracts import DiscoveryResult, FetchResult, Material, Publication, SourceObservation
 from oko.collection.youtube.adapter import YouTubeAdapter,feed_reference,video_reference
 from oko.collection.youtube.source import YouTubeSource
 
 
 class YouTubeAdapterSource(YouTubeSource):
-    fetch_requirements=FetchRequirements()
 
     def publication_adapter(self) -> YouTubeAdapter:
         if not hasattr(self,'_api'):
@@ -43,11 +41,15 @@ class YouTubeAdapterSource(YouTubeSource):
             if 'youtube_adapter' not in state or state.get('run')!=run:
                 metadata=await api.resolve_feed(self.url)
                 state=dict(youtube_adapter=metadata.latest_cursor,run=run,count=selection.get('count') or 1,locating=True)
-                return DiscoveryResult((),json.dumps(state),continuation=.1)
+                return DiscoveryResult((),json.dumps(state),continuation=0)
             feed=feed_reference(self.url)
             if state.get('locating'):
                 state['youtube_adapter']=await api.cursor_before(feed,state['youtube_adapter'],state['count']-1)
                 state['locating']=False
+                pending=json.loads(state['youtube_adapter'])
+                if pending.get('locating') and pending.get('history_error'):
+                    state.update(scan_complete=False,history_enroll=[],history_waiting=True,history_error=pending['history_error'])
+                    return DiscoveryResult((),json.dumps(state),continuation=60)
             page=await api.discover(feed,state['youtube_adapter'],50)
             state.update(youtube_adapter=page.next_cursor,scan_complete=not page.has_more,
                          history_enroll=[value.metadata.reference.key.external_id for value in page.publications]
@@ -62,11 +64,12 @@ class YouTubeAdapterSource(YouTubeSource):
                 published_known=value.metadata.published_at is not None,adapter_reference=value.metadata.reference) for value in page.publications)
             self.gap='; '.join(dict.fromkeys(issue.message for issue in page.issues)) or None
             return DiscoveryResult(publications,json.dumps(state),SourceObservation(self.gap,self.changes),
-                                   continuation=(60 if retry else .1) if page.has_more else None)
+                                   continuation=(60 if retry else 0) if page.has_more else None,
+                                   source_order=api.window_order(feed,page.next_cursor))
         except AdapterException as error:
             raise source_error(error)
 
-    async def fetch(self, publication: Publication, resources: FetchResources = FetchResources()) -> FetchResult:
+    async def fetch(self, publication: Publication) -> FetchResult:
         try:
             value=await self.publication_adapter().fetch(publication.adapter_reference or video_reference(publication.id))
             return FetchResult(self._material(value,publication.teaser),SourceObservation(self.gap,self.changes))

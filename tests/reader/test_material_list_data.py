@@ -1,4 +1,4 @@
-from oko.collection.contracts import DiscoveryResult, FetchResult, FetchRequirements, FetchResources
+from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 import httpx
 from fastapi.testclient import TestClient
@@ -67,7 +67,6 @@ def test_cards_have_plain_bounded_text_and_unknown_dates_are_last(tmp_path):
     from oko.collection.contracts import Material, Publication
 
     class Source:
-        fetch_requirements = FetchRequirements()
         changes = None
         async def discover(self, cursor):
             return DiscoveryResult(tuple([] if cursor else [
@@ -76,7 +75,7 @@ def test_cards_have_plain_bounded_text_and_unknown_dates_are_last(tmp_path):
                 Publication('unknown', 'https://example.org/unknown', 0, published_known=False),
             ]), 'done')
 
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material(publication.id, '<p>Краткий <b>текст</b> &amp; подробности.</p><script>secret()</script><style>secret-style</style>' + 'x' * 700))
 
     with TestClient(create_app(tmp_path, source=Source(), token='test'), headers=HEADERS) as client:
@@ -144,7 +143,7 @@ def test_preview_does_not_restore_fragment_formed_at_a_removed_boundary(tmp_path
         async def discover(self, cursor):
             return DiscoveryResult(tuple([] if cursor else [Publication('edge', 'https://example.org/edge', 20)]), 'done')
 
-        async def fetch(self, publication, resources=FetchResources()):
+        async def fetch(self, publication):
             return FetchResult(Material('Boundary', 'aabb'))
 
     native = model_transport([])

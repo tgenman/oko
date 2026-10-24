@@ -16,7 +16,7 @@ from pydantic import (
 )
 from pydantic.experimental.missing_sentinel import MISSING
 
-from oko.reader.wire import DateValue as date_aliased
+from oko.reader.wire import DateValue as date
 from oko.reader.wire import TimestampValue as datetime
 from oko.reader.wire import UriValue as AnyUrl
 from oko.reader.wire import WireModel, boolean_constant, integer_constant
@@ -461,6 +461,11 @@ class FolderSettingsTarget(WireModel):
     scope: Literal["folder"]
 
 
+class HistoryAbsent(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    state: Literal["absent"]
+
+
 class HistoryPauseRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     paused: StrictBool
@@ -527,7 +532,7 @@ class IncompleteContent(WireModel):
         "media_unavailable",
         "captions_unavailable",
         "source_unavailable",
-        "legacy",
+        "source_incomplete",
         "external_attachment",
         "post_web_unavailable",
     ]
@@ -549,23 +554,6 @@ class KnownLocalModel(WireModel):
     state: Literal["known"]
 
 
-class LegacyCommandContext(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    name: Literal[
-        "import_subscriptions",
-        "import_preview",
-        "create_digest",
-        "unrecognized_operation",
-    ]
-    operation: Literal["legacy"]
-
-
-class LegacyProcessorSelection(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["legacy"]
-    value: StrictStr = Field(..., max_length=200, min_length=1)
-
-
 class LifetimePolicy(RootModel[ExplicitLifetimePolicy | ClientPresenceLifetimePolicy]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: ExplicitLifetimePolicy | ClientPresenceLifetimePolicy = Field(
@@ -582,9 +570,9 @@ class LifetimePolicyIncompatibleError(WireModel):
     message: StrictStr
 
 
-class LocalDate(RootModel[date_aliased]):
+class LocalDate(RootModel[date]):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: date_aliased = Field(..., examples=["2026-10-14"])
+    root: date = Field(..., examples=["2026-10-14"])
 
 
 class LocalProcessorCheck(WireModel):
@@ -1147,11 +1135,9 @@ class SourceUrl(RootModel[AnyUrl]):
     root: AnyUrl = Field(..., examples=["https://example.test/post/1"])
 
 
-class StoredProcessorSelection(
-    RootModel[ProcessorSelection | LegacyProcessorSelection]
-):
+class StoredProcessorSelection(RootModel[ProcessorSelection]):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: ProcessorSelection | LegacyProcessorSelection = Field(..., examples=["codex"])
+    root: ProcessorSelection = Field(..., examples=["codex"])
 
 
 class SubscriptionFolder(WireModel):
@@ -1249,7 +1235,7 @@ class UnknownLocalModel(WireModel):
 class UnknownResultProvenance(WireModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["unknown"]
-    reason: Literal["legacy", "not_recorded"]
+    reason: Literal["not_recorded"]
 
 
 class VerificationExpiredError(WireModel):
@@ -1696,12 +1682,6 @@ class CommandRenameFolder(WireModel):
     operation: Literal["rename_folder"]
 
 
-class CommandRestoreFilter(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    material_id: MaterialId
-    operation: Literal["restore_filter"]
-
-
 class CommandRetryFilter(WireModel):
     model_config = ConfigDict(extra="forbid")
     material_id: MaterialId
@@ -1919,7 +1899,7 @@ class FeedActivity(WireModel):
     model_config = ConfigDict(extra="forbid")
     created: Timestamp | None = Field(
         ...,
-        description="Time this subscription was created in Oko. Null for unknown legacy dates.",
+        description="Time this subscription was created in Oko. Null when the date is unknown.",
     )
     description: StrictStr | None = Field(
         ...,
@@ -2004,23 +1984,10 @@ class FolderNotEmptyError(WireModel):
     message: StrictStr
 
 
-class HistoryAbsent(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    legacy_since: Timestamp | None
-    state: Literal["absent"]
-
-
 class HistoryCountSelection(WireModel):
     model_config = ConfigDict(extra="forbid")
     count: PositiveDecimal
     mode: Literal["count"]
-
-
-class HistoryDateSelection(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    date: LocalDate
-    mode: Literal["date"]
-    timezone: IanaTimezone
 
 
 class HistoryDiscoveryProblem(WireModel):
@@ -2063,10 +2030,10 @@ class HistoryProgress(WireModel):
     warnings: list[StrictStr]
 
 
-class HistorySelection(RootModel[HistoryCountSelection | HistoryDateSelection]):
+class HistorySelection(RootModel[HistoryCountSelection]):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: HistoryCountSelection | HistoryDateSelection = Field(
-        ..., discriminator="mode", examples=[{"count": "20", "mode": "count"}]
+    root: HistoryCountSelection = Field(
+        ..., examples=[{"count": "20", "mode": "count"}]
     )
 
 
@@ -2171,13 +2138,6 @@ class PersonalTelegramProfileUnavailable(WireModel):
     verified_user_id: TelegramUserId | None
 
 
-class PreviousVersionReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    number: StrictInt = Field(..., ge=1, le=9007199254740991)
-    revision_id: RevisionId
-    url: MediaUrl
-
-
 class ProcessingWaiting(WireModel):
     model_config = ConfigDict(extra="forbid")
     reason: WaitingReason
@@ -2227,7 +2187,7 @@ class Provenance(
         Field(
             ...,
             discriminator="kind",
-            examples=[{"kind": "unknown", "reason": "legacy"}],
+            examples=[{"kind": "unknown", "reason": "not_recorded"}],
         )
     )
 
@@ -2236,29 +2196,6 @@ class PublicationReference(WireModel):
     model_config = ConfigDict(extra="forbid")
     material_id: MaterialId
     source_url: SourceUrl
-
-
-class PublicationVersion(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attachments: list[Attachment]
-    completeness: ContentCompleteness
-    external_attachments: list[ExternalAttachment] = Field(
-        default=[], validate_default=True
-    )
-    images: list[MediaUrl]
-    linked_content: LinkedContent | None = Field(
-        default=None,
-        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.",
-    )
-    number: StrictInt = Field(..., ge=1, le=9007199254740991)
-    post_web_unavailable: StrictBool = Field(
-        default=False,
-        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
-    )
-    reply_preview: ReplyPreview | None
-    revision_id: RevisionId
-    text: StrictStr
-    title: StrictStr
 
 
 class QuotaWindow(WireModel):
@@ -2287,7 +2224,6 @@ class ReadingMediaData(WireModel):
         default=False,
         description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
     )
-    previous_versions: list[PreviousVersionReference]
     revision_id: RevisionId | None
 
 
@@ -2307,7 +2243,7 @@ class ReadingTextContent(WireModel):
     )
     linked_content: LinkedContent | None = Field(
         default=None,
-        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.",
+        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.",
     )
     loading: StrictBool
     post_web_unavailable: StrictBool = Field(
@@ -2535,14 +2471,6 @@ class TelegramConnectResult(WireModel):
     feed_id: FeedId
 
 
-class TelegramLegacyClientAccess(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    alias: StrictStr = Field(..., min_length=1)
-    kind: Literal["legacy_client"]
-    peer_id: TelegramPeerId | None
-    source_locator: StrictStr = Field(..., min_length=1)
-
-
 class TelegramProfileIdentityMismatch(WireModel):
     model_config = ConfigDict(extra="forbid")
     checked_at: Timestamp
@@ -2756,14 +2684,13 @@ class AvailablePublicationContent(WireModel):
     images: list[MediaUrl]
     linked_content: LinkedContent | None = Field(
         default=None,
-        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.",
+        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.",
     )
     loading: StrictBool
     post_web_unavailable: StrictBool = Field(
         default=False,
         description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
     )
-    previous_versions: list[PreviousVersionReference]
     reply_preview: ReplyPreview | None
     revision_id: RevisionId
     source_deleted: StrictBool
@@ -2903,7 +2830,6 @@ class CommandContext(
         | CommandRegenerate
         | CommandRetryTheses
         | CommandRetryMaterial
-        | CommandRestoreFilter
         | CommandRetryFilter
         | CommandViewed
         | CommandCodexCheck
@@ -2936,7 +2862,6 @@ class CommandContext(
         | CommandRegenerate
         | CommandRetryTheses
         | CommandRetryMaterial
-        | CommandRestoreFilter
         | CommandRetryFilter
         | CommandViewed
         | CommandCodexCheck
@@ -3049,15 +2974,10 @@ class EffectiveSettingsValues(WireModel):
 
 class FilterResult(WireModel):
     model_config = ConfigDict(extra="forbid")
-    can_restore: StrictBool = Field(
-        default=True,
-        description="Whether the retained legacy filter can be overridden. False for the latest publication pipeline.",
-    )
     hidden: StrictBool
     provenance: Provenance
     reason: StrictStr
     removed: list[StrictStr]
-    restored: StrictBool
 
 
 class FolderSettingsSnapshot(WireModel):
@@ -3139,9 +3059,7 @@ class HistoryState(
         | HistoryWaiting
         | HistoryComplete
         | HistoryCancelled
-    ) = Field(
-        ..., discriminator="state", examples=[{"legacy_since": None, "state": "absent"}]
-    )
+    ) = Field(..., discriminator="state", examples=[{"state": "absent"}])
 
 
 class OkoSettingsSnapshot(WireModel):
@@ -3279,28 +3197,25 @@ class StorageUnavailableError(WireModel):
     message: StrictStr
 
 
-class StoredCommandContext(RootModel[CommandContext | LegacyCommandContext]):
+class StoredCommandContext(RootModel[CommandContext]):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: CommandContext | LegacyCommandContext = Field(
-        ..., examples=[{"name": "import_subscriptions", "operation": "legacy"}]
+    root: CommandContext = Field(
+        ...,
+        examples=[
+            {
+                "keys": [],
+                "operation": "settings_patch",
+                "target": {"owner": "global", "scope": "oko"},
+            }
+        ],
     )
 
 
 class TelegramAccess(
-    RootModel[
-        TelegramUnconfiguredAccess
-        | TelegramWebAccess
-        | TelegramClientAccess
-        | TelegramLegacyClientAccess
-    ]
+    RootModel[TelegramUnconfiguredAccess | TelegramWebAccess | TelegramClientAccess]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        TelegramUnconfiguredAccess
-        | TelegramWebAccess
-        | TelegramClientAccess
-        | TelegramLegacyClientAccess
-    ) = Field(
+    root: TelegramUnconfiguredAccess | TelegramWebAccess | TelegramClientAccess = Field(
         ...,
         discriminator="kind",
         examples=[
@@ -3362,23 +3277,6 @@ class TelegramConnectRequest(
     root: TelegramWebConnectRequest | TelegramClientConnectRequest = Field(
         ..., examples=[{"folder": "example", "source_locator": "example"}]
     )
-
-
-class TelegramLegacyClientSubscriptionFeed(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    access: TelegramLegacyClientAccess
-    avatar_url: FeedAvatarUrl | MISSING = MISSING
-    connection: Literal["needs_profile_confirmation", "deleting"]
-    folder_id: FolderId
-    history: HistoryState
-    id: FeedId
-    identity: StrictStr = Field(..., min_length=1)
-    importance: Importance
-    initial_days: StrictInt = Field(..., ge=1, le=3650)
-    kind: Literal["telegram"]
-    original_urls: list[SourceLocator]
-    public_ai: StrictBool | None
-    title: StrictStr
 
 
 class TelegramProfileSave409Errors(
@@ -3518,7 +3416,7 @@ class ThesesState(RootModel[ThesesReadyState | ThesesAttemptState]):
                 "diagnostic_message": None,
                 "result": {
                     "points": [],
-                    "provenance": {"kind": "unknown", "reason": "legacy"},
+                    "provenance": {"kind": "unknown", "reason": "not_recorded"},
                 },
             }
         ],
@@ -3746,10 +3644,9 @@ class FilterState(RootModel[FilterReadyState | FilterAttemptState]):
                 "diagnostic_message": None,
                 "result": {
                     "hidden": False,
-                    "provenance": {"kind": "unknown", "reason": "legacy"},
+                    "provenance": {"kind": "unknown", "reason": "not_recorded"},
                     "reason": "example",
                     "removed": [],
-                    "restored": False,
                 },
             }
         ],
@@ -3927,7 +3824,6 @@ class SubscriptionFeed(
         | UnresolvedSubscriptionFeed
         | TelegramWebSubscriptionFeed
         | TelegramClientSubscriptionFeed
-        | TelegramLegacyClientSubscriptionFeed
     ]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
@@ -3939,14 +3835,13 @@ class SubscriptionFeed(
         | UnresolvedSubscriptionFeed
         | TelegramWebSubscriptionFeed
         | TelegramClientSubscriptionFeed
-        | TelegramLegacyClientSubscriptionFeed
     ) = Field(
         ...,
         examples=[
             {
                 "connection": "ready",
                 "folder_id": "example",
-                "history": {"legacy_since": None, "state": "absent"},
+                "history": {"state": "absent"},
                 "id": "example",
                 "identity": "example",
                 "importance": "normal",
@@ -4006,7 +3901,6 @@ class AvailableReadingCard(WireModel):
         default=False,
         description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
     )
-    previous_versions: list[PreviousVersionReference]
     published_at: Timestamp | None
     revision_id: RevisionId
     snippet: StrictStr
@@ -4169,10 +4063,7 @@ class HistoryStart409Errors(RootModel[HistoryConflictError | RuntimeStoppedError
             {
                 "code": "history_conflict",
                 "command_id": None,
-                "details": {
-                    "feed_id": "example",
-                    "history": {"legacy_since": None, "state": "absent"},
-                },
+                "details": {"feed_id": "example", "history": {"state": "absent"}},
                 "diagnostic_id": None,
                 "message": "example",
             }
@@ -4194,72 +4085,6 @@ class Image404Errors(RootModel[ResourceNotFoundError | MediaUnavailableError]):
                 "message": "example",
             }
         ],
-    )
-
-
-class LegacyCurrentProblem(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    affected: list[AffectedResource]
-    code: Literal["legacy_problem"]
-    command_id: CommandId | None
-    consequence: StrictStr = Field(
-        ...,
-        description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
-    )
-    created_at: Timestamp
-    id: ProblemId
-    message: StrictStr
-    raw_code: StrictStr = Field(..., min_length=1)
-    recovery: list[RecoveryIntent]
-    state: Literal["current"]
-    title: StrictStr = Field(
-        ...,
-        description="Human-readable subject explanation; clients branch on code, not this text.",
-    )
-
-
-class LegacyFinishedProblem(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    affected: list[AffectedResource]
-    code: Literal["legacy_problem"]
-    command_id: CommandId | None
-    consequence: StrictStr = Field(
-        ...,
-        description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
-    )
-    created_at: Timestamp
-    finished_at: Timestamp
-    id: ProblemId
-    message: StrictStr
-    outcome: Literal["resolved", "irrelevant"]
-    raw_code: StrictStr = Field(..., min_length=1)
-    recovery: list[RecoveryIntent]
-    state: Literal["finished"]
-    title: StrictStr = Field(
-        ...,
-        description="Human-readable subject explanation; clients branch on code, not this text.",
-    )
-
-
-class LegacyRetryingProblem(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    affected: list[AffectedResource]
-    code: Literal["legacy_problem"]
-    command_id: CommandId | None
-    consequence: StrictStr = Field(
-        ...,
-        description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
-    )
-    created_at: Timestamp
-    id: ProblemId
-    message: StrictStr
-    raw_code: StrictStr = Field(..., min_length=1)
-    recovery: list[RecoveryIntent]
-    retry_at: Timestamp | None
-    state: Literal["retrying"]
-    title: StrictStr = Field(
-        ...,
-        description="Human-readable subject explanation; clients branch on code, not this text.",
     )
 
 
@@ -4369,25 +4194,9 @@ class PreviousVersion404Errors(
     )
 
 
-class Problem(
-    RootModel[
-        CurrentProblem
-        | LegacyCurrentProblem
-        | RetryingProblem
-        | LegacyRetryingProblem
-        | FinishedProblem
-        | LegacyFinishedProblem
-    ]
-):
+class Problem(RootModel[CurrentProblem | RetryingProblem | FinishedProblem]):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        CurrentProblem
-        | LegacyCurrentProblem
-        | RetryingProblem
-        | LegacyRetryingProblem
-        | FinishedProblem
-        | LegacyFinishedProblem
-    ) = Field(
+    root: CurrentProblem | RetryingProblem | FinishedProblem = Field(
         ...,
         examples=[
             {
@@ -4409,10 +4218,8 @@ class Problem(
 class ProblemSnapshot(WireModel):
     model_config = ConfigDict(extra="forbid")
     count: StrictInt = Field(..., ge=0, le=9007199254740991)
-    current: list[
-        CurrentProblem | RetryingProblem | LegacyCurrentProblem | LegacyRetryingProblem
-    ]
-    recent: list[FinishedProblem | LegacyFinishedProblem]
+    current: list[CurrentProblem | RetryingProblem]
+    recent: list[FinishedProblem]
     updated_at: Timestamp
 
 
@@ -4432,10 +4239,9 @@ class ReadableMaterial(RootModel[PendingReadableMaterial | AvailableReadableMate
                     "diagnostic_message": None,
                     "result": {
                         "hidden": False,
-                        "provenance": {"kind": "unknown", "reason": "legacy"},
+                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
                         "reason": "example",
                         "removed": [],
-                        "restored": False,
                     },
                 },
                 "folder_id": "example",
@@ -4456,7 +4262,7 @@ class ReadableMaterial(RootModel[PendingReadableMaterial | AvailableReadableMate
                     "diagnostic_message": None,
                     "result": {
                         "points": [],
-                        "provenance": {"kind": "unknown", "reason": "legacy"},
+                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
                     },
                 },
                 "title": "example",
@@ -4480,10 +4286,9 @@ class ReadingCard(RootModel[PendingReadingCard | AvailableReadingCard]):
                     "diagnostic_message": None,
                     "result": {
                         "hidden": False,
-                        "provenance": {"kind": "unknown", "reason": "legacy"},
+                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
                         "reason": "example",
                         "removed": [],
-                        "restored": False,
                     },
                 },
                 "folder_id": "example",
@@ -4505,7 +4310,7 @@ class ReadingCard(RootModel[PendingReadingCard | AvailableReadingCard]):
                     "diagnostic_message": None,
                     "result": {
                         "points": [],
-                        "provenance": {"kind": "unknown", "reason": "legacy"},
+                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
                     },
                 },
                 "title": "example",

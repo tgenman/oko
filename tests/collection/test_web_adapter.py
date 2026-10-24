@@ -73,7 +73,7 @@ def test_web_failure_describes_article_and_keeps_source_wait_metadata():
         asyncio.run(adapter.fetch(reference('https://web.example/limited')))
     issue=caught.value.issue
     assert issue.kind==AdapterErrorKind.source_wait and issue.retry_at is not None
-    assert issue.scope=='web:web.example' and issue.message=='Не удалось загрузить статью'
+    assert issue.scope=='web:web.example' and issue.message=='Не удалось загрузить статью: HTTP 429'
 
 
 def test_telegraph_key_uses_its_page_path_across_source_tracking_links():

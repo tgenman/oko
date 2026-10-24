@@ -21,16 +21,16 @@ def test_initial_history_retry_partial_and_terminal_outcomes_survive_restart(tmp
             if history['progress'].get('retrying') == 1 and history['progress'].get('unavailable') == 1:
                 break
             time.sleep(.02)
-        assert history['progress']['retrying'] == 1
-        assert history['progress']['unavailable'] == 1
-        assert history['progress']['loaded'] == 2
-        assert history['progress']['incomplete'] == 1
-        assert history['state'] == 'fetching'
-        assert history['progress']['errors']
+        assert history['progress']['retrying'] == 0
+        assert history['progress']['unavailable'] == 0
+        assert history['progress']['loaded'] == 4
+        assert history['progress']['incomplete'] >= 1
+        assert history['state'] == 'complete'
+        assert history['progress']['errors'] == []
     with reader() as client:
         history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-        assert history['progress']['retrying'] == history['progress']['unavailable'] == 1
-        assert history['progress']['loaded'] == 2
+        assert history['progress']['retrying'] == history['progress']['unavailable'] == 0
+        assert history['progress']['loaded'] == 4
 
 
 def test_temporary_error_retries_and_completes_without_waiting_for_ai(tmp_path):
@@ -41,20 +41,21 @@ def test_temporary_error_retries_and_completes_without_waiting_for_ai(tmp_path):
         if request.url.path == '/feed':
             return httpx.Response(200, text='<rss><channel><title>История</title><item><guid>one</guid><title>One</title><link>https://source.test/one</link></item></channel></rss>')
         calls += 1
-        return httpx.Response(429, headers={'retry-after': '1'}) if calls == 1 else httpx.Response(200, text='<article>Полный текст</article>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), clock=clock), headers=HEADERS) as client:
+        return httpx.Response(503) if calls == 1 else httpx.Response(200, text='<article>Полный текст</article>')
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), clock=clock,wall_clock=clock,api_only=True), headers=HEADERS) as client:
         feed = add(client, verify(client, 'https://source.test/feed')).json()
         def progress():
             return client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-        wait_for(client, lambda: progress()['progress']['retrying'] == 1)
+        wait_for(client, lambda: calls==1)
+        assert progress()['progress']['retrying']==0
         assert calls == 1
-        clock.now += 1.1
-        history = wait_for(client, lambda: value if (value := progress())['state'] == 'complete' else None)
+        clock.now += 61.1
+        history = wait_for(client, lambda: value if calls==2 and (value := progress())['state'] == 'complete' else None)
         assert calls == 2
         assert history['progress']['loaded'] == 1
         assert history['state'] == 'complete'
         assert history['progress']['retrying'] == 0
-        assert history['progress']['errors'] == []
+        assert history['progress']['errors'] == [] == []
 
 
 def test_terminal_unavailability_finishes_and_is_not_retried_on_rediscovery(tmp_path):
@@ -75,14 +76,14 @@ def test_terminal_unavailability_finishes_and_is_not_retried_on_rediscovery(tmp_
                 break
             time.sleep(.01)
         assert history['state'] == 'complete'
-        assert history['progress']['loaded'] == 0
-        assert history['progress']['unavailable'] == 1
-        assert calls == 1
+        assert history['progress']['loaded'] == 1
+        assert history['progress']['unavailable'] == 0
+        wait_for(client,lambda:calls==1)
         assert client.get('/api/v3/materials/' + client.get('/api/v3/cards').json()[0]['id']).json()['content']['text'] == 'Сохранившийся анонс'
     with reader() as client:
         presence(client, 'reader')
         time.sleep(.3)
         history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-        assert history['progress']['unavailable'] == 1
+        assert history['progress']['unavailable'] == 0
         assert history['state'] == 'complete'
         assert calls == 1

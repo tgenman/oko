@@ -29,7 +29,7 @@ async function reader() {
       // Transitional v2 scenario snapshots are adapted only in this synthetic
       // transport. Production HTTP acceptance verifies the real v3 envelopes.
       const history=(value:unknown):unknown=>{
-        if(!value||typeof value!=='object')return {state:'absent',legacy_since:null};
+        if(!value||typeof value!=='object')return {state:'absent'};
         if('selection' in value||('state' in value&&value.state==='absent'))return value;
         const h=value as import('./scenario-data').History;
         const selection=h.mode==='date'?{mode:'date',date:h.date,timezone:h.timezone}:{mode:'count',count:h.count_text||String(h.count)};
@@ -78,7 +78,7 @@ async function reader() {
             return [key,{value:item.value,origin:{scope:item.scope,...(item.scope==='default'?{}:{owner:'owner' in item?item.owner:'global'})}}];
           }));
           const feed=('feed' in body?body.feed:null)||replies.get('/api/v3/subscriptions')?.body?.feeds.find(f=>f.id===owner);
-          return {scope,owner,effective,overrides:body.overrides,...(scope==='feed'&&feed&&typeof feed==='object'?{feed:{...feed,history:'initial_history' in feed&&feed.initial_history?history(feed.initial_history):{state:'absent',legacy_since:'legacy_since' in feed&&typeof feed.legacy_since==='number'?new Date(feed.legacy_since*1000).toISOString():null}}}:{})};
+          return {scope,owner,effective,overrides:body.overrides,...(scope==='feed'&&feed&&typeof feed==='object'?{feed:{...feed,history:'initial_history' in feed&&feed.initial_history?history(feed.initial_history):{state:'absent'}}}:{})};
         }
         if(url==='/api/v3/processors/llamacpp'&&method==='GET'&&!('configuration' in body))return {configuration:body};
         if(url==='/api/v3/processors/llamacpp/check'&&'local' in body&&'model' in body&&'models' in body)return {locality:body.local?'local':'remote',model:body.model,models:body.models};
@@ -157,10 +157,10 @@ async function reader() {
             const m=await material(item.id),revision=m.availability==='available'?m.content.revision_id:null;
             if(kind==='filter')changed(kind,item.id,{revision_id:revision,filter:m.filter},item.known_version);
             else if(kind==='theses')changed(kind,item.id,{revision_id:revision,theses:m.theses},item.known_version);
-            else if(kind==='media')changed(kind,item.id,{revision_id:revision,images:m.availability==='available'?m.content.images:[],attachments:m.availability==='available'?m.content.attachments:[],previous_versions:m.availability==='available'?m.content.previous_versions:[]},item.known_version);
+            else if(kind==='media')changed(kind,item.id,{revision_id:revision,images:m.availability==='available'?m.content.images:[],attachments:m.availability==='available'?m.content.attachments:[]},item.known_version);
             else{
               const {feed_title,folder_id,importance,snippet,filter,theses,...text}=m;
-              if(text.availability==='available'){const {images,attachments,previous_versions,display_text,...content}=text.content;text.content=content as typeof text.content;}
+              if(text.availability==='available'){const {images,attachments,display_text,...content}=text.content;text.content=content as typeof text.content;}
               changed(kind,item.id,text,item.known_version);
             }
           }
@@ -204,7 +204,6 @@ async function reader() {
         for (const material of materials) {
           const {snippet, feed_title, ...opened} = material;
           t.replies.set('/api/v3/materials/' + material.id, {body: opened});
-          for (const version of material.previous || []) t.aliases.set(version.url, 'version_v3');
         }
       }, materials);
       await target.goto(origin + '/#token=' + token);

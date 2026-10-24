@@ -30,7 +30,8 @@ def test_reader_keeps_opened_original_then_deletes_explicitly(tmp_path: Path):
         assert material['title'] == 'Око: первый материал'
         assert material['source_url'] == 'https://example.org/oko/1'
         assert len(client.get('/api/v3/cards').json()) == 3
-        assert list(tmp_path.glob('content/*/1/original.md'))
+        assert material['content']['text']
+        assert not list(tmp_path.glob('content/**/*.md'))
         assert client.post(f'/api/v3/materials/{item}/viewed').status_code == 200
         assert client.post(f'/api/v3/materials/{item}/viewed').status_code == 200
         assert client.get(f'/api/v3/materials/{item}').status_code == 404

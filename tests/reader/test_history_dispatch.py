@@ -112,9 +112,9 @@ def archive_seed(root):
         store.subscriptions.ensure_demo()
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection) VALUES ('archive','archive','Archive','default','rss','rss','connected')")
-            store.db.execute("INSERT INTO initial_history(feed,selection,paused,scan_complete) VALUES ('archive','{\"cancelled\":true}',1,1)")
-            store.db.executemany("INSERT INTO items(id,feed_id,viewed) VALUES (?,'archive',1)",
-                                 [(f'old-{i}',) for i in range(10000)])
+            store.db.execute("INSERT INTO initial_history(feed,selection,paused,scan_complete) VALUES ('archive','{\"mode\":\"count\",\"cancelled\":true}',1,1)")
+            store.db.executemany("INSERT INTO items(id,feed_id,viewed,platform,external_id) VALUES (?,'archive',1,'other_web',?)",
+                                 [(f'old-{i}',f'old-{i}') for i in range(10000)])
             store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",
                                  [(f'old-{i}',) for i in range(10000)])
     finally:

@@ -1,0 +1,89 @@
+{
+  "release": "4e5495632cdce1bc16c18129686a688040473962",
+  "http": {
+    "status": [
+      {
+        "status": 200,
+        "ms": 109.57,
+        "bytes": 307731
+      },
+      {
+        "status": 200,
+        "ms": 45.41,
+        "bytes": 307731
+      },
+      {
+        "status": 200,
+        "ms": 45.81,
+        "bytes": 307731
+      },
+      {
+        "status": 200,
+        "ms": 47.51,
+        "bytes": 307731
+      },
+      {
+        "status": 200,
+        "ms": 48.9,
+        "bytes": 307731
+      }
+    ],
+    "navigation": [
+      {
+        "status": 200,
+        "ms": 31.65,
+        "bytes": 168325
+      },
+      {
+        "status": 200,
+        "ms": 31.62,
+        "bytes": 168325
+      },
+      {
+        "status": 200,
+        "ms": 30.01,
+        "bytes": 168325
+      },
+      {
+        "status": 200,
+        "ms": 26.39,
+        "bytes": 168325
+      },
+      {
+        "status": 200,
+        "ms": 24.94,
+        "bytes": 168325
+      }
+    ],
+    "local_media": {
+      "status": 200,
+      "bytes": 125016
+    }
+  },
+  "data": {
+    "quick_check": [
+      [
+        "ok"
+      ]
+    ],
+    "feeds": 184,
+    "publications": 1355,
+    "feed_publication_links": 1264,
+    "publication_links": 91,
+    "media": 3789,
+    "broken_feed_links": 0,
+    "broken_article_links": 0,
+    "orphan_media": 0,
+    "null_content": 0,
+    "ready_files": 1748,
+    "missing_ready_files": 0
+  },
+  "backup": "20261023T214822318667Z",
+  "backup_integrity": "PASS",
+  "preserved_publications": 1354,
+  "removed_publications": 0,
+  "added_publications": 1,
+  "image": "sha256:a0dfc2cdf6d09b1ebbb6f44b1cd84387fe4c91d22114da4daa71a6fb6d830ea2",
+  "helper_loaded": true,
+  "container_health": "healthy"
+}

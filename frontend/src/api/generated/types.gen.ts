@@ -129,7 +129,7 @@ export type AvailablePublicationContent = {
     external_attachments?: Array<ExternalAttachment>;
     images: Array<MediaUrl>;
     /**
-     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.
      */
     linked_content?: LinkedContent | null;
     loading: boolean;
@@ -137,7 +137,6 @@ export type AvailablePublicationContent = {
      * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
      */
     post_web_unavailable?: boolean;
-    previous_versions: Array<PreviousVersionReference>;
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
     source_deleted: boolean;
@@ -184,7 +183,6 @@ export type AvailableReadingCard = {
      * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
      */
     post_web_unavailable?: boolean;
-    previous_versions: Array<PreviousVersionReference>;
     published_at: Timestamp | null;
     revision_id: RevisionId;
     snippet: string;
@@ -765,8 +763,6 @@ export type CommandContext = ({
 } & CommandRetryTheses) | ({
     operation: 'retry_material';
 } & CommandRetryMaterial) | ({
-    operation: 'restore_filter';
-} & CommandRestoreFilter) | ({
     operation: 'retry_filter';
 } & CommandRetryFilter) | ({
     operation: 'viewed';
@@ -908,11 +904,6 @@ export type CommandRenameFolder = {
 export type CommandResource = {
     command_id: CommandId;
     kind: 'command';
-};
-
-export type CommandRestoreFilter = {
-    material_id: MaterialId;
-    operation: 'restore_filter';
 };
 
 export type CommandRetryFilter = {
@@ -1355,7 +1346,7 @@ export type FailedReadingResource = {
 
 export type FeedActivity = {
     /**
-     * Time this subscription was created in Oko. Null for unknown legacy dates.
+     * Time this subscription was created in Oko. Null when the date is unknown.
      */
     created: Timestamp | null;
     /**
@@ -1479,15 +1470,10 @@ export type FilterReadyState = {
 };
 
 export type FilterResult = {
-    /**
-     * Whether the retained legacy filter can be overridden. False for the latest publication pipeline.
-     */
-    can_restore?: boolean;
     hidden: boolean;
     provenance: Provenance;
     reason: string;
     removed: Array<string>;
-    restored: boolean;
 };
 
 export type FilterState = FilterReadyState | FilterAttemptState;
@@ -1567,7 +1553,6 @@ export type FolderSettingsTarget = {
 };
 
 export type HistoryAbsent = {
-    legacy_since: Timestamp | null;
     state: 'absent';
 };
 
@@ -1605,12 +1590,6 @@ export type HistoryConflictErrorDetails = {
 export type HistoryCountSelection = {
     count: PositiveDecimal;
     mode: 'count';
-};
-
-export type HistoryDateSelection = {
-    date: LocalDate;
-    mode: 'date';
-    timezone: IanaTimezone;
 };
 
 export type HistoryDiscovering = {
@@ -1682,11 +1661,7 @@ export type HistoryProgress = {
     warnings: Array<string>;
 };
 
-export type HistorySelection = ({
-    mode: 'count';
-} & HistoryCountSelection) | ({
-    mode: 'date';
-} & HistoryDateSelection);
+export type HistorySelection = HistoryCountSelection;
 
 export type HistoryStart409Errors = ({
     code: 'history_conflict';
@@ -1755,7 +1730,7 @@ export type Importance = 'normal' | 'elevated' | 'high';
 
 export type IncompleteContent = {
     message: string;
-    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'legacy' | 'external_attachment' | 'post_web_unavailable';
+    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'source_incomplete' | 'external_attachment' | 'post_web_unavailable';
     state: 'incomplete';
 };
 
@@ -1770,82 +1745,6 @@ export type InternalErrorError = {
 export type KnownLocalModel = {
     name: string;
     state: 'known';
-};
-
-/**
- * Response-only context for a persisted command whose operation was retired or cannot be reconstructed. No URL, page or submitted values are exposed.
- */
-export type LegacyCommandContext = {
-    name: 'import_subscriptions' | 'import_preview' | 'create_digest' | 'unrecognized_operation';
-    operation: 'legacy';
-};
-
-export type LegacyCurrentProblem = {
-    affected: Array<AffectedResource>;
-    code: 'legacy_problem';
-    command_id: CommandId | null;
-    /**
-     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
-     */
-    consequence: string;
-    created_at: Timestamp;
-    id: ProblemId;
-    message: string;
-    raw_code: string;
-    recovery: Array<RecoveryIntent>;
-    state: 'current';
-    /**
-     * Human-readable subject explanation; clients branch on code, not this text.
-     */
-    title: string;
-};
-
-export type LegacyFinishedProblem = {
-    affected: Array<AffectedResource>;
-    code: 'legacy_problem';
-    command_id: CommandId | null;
-    /**
-     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
-     */
-    consequence: string;
-    created_at: Timestamp;
-    finished_at: Timestamp;
-    id: ProblemId;
-    message: string;
-    outcome: 'resolved' | 'irrelevant';
-    raw_code: string;
-    recovery: Array<RecoveryIntent>;
-    state: 'finished';
-    /**
-     * Human-readable subject explanation; clients branch on code, not this text.
-     */
-    title: string;
-};
-
-export type LegacyProcessorSelection = {
-    kind: 'legacy';
-    value: string;
-};
-
-export type LegacyRetryingProblem = {
-    affected: Array<AffectedResource>;
-    code: 'legacy_problem';
-    command_id: CommandId | null;
-    /**
-     * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
-     */
-    consequence: string;
-    created_at: Timestamp;
-    id: ProblemId;
-    message: string;
-    raw_code: string;
-    recovery: Array<RecoveryIntent>;
-    retry_at: Timestamp | null;
-    state: 'retrying';
-    /**
-     * Human-readable subject explanation; clients branch on code, not this text.
-     */
-    title: string;
 };
 
 export type LifetimePolicy = ({
@@ -2122,13 +2021,7 @@ export type PreviousVersion404Errors = ({
     code: 'version_unavailable';
 } & VersionUnavailableError);
 
-export type PreviousVersionReference = {
-    number: number;
-    revision_id: RevisionId;
-    url: MediaUrl;
-};
-
-export type Problem = CurrentProblem | LegacyCurrentProblem | RetryingProblem | LegacyRetryingProblem | FinishedProblem | LegacyFinishedProblem;
+export type Problem = CurrentProblem | RetryingProblem | FinishedProblem;
 
 export type ProblemCode = 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed' | 'profile_not_configured' | 'profile_unavailable' | 'account_identity_mismatch' | 'source_identity_conflict' | 'duplicate_source' | 'profile_in_use' | 'profile_account_conflict';
 
@@ -2141,8 +2034,8 @@ export type ProblemResource = {
 
 export type ProblemSnapshot = {
     count: number;
-    current: Array<CurrentProblem | RetryingProblem | LegacyCurrentProblem | LegacyRetryingProblem>;
-    recent: Array<FinishedProblem | LegacyFinishedProblem>;
+    current: Array<CurrentProblem | RetryingProblem>;
+    recent: Array<FinishedProblem>;
     updated_at: Timestamp;
 };
 
@@ -2269,26 +2162,6 @@ export type PublicationReference = {
 export type PublicationTheses = {
     points: Array<ThesesPoint>;
     provenance: Provenance;
-};
-
-export type PublicationVersion = {
-    attachments: Array<Attachment>;
-    completeness: ContentCompleteness;
-    external_attachments?: Array<ExternalAttachment>;
-    images: Array<MediaUrl>;
-    /**
-     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
-     */
-    linked_content?: LinkedContent | null;
-    number: number;
-    /**
-     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-     */
-    post_web_unavailable?: boolean;
-    reply_preview: ReplyPreview | null;
-    revision_id: RevisionId;
-    text: string;
-    title: string;
 };
 
 export type QuotaWindow = {
@@ -2420,7 +2293,6 @@ export type ReadingMediaData = {
      * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
      */
     post_web_unavailable?: boolean;
-    previous_versions: Array<PreviousVersionReference>;
     revision_id: RevisionId | null;
 };
 
@@ -2444,7 +2316,7 @@ export type ReadingTextContent = {
      */
     description: string;
     /**
-     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for legacy or unrelated content. Combined text remains available for processing and independent clients.
+     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.
      */
     linked_content?: LinkedContent | null;
     loading: boolean;
@@ -2835,7 +2707,7 @@ export type StorageUnavailableErrorDetails = {
     retry_at: Timestamp | null;
 };
 
-export type StoredCommandContext = CommandContext | LegacyCommandContext;
+export type StoredCommandContext = CommandContext;
 
 export type StoredOverrides = {
     originals?: boolean;
@@ -2845,14 +2717,14 @@ export type StoredOverrides = {
     theses?: boolean;
 };
 
-export type StoredProcessorSelection = ProcessorSelection | LegacyProcessorSelection;
+export type StoredProcessorSelection = ProcessorSelection;
 
 export type SubscriptionCatalog = {
     feeds: Array<SubscriptionFeed>;
     folders: Array<SubscriptionFolder>;
 };
 
-export type SubscriptionFeed = TelegramUnconfiguredSubscriptionFeed | DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed | TelegramClientSubscriptionFeed | TelegramLegacyClientSubscriptionFeed;
+export type SubscriptionFeed = TelegramUnconfiguredSubscriptionFeed | DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed | TelegramClientSubscriptionFeed;
 
 export type SubscriptionFolder = {
     id: FolderId;
@@ -2869,9 +2741,7 @@ export type TelegramAccess = ({
     kind: 'web';
 } & TelegramWebAccess) | ({
     kind: 'client';
-} & TelegramClientAccess) | ({
-    kind: 'legacy_client';
-} & TelegramLegacyClientAccess);
+} & TelegramClientAccess);
 
 export type TelegramClientAccess = {
     account_user_id: TelegramUserId;
@@ -2955,29 +2825,6 @@ export type TelegramConnectRequest = TelegramWebConnectRequest | TelegramClientC
 export type TelegramConnectResult = {
     access: TelegramConfirmedAccess;
     feed_id: FeedId;
-};
-
-export type TelegramLegacyClientAccess = {
-    alias: string;
-    kind: 'legacy_client';
-    peer_id: TelegramPeerId | null;
-    source_locator: string;
-};
-
-export type TelegramLegacyClientSubscriptionFeed = {
-    access: TelegramLegacyClientAccess;
-    avatar_url?: FeedAvatarUrl;
-    connection: 'needs_profile_confirmation' | 'deleting';
-    folder_id: FolderId;
-    history: HistoryState;
-    id: FeedId;
-    identity: string;
-    importance: Importance;
-    initial_days: number;
-    kind: 'telegram';
-    original_urls: Array<SourceLocator>;
-    public_ai: boolean | null;
-    title: string;
 };
 
 export type TelegramMessageId = string;
@@ -3200,7 +3047,7 @@ export type UnknownLocalModel = {
 
 export type UnknownResultProvenance = {
     kind: 'unknown';
-    reason: 'legacy' | 'not_recorded';
+    reason: 'not_recorded';
 };
 
 export type UnresolvedSubscriptionFeed = {
@@ -4386,7 +4233,7 @@ export type HistoryPauseError = HistoryPauseErrors[keyof HistoryPauseErrors];
 
 export type HistoryPauseResponses = {
     /**
-     * Legacy resume of the existing archive run. Manual pause is rejected.
+     * Resume of the existing archive run. Manual pause is rejected.
      */
     200: FeedHistoryState;
 };
@@ -6013,7 +5860,7 @@ export type SubscriptionListError = SubscriptionListErrors[keyof SubscriptionLis
 
 export type SubscriptionListResponses = {
     /**
-     * Read saved folders and source subscriptions, including deleting entries and unconfirmed legacy client bindings without inventing identity.
+     * Read saved folders and source subscriptions, including deleting entries without inventing identity.
      */
     200: SubscriptionCatalog;
 };

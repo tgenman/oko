@@ -73,7 +73,7 @@ class _Content:
         if isinstance(node,Comment):
             return
         if isinstance(node,NavigableString):
-            self.text.append(re.sub(r'\s+',' ',str(node)))
+            self.text.append(str(node))
             return
         if not isinstance(node,Tag) or node.name in ('script','style','nav','footer','aside','form'):
             return
@@ -93,6 +93,7 @@ class _Content:
             url=self.address(node.get('src'))
             if url:
                 self.blocks.append(dict(type='external_media',kind='youtube' if urlsplit(url).hostname in ('www.youtube.com','youtube.com','youtu.be') else 'web',url=url))
+                self.blocks.append(dict(type='text',role='body',text='Внешнее встраивание не сохранено локально: '+url))
             return
         if tag=='a':
             url=self.address(node.get('href'))

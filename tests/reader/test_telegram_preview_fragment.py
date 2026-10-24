@@ -26,7 +26,7 @@ def test_forwarded_fragment_is_incomplete_without_errors_or_automatic_retry(tmp_
         feed=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
         identity=settled(client)[0]['id'];path='/api/v3/materials/'+identity
         content=client.get(path).json()['content'];linked=content['linked_content']
-        assert content['completeness']['state']=='incomplete' and content['completeness']['reason']=='legacy'
+        assert content['completeness']['state']=='incomplete' and content['completeness']['reason']=='source_incomplete'
         assert 'предпросмотра' in content['completeness']['message']
         assert linked and 'https://t.me/fixture/11' in linked['post_text']
         assert 'https://t.me/original/42' in linked['post_text']
@@ -69,13 +69,13 @@ def test_previous_fragment_survives_failed_manual_refresh_and_legacy_error_is_co
         content=client.get(path).json()['content']
         assert 'Saved short preview' in content['text']
         assert 'https://t.me/original/42' in content['linked_content']['post_text']
-        assert content['previous_versions']==[] and not content['changed']
+        assert 'previous_versions' not in content and not content['changed']
         assert client.get('/api/v3/status').json()['problems']['count']==0
         broken[0]=True;client.post(path+'/retry');settled(client)
         failed=client.get(path).json()['content']
         assert failed['text']==content['text']
         assert 'HTTP 500' in failed['linked_content']['post_text']
-        assert failed['previous_versions']==[] and not failed['changed']
+        assert 'previous_versions' not in failed and not failed['changed']
         assert client.get('/api/v3/status').json()['problems']['count']==0
         broken[0]=False;client.post(path+'/retry');settled(client)
         assert 'HTTP 500' not in client.get(path).json()['content']['linked_content']['post_text']
@@ -94,7 +94,7 @@ def test_metadata_does_not_replace_a_genuine_full_local_copy(tmp_path):
         content=client.get(path).json()['content']
         assert content['text']=='Complete original body'
         assert content['post_web_unavailable'] is True
-        assert content['previous_versions']==[] and not content['changed']
+        assert 'previous_versions' not in content and not content['changed']
 
 
 def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):

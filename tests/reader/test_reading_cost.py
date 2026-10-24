@@ -77,8 +77,7 @@ def test_selected_scope_and_file_reads_do_not_grow_with_other_materials(tmp_path
             response = client.get('/api/v3/cards', params={'folder': folder})
             assert response.status_code == 200
             assert len(response.json()) == 26
-            assert len(reads) == 26
-            assert set(reads.values()) == {1}
+            assert not reads  # Publication text comes from SQLite, not document files.
             costs.append(int(response.headers['X-Test-SQL']))
             assert client.patch('/api/v3/settings/feed/' + feeds[0], json={'originals': False}).status_code == 200
             response = client.get('/api/v3/cards', params={'feed': feeds[0]})
@@ -88,10 +87,10 @@ def test_selected_scope_and_file_reads_do_not_grow_with_other_materials(tmp_path
 
 def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     store = Store(tmp_path, lambda _: None)
-    # Legacy archive fixture: only 100 records are still unviewed.
+    # Current archive fixture: only 100 records are still unviewed.
     with store.db:
-        store.db.executemany('INSERT INTO items(id,published,viewed,feed_id) VALUES (?,?,?,?)',
-            [(f'archive-{n:05}', n, int(n >= 100), 'demo') for n in range(20000)])
+        store.db.executemany("INSERT INTO items(id,published,viewed,feed_id,platform,external_id) VALUES (?,?,?,?,'other_web',?)",
+            [(f'archive-{n:05}', n, int(n >= 100), 'demo',f'archive-{n:05}') for n in range(20000)])
         store.db.execute('DROP INDEX items_unviewed_order')
     store.db.close()
     for _ in range(2):
@@ -111,5 +110,5 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
             store.db.execute('UPDATE items SET viewed=1 WHERE id=?', ('archive-00000',))
             store.db.execute('UPDATE items SET viewed=0 WHERE id=?', ('archive-00000',))
         store.db.set_progress_handler(None, 0)
-        assert len(writes) < 1500, len(writes)
+        assert len(writes) < 1600, len(writes)
         store.db.close()

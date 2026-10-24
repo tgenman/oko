@@ -6,10 +6,6 @@
 #material .telegraph-body{padding:24px}
 #material .telegraph-body>h2{font-size:23px;line-height:1.4;margin:0 0 18px}
 #material .telegraph-error{color:#a64a29;font-size:13px;line-height:1.6}
-#material blockquote.publication-load-error{box-sizing:border-box;min-width:0;margin:20px 0;padding:14px 16px;background:#fff0f0;border:1px solid #edb2b2;border-left:3px solid #d45252;border-radius:7px;color:#a02c2c;font-size:13px;line-height:1.65;white-space:normal;overflow-wrap:anywhere}
-#material .publication-load-error p{margin:0 0 6px}
-#material .publication-load-error p:last-child{margin-bottom:0}
-#material .publication-load-error a{display:inline-block;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
 #material .telegraph-article>footer{border-top:1px solid #e2e7df;padding:10px 24px;color:#84907e;font-size:11px}
 #material .telegraph-article :is(img,video,audio){display:block;max-width:100%;margin:16px 0}
 @media(max-width:800px){#material .telegraph-article>header{padding:13px 15px}#material .telegraph-body{padding:18px 15px}#material .telegraph-body>h2{font-size:21px}}

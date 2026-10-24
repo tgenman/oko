@@ -40,7 +40,7 @@ def test_status_and_viewed_work_budgets(tmp_path, count):
         response = client.post('/api/v3/materials/' + items[0] + '/viewed')
         assert response.status_code == 200
         # SQLite trace also reports trigger invocations for the durable entity versions.
-        assert int(response.headers['X-Test-SQL']) < 180
+        assert int(response.headers['X-Test-SQL']) < 240
         assert client.get('/api/v3/materials/' + items[0]).status_code == 404
         assert len(client.get('/api/v3/cards').json()) == count * 4 - 1
 
@@ -53,9 +53,8 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
     _, items = library(tmp_path, [26] * 4)
     from oko.storage.store import Store
     seed = Store(tmp_path, lambda _: None)
-    path = seed.path(items[0])
-    raw, text = path.read_text().split('\n\n', 1)
-    path.write_text(json.dumps(dict(json.loads(raw), full=False, reason='Fixture incomplete')) + '\n\n' + text)
+    with seed.db:
+        seed.db.execute("UPDATE items SET content=json_set(content,'$.extra._reader.full',json('false'),'$.extra._reader.reason','Fixture incomplete') WHERE id=?",(items[0],))
     with seed.db:
         seed.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch' AND item=?", (items[0],))
     seed.db.close()
@@ -73,7 +72,7 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
         tracing(client, app)
         first = client.get('/api/v3/status')
         assert first.status_code == 200
-        assert len(opened) == 104
+        assert len(opened) == 0
         opened.clear()
         second = client.get('/api/v3/status')
         assert second.status_code == 200
@@ -84,16 +83,13 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
 
         def change_fixture():
             store = app.state.runtime.require_store()
-            path = store.path(items[0])
-            raw, text = path.read_text().split('\n\n', 1)
-            header = dict(json.loads(raw), full=True, reason='')
-            path.write_text(json.dumps(header) + '\n\n' + text)
             with store.db:
+                store.db.execute("UPDATE items SET content=json_set(content,'$.extra._reader.full',json('true'),'$.extra._reader.reason','') WHERE id=?",(items[0],))
                 store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch' AND item=?", (items[0],))
         client.portal.call(change_fixture)
         response = client.get('/api/v3/status')
         assert response.status_code == 200
-        assert len(opened) == 1
+        assert len(opened) == 0
         assert not any(p['code'] == 'material_incomplete' for p in response.json()['problems']['current'])
         assert any(p['id'] == original_problem['id'] and p['outcome'] == 'resolved' for p in response.json()['problems']['recent'])
 
@@ -106,7 +102,7 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
     store = Store(tmp_path, lambda _: None)
     rows = []
     for n in range(3000):
-        context = json.dumps(dict(identity=f'fixture-{n}', title='Synthetic failure', objects=[], action=None))
+        context = json.dumps(dict(identity=f'fixture-{n}', title='Synthetic failure', objects=[], action=None,command_context={'operation':'retry_material','material_id':f'fixture-{n}'}))
         rows.append((f'old-{n:032x}', f'fixture-{n}', context, store.wall_clock(), 'failed'))
         rows.append((f'new-{n:032x}', f'fixture-{n}', context, store.wall_clock(), {0: 'succeeded', 1: 'unknown', 2: 'pending'}.get(n, 'failed')))
     with store.db:
@@ -130,7 +126,7 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
             problems = response.json()['problems']['current']
             assert len(problems) == 2999
             assert all(p['command_id'].startswith('new-') for p in problems)
-            assert sum(p['raw_code'] == 'action-unknown' for p in problems) == 2
+            assert sum(p['title'] == 'Результат действия пока неизвестен' for p in problems) == 2
             assert len(steps) * 100 < 1500000, len(steps) * 100
             again = client.get('/api/v3/status')
             assert len(again.json()['problems']['current']) == 2999

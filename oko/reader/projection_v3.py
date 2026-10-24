@@ -53,7 +53,7 @@ def command_recovery(context: wire.CommandContext) -> tuple[list[wire.AffectedRe
         resources.append(wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=value.feed_id)))
     elif isinstance(value, (wire.CommandCompleteFolder, wire.CommandRenameFolder, wire.CommandRemoveFolder)):
         resources.append(wire.AffectedResource(wire.FolderResource(kind='folder', folder_id=value.folder_id)))
-    elif isinstance(value, (wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandRegenerate, wire.CommandViewed, wire.CommandRestoreFilter)):
+    elif isinstance(value, (wire.CommandRetryMaterial, wire.CommandRetryTheses, wire.CommandRetryFilter, wire.CommandRegenerate, wire.CommandViewed)):
         resources.append(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=value.material_id)))
         recovery.append(wire.RecoveryIntent(wire.RecoveryInspectMaterials(kind='inspect_materials', material_ids=[value.material_id])))
     elif isinstance(value, wire.CommandCollect):
@@ -76,7 +76,7 @@ def producer_code(raw: str, kind: str) -> str:
 
 
 def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | None = None,
-            material_feeds: dict[str, str] | None = None, forgotten: set[str] | None = None) -> wire.CurrentProblem | wire.RetryingProblem | wire.FinishedProblem | wire.LegacyCurrentProblem | wire.LegacyRetryingProblem | wire.LegacyFinishedProblem:
+            material_feeds: dict[str, str] | None = None, forgotten: set[str] | None = None) -> wire.CurrentProblem | wire.RetryingProblem | wire.FinishedProblem:
     command = wire.CommandId(value.request_id) if isinstance(value.request_id, str) and value.request_id else None
     context = None
     error = None
@@ -92,7 +92,7 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
     live = isinstance(value.operation,str) and value.operation.startswith('producer:')
     resources = [affected(obj) for obj in value.objects]
     recovery: list[wire.RecoveryIntent] = []
-    code = 'legacy_problem'
+    code = 'command_failed'
     if context is not None:
         resources, recovery = command_recovery(context)
         code = 'command_outcome_unknown' if value.code == 'action-unknown' else 'command_failed'
@@ -152,8 +152,6 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
         message=error.message if error else value.reason if isinstance(value.reason,str) and value.reason else value.next_step,
         consequence=value.consequence,affected=resources,recovery=[] if value.state=='finished' else recovery,
         created_at=timestamp(value.created_at),state=value.state)
-    if code=='legacy_problem':
-        data['raw_code']=value.code
     if value.state=='finished':
         data.update(finished_at=timestamp(value.finished_at) if value.finished_at is not None else None,outcome=value.outcome)
     elif value.state=='retrying':
@@ -163,16 +161,20 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
 
 def problems(value: facts.ProblemSnapshot, bindings: dict[str, wire.TelegramAccess] | None = None,
              material_feeds: dict[str, str] | None = None, forgotten: set[str] | None = None) -> wire.ProblemSnapshot:
-    current: list[wire.CurrentProblem | wire.RetryingProblem | wire.LegacyCurrentProblem | wire.LegacyRetryingProblem] = []
-    recent: list[wire.FinishedProblem | wire.LegacyFinishedProblem] = []
+    current: list[wire.CurrentProblem | wire.RetryingProblem] = []
+    recent: list[wire.FinishedProblem] = []
     for entry in value.current:
+        if not isinstance(entry.operation,str) or not entry.operation.startswith(('producer:','{')):
+            continue
         projected = problem(entry,bindings,material_feeds,forgotten)
-        if isinstance(projected,(wire.FinishedProblem,wire.LegacyFinishedProblem)):
+        if isinstance(projected,wire.FinishedProblem):
             raise ValueError('Current snapshot contains a finished problem')
         current.append(projected)
     for entry in value.recent:
+        if not isinstance(entry.operation,str) or not entry.operation.startswith(('producer:','{')):
+            continue
         projected = problem(entry,bindings,material_feeds,forgotten)
-        if not isinstance(projected,(wire.FinishedProblem,wire.LegacyFinishedProblem)):
+        if not isinstance(projected,wire.FinishedProblem):
             raise ValueError('Recent snapshot contains an unfinished problem')
         recent.append(projected)
     return wire.ProblemSnapshot(current=current,recent=recent,count=len(current),updated_at=timestamp(value.updated_at))
@@ -209,15 +211,10 @@ def youtube(value: facts.YouTube | None) -> wire.YouTubeState:
 
 
 def history(value: facts.InitialHistoryStatus) -> wire.FeedHistoryState:
-    if value.mode == 'count':
-        count = value.count_text or (str(value.count) if value.count is not None else None)
-        if count is None:
-            raise ValueError('Count selection lacks exact count')
-        selection = wire.HistorySelection(wire.HistoryCountSelection(mode='count', count=wire.PositiveDecimal(count)))
-    else:
-        if value.date is None:
-            raise ValueError('Date selection lacks date')
-        selection = wire.HistorySelection(wire.HistoryDateSelection(mode='date', date=wire.LocalDate(value.date), timezone=wire.IanaTimezone(value.timezone)))
+    count=value.count_text or (str(value.count) if value.count is not None else None)
+    if count is None:
+        raise ValueError('Count selection lacks exact count')
+    selection=wire.HistorySelection(wire.HistoryCountSelection(mode='count',count=wire.PositiveDecimal(count)))
     progress = wire.HistoryProgress(loaded=value.loaded, viewed=value.viewed, incomplete=value.incomplete,
         stop_reason=wire.HistoryStopReason.model_validate(value.stop_reason) if isinstance(value.stop_reason, str) else None,
         available=value.available, retrying=value.retrying, unavailable=value.unavailable,
@@ -229,9 +226,7 @@ def history(value: facts.InitialHistoryStatus) -> wire.FeedHistoryState:
             retry_at=timestamp(value.discovery_retry_at) if isinstance(value.discovery_retry_at, float) and value.discovery_retry_at else None)
             if isinstance(value.discovery_error, str) and value.discovery_error else None)
     state: wire.HistoryNotStarted | wire.HistoryCancelled | wire.HistoryComplete | wire.HistoryPaused | wire.HistoryWaiting | wire.HistoryFetching | wire.HistoryDiscovering
-    # Older RSS selections have no persisted run; expose stable identity without a read-side write.
-    import hashlib
-    run = value.run if isinstance(value.run, str) and value.run else 'legacy-' + hashlib.sha256((value.feed_id + selection.model_dump_json()).encode()).hexdigest()[:24]
+    run=value.run if isinstance(value.run,str) and value.run else 'initial'
     if value.state == 'pending' and not value.paused and not (isinstance(value.run, str) and value.run):
         state = wire.HistoryNotStarted(state='not_started', selection=selection, progress=progress)
     elif value.state == 'cancelled':
@@ -255,10 +250,6 @@ def telegram_access(value: facts.SubscriptionFeed, binding: dict[str, object] | 
     """Publication source identity without subscription/history presentation."""
     if binding and binding['kind'] in ('web', 'client'):
         return wire.TelegramAccess.model_validate(binding)
-    if value.transport == 'telegram' and isinstance(value.telegram_account, str):
-        return wire.TelegramAccess(wire.TelegramLegacyClientAccess(kind='legacy_client', alias=value.telegram_account,
-            peer_id=wire.TelegramPeerId(str(value.telegram_peer)) if isinstance(value.telegram_peer,int) else None,
-            source_locator=value.identity if isinstance(value.identity,str) else value.id))
     if binding and binding['kind']=='unconfigured':
         return wire.TelegramAccess.model_validate(binding)
     return wire.TelegramAccess(wire.TelegramUnconfiguredAccess(kind='unconfigured',
@@ -267,9 +258,8 @@ def telegram_access(value: facts.SubscriptionFeed, binding: dict[str, object] | 
 
 def subscription(value: facts.SubscriptionFeed, binding: dict[str, object] | None = None) -> wire.SubscriptionFeed:
     data = value.model_dump(exclude_unset=True)
-    data['history'] = history(facts.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, facts.History) else wire.HistoryState(wire.HistoryAbsent(state='absent', legacy_since=timestamp(value.legacy_since) if isinstance(value.legacy_since, float) else None)).model_dump(mode='json')
+    data['history'] = history(facts.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, facts.History) else wire.HistoryState(wire.HistoryAbsent(state='absent')).model_dump(mode='json')
     data.pop('initial_history', None)
-    data.pop('legacy_since', None)
     data['connection'] = 'ready' if data.get('connection') == 'connected' else data.get('connection', 'unavailable')
     if value.kind == 'telegram':
         if binding and binding['kind'] in ('web', 'client'):

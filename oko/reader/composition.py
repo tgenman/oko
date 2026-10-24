@@ -93,12 +93,12 @@ class ReadingComposition:
                 material.pop('linked_content', None)
                 preview = description or text
                 filtered = material.get('filter', {})
-                if not description and filtered.get('status') == 'done' and not filtered['restored']:
+                if not description and filtered.get('status') == 'done':
                     # Preserve the existing preview of display_text followed by
                     # its final fragment pass, including joined boundaries.
                     for fragment in filtered['removed']:
                         preview = preview.replace(fragment, '')
-                if filtered.get('status') == 'done' and not filtered['restored']:
+                if filtered.get('status') == 'done':
                     for fragment in filtered['removed']:
                         preview = preview.replace(fragment, '')
                 cards.append(dict(material, feed_id=owner_id, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
@@ -109,24 +109,14 @@ class ReadingComposition:
         """Count visible original publications in their current feeds and folders."""
         folders = self._store.subscriptions.folders()
         feeds = self._store.subscriptions.feeds()
-        by_feed = {feed['id']: feed for feed in feeds}
-        folder_members: dict[str, set[str]] = {folder['id']: set() for folder in folders}
-        feed_members: dict[str, set[str]] = {feed['id']: set() for feed in feeds}
-        visible = set()
-        unviewed_feeds: set[str] = set()
-        for row in self._store.db.execute('SELECT i.id,m.feed_id FROM items i JOIN reading_memberships m ON m.publication_id=i.id WHERE i.viewed=0'):
-            if row['feed_id'] not in by_feed:
-                continue
-            unviewed_feeds.add(row['feed_id'])
-            if self._store.filters.read(row['id'])['hidden']:
-                continue
-            identity = row['id']
-            visible.add(identity)
-            feed_members[row['feed_id']].add(identity)
-            folder_members[by_feed[row['feed_id']]['folder_id']].add(identity)
-        return dict(folders=[dict(folder, count=len(folder_members[folder['id']])) for folder in folders],
-                    feeds=[dict(feed, count=len(feed_members[feed['id']]), has_unviewed=feed['id'] in unviewed_feeds) for feed in feeds],
-                    count=len(visible))
+        folder_counts={row['folder']:row['visible'] for row in self._store.db.execute('SELECT folder,visible FROM reader_folder_counts')}
+        feed_counts={row['feed']:row for row in self._store.db.execute('SELECT feed,visible,unviewed FROM reader_feed_counts')}
+        visible=self._store.db.execute("""SELECT count(*) FROM items i LEFT JOIN reader_visibility v ON v.item=i.id
+            WHERE i.viewed=0 AND coalesce(v.hidden,0)=0
+            AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)""").fetchone()[0]
+        return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],
+                    feeds=[dict(feed,count=feed_counts[feed['id']]['visible'],has_unviewed=bool(feed_counts[feed['id']]['unviewed'])) for feed in feeds],
+                    count=visible)
 
     @reading_snapshot()
     def folder_contents(self, folder: str) -> FolderContents:

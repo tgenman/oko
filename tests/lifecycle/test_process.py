@@ -17,6 +17,7 @@ def test_restart_after_atomic_file_move(tmp_path: Path):
         with connect(tmp_path, process) as client:
             assert all(not (card['availability'] == 'available') for card in client.get('/api/v3/cards').json())
             presence(client, 'a')
+            assert client.post('/api/v3/collect').status_code==200
             assert len(wait_cards(client, 3)) == 3
     finally:
         cleanup(process)
@@ -31,6 +32,7 @@ def test_discovery_transaction_survives_process_death(tmp_path: Path):
         process = launch(tmp_path)
         with connect(tmp_path, process) as client:
             presence(client, 'a')
+            assert client.post('/api/v3/collect').status_code==200
             assert len(wait_cards(client, 3)) == 3
     finally:
         cleanup(process)

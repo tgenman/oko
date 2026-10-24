@@ -10,7 +10,7 @@ const stopReasons:Record<HistoryStopReason,string>={
 export function historyProgress(history: HistoryState | null | undefined) {
   if (!history || history.state==='absent') return '';
   const {selection,progress:counts}=history;
-  const progress = selection.mode === 'count' ? `${counts.stop_reason?`Found ${counts.available} of ${selection.count} · `:''}Loaded ${counts.loaded} of ${selection.count}` : `Loaded ${counts.loaded} publications since ${selection.date.split('-').reverse().join('.')}`;
+  const progress = `${counts.stop_reason?`Found ${counts.available} of ${selection.count} · `:''}Loaded ${counts.loaded} of ${selection.count}`;
   const state = history.state === 'cancelled' ? 'History download stopped' : history.state === 'waiting' ? 'Discovery incomplete — refresh this feed' : history.state === 'paused' ? 'History waiting — refresh this feed' : history.state === 'discovering' ? 'Discovering initial history' : history.state === 'not_started' ? 'Waiting for the first source request' : history.state === 'complete' ? counts.stop_reason?'History selection finished':'Initial history complete' : 'Loading initial history';
   const short = counts.scan_complete && counts.manifest_complete && selection.mode === 'count' && BigInt(selection.count || 0) > BigInt(counts.available) ? ` · Requested ${selection.count}, available ${counts.available}` : '';
   const outcomes = (counts.incomplete ? ` · ${counts.incomplete} incomplete` : '') + (counts.retrying ? ` · ${counts.retrying} awaiting retry` : '') + (counts.unavailable ? ` · ${counts.unavailable} permanently unavailable` : '');
