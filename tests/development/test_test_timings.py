@@ -85,16 +85,23 @@ def test_real_runner_uses_history_and_does_not_learn_failures_or_partial_cases(t
     assert result.returncode==1 and history.path.read_bytes()==saved
 
 
-def test_ci_keeps_existing_jobs_and_matrix_and_caches_only_advisory_timings():
+def test_ci_keeps_required_groups_with_seven_jobs_and_optional_timing_cache():
     import yaml
     document=yaml.safe_load((ROOT/'.github/workflows/check.yml').read_text())
     assert set(document['jobs'])=={'build','tests','check'}
     tests=document['jobs']['tests']
-    assert tests['strategy']['matrix']==dict(suite=['python','node','browser','tools'])
+    entries=tests['strategy']['matrix']['include']
+    assert {e['job']:e['suite'] for e in entries}=={'python-1':'python','python-2':'python','browser-1':'browser','browser-2':'browser','latency':'browser','node':'node','tools':'tools'}
+    assert tests['strategy']['max-parallel']==7 and tests['strategy']['fail-fast'] is False
+    assert sum(e['sharded'] for e in entries)==5
     caches=[step for step in tests['steps'] if str(step.get('uses','')).startswith('actions/cache@')]
     assert len(caches)==1 and caches[0]['continue-on-error'] is True
     assert caches[0]['with']['path']=='.scratch/check-cache/test-timings'
     assert document['jobs']['check']['needs']==['build','tests']
+    gate=document['jobs']['check']['steps']
+    assert any('ci_shards.py verify' in step.get('run','') for step in gate)
+    audit=next(i for i,step in enumerate(gate) if 'ci_shards.py verify' in step.get('run',''))
+    assert all(i>audit and step['continue-on-error'] for i,step in enumerate(gate) if 'actions/cache/save@' in step.get('uses',''))
 
 
 def test_invalid_numeric_hints_cannot_abort_or_empty_the_schedule(tmp_path):

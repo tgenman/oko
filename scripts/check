@@ -429,7 +429,7 @@ def checkout_state(excluded):
     return result
 
 
-TOOL_TESTS = ('tests/development/test_prepare_worktree.py', 'tests/development/test_check_feedback.py', 'tests/development/test_oko_access.py', 'tests/development/test_test_timings.py', 'tests/development/test_fixture_contracts.py', 'tests/development/test_test_environment.py', 'tests/development/test_update_working_oko.py', 'tests/development/test_agent_tools.py', 'tests/development/test_docker_release.py', 'tests/development/test_library_templates.py', 'tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_TESTS = ('tests/development/test_ci_shards.py', 'tests/development/test_prepare_worktree.py', 'tests/development/test_check_feedback.py', 'tests/development/test_oko_access.py', 'tests/development/test_test_timings.py', 'tests/development/test_fixture_contracts.py', 'tests/development/test_test_environment.py', 'tests/development/test_update_working_oko.py', 'tests/development/test_agent_tools.py', 'tests/development/test_docker_release.py', 'tests/development/test_library_templates.py', 'tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
                'tests/support/', 'frontend/src/api/generated/',
                'oko/reader/generated/',
@@ -439,7 +439,7 @@ TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/
                'vite.config.mts', 'eslint.config.ts', '.gitignore', 'tests/process_server.py')
 
 
-API_TOOL_TESTS = ('tests/development/test_api_generation.py', 'tests/development/test_frontend_builder.py',
+API_TOOL_TESTS = ('tests/development/test_ci_shards.py', 'tests/development/test_api_generation.py', 'tests/development/test_frontend_builder.py',
                   'tests/development/test_build_speed.py', 'tests/development/test_hooks.py',
                   'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_FAMILIES = (
@@ -695,6 +695,8 @@ def main():
               'lifecycle': ['build', 'syntax', 'lint', 'browser', 'diff']}
     suites = ('contracts', 'build', 'syntax', 'lint', 'http', 'browser', 'browser-types', 'tooling-types', 'diff', 'types', 'entrypoint', 'staged')
     parser.add_argument('sets', nargs='+', choices=(*groups, *suites))
+    parser.add_argument('--ci-plan', type=Path, help='Shared CI file allocation, bound to this revision')
+    parser.add_argument('--ci-job', help='Job from the shared CI allocation')
     parser.add_argument('--match', help='Regex selecting browser scenarios by name (requires browser checks)')
     parser.add_argument('--files', nargs='+', help='Explicit browser/Python test files or JavaScript files for lint/syntax; put check sets before this option')
     parser.add_argument('--report-dir', type=Path, default=ROOT / '.scratch/check-runs', help='Parent directory for separate full logs and JSON reports for each run')
@@ -705,6 +707,22 @@ def main():
     parser.add_argument('--in-place', action='store_true', help='Check this checkout directly; local all otherwise uses a captured tree')
     parser.add_argument('--compact', action='store_true', help='Print the summary only; preserve full output in the report log')
     args = parser.parse_args()
+    ci_shard = None
+    if args.ci_plan is not None or args.ci_job is not None:
+        if args.ci_plan is None or args.ci_job is None or args.sets not in (['python'],['browser']) or args.files or args.match is not None:
+            parser.error('--ci-plan and --ci-job require one Python/browser group without case/file selectors')
+        if os.environ.get('PYTEST_ADDOPTS'):
+            parser.error('CI shards require unfiltered PYTEST_ADDOPTS')
+        try:
+            from ci_shards import load_plan
+            plan = load_plan(args.ci_plan, ROOT, TOOL_TESTS)
+            job = plan['jobs'][args.ci_job]
+            if job['group'] != ('python-tests' if args.sets == ['python'] else 'browser') or args.browser_workers != plan['browser_workers']:
+                raise ValueError('CI group or worker capacity differs from plan')
+            args.files = job['files']
+            ci_shard = dict(plan_id=plan['id'], job=args.ci_job)
+        except (OSError,ValueError,TypeError,KeyError,AttributeError) as error:
+            parser.error(str(error))
     if args.if_changed and args.sets != ['tools']:
         parser.error('--if-changed requires the tools group alone')
     env = os.environ.copy()
@@ -775,6 +793,7 @@ def main():
         selected_files['tool-tests'] = tool_test_selection(tool_inputs)
     report = Report(args.report_dir.resolve(), names, selected_files)
     report.compact = args.compact
+    if ci_shard is not None:report.data['ci_shard'] = ci_shard
     timing_root = ROOT
     try:
         snapshot = json.loads(os.environ.get('OKO_CHECK_SNAPSHOT','{}'))
@@ -782,6 +801,8 @@ def main():
             timing_root = Path(snapshot['source'])
     except (ValueError,KeyError,TypeError):pass
     history = TimingHistory(timing_history_path(timing_root,names),args.browser_workers)
+    if ci_shard is not None and plan['history']['context'] == history.context:
+        history.samples = plan['history']['suites']
     report.timing_weights = history.estimates()
     report.data['timing_history'] = dict(path=str(history.path),context=history.context)
     selectors = shlex.split(env.get('PYTEST_ADDOPTS',''))
