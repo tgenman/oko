@@ -23,12 +23,23 @@ def test_restart_after_atomic_file_move(tmp_path: Path):
         cleanup(process)
 
 
-def test_discovery_transaction_survives_process_death(tmp_path: Path):
+@pytest.mark.parametrize('held_body', [False, True])
+def test_discovery_transaction_survives_process_death(tmp_path: Path, monkeypatch, held_body):
+    if held_body:
+        monkeypatch.setenv('OKO_TEST_HOLD_PRESENCE_BODY', '1')
     process = launch(tmp_path, 'before_discovery_commit')
     try:
         with connect(tmp_path, process) as client:
-            presence(client, 'a')
+            try:
+                presence(client, 'a')
+            except (httpx.RemoteProtocolError, httpx.ReadError):
+                pass  # The injected exit may precede the registration response body.
         assert process.wait(timeout=5) == 79
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect((tmp_path/'state.sqlite').as_uri()+'?mode=ro',uri=True)) as db:
+            assert db.execute('SELECT count(*) FROM items').fetchone()[0] == 0
+        monkeypatch.delenv('OKO_TEST_HOLD_PRESENCE_BODY', raising=False)
         process = launch(tmp_path)
         with connect(tmp_path, process) as client:
             presence(client, 'a')

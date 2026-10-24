@@ -40,10 +40,13 @@ async function main() {
       args:['--host-resolver-rules=MAP oko 127.0.0.1','--no-proxy-server']});
     try {
       if(stopped){process.exitCode=stopped==='SIGINT'?130:143;return;}
-      batch=await batchTests(process.argv.slice(2));
+      let timings:Record<string,number>={};
+      try {const parsed:unknown=JSON.parse(process.env.OKO_TEST_FILE_TIMINGS||'{}');if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))timings=parsed as Record<string,number>;}catch{/* Missing/corrupt hints preserve the size-based schedule. */}
+      batch=await batchTests(process.argv.slice(2),timings);
       const args=batch.args;
+      const environment={...process.env};delete environment.OKO_TEST_FILE_TIMINGS;
       child = spawn(process.execPath,args,{
-        detached:true,stdio:'inherit',env:{...process.env,OKO_TEST_BROWSER_WS:browser.wsEndpoint()},
+        detached:true,stdio:'inherit',env:{...environment,OKO_TEST_BROWSER_WS:browser.wsEndpoint()},
       });
       const code = await new Promise<number>((resolve,reject)=>{
         child!.once('error',reject);

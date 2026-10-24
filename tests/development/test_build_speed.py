@@ -25,7 +25,7 @@ def test_batched_syntax_checks_every_file_and_reports_all_errors(tmp_path):
     assert 'first.tsx' in result.stderr and 'last.ts' in result.stderr
 
 
-def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path):
+def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path, monkeypatch):
     api_repository(tmp_path)
     command = ('node', '--import', 'tsx', 'scripts/generate-api.mts')
     generated = run(tmp_path, *command, 'generate')
@@ -34,6 +34,11 @@ def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path):
     assert checked.returncode == 0, checked.stdout + checked.stderr
     hit = run(tmp_path, *command, 'check')
     assert hit.returncode == 0 and 'API check cache hit' in hit.stdout
+    monkeypatch.setenv('OKO_TEST_LIBRARY_DIR', str(tmp_path/'another-seed'))
+    reused = run(tmp_path, *command, 'check')
+    assert reused.returncode == 0 and 'API check cache hit' in reused.stdout
+    fresh = run(tmp_path, *command, 'check', '--fresh')
+    assert fresh.returncode == 0 and 'API check cache hit' not in fresh.stdout
     lock = tmp_path / 'uv.lock'
     locked = lock.read_bytes()
     lock.write_bytes(locked + b'\n# lock input changed\n')
@@ -81,6 +86,7 @@ assert.notEqual(await key(), development);
 const production = await key();
 process.env.npm_lifecycle_event = 'another-command';
 process.env.OKO_TEST_ARTIFACT_DIR = '/another-report';
+process.env.OKO_TEST_LIBRARY_DIR = '/another-test-seed';
 process.env.PYTEST_CURRENT_TEST = 'different test (call)';
 process.env.PYTEST_VERSION = 'pytest process marker';
 assert.equal(await key(), production);
@@ -188,3 +194,39 @@ const {spawnSync}=require('node:child_process');
     broken=run(ROOT,*command,'--test-name-pattern=batch case 3',*files)
     assert broken.returncode!=0,broken.stdout+broken.stderr
     assert 'EXEC 3 ' in broken.stdout,broken.stdout
+
+
+def test_browser_duration_hints_balance_files_without_losing_registration(tmp_path):
+    files=[]
+    for index in range(4):
+        f=tmp_path/f'test_cost_{index}.ts';f.write_text('//'+'x'*(100000 if index==0 else 1000));files.append(str(f))
+    script=str(ROOT/'scripts/browser-batches.cts')
+    code=r"""
+const {batchTests}=require(process.argv[1]);const fs=require('node:fs');
+(async()=>{
+ const files=process.argv.slice(2),hint={[files[0]]:50,[files[1]]:40,[files[2]]:30,[files[3]]:20};
+ const batch=await batchTests(['--test','--test-concurrency=2',...files],hint);
+ try{console.log(JSON.stringify(batch.args.filter(x=>x.endsWith('.cjs')).map(x=>fs.readFileSync(x,'utf8'))));}
+ finally{await batch.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+    result=run(ROOT,'node','--require','tsx/cjs','-e',code,script,*files)
+    assert result.returncode==0,result.stderr
+    groups=json.loads(result.stdout)
+    assert len(groups)==2
+    assert not any(files[0] in group and files[1] in group for group in groups)
+    assert all(sum(name in group for group in groups)==1 for name in files)
+    costs=dict(zip(files,[50,40,30,20]))
+    assert max(sum(costs[name] for name in files if name in group) for group in groups)==70
+
+
+def test_node_timing_reporter_preserves_tap_failures_and_attributes_original_file(tmp_path):
+    file=tmp_path/'test_reporter.ts'
+    file.write_text("const {test}=require('node:test');test('outer',async t=>{await t.test('inner',()=>{});});test('bad',()=>{throw Error('intentional');});")
+    report=tmp_path/'timings.json'
+    result=run(ROOT,'node','--require','tsx/cjs','--test','--test-reporter=tap',
+               '--test-reporter='+str(ROOT/'scripts/test-timing-reporter.mts'),
+               '--test-reporter-destination=stdout','--test-reporter-destination='+str(report),str(file))
+    assert result.returncode==1 and 'not ok' in result.stdout and 'intentional' in result.stdout
+    data=json.loads(report.read_text())
+    assert data['version']==1 and set(data['files'])=={str(file)} and data['files'][str(file)]>0

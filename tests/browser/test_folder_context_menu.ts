@@ -48,7 +48,15 @@ test('folder deletion rechecks an empty folder when a feed arrives before confir
  await api('feeds/'+alpha.id,'PATCH',{folder_id:b.id});
  await page.goto(origin+'/#token='+token);await page.locator('#read-feeds-toggle').click();
  const row=page.locator('[data-folder="'+a.id+'"]');await row.click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await expect(page.locator('#folder-action-heading')).toHaveText('Delete Folder');
- await api('feeds/'+alpha.id,'PATCH',{folder_id:a.id});await page.locator('#folder-action-confirm').click();await expect(page.locator('#folder-action-heading')).toHaveText('Folder Is Not Empty');
+ let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});t.after(()=>release());
+ // Keep the browser's empty-folder snapshot until the real DELETE rechecks it.
+ await page.route('**/api/v3/reading-composition',async route=>{await held;await route.continue();});
+ try{
+  await api('feeds/'+alpha.id,'PATCH',{folder_id:a.id});
+  const rejected=page.waitForResponse(response=>response.url().endsWith('/folders/'+a.id)&&response.request().method()==='DELETE');
+  await page.locator('#folder-action-confirm').click();expect((await rejected).status()).toBe(409);
+  await expect(page.locator('#folder-action-heading')).toHaveText('Folder Is Not Empty');
+ }finally{release();}
  expect((await api('subscriptions')).folders.some(f=>f.id===a.id)).toBe(true);await page.locator('#folder-action-close').click();
 });
 

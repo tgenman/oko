@@ -1,0 +1,811 @@
+{
+  "comparison_base": "0558222d6cce42e3597dddb29aab9f5b5ff55c9e",
+  "integration_base": "1a7ce74293dbb6d87ccb29169761d562e3e07fa1",
+  "runs": [
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/runs/20261024T151108Z-85a89860/report.json",
+      "exit_code": 0,
+      "wall_seconds": 180.7,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 901,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 901
+          },
+          "duration_seconds": 167.2776
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 213,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 213
+          },
+          "duration_seconds": 139.1138
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.2183
+        },
+        "Playwright": {
+          "status": "PASS",
+          "counts": {
+            "total": 223,
+            "passed": 221,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 156.6817
+        }
+      },
+      "timing_plan": null,
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/runs/20261024T151424Z-8a04fa2e/report.json",
+      "exit_code": 1,
+      "wall_seconds": 189.9,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 901,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 901
+          },
+          "duration_seconds": 175.3499
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 213,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 213
+          },
+          "duration_seconds": 147.1664
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.2554
+        },
+        "Playwright": {
+          "status": "FAIL",
+          "counts": {
+            "total": 219,
+            "passed": 216,
+            "failed": 1,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 135.7276
+        }
+      },
+      "timing_plan": null,
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/runs/20261024T153246Z-1f7e8906/report.json",
+      "exit_code": 1,
+      "wall_seconds": 190.84,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 902,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 902
+          },
+          "duration_seconds": 175.9816
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 225,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 225
+          },
+          "duration_seconds": 145.2837
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.2595
+        },
+        "Playwright": {
+          "status": "FAIL",
+          "counts": {
+            "total": 219,
+            "passed": 216,
+            "failed": 1,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 129.341
+        }
+      },
+      "timing_plan": {
+        "python-tests": {
+          "source": "durations",
+          "known_files": 115,
+          "total_files": 117,
+          "predicted_loads": [
+            144.88500000000008,
+            144.86299999999997,
+            144.87576014783068,
+            144.86073719680735
+          ]
+        },
+        "tool-tests": {
+          "source": "durations",
+          "known_files": 20,
+          "total_files": 21,
+          "predicted_loads": [
+            134.66500000000002,
+            133.7258561055763
+          ]
+        }
+      },
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/runs/20261024T154101Z-73d32598/report.json",
+      "exit_code": 0,
+      "wall_seconds": 213.53,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 902,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 902
+          },
+          "duration_seconds": 178.6651
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 225,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 225
+          },
+          "duration_seconds": 157.4333
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 2.506
+        },
+        "Playwright": {
+          "status": "PASS",
+          "counts": {
+            "total": 223,
+            "passed": 221,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 179.2761
+        }
+      },
+      "timing_plan": {
+        "python-tests": {
+          "source": "durations",
+          "known_files": 115,
+          "total_files": 117,
+          "predicted_loads": [
+            144.88500000000008,
+            144.86299999999997,
+            144.87576014783068,
+            144.86073719680735
+          ]
+        },
+        "tool-tests": {
+          "source": "durations",
+          "known_files": 20,
+          "total_files": 21,
+          "predicted_loads": [
+            134.66500000000002,
+            133.7258561055763
+          ]
+        }
+      },
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/runs/20261024T155139Z-bb5caebe/report.json",
+      "exit_code": 1,
+      "wall_seconds": 146.55,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 902,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 902
+          },
+          "duration_seconds": 133.2287
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 226,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 226
+          },
+          "duration_seconds": 114.9336
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.4031
+        },
+        "Playwright": {
+          "status": "FAIL",
+          "counts": {
+            "total": 219,
+            "passed": 216,
+            "failed": 1,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 106.171
+        }
+      },
+      "timing_plan": {
+        "python-tests": {
+          "source": "durations",
+          "known_files": 116,
+          "total_files": 117,
+          "predicted_loads": [
+            155.20162514833353,
+            155.22199999999998,
+            155.20099999999996,
+            155.22700000000003
+          ]
+        },
+        "tool-tests": {
+          "source": "durations",
+          "known_files": 21,
+          "total_files": 21,
+          "predicted_loads": [
+            142.3985,
+            141.304
+          ]
+        }
+      },
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/runs/20261024T155942Z-f13e56de/report.json",
+      "exit_code": 0,
+      "wall_seconds": 151.46,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 902,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 902
+          },
+          "duration_seconds": 138.6225
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 226,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 226
+          },
+          "duration_seconds": 116.6203
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.3264
+        },
+        "Playwright": {
+          "status": "PASS",
+          "counts": {
+            "total": 223,
+            "passed": 221,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 133.5881
+        }
+      },
+      "timing_plan": {
+        "python-tests": {
+          "source": "durations",
+          "known_files": 116,
+          "total_files": 117,
+          "predicted_loads": [
+            155.20162514833353,
+            155.22199999999998,
+            155.20099999999996,
+            155.22700000000003
+          ]
+        },
+        "tool-tests": {
+          "source": "durations",
+          "known_files": 21,
+          "total_files": 21,
+          "predicted_loads": [
+            142.3985,
+            141.304
+          ]
+        }
+      },
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/runs/20261024T160847Z-0fadbe62/report.json",
+      "exit_code": 0,
+      "wall_seconds": 153.0,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 902,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 902
+          },
+          "duration_seconds": 136.9048
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 227,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 227
+          },
+          "duration_seconds": 111.5953
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.157
+        },
+        "Playwright": {
+          "status": "PASS",
+          "counts": {
+            "total": 223,
+            "passed": 221,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 132.4952
+        }
+      },
+      "timing_plan": {
+        "python-tests": {
+          "source": "durations",
+          "known_files": 116,
+          "total_files": 117,
+          "predicted_loads": [
+            144.232,
+            144.23199999999997,
+            144.23171225036708,
+            144.23100000000002
+          ]
+        },
+        "tool-tests": {
+          "source": "durations",
+          "known_files": 21,
+          "total_files": 21,
+          "predicted_loads": [
+            133.631,
+            132.67600000000002
+          ]
+        }
+      },
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/integration/20261024T161459Z-2a2c204a/report.json",
+      "exit_code": 1,
+      "wall_seconds": 153.28,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "FAIL",
+          "counts": {
+            "total": 910,
+            "failed": 1,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 909
+          },
+          "duration_seconds": 137.0949
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 228,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 228
+          },
+          "duration_seconds": 121.3669
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.3478
+        },
+        "Playwright": {
+          "status": "PASS",
+          "counts": {
+            "total": 227,
+            "passed": 225,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 129.8156
+        }
+      },
+      "timing_plan": {
+        "python-tests": {
+          "source": "durations",
+          "known_files": 116,
+          "total_files": 119,
+          "predicted_loads": [
+            132.89052536836556,
+            132.89000000000007,
+            132.88937687344585,
+            132.89
+          ]
+        },
+        "tool-tests": {
+          "source": "durations",
+          "known_files": 21,
+          "total_files": 22,
+          "predicted_loads": [
+            121.09100000000001,
+            121.05567841656176
+          ]
+        }
+      },
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    },
+    {
+      "report": "/private/tmp/oko-test-speed-three-fixes-20261024/integration/20261024T162144Z-2d13f055/report.json",
+      "exit_code": 0,
+      "wall_seconds": 151.94,
+      "checkout": {
+        "status": "PASS",
+        "changed_files": []
+      },
+      "groups": {
+        "Python": {
+          "status": "PASS",
+          "counts": {
+            "total": 910,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 910
+          },
+          "duration_seconds": 135.611
+        },
+        "tools": {
+          "status": "PASS",
+          "counts": {
+            "total": 228,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "passed": 228
+          },
+          "duration_seconds": 120.7726
+        },
+        "Node": {
+          "status": "PASS",
+          "counts": {
+            "total": 113,
+            "passed": 113,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0
+          },
+          "duration_seconds": 1.4037
+        },
+        "Playwright": {
+          "status": "PASS",
+          "counts": {
+            "total": 227,
+            "passed": 225,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 2
+          },
+          "duration_seconds": 127.8544
+        }
+      },
+      "snapshot": {
+        "source": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko",
+        "checkout": "/var/folders/_g/b8j10z1d3db8wtgxyks8jk1m0000gp/T/oko-check-t5cxc0zv/checkout",
+        "head": "1a7ce74293dbb6d87ccb29169761d562e3e07fa1",
+        "tree": "ef0772515d559ae0b2f5b4c001749e082343593a"
+      },
+      "timing_plan": {
+        "python-tests": {
+          "source": "durations",
+          "known_files": 116,
+          "total_files": 119,
+          "predicted_loads": [
+            132.89052536836556,
+            132.89000000000007,
+            132.88937687344585,
+            132.89
+          ]
+        },
+        "tool-tests": {
+          "source": "durations",
+          "known_files": 21,
+          "total_files": 22,
+          "predicted_loads": [
+            121.09100000000001,
+            121.05567841656176
+          ]
+        }
+      },
+      "worker_seconds": {
+        "python-tests": {
+          "python-tests-1": null,
+          "python-tests-2": null,
+          "python-tests-3": null,
+          "python-tests-4": null
+        },
+        "tool-tests": {
+          "tool-tests-1": null,
+          "tool-tests-2": null
+        }
+      }
+    }
+  ],
+  "api_cache_before": [
+    {
+      "seed": "a",
+      "seconds": 5.622,
+      "code": 0,
+      "cache_hit": false
+    },
+    {
+      "seed": "b",
+      "seconds": 5.553,
+      "code": 0,
+      "cache_hit": false
+    },
+    {
+      "seed": "b",
+      "seconds": 0.217,
+      "code": 0,
+      "cache_hit": true
+    }
+  ],
+  "api_cache_after": [
+    {
+      "seed": "a",
+      "seconds": 5.207,
+      "code": 0,
+      "cache_hit": false
+    },
+    {
+      "seed": "b",
+      "seconds": 0.192,
+      "code": 0,
+      "cache_hit": true
+    },
+    {
+      "seed": "b",
+      "seconds": 0.194,
+      "code": 0,
+      "cache_hit": true
+    }
+  ]
+}

@@ -159,7 +159,7 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
   await expect(r.page.locator('#list-status')).toContainText('Сбой списка');
   await expect(r.page.locator('#cards button')).toHaveCount(2);
   await expect(r.page.locator('#list-retry')).toBeVisible();
-  await r.page.evaluate(()=>readerTransport.replies.delete('/api/v3/cards?sort=newest'));
+  await r.page.evaluate(()=>document.getElementById('list-retry')!.addEventListener('click',()=>readerTransport.replies.delete('/api/v3/cards?sort=newest'),{capture:true,once:true}));
   await r.page.locator('#list-retry').click();
   await expect(r.page.locator('#list-retry')).toBeHidden();
   await r.page.evaluate(()=>readerTransport.held.set('/api/v3/cards?sort=newest&feed=feed',true));
