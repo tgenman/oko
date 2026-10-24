@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 import re
+import ipaddress
 import secrets
 import time
 from urllib.parse import urlsplit
@@ -169,7 +170,11 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         supplied = request.headers.get('authorization', '')
         bearer = secrets.compare_digest(supplied.encode(), f'Bearer {token}'.encode())
         # Service bearer remains usable only through local Host, never the external origin.
-        local_bearer = bearer and expected_origin.startswith('http://') and bool(re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host))
+        try:
+            local_peer = bool(request.client and ipaddress.ip_address(request.client.host).is_loopback)
+        except ValueError:
+            local_peer = False
+        local_bearer = bearer and local_peer and expected_origin.startswith('http://') and bool(re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host))
         if password_access:
             denied = await access_response(password_access, request, call_next, expected_origin, local_bearer)
             if denied is not None:

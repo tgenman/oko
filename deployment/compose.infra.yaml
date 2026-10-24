@@ -1,0 +1,30 @@
+name: oko-infra
+services:
+  postgres:
+    image: postgres:18-bookworm@sha256:bbf83594798e144bff365a9c191c5d779f181fb3135902064ab8ff11918020fc
+    restart: unless-stopped
+    shm_size: 128mb
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    environment:
+      POSTGRES_DB: oko
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-admin
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=25, -c, work_mem=4MB, -c, log_statement=none]
+    volumes:
+      - /srv/oko/postgres:/var/lib/postgresql
+      - /srv/oko/secrets/postgres-admin:/run/secrets/postgres-admin:ro
+      - /srv/oko/secrets/postgres-init.sql:/docker-entrypoint-initdb.d/10-oko.sql:ro
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d oko']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+networks:
+  backend:
+    name: oko-backend

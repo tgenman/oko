@@ -74,10 +74,19 @@ def test_unknown_tag_inspection_never_becomes_permission_to_publish(status,code)
         scope['probe']('a'*40,'synthetic-token','owner')
 
 
-def test_only_confirmed_missing_package_or_manifest_can_be_published():
+def test_only_confirmed_missing_manifest_in_known_private_package_can_be_published():
     scope=registry_module()
-    scope['probe'].__globals__['request']=lambda *_:(404,{}, {})
-    assert scope['probe']('a'*40,'synthetic-token','owner') == dict(package='absent',present=False,digest=None)
     replies=iter([(200,{'visibility':'private'},{}),(200,{'token':'synthetic-registry-token'},{}),(404,{'errors':[{'code':'MANIFEST_UNKNOWN'}]}, {})])
     scope['probe'].__globals__['request']=lambda *_:next(replies)
     assert scope['probe']('a'*40,'synthetic-token','owner') == dict(package='private',present=False,digest=None)
+
+
+def test_unknown_package_metadata_never_authorizes_publication():
+    scope=registry_module();calls=[]
+    def request(url,headers):
+        calls.append(url)
+        return 404,{},{}
+    scope['probe'].__globals__['request']=request
+    with pytest.raises(RuntimeError,match='visibility is unknown'):
+        scope['probe']('a'*40,'synthetic-token','owner')
+    assert calls == [scope['PACKAGE']]

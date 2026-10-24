@@ -1,0 +1,54 @@
+name: oko-app
+services:
+  reader:
+    image: ${OKO_IMAGE:?release digest required}
+    platform: linux/amd64
+    user: '10001:10001'
+    group_add: ['20001']
+    restart: unless-stopped
+    init: true
+    read_only: true
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 192
+    ports: ['443:8765']
+    command:
+      - --persistent
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8765'
+      - --public-url
+      - https://oko.observer
+      - --tls-cert
+      - /tls/current/fullchain.pem
+      - --tls-key
+      - /tls/current/privkey.pem
+      - --data
+      - /data
+      - --database-url-file
+      - /run/secrets/database-url
+      - --codex-socket
+      - /run/oko-ipc/helper.sock
+      - --codex-token-file
+      - /run/secrets/codex
+      - --no-browser
+      - --initially-disabled
+    volumes:
+      - /srv/oko/data:/data
+      - /srv/oko/tls:/tls:ro
+      - /srv/oko/ipc:/run/oko-ipc:ro
+      - /srv/oko/secrets/database-reader:/run/secrets/database-url:ro
+      - /srv/oko/secrets/codex-reader-token:/run/secrets/codex:ro
+    tmpfs: ['/tmp:mode=1777,size=128m']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    networks: [backend]
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+networks:
+  backend:
+    external: true
+    name: oko-backend

@@ -50,3 +50,31 @@ def test_cli_rejects_readable_database_credentials_before_launch(postgres_url, t
     assert 'private regular file (0600)' in result.stderr
     assert postgres_url not in result.stdout + result.stderr
     assert not (tmp_path / 'reader' / 'runtime.json').exists()
+
+
+def test_postgres_startup_waits_for_delayed_database(postgres_url, monkeypatch):
+    import psycopg
+    from oko.storage import readiness
+    original = readiness.psycopg.connect
+    attempts = []
+    def connect(*args, **options):
+        attempts.append(True)
+        if len(attempts) < 3: raise psycopg.OperationalError('synthetic delayed database')
+        return original(*args, **options)
+    monkeypatch.setattr(readiness.psycopg, 'connect', connect)
+    monkeypatch.setattr(readiness.time, 'sleep', lambda _:None)
+    readiness.wait_database(postgres_url)
+    assert len(attempts) == 3
+
+
+def test_failed_database_startup_exits_without_disclosing_dsn(monkeypatch):
+    import psycopg
+    import pytest
+    from oko.storage import readiness
+    ticks=iter([0,31])
+    monkeypatch.setattr(readiness.time,'monotonic',lambda:next(ticks))
+    def unavailable(*args,**options): raise psycopg.OperationalError('synthetic secret DSN')
+    monkeypatch.setattr(readiness.psycopg,'connect',unavailable)
+    with pytest.raises(SystemExit,match='PostgreSQL is unavailable') as error:
+        readiness.wait_database('synthetic secret DSN')
+    assert 'secret' not in str(error.value)

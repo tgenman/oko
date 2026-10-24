@@ -28,7 +28,7 @@ def login(client, name='alice', origin='http://testserver'):
 
 def test_all_routes_require_session_and_no_launcher_bootstrap(tmp_path, credentials):
     app = setup(tmp_path, credentials)
-    with TestClient(app) as client:
+    with TestClient(app, client=('127.0.0.1', 50000)) as client:
         for path, operations in app.openapi()['paths'].items():
             if path in ('/login', '/login/style.css', '/login/session'):
                 continue
@@ -47,6 +47,15 @@ def test_all_routes_require_session_and_no_launcher_bootstrap(tmp_path, credenti
         page = client.get('/login')
         assert 'Логин' in page.text and 'Пароль' in page.text
         assert 'reader-shell' not in page.text and 'token' not in page.text
+
+
+def test_public_peer_cannot_claim_local_bearer_by_host_or_forwarded_headers(tmp_path, credentials):
+    app = setup(tmp_path, credentials, public_url='https://reader.example')
+    with TestClient(app, base_url='https://reader.example', client=('198.51.100.9', 50000)) as client:
+        for host in ('localhost', '127.0.0.1', 'testserver'):
+            response = client.get('/api/v3/status', headers={'Host':host, 'Authorization':'Bearer service',
+                'X-Forwarded-For':'127.0.0.1', 'X-Forwarded-Host':'localhost'})
+            assert response.status_code == 403
 
 
 def test_two_logins_share_settings_but_logout_only_revokes_one(tmp_path, credentials):
