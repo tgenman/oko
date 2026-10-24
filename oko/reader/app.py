@@ -23,8 +23,8 @@ from oko.host import Host
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
 from oko.reader.lifetime import Lifetime
-from oko.reader.browser_auth import BrowserSessions, COOKIE, MAX_AGE
 from oko.reader import api_v3
+from oko.reader.password_auth import PasswordAccess, access_response, install_login
 from oko.reader.http_schemas import SchemaRoute
 from oko.reader.generated.models import BrowserSessionRevoked
 from oko.collection.contracts import CaptionsClient
@@ -44,14 +44,17 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     if not api_only:
         from oko.reader.static import validate_frontend
         validate_frontend()
+    if persistent:
+        with PasswordAccess(root, wall_clock).state() as access_state:
+            public_url = access_state.get('origin') or public_url
     public_host: str | None = None
     if public_url:
         parsed = urlsplit(public_url)
-        if parsed.scheme != 'http' or parsed.hostname not in ('oko', 'localhost', '127.0.0.1') or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
-            raise ValueError('Public URL must be an allowed local HTTP origin')
+        if parsed.scheme not in ('http', 'https') or (parsed.scheme == 'http' and parsed.hostname not in ('oko', 'localhost', '127.0.0.1')) or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
+            raise ValueError('Public URL must be a local HTTP or explicit HTTPS origin')
         public_host = parsed.netloc
+    password_access = PasswordAccess(root, wall_clock) if persistent or (public_url and urlsplit(public_url).scheme == 'https') else None
     lifetime = Lifetime('explicit' if api_only or persistent else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
-    browser_sessions = BrowserSessions(root, wall_clock) if persistent else None
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
     runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
@@ -149,6 +152,9 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             response.headers['X-Oko-Error'] = group
         return response
 
+    if password_access:
+        install_login(app, password_access, public_url)
+
     @app.middleware('http')
     async def boundary(request: Request, call_next: Any) -> Response:
         api = request.url.path == '/api' or request.url.path.startswith('/api/')
@@ -156,18 +162,26 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         host = request.headers.get('host', '')
         if host != public_host and not re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host):
             return api_v3.error_response(403, api_v3.security_error('host_not_allowed')) if api else JSONResponse({'detail': 'Недопустимый адрес'}, status_code=403)
+        expected_origin = public_url.rstrip('/') if public_url and host == public_host else f'http://{host}'
         origin = request.headers.get('origin')
-        if origin and origin != f'http://{host}':
+        if origin and origin != expected_origin:
             return api_v3.error_response(403, api_v3.security_error('origin_not_allowed')) if api else JSONResponse({'detail': 'Посторонняя страница'}, status_code=403)
+        supplied = request.headers.get('authorization', '')
+        bearer = secrets.compare_digest(supplied.encode(), f'Bearer {token}'.encode())
+        # Service bearer remains usable only through local Host, never the external origin.
+        local_bearer = bearer and expected_origin.startswith('http://') and bool(re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host))
+        if password_access:
+            denied = await access_response(password_access, request, call_next, expected_origin, local_bearer)
+            if denied is not None:
+                return denied
         if api:
-            supplied = request.headers.get('authorization', '')
-            bearer = secrets.compare_digest(supplied, f'Bearer {token}')
-            cookie = request.cookies.get(COOKIE, '')
-            remembered = browser_sessions is not None and browser_sessions.valid(cookie)
+            remembered = (password_access.valid(request.cookies.get(password_access.cookie, '')) if password_access else False)
+            if password_access:
+                bearer = local_bearer
             if not bearer and (supplied or not remembered):
                 return api_v3.error_response(403, api_v3.security_error('session_required')) if api else JSONResponse({'detail': 'Требуется локальная сессия'}, status_code=403)
             if not bearer and (request.headers.get('sec-fetch-site') == 'cross-site' or
-                    request.method not in ('GET', 'HEAD') and origin != f'http://{host}'):
+                    request.method not in ('GET', 'HEAD') and origin != expected_origin):
                 return api_v3.error_response(403, api_v3.security_error('origin_not_allowed'))
         if api and not v3:
             from oko.reader.generated.models import ApiVersionRemovedError, ApiVersionRemovedErrorDetails
@@ -206,6 +220,21 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             capture_scope.reset(scope_context)
             diagnostic_source.reset(source_context)
             active_journal.reset(context)
+        if password_access and not local_bearer and request.url.path not in ('/api/v3/browser-session', '/logout') and hasattr(response, 'body_iterator'):
+            credential = request.cookies.get(password_access.cookie, '')
+            if not password_access.valid(credential):
+                denied = api_v3.error_response(403, api_v3.security_error('session_required'))
+                denied.headers['X-Oko-Login-Required'] = '1'
+                return denied
+            chunks = getattr(response, 'body_iterator')
+
+            async def guarded_body() -> AsyncIterator[bytes]:
+                async for chunk in chunks:
+                    if not password_access.valid(credential):
+                        break
+                    yield chunk.encode() if isinstance(chunk, str) else bytes(chunk)
+
+            setattr(response, 'body_iterator', guarded_body())
         response.headers['Cache-Control'] = 'no-store'
         if v3 and request.method in ('POST','PUT','PATCH','DELETE'):
             response.headers['X-Oko-Action'] = action_id
@@ -214,11 +243,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         response.headers['Referrer-Policy'] = 'no-referrer'
         if v3:
             response.headers['X-Oko-Instance'] = instance_id
-        if browser_sessions and request.url.path == '/api/v3/status' and response.status_code == 200 and bearer and not remembered and request.headers.get('X-Oko-Remember') == '1':
-            response.set_cookie(COOKIE, browser_sessions.create(), max_age=MAX_AGE,
-                                httponly=True, samesite='strict', path='/')
-        if browser_sessions and request.url.path == '/api/v3/status' and response.status_code == 200:
-            response.headers['X-Oko-Browser-Session'] = 'remembered'
+        if password_access and not local_bearer:
+            response.headers['X-Oko-Password-Login'] = '1'
+            if request.url.path == '/api/v3/status':
+                response.headers['X-Oko-Browser-Session'] = 'remembered'
         return response
 
     api_v3.register(app, application, lifetime, wall_clock, journal)
@@ -227,8 +255,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     async def revoke_browser_session(request: Request) -> BrowserSessionRevoked:
         if request.query_params or await request.body():
             raise api_v3.ApiError(422, api_v3.invalid('query' if request.query_params else 'body', ''))
-        if browser_sessions:
-            browser_sessions.revoke(request.cookies.get(COOKIE, ''))
+        if password_access:
+            password_access.revoke(request.cookies.get(password_access.cookie, ''))
         return BrowserSessionRevoked(revoked=True)
 
     if not api_only:

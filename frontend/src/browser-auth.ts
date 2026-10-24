@@ -1,5 +1,7 @@
+import {createAccessGuard} from './access';
 // One fetch owner shares a remembered credential across JSON and media calls.
-export function browserFetch(adapter: typeof fetch, origin: string): typeof fetch {
+export function browserFetch(adapter: typeof fetch, origin: string, onLost?:()=>void): typeof fetch {
+  const access = createAccessGuard(adapter,onLost);
   let remembered = false;
   let instance: string | null = null;
   let replaced = false;
@@ -23,7 +25,7 @@ export function browserFetch(adapter: typeof fetch, origin: string): typeof fetc
     if (replaced) throw new Error('Oko was restarted. Reload to continue.');
     if (remembered) headers.delete('Authorization');
     if (!remembered && url.pathname === '/api/v3/status' && headers.has('Authorization')) headers.set('X-Oko-Remember','1');
-    const response = await adapter(input, {...options, headers});
+    const response = await access.fetch(input, {...options, headers});
     const current = response.headers.get('X-Oko-Instance');
     if (current && instance && current !== instance) {
       replacement();

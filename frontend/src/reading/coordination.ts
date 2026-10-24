@@ -136,6 +136,8 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onWarning: () => statusPanel.open(),
   });
   function stopUi(message: string) {
+    if(stopped)return;
+    checking?.abort();
     session.dispose();
     menus.stop();
     stopped = true;
@@ -270,6 +272,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
 
   return {
     start: () => session.start(),
+    stopAccess: () => stopUi(''),
     refresh,
     changed,
     openMaterial: (id: string) => opened.open({id}),

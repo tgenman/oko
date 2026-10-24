@@ -7,7 +7,7 @@ import {createStatusPanel} from './status/panel';
 import {createReaderActions} from './status/actions';
 import {createReaderApi} from './api/reader';
 import {browserFetch} from './browser-auth';
-import {initializeReaderShell,mountSurface,setRenderReporter} from './renderer';
+import {initializeReaderShell,mountSurface,setRenderReporter,disposeReaderShell} from './renderer';
 
 import {useState} from 'react';
 import {ReaderShell} from './shell';
@@ -15,7 +15,7 @@ import {errorMessage} from './api/errors';
 import {regenerate,retryMaterial,retryTheses,retryFilter} from './api/generated/sdk.gen';
 initializeReaderShell(<ReaderShell/>);
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
-const fetchReader = browserFetch(window.fetch.bind(window), location.origin);
+const fetchReader = browserFetch(window.fetch.bind(window), location.origin,()=>{reading?.stopAccess();disposeReaderShell();});
 const transport = createTransport({fetch:fetchReader, token, origin:location.origin});
 const readerApi = createReaderApi({fetch:fetchReader, token, origin:location.origin,onError:(error,source)=>reportError(error,source,true)});
 const debug = createDebugPanel({token, readerApi});

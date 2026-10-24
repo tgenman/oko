@@ -32,7 +32,7 @@ export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>
   try {
     const [{origin},readyContext]=await Promise.all([started,contextStarted]);
     t?.signal.throwIfAborted();
-    const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json',Host:new URL(origin).host};
+    const headers={'Sec-Fetch-Mode':'','Authorization':'Bearer '+token,'Content-Type':'application/json',Host:new URL(options.persistent?origin.replace('://oko:', '://127.0.0.1:'):origin).host};
     const apiOrigin=options.hostname ? origin.replace('://oko:', '://127.0.0.1:') : origin;
     async function api<P extends string>(url: P,method='GET',body?: unknown): Promise<ApiReply<P>> {
       const response=await fetch(apiOrigin+'/api/'+(url.startsWith('v3/')?url:'v3/'+url),{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
