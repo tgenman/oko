@@ -125,3 +125,29 @@ Guard намеренно отказывает на неподтверждённ�
 осиротевшие Job удаления. Такие конфликты требуют отдельного разбора.
 Рабочие критерии выпуска #115 остаются открытыми до отдельного разрешения и
 фактического выполнения процедуры.
+
+
+## Публикация PR: стабилизация браузерной подготовки
+
+Первый CI PR #118 на `efc1927019cba39d8764b118a7864bd33d0d691d`:
+Build/static, Python, tools и Node прошли; browser — **216 passed / 1 failed /
+2 skipped**, Full checks — failure.
+[Неуспешный браузерный job](https://github.com/tgenman/oko/actions/runs/40089458311/job/120859199613).
+В test_codex_settings_http селект модели остался пустым/disabled: сценарий
+переходил в настройки до регистрации браузера и готовности workAllowed, тогда
+каталог ещё не запрашивался. В productionReader для этого уже есть openReader(),
+ожидающий настоящую регистрацию; его ожидание проверяет test_reader_readiness.
+
+Оба сценария этого файла используют openReader и ожидают активную видимую
+кнопку сбора перед настройкой модели. Значения, действия, таймауты и проверки
+сохранены; frontend/server код не менялся. Независимое ревью — без замечаний.
+
+Первый локальный повтор не запустил приложение: в исходном worktree не было
+frontend_build (полный all собирал его в frozen snapshot). Это **неуспех**,
+[отчёт](pipeline-acceptance-115/codex-browser-missing-build-report.json).
+Повтор с явной сборкой:
+`./scripts/check build browser --compact --files tests/browser/test_codex_settings_http.ts`
+— **2 passed**, build/types PASS, 16.04 s,
+[отчёт](pipeline-acceptance-115/codex-browser-repeat-report.json).
+[Снимок формы](pipeline-acceptance-115/react-models-desktop.png) просмотрен.
+Это ограниченный повтор; последующее слияние требует успешного CI нового SHA.

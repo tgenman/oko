@@ -1,0 +1,120 @@
+{
+  "started_at": "20261024T112610Z",
+  "selected_files": {
+    "browser": [
+      "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/tests/browser/test_codex_settings_http.ts"
+    ],
+    "node-tests": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (1.25s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.2468
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 1.2468
+    },
+    "browser-types": {
+      "status": "PASS (1.55s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.5466
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 1.5466
+    },
+    "browser": {
+      "status": "FAIL (2.96s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/scripts/run-browser-tests.cts",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-reporter=tap",
+            "--test-concurrency=8",
+            "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/tests/browser/test_codex_settings_http.ts"
+          ],
+          "exit_code": 1,
+          "duration_seconds": 2.7553
+        }
+      ],
+      "failures": [
+        "production HTTP saves choices, reads provenance and recreates material from the browser",
+        "model screens save connection and independent Codex choices through production HTTP",
+        "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/tests/browser/server-process.ts"
+      ],
+      "counts": {
+        "total": 3,
+        "passed": 0,
+        "failed": 3,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "passed_scenarios": 0,
+      "duration_seconds": 2.9629,
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "scripts/oko-release",
+      "tests/development/test_docker_release.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {
+    "Playwright": {
+      "status": "FAIL",
+      "counts": {
+        "total": 3,
+        "passed": 0,
+        "failed": 3,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "duration_seconds": 2.9629
+    }
+  },
+  "exit_code": 1,
+  "duration_seconds": 6.15,
+  "log": "/Users/dabondarev/.codex/worktrees/pipeline-acceptance-115/oko/.scratch/check-runs/20261024T112610Z-676e1763/output.log"
+}
