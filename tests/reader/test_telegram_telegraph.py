@@ -246,6 +246,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
     from tests.support.reader import wait_for
     calls=[]
     phase=[1]
+    first_article_response=[True]
     block_ai=[False]
     regeneration_started=threading.Event()
     regeneration_finished=threading.Event()
@@ -275,8 +276,11 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
         if late:
             regeneration_finished.set()
         return result
-    def response(request):
+    async def response(request):
         if request.url.host=='api.telegra.ph':
+            if first_article_response[0]:
+                first_article_response[0]=False
+                await asyncio.sleep(.03)  # Root-only theses may finish before its linked article.
             if phase[0]==2:
                 return httpx.Response(503)
             return httpx.Response(200,json={'ok':True,'result':{'title':'Article','content':[
@@ -290,7 +294,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
         assert client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web')).status_code==200
         identity=settled(client)[0]['id']
         path='/api/v3/materials/'+identity
-        initial=wait_for(client,lambda: v if (v:=client.get(path).json())['theses']['result'] else None)
+        initial=wait_for(client,lambda: v if (v:=client.get(path).json())['theses']['result'] and 'Original article' in v['content']['text'] else None)
         accepted=initial['theses']['result']
         initial_calls=len([r for r in calls if r.url.path=='/v1/chat/completions'])
         if regenerating:

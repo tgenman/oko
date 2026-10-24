@@ -50,7 +50,26 @@ Actual PostgreSQL 18, with a separate disposable schema for each case:
 Strict mypy and browser TypeScript checks passed. Independent review found one
 startup error-handling omission (`SchemaMismatch`), fixed and verified with an
 HTTP regression case. Follow-up review accepted the schema/instance leases.
-The final isolated full-project run and CI results are recorded below once complete.
+The first isolated full-project run (`3434cd08`, based on `f9b1a5af`) passed
+contracts, static checks, build, HTTP, entrypoint, 264 tool tests, 113 Node tests
+and 225 Playwright tests (3 skipped). Python had 942 passes and two failures:
+
+- Worker imported database exception types directly. Classify integrity failures
+  through Store instead; the three layer-boundary tests pass.
+- An existing Telegraph test captured root-only theses before its linked article
+  first completed. Independent baseline reproduction with a 30 ms first-response
+  delay produced the same failure; the two revision hashes exactly matched
+  without/with the complete child. Wait for both ready theses and the initial
+  article text before recording the baseline. Keep the unchanged-revision
+  assertion after 503, and retain the controlled delay to exercise the race.
+
+The unchanged-code repeat of all four Telegraph variants passed before the
+stabilization. This does not turn the original full run into a pass. The final
+Python evidence after the fixes: the entire Python suite passed **944 tests,
+0 skipped**, with strict mypy and contract checks also passing. This includes
+33 real-PostgreSQL scenarios, including the nested Playwright and CLI cases.
+The earlier successful UI/tool/Node groups remain separate evidence; GitHub CI
+is required before merging the final release.
 
 ![Password login backed by PostgreSQL](login.png)
 

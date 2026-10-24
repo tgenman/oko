@@ -1,4 +1,3 @@
-from oko.storage.database import INTEGRITY_ERRORS
 """Collection cron owns source/media attempts and their adapter calls."""
 from oko.collection.request_observation import Capture
 import asyncio
@@ -353,7 +352,7 @@ class CollectionWorker:
                         code = job.kind + ':' + type(error).__name__
                     label = self.execution.diagnostics.clean(label) if self.execution.diagnostics else label
                     current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
-                        terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and isinstance(error,(ValueError,*INTEGRITY_ERRORS)),
+                        terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
                         issue=error.adapter_issue if isinstance(error,SourceError) else None)
                     if job.kind=='fetch':
                         self.service.notify_parents(job.item)

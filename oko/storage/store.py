@@ -1,4 +1,4 @@
-from oko.storage.database import expect_row, Connection, Row
+from oko.storage.database import expect_row, Connection, Row, INTEGRITY_ERRORS
 from oko.collection.external_media import saved_external, expected_incomplete
 from oko.collection.adapters import ExternalKey, ExternalReference, Platform, MediaReference, PublicationContent, PublicationMetadata
 from datetime import datetime, timezone
@@ -51,6 +51,10 @@ class WorkSummary:
 
 class Store:
     """The database owns durable work and publications; files hold local media."""
+    @staticmethod
+    def is_integrity_failure(error: BaseException) -> bool:
+        return isinstance(error, INTEGRITY_ERRORS)
+
     def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
                                auto_read: bool | None) -> dict[str,Any]:
         with self.db:
