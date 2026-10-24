@@ -46,15 +46,16 @@ test('folder deletion rechecks an empty folder when a feed arrives before confir
  const catalog=await addSources(api,[['https://a.test/feed','Alpha','A'],['https://b.test/feed','Beta','B']]);
  const a=catalog.folders.find(f=>f.title==='A')!,b=catalog.folders.find(f=>f.title==='B')!,alpha=catalog.feeds.find(f=>f.title==='Alpha')!;
  await api('feeds/'+alpha.id,'PATCH',{folder_id:b.id});
+ let release!:()=>void,freeze=false;const held=new Promise<void>(resolve=>{release=resolve;});t.after(()=>release());
+ // Intercept before navigation so an in-flight poll cannot deliver a newer catalog.
+ await page.route('**/api/v3/reading/check',async route=>{const response=await route.fetch();if(freeze)await held;await route.fulfill({response});});
  await page.goto(origin+'/#token='+token);await page.locator('#read-feeds-toggle').click();
  const row=page.locator('[data-folder="'+a.id+'"]');await row.click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await expect(page.locator('#folder-action-heading')).toHaveText('Delete Folder');
- let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});t.after(()=>release());
- // Keep the browser's empty-folder snapshot until the real DELETE rechecks it.
- await page.route('**/api/v3/reading-composition',async route=>{await held;await route.continue();});
+ freeze=true;
  try{
   await api('feeds/'+alpha.id,'PATCH',{folder_id:a.id});
-  const rejected=page.waitForResponse(response=>response.url().endsWith('/folders/'+a.id)&&response.request().method()==='DELETE');
-  await page.locator('#folder-action-confirm').click();expect((await rejected).status()).toBe(409);
+  const [rejected]=await Promise.all([page.waitForResponse(response=>response.url().endsWith('/folders/'+a.id)&&response.request().method()==='DELETE'),page.locator('#folder-action-confirm').click()]);
+  expect(rejected.status()).toBe(409);
   await expect(page.locator('#folder-action-heading')).toHaveText('Folder Is Not Empty');
  }finally{release();}
  expect((await api('subscriptions')).folders.some(f=>f.id===a.id)).toBe(true);await page.locator('#folder-action-close').click();

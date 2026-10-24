@@ -64,9 +64,10 @@ def test_feed_refresh_cannot_override_429_deadline_and_rss_keeps_working(tmp_pat
         feed = client.post('/api/v3/telegram/connect', json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
         settled(client)
         blocked[0] = True
-        client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed})
+        count = len(calls)  # The worker may perform the request before POST returns.
+        reply = client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed})
+        assert reply.status_code == 200, reply.text
         deadline = time.monotonic()+3
-        count = len(calls)
         while len(calls) == count and time.monotonic() < deadline:
             time.sleep(.02)
         assert len(calls) == count+1
