@@ -1,7 +1,7 @@
 """Bounded, request-local inputs shared by material parts and their admission rules.
 
-Only the synchronous versioned reader opens this scope. Nothing survives it;
-write paths use the same accessors against current storage without a snapshot.
+Synchronous readers and read-only reconciliation planning open this scope.
+Nothing survives it; mutation always happens after the scope has closed.
 """
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -34,11 +34,11 @@ def current(db: sqlite3.Connection) -> Inputs | None:
 
 
 _ITEM = '''SELECT i.*,c.number AS current_number,v.fingerprint AS current_fingerprint,
-    d.item AS source_deleted,r.version AS restored_version,t.path AS retained_path,t.digest AS retained_digest
+    d.item AS source_deleted,r.version AS restored_version,t.path AS retained_path,t.digest AS retained_digest,h.hidden AS reader_hidden
     FROM items i LEFT JOIN content_current c ON c.item=i.id
     LEFT JOIN content_versions v ON v.item=i.id AND v.number=c.number
     LEFT JOIN source_deleted d ON d.item=i.id LEFT JOIN filter_restores r ON r.item=i.id
-    LEFT JOIN retained_theses t ON t.item=i.id'''
+    LEFT JOIN retained_theses t ON t.item=i.id LEFT JOIN reader_visibility h ON h.item=i.id'''
 _FEED = 'SELECT f.*,b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b.feed=f.id'
 
 
@@ -104,7 +104,7 @@ def state(db: sqlite3.Connection, key: str) -> str | None:
 
 
 @contextmanager
-def material_inputs(db: sqlite3.Connection, identities: set[str]) -> Iterator[None]:
+def material_inputs(db: sqlite3.Connection, identities: set[str], *, feed_ids: set[str] | None = None) -> Iterator[None]:
     """Six indexed reads for up to one API batch; independent of foreign data."""
     value = Inputs(db)
     ids = sorted(identities)
@@ -114,21 +114,23 @@ def material_inputs(db: sqlite3.Connection, identities: set[str]) -> Iterator[No
         value.items.update({r['id']: r for r in db.execute(_ITEM+f' WHERE i.id IN ({marks})',batch)})
         for r in db.execute(f'SELECT * FROM jobs WHERE item IN ({marks})',batch):
             value.jobs.setdefault(r['item'], {})[r['kind']] = r
-        for r in db.execute(f'SELECT * FROM content_versions WHERE item IN ({marks}) ORDER BY number DESC',batch):
-            value.versions.setdefault(r['item'], []).append(r)
-    feeds = sorted({r['feed_id'] for r in value.items.values()})
+        live = [identity for identity in batch if identity in value.items and not value.items[identity]['viewed']]
+        if live:
+            for r in db.execute('SELECT * FROM content_versions WHERE item IN (' + ','.join('?' for _ in live) + ') ORDER BY number DESC',live):
+                value.versions.setdefault(r['item'], []).append(r)
+    feeds = sorted({r['feed_id'] for r in value.items.values() if not r['viewed']} | (feed_ids or set()))
     for start in range(0, len(feeds), 400):
         batch = feeds[start:start+400]
         marks = ','.join('?' for _ in batch)
         value.feeds.update({r['id']: r for r in db.execute(_FEED+f' WHERE f.id IN ({marks})',batch)})
-    owners = [('oko','global')] + [('feed',f) for f in feeds] + [('folder',f) for f in sorted({r['folder_id'] for r in value.feeds.values()})]
+    owners = ([('oko','global')] if feeds else []) + [('feed',f) for f in feeds] + [('folder',f) for f in sorted({r['folder_id'] for r in value.feeds.values()})]
     value.settings={key:[] for key in owners}
     for start in range(0,len(owners),400):
         batch = owners[start:start+400]
         where = ' OR '.join('(scope=? AND owner=?)' for _ in batch)
         for r in db.execute('SELECT scope,owner,field,value FROM settings WHERE '+where,[v for pair in batch for v in pair]):
             value.settings.setdefault((r['scope'],r['owner']),[]).append(r)
-    keys = ['processor:llamacpp','settings-version'] + ['settings-version:'+f for f in feeds]
+    keys = (['processor:llamacpp','settings-version'] if feeds else []) + ['settings-version:'+f for f in feeds]
     value.state_keys=set(keys)
     for start in range(0,len(keys),400):
         batch = keys[start:start+400]

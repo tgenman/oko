@@ -138,13 +138,15 @@ class ProcessingCoordination:
                 self.store.db.executemany('INSERT INTO processing_dirty VALUES (?) ON CONFLICT(item) DO NOTHING', [(item,) for item in self._repairs])
             self._repairs.clear()
         items = [row[0] for row in self.store.db.execute('SELECT item FROM processing_dirty')]
-        for item in items:
-            # No suspension: changes made by this reconciliation are included
-            # before removing its dirty marker. Interrupted passes retain it.
-            self.store.filters.sync([item])
-            self.theses.sync([item])
+        for start in range(0, len(items), 400):
+            batch = items[start:start + 400]
+            # Each phase plans against fresh committed inputs. In particular,
+            # theses see the filter changes, never the pre-filter snapshot.
+            self.store.filters.sync(batch)
+            self.theses.sync(batch)
             with self.store.db:
-                self.store.db.execute('DELETE FROM processing_dirty WHERE item=?', (item,))
+                self.store.db.execute('DELETE FROM processing_dirty WHERE item IN (' +
+                                      ','.join('?' for _ in batch) + ')', batch)
 
     def retry_failed(self, feed: str) -> None:
         """Retry failed processing only; accepted current results are untouched."""

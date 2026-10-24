@@ -119,6 +119,7 @@ class Store:
         if 'source_order' not in {row['name'] for row in self.db.execute('PRAGMA table_info(items)')}:
             self.db.execute('ALTER TABLE items ADD COLUMN source_order INTEGER')
             self.db.commit()
+        self.db.execute('CREATE INDEX IF NOT EXISTS items_viewed_ids ON items(id) WHERE viewed=1')
         self.db.execute('CREATE INDEX IF NOT EXISTS items_unviewed_order ON items(published DESC,id,feed_id) WHERE viewed=0')
         self.db.execute('CREATE INDEX IF NOT EXISTS jobs_item ON jobs(item)')
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_active ON jobs(status,kind,item) WHERE status IN ('pending','running') OR error IS NOT NULL")
@@ -369,7 +370,7 @@ class Store:
             self.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('feed-status:' + feed, json.dumps(state)))
 
     def source_statuses(self) -> list[dict[str, Any]]:
-        return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key LIKE 'feed-status:%'")]
+        return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value'])) for row in self.db.execute("SELECT * FROM state WHERE key >= 'feed-status:' AND key < 'feed-status;'")]
 
     def ready_sources(self, feeds: list[str]) -> int:
         return sum(1 for feed in feeds if not self.db.execute(
@@ -639,14 +640,14 @@ class Store:
     def saved_publication(self, row: sqlite3.Row) -> dict[str, Any] | None:
         """Saved publication facts without reader-specific text projections."""
         item = row['id']
-        settings = self.subscriptions.effective('feed', row['feed_id'])
+        settings = self.subscriptions.effective('feed', row['feed_id'], details=False)
         base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'],
                     published_known=bool(row['published_known']), source_order=row['source_order'],
                     members=json.loads(row['members']), complete=bool(row['complete']),
                     originals=settings['effective']['originals']['value'])
+        fetch = material_read.jobs(self.db, item).get('fetch')
         if not row['complete']:
-            base.update(title='Материал загружается', loading=bool(self.db.execute(
-                "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()))
+            base.update(title='Материал загружается', loading=bool(fetch and fetch['status'] in ('pending', 'running')))
             return dict(base, text='')
         try:
             header, text = self.original(item)
@@ -655,9 +656,7 @@ class Store:
             base.update(changed=bool(previous), previous=previous, source_deleted=self.versions.deleted(item),
                 filter=filtered, title=header['title'], theses=self.processing.theses.read(item),
                 provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
-                version=self.content_version(item), loading=bool(self.db.execute(
-                    "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",
-                    (item, reader_now(self.clock()))).fetchone()),
+                version=self.content_version(item), loading=bool(fetch and (fetch['status']=='running' or fetch['status']=='pending' and fetch['next']<=reader_now(self.clock()))),
                 full=header.get('full', True) and (not header.get('members') or set(header['members']) == set(base['members'])),
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=f"/api/v3/materials/{item}/media/{a['name']}", kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],

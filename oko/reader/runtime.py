@@ -311,7 +311,7 @@ class Runtime:
             if self._store and not self.stopped:
                 candidates = self._store.problems.candidates(self._wall_clock())
             feeds = {f['id']: f for f in self._store.subscriptions.feeds()} if self._store else {}
-            bindings = {identity: binding for identity in feeds if self._store and not self.stopped and (binding := self._store.subscriptions.telegram.binding(identity))}
+            bindings = {identity: binding for identity, binding in self._store.subscriptions.telegram.bindings().items() if identity in feeds} if self._store and not self.stopped else {}
             state = self._status()
         if candidates is not None and self._store:
             self._last_problems = self._store.problems.reconcile(candidates, self._wall_clock(), feeds)

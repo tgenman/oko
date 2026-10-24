@@ -1,5 +1,6 @@
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
 from oko.storage.reading import reading_snapshot
+from oko.storage import material_read
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, TYPE_CHECKING, TypedDict
@@ -78,28 +79,29 @@ class ReadingComposition:
             where.append('f.folder_id=?')
             parameters.append(folder)
         rows = self._store.db.execute('SELECT i.* FROM items i JOIN feeds f ON f.id=i.feed_id WHERE '
-                                      + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
+                                      + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters).fetchall()
         cards = []
-        for row in rows:
-            material = self._store.saved_publication(row)
-            if material:
-                material = _reading_heading(material, feeds[row['feed_id']], self._store.original(row['id'])[0] if material['complete'] else {})
-            if material and (show_hidden or not material.get('filter', {}).get('hidden')):
-                owner = feeds[row['feed_id']]
-                text = material.pop('text')
-                description = material.pop('description', '')
-                material.pop('reply_preview', None)
-                preview = description or text
-                filtered = material.get('filter', {})
-                if not description and filtered.get('status') == 'done' and not filtered['restored']:
-                    # Preserve the existing preview of display_text followed by
-                    # its final fragment pass, including joined boundaries.
-                    for fragment in filtered['removed']:
-                        preview = preview.replace(fragment, '')
-                if filtered.get('status') == 'done' and not filtered['restored']:
-                    for fragment in filtered['removed']:
-                        preview = preview.replace(fragment, '')
-                cards.append(dict(material, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
+        with material_read.material_inputs(self._store.db, {row['id'] for row in rows}):
+            for row in rows:
+                material = self._store.saved_publication(row)
+                if material:
+                    material = _reading_heading(material, feeds[row['feed_id']], self._store.original(row['id'])[0] if material['complete'] else {})
+                if material and (show_hidden or not material.get('filter', {}).get('hidden')):
+                    owner = feeds[row['feed_id']]
+                    text = material.pop('text')
+                    description = material.pop('description', '')
+                    material.pop('reply_preview', None)
+                    preview = description or text
+                    filtered = material.get('filter', {})
+                    if not description and filtered.get('status') == 'done' and not filtered['restored']:
+                        # Preserve the existing preview of display_text followed by
+                        # its final fragment pass, including joined boundaries.
+                        for fragment in filtered['removed']:
+                            preview = preview.replace(fragment, '')
+                    if filtered.get('status') == 'done' and not filtered['restored']:
+                        for fragment in filtered['removed']:
+                            preview = preview.replace(fragment, '')
+                    cards.append(dict(material, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
         return cards
 
     @reading_snapshot()
@@ -112,16 +114,18 @@ class ReadingComposition:
         feed_members: dict[str, set[str]] = {feed['id']: set() for feed in feeds}
         visible = set()
         unviewed_feeds: set[str] = set()
-        for row in self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0'):
-            if row['feed_id'] not in by_feed:
-                continue
-            unviewed_feeds.add(row['feed_id'])
-            if self._store.filters.read(row['id'])['hidden']:
-                continue
-            identity = row['id']
-            visible.add(identity)
-            feed_members[row['feed_id']].add(identity)
-            folder_members[by_feed[row['feed_id']]['folder_id']].add(identity)
+        rows = self._store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0').fetchall()
+        with material_read.material_inputs(self._store.db, {row['id'] for row in rows}):
+            for row in rows:
+                if row['feed_id'] not in by_feed:
+                    continue
+                unviewed_feeds.add(row['feed_id'])
+                if self._store.filters.read(row['id'])['hidden']:
+                    continue
+                identity = row['id']
+                visible.add(identity)
+                feed_members[row['feed_id']].add(identity)
+                folder_members[by_feed[row['feed_id']]['folder_id']].add(identity)
         return dict(folders=[dict(folder, count=len(folder_members[folder['id']])) for folder in folders],
                     feeds=[dict(feed, count=len(feed_members[feed['id']]), has_unviewed=feed['id'] in unviewed_feeds) for feed in feeds],
                     count=len(visible))

@@ -33,7 +33,8 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.get('/api/v3/subscriptions', response_model=wire.SubscriptionCatalog)
     async def subscriptions() -> wire.SubscriptionCatalog:
         saved = runtime.require_store().subscriptions
-        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds()])
+        bindings = saved.telegram.bindings()
+        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(v), bindings.get(v['id'])) for v in saved.feeds()])
 
     @router.get('/api/v3/feeds/{feed}/avatar/{revision}')
     async def feed_avatar(feed: str, revision: str) -> Response:

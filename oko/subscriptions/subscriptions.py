@@ -116,6 +116,7 @@ class Subscriptions:
           original_urls TEXT, connection TEXT, transport TEXT,
           importance TEXT DEFAULT 'normal', initial_days INTEGER DEFAULT 1,
           public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER);
+        CREATE INDEX IF NOT EXISTS feeds_folder ON feeds(folder_id);
         CREATE TABLE IF NOT EXISTS settings (scope TEXT, owner TEXT, field TEXT, value TEXT,
           PRIMARY KEY(scope,owner,field));
         ''')
@@ -219,7 +220,7 @@ class Subscriptions:
             self.db.execute('DELETE FROM folders WHERE id=?', (identity,))
 
     @reading_value
-    def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None) -> list[dict[str, Any]]:
+    def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None, identities: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
         conditions, parameters = [], []
         if identity is not None:
             conditions.append('id=?')
@@ -230,29 +231,48 @@ class Subscriptions:
         if transport is not None:
             conditions.append('transport=?')
             parameters.append(transport)
-        query = 'SELECT id FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
-        return [self._feed(row['id']) for row in self.db.execute(query, parameters)]
+        if identities is not None:
+            if not identities:
+                return []
+            conditions.append('id IN (' + ','.join('?' for _ in identities) + ')')
+            parameters.extend(identities)
+        conditions = ['f.' + condition for condition in conditions]
+        query = """SELECT f.*,a.digest AS reader_avatar,b.binding AS reader_binding,
+            p.state AS reader_profile,c.value AS reader_cursor FROM feeds f
+            LEFT JOIN telegram_avatars a ON a.feed=f.id AND f.kind='telegram'
+            LEFT JOIN telegram_bindings b ON b.feed=f.id
+            LEFT JOIN telegram_profiles p ON p.role=json_extract(b.binding,'$.role')
+            LEFT JOIN state c ON c.key='cursor:' || CASE WHEN f.transport='telegram' THEN 'telegram:' ELSE '' END || f.id"""
+        query += (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY f.rowid'
+        rows = list(self.db.execute(query, parameters))
+        histories = self.history.statuses([row['id'] for row in rows])
+        return [self._project_feed(row, histories.get(row['id'])) for row in rows]
 
     @reading_value
     def _feed(self, identity: str) -> dict[str, Any]:
-        row = self.db.execute('SELECT * FROM feeds WHERE id=?', (identity,)).fetchone()
-        if row is None:
+        feeds = self.feeds(identity)
+        if not feeds:
             raise LookupError('Фид не найден')
+        return feeds[0]
+
+    @staticmethod
+    def _project_feed(row: sqlite3.Row, history: dict[str, Any] | None) -> dict[str, Any]:
         feed = dict(row)
         feed.pop('telegram_topic', None)
-        avatar = self.db.execute('SELECT digest FROM telegram_avatars WHERE feed=?', (feed['id'],)).fetchone() if feed['kind'] == 'telegram' else None
+        avatar = feed.pop('reader_avatar')
+        binding_json = feed.pop('reader_binding')
+        profile = feed.pop('reader_profile')
+        cursor_json = feed.pop('reader_cursor')
         if avatar:
-            feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar[0]
+            feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar
         feed['original_urls'] = json.loads(feed['original_urls'])
-        binding = self.telegram.binding(feed['id'])
+        binding = json.loads(binding_json) if binding_json else None
         if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
-            profile = self.telegram.profile(binding['role'])
-            if not profile or profile['state'] != 'ready':
+            if profile != 'ready':
                 feed['connection'] = 'unavailable'
-        feed['initial_history'] = self.history.status(feed['id'])
+        feed['initial_history'] = history
         if feed['initial_history'] is None:
-            namespace = 'telegram:' if feed['transport'] == 'telegram' else ''
-            saved = self.db.execute('SELECT value FROM state WHERE key=?', ('cursor:' + namespace + feed['id'],)).fetchone()
+            saved = {'value': cursor_json} if cursor_json is not None else None
             try:
                 cursor = json.loads(saved['value']) if saved else {}
             except json.JSONDecodeError:

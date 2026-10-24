@@ -252,6 +252,34 @@ class Versions:
                     (item,current_number)).fetchall())
         return [dict(number=r['number'], version=r['fingerprint'], url=f"/api/v3/materials/{item}/versions/{r['number']}") for r in rows]
 
+    def media(self, item: str, kind: str, name: str, number: int | None = None) -> tuple[Path, str] | None:
+        """Authorize saved bytes without evaluating filters or processing results."""
+        if Path(name).name != name:
+            return None
+        row = self.store.db.execute("""SELECT i.complete,c.number FROM items i
+            LEFT JOIN content_current c ON c.item=i.id WHERE i.id=? AND i.viewed=0""", (item,)).fetchone()
+        if row is None or number is None and not row['complete']:
+            return None
+        if number is not None and not self.store.db.execute(
+                'SELECT 1 FROM content_versions WHERE item=? AND number=? AND visible=1', (item, number)).fetchone():
+            return None
+        original = self.path(item, number if number is not None else row['number'] or 1)
+        try:
+            from oko.storage.reading import saved_document
+            header, _ = saved_document(original)
+            path = original.parent / name
+            if not path.is_file():
+                return None
+            if kind == 'images' and name.startswith('image-'):
+                mime = {'.png':'image/png', '.jpg':'image/jpeg', '.gif':'image/gif', '.webp':'image/webp'}.get(path.suffix)
+                return (path, mime) if mime else None
+            attachment = next((a for a in header.get('attachments', []) if a['name'] == name), None)
+            if kind == 'media' and attachment:
+                return path, str(attachment['mime'])
+        except (OSError, ValueError, KeyError):
+            return None
+        return None
+
     def read(self, item: str, number: int) -> dict[str, Any] | None:
         if not self.store.db.execute('SELECT 1 FROM items WHERE id=? AND viewed=0', (item,)).fetchone():
             return None

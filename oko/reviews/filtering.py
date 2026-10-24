@@ -1,6 +1,6 @@
 """Durable filtered views; originals and media remain owned by Store."""
 from oko.storage import material_read
-from oko.storage.reading import reading_value, saved_document
+from oko.storage.reading import reading_value, saved_document, reading_snapshot
 from oko.diagnostics import record_caught
 import hashlib
 import json
@@ -56,16 +56,24 @@ class Filters:
 
     def sync(self, items: list[str]) -> None:
         store = self.store
-        for item in items:
-            signature = self.signature(item)
-            old = store.db.execute('SELECT signature FROM filter_inputs WHERE item=?', (item,)).fetchone()
-            state = store.db.execute("SELECT id,generation,status FROM jobs WHERE kind='filter' AND item=?", (item,)).fetchone()
+        if not items:
+            return
+        marks = ','.join('?' for _ in items)
+        old_inputs = {r['item']: r for r in store.db.execute(
+            'SELECT item,signature FROM filter_inputs WHERE item IN (' + marks + ')', items)}
+        with reading_snapshot(), material_read.material_inputs(store.db, set(items)):
+            plan = [(item, self.signature(item), material_read.jobs(store.db, item).get('filter'),
+                     store.path(item).parent, material_read.item(store.db, item)) for item in items]
+        for item, signature, state, directory, record in plan:
+            old_row = old_inputs.get(item)
+            old = (old_row['signature'],) if old_row else None
             if signature and old and old[0] != signature and state and state['status'] == 'done':
                 self._upgrade_result(item, old[0], signature, state['id'], state['generation'])
                 old = store.db.execute('SELECT signature FROM filter_inputs WHERE item=?', (item,)).fetchone()
             if signature is None:
-                store.read_versions.sync_filter(item, False)
-            if signature is None and old is None and (not state or state['status'] == 'cancelled') and not (store.path(item).parent / 'filter.md').exists():
+                if record is None or record['reader_hidden'] != 0:
+                    store.read_versions.sync_filter(item, False)
+            if signature is None and old is None and (not state or state['status'] == 'cancelled') and not (directory / 'filter.md').exists():
                 continue
             if old and old[0] == signature and state:
                 filtered = self.read(item)
@@ -73,7 +81,7 @@ class Filters:
                 if state['status'] != 'done' or filtered.get('status') == 'done':
                     continue
             store.read_versions.sync_filter(item, False)
-            (store.path(item).parent / 'filter.md').unlink(missing_ok=True)
+            (directory / 'filter.md').unlink(missing_ok=True)
             with store.db:
                 store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='filter' AND item=?", (item,))
                 if signature:

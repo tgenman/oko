@@ -1,6 +1,5 @@
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
 from oko.storage.reading import reading_snapshot
-from pathlib import Path
 from collections.abc import Callable
 from typing import Literal, TypedDict
 
@@ -170,7 +169,8 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
         saved = runtime.require_store().subscriptions
-        return {v['id']: project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds(identity)}
+        bindings = saved.telegram.bindings() if identity is None else {identity: saved.telegram.binding(identity)}
+        return {v['id']: project.subscription(facts.SubscriptionFeed.model_validate(v), bindings.get(v['id'])) for v in saved.feeds(identity)}
 
     def composition() -> wire.ReadingComposition:
         current = runtime.require_store()
@@ -265,16 +265,10 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:
         identity(item)
         current = runtime.require_store()
-        raw = current.versions.read(item, number) if number is not None else current.material(item)
-        material = facts.Version.model_validate(raw) if number is not None and raw else facts.Material.model_validate(raw) if raw else None
-        images = material.images if material and isinstance(material.images, list) else []
-        attached = material.attachments if material and isinstance(material.attachments, list) else []
-        path = (current.versions.path(item, number) if number is not None else current.path(item)).parent / name
-        image = kind == 'images' and any(url.endswith('/' + name) for url in images)
-        attachment = next((a for a in attached if a.url.endswith('/' + name)), None) if kind == 'media' else None
-        if Path(name).name != name or not (image or attachment) or not path.is_file():
+        saved = current.versions.media(item, kind, name, number)
+        if saved is None:
             raise ApiError(404, wire.ErrorEnvelope(wire.MediaUnavailableError(code='media_unavailable', message='Вложение недоступно', details=wire.MediaUnavailableErrorDetails(material_id=identity(item), name=name), command_id=None, diagnostic_id=None)))
-        mime = attachment.mime if attachment else {'.png':'image/png','.jpg':'image/jpeg','.gif':'image/gif','.webp':'image/webp'}[path.suffix]
+        path, mime = saved
         return Response(path.read_bytes(), media_type=mime, headers={'Content-Disposition':'inline'})
 
     @router.get('/api/v3/materials/{item}/images/{name}')

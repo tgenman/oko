@@ -3,6 +3,7 @@ import json
 from oko.collection.contracts import SourceManifest
 from oko.collection.external_media import expected_incomplete
 from oko.storage.reading import reading_snapshot
+from oko.storage import problem_links, material_read
 from dataclasses import dataclass
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -41,6 +42,8 @@ class Problems:
               body TEXT NOT NULL, started REAL NOT NULL, completed REAL, result TEXT NOT NULL);
         ''')
         self.db.execute('CREATE INDEX IF NOT EXISTS reader_action_identity_sequence ON reader_action_results(identity,sequence)')
+        problem_links.install(self.db)
+        self.db.execute("CREATE INDEX IF NOT EXISTS reader_action_unresolved ON reader_action_results(result,identity,sequence) WHERE result IN ('failed','unknown','pending')")
         # Recovery projection only: preserve the original service records for rollback.
         self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result='pending'")}
 
@@ -52,9 +55,11 @@ class Problems:
 
     def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
-        scopes = [('oko','global')] + [('feed', feed['id']) for feed in self.store.subscriptions.feeds()]
-        needs_codex = any((values := self.store.subscriptions.effective(scope, owner)['effective'])['processor']['value'] == 'codex' and
-                         any(values[key]['value'] for key in ('theses', 'prompt_filters')) for scope, owner in scopes)
+        feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
+        scopes = [('oko','global')] + [('feed', identity) for identity in feeds]
+        with material_read.material_inputs(self.db, set(), feed_ids=set(feeds)):
+            needs_codex = any((values := self.store.subscriptions.effective(scope, owner, details=False)['effective'])['processor']['value'] == 'codex' and
+                             any(values[key]['value'] for key in ('theses', 'prompt_filters')) for scope, owner in scopes)
         if needs_codex and self.store.codex_config() is None:
             current.append(dict(id='processor:codex-choice', code='codex-choice', section='action',
                                 title='Не выбрана модель Codex', consequence='Тезисы пока не создаются.',
@@ -63,15 +68,16 @@ class Problems:
                                 action=None, created_at=now,
                                 state='current', finished_at=None, outcome=None, next_at=None))
         groups: dict[str, dict[str, Any]] = {}
-        feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
+        bindings = self.store.subscriptions.telegram.bindings()
+        profiles = self.store.subscriptions.telegram.profiles()
         for saved_feed in feeds.values():
             if saved_feed['kind'] != 'telegram' or saved_feed['connection'] == 'deleting':
                 continue
-            binding = self.store.subscriptions.telegram.binding(saved_feed['id'])
+            binding = bindings.get(saved_feed['id'])
             if not binding or binding['kind'] not in ('legacy_client','client'):
                 continue
             role = binding.get('role')
-            profile = self.store.subscriptions.telegram.profile(role) if role else None
+            profile = profiles.get(role) if role else None
             if binding['kind'] == 'client' and profile and profile['state'] == 'ready':
                 continue
             code = 'identity-unconfirmed' if not role or not profile else 'account_identity_mismatch' if profile['state'] == 'identity_mismatch' else 'profile_unavailable'
@@ -250,7 +256,7 @@ class Problems:
         for identity in members:
             self._headers.pop(identity, None)
             self._numbers.pop(identity, None)
-        for row in self.db.execute('SELECT * FROM reader_problems').fetchall():
+        for row in problem_links.material_records(self.db, 'problem', members):
             body = json.loads(row['body'])
             before = body['objects']
             body['objects'] = [obj for obj in before if not (obj['kind'] == 'material' and obj['id'] in members)]
@@ -263,7 +269,7 @@ class Problems:
                                 (json.dumps(body), now, row['id']))
             else:
                 self.db.execute('UPDATE reader_problems SET body=? WHERE id=?', (json.dumps(body), row['id']))
-        for row in self.db.execute('SELECT * FROM reader_action_results').fetchall():
+        for row in problem_links.material_records(self.db, 'action', members):
             body = json.loads(row['body'])
             before = body['objects']
             body['objects'] = [obj for obj in before if not (obj['kind'] == 'material' and obj['id'] in members)]
@@ -304,8 +310,7 @@ class Problems:
                     self.db.execute('INSERT INTO reader_problems VALUES (?,?,?,?,?,NULL,NULL)',
                                     (uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', json.dumps(body), now))
             self.db.execute('DELETE FROM reader_problems WHERE finished<=?', (now - 86400,))
-            self.db.execute('''DELETE FROM reader_action_results WHERE completed<=? AND sequence NOT IN
-                (SELECT max(sequence) FROM reader_action_results GROUP BY identity)''', (now - 86400,))
+            problem_links.cleanup(self.db, now - 86400)
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
         labels: dict[tuple[str, str], str] = {}

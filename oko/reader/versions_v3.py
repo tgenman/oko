@@ -31,15 +31,16 @@ class VersionedReading:
 
     def compact(self, identity: str) -> dict[str, Any] | None:
         store = self.runtime.require_store()
-        row = store.db.execute('SELECT * FROM items WHERE id=? AND viewed=0',(identity,)).fetchone()
-        if row is None:
+        row = material_read.item(store.db, identity)
+        if row is None or row['viewed']:
             return None
         result: dict[str, Any] = dict(id=identity,feed_id=row['feed_id'],title='Материал загружается',
             published_at=project.timestamp(row['published']) if row['published_known'] else None,
             source_url=row['url'],snippet='',availability='pending',loading=False,changed=False,
             revision_id=None,preview_url=None,hidden=False,filter_state='disabled',theses_state='disabled')
         if not row['complete']:
-            result['loading']=bool(store.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')",(identity,)).fetchone())
+            job = material_read.jobs(store.db, identity).get('fetch')
+            result['loading'] = bool(job and job['status'] in ('pending', 'running'))
             return result
         header,text=store.original(identity)
         filtered=store.filters.read(identity)
@@ -49,20 +50,21 @@ class VersionedReading:
             for _ in range(1 if description else 2):
                 for fragment in filtered['removed']:
                     preview=preview.replace(fragment,'')
-        settings=store.subscriptions.effective('feed',row['feed_id'])
+        settings=store.subscriptions.effective('feed',row['feed_id'], details=False)
         title=header['title']
         if settings['feed']['kind']=='telegram' and settings['feed'].get('transport')!='rss':
             title=telegram_title(header,text)
         folder=store.path(identity).parent
         image=next(iter(sorted(folder.glob('image-*'))),None)
         attachment=next((a for a in header.get('attachments',[]) if a['kind']=='image'),None)
-        jobs={r['kind']:r for r in store.db.execute("SELECT kind,status,error FROM jobs WHERE item=? AND kind IN ('filter','theses')",(identity,))}
+        jobs = material_read.jobs(store.db, identity)
+        fetch = jobs.get('fetch')
         theses=jobs.get('theses')
         theses_state=_state(theses['status'] if theses else 'pending',theses['error'] if theses else None) if store.processing.theses.signature(identity) else 'disabled'
         result.update(title=title,snippet=snippet(preview),availability='available',hidden=bool(filtered['hidden']),
             filter_state=_state(filtered['status'],filtered.get('error')),theses_state=theses_state,
             changed=bool(store.versions.previous(identity)),revision_id=store.content_version(identity),
-            loading=bool(store.db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",(identity,reader_now(store.clock()))).fetchone()),
+            loading=bool(fetch and (fetch['status']=='running' or fetch['status']=='pending' and fetch['next']<=reader_now(store.clock()))),
             preview_url=f'/api/v3/materials/{identity}/images/{image.name}' if image else f"/api/v3/materials/{identity}/media/{attachment['name']}" if attachment else None)
         external = saved_external(header,f'/api/v3/materials/{identity}')
         result['post_web_unavailable'] = external['post_web_unavailable']
@@ -204,8 +206,22 @@ class VersionedReading:
                         for feed in nav['feeds']:
                             requested.setdefault(('feed',feed['id']),dict(kind='feed',id=feed['id'],known_version=None))
                         versions.update(owner.batch({key for key in requested if key not in versions}))
+                    feed_ids = sorted(identity for (kind, identity), request in requested.items()
+                        if kind == 'feed' and (kind, identity) in versions
+                        and request['known_version'] != str(versions[kind, identity]['version'])
+                        and versions[kind, identity]['feed_exists'] is not None)
+                    feed_data = {}
+                    if feed_ids:
+                        for start in range(0, len(feed_ids), 400):
+                            try:
+                                for feed in store.subscriptions.feeds(identities=tuple(feed_ids[start:start + 400])):
+                                    feed_data[feed['id']] = feed
+                            except (OSError, ValueError, KeyError):
+                                # A damaged legacy row must fail only its resource.
+                                # Retry this batch individually inside the resource boundary.
+                                pass
                     changed_items={identity for (kind,identity),request in requested.items()
-                        if kind in ('material','filter','theses','media') and (kind,identity) in versions
+                        if kind in ('card','material','filter','theses','media') and (kind,identity) in versions
                         and request['known_version']!=str(versions[kind,identity]['version'])
                         and versions[kind,identity]['item_exists'] is not None and not versions[kind,identity]['viewed']}
                     from contextlib import nullcontext
@@ -223,8 +239,8 @@ class VersionedReading:
                                 if kind=='status': data=status_data
                                 elif kind=='navigation': data=nav
                                 elif kind=='feed':
-                                    feeds=store.subscriptions.feeds(identity)
-                                    data=project.subscription(facts.SubscriptionFeed.model_validate(feeds[0]),store.subscriptions.telegram.binding(identity)).model_dump(mode='json') if feeds else None
+                                    feeds = [feed_data[identity]] if identity in feed_data else store.subscriptions.feeds(identity)
+                                    data = project.subscription(facts.SubscriptionFeed.model_validate(feeds[0]), store.subscriptions.telegram.binding(identity)).model_dump(mode='json') if feeds else None
                                 elif kind=='card':data=self.compact(identity)
                                 elif kind=='media':data=self.media(identity)
                                 elif kind in ('filter','theses'):

@@ -1,6 +1,6 @@
 """Publication theses: current inputs, durable results and their reader state."""
 from oko.storage import material_read
-from oko.storage.reading import reading_value, saved_bytes, saved_document
+from oko.storage.reading import reading_value, saved_bytes, saved_document, reading_snapshot
 from oko.diagnostics import record_caught
 import hashlib
 import json
@@ -57,25 +57,33 @@ class PublicationTheses:
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def sync(self, items: list[str]) -> None:
-        for item in items:
-            signature = self.signature(item)
-            old = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
-            state = self.store.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()
-            if signature and old and old[0] != signature and state and state[0] == 'done':
+        if not items:
+            return
+        store = self.store
+        marks = ','.join('?' for _ in items)
+        old_inputs = {r['item']: r for r in store.db.execute(
+            'SELECT item,signature FROM thesis_inputs WHERE item IN (' + marks + ')', items)}
+        with reading_snapshot(), material_read.material_inputs(store.db, set(items)):
+            plan = [(item, self.signature(item), material_read.jobs(store.db, item).get('theses'),
+                     store.path(item).parent) for item in items]
+        for item, signature, state, directory in plan:
+            old_row = old_inputs.get(item)
+            old = (old_row['signature'],) if old_row else None
+            if signature and old and old[0] != signature and state and state['status'] == 'done':
                 self._upgrade_caption_result(item, old[0], signature)
                 old = self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item=?', (item,)).fetchone()
-            if signature is None and old and state and state[0] == 'done':
+            if signature is None and old and state and state['status'] == 'done':
                 feed = self.store.item_feed(item)
                 if self.store.subscriptions.effective('feed', feed)['feed']['kind'] == 'youtube':
                     # Filtering may temporarily hide a completed caption result.
                     # Keep its committed file and job until the inputs are known.
                     continue
-            if signature is None and old is None and (not state or state[0] == 'cancelled') and not (self.store.path(item).parent / 'theses.md').exists():
+            if signature is None and old is None and (not state or state['status'] == 'cancelled') and not (directory / 'theses.md').exists():
                 continue
             if old and old[0] == signature:
-                if state and (state[0] != 'done' or self.read(item) is not None):
+                if state and (state['status'] != 'done' or self.read(item) is not None):
                     continue
-            path = self.store.path(item).parent / 'theses.md'
+            path = directory / 'theses.md'
             path.unlink(missing_ok=True)
             with self.store.db:
                 self.store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE kind='theses' AND item=?", (item,))
