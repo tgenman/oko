@@ -8,6 +8,7 @@
 ./scripts/check python types
 ./scripts/check http
 ./scripts/check browser
+./scripts/check node
 ./scripts/check lint
 ./scripts/check browser --files tests/browser/test_material_list.ts tests/browser/test_reader_http.ts
 ./scripts/check tools --files tests/development/test_hooks.py
@@ -250,7 +251,7 @@ CI кэширует загруженные пакеты uv по версии и�
 `tools --if-changed --base <PR base SHA или push before SHA>`; она обязательна для итогового
 результата и явно сообщает, если инструментальных изменений нет.
 
-Генерация API, typecheck и сборка завершаются до тестов. После этого `browser`,
+Генерация API, typecheck и сборка завершаются до тестов. После этого `browser`, `node-tests`,
 `python-tests` и выбранный `tool-tests` исполняются параллельно в отдельных процессах.
 Время групп пересекается и не суммируется во время полного прогона. Каждая группа владеет
 своим логом `parallel/<группа>/<запуск>/output.log` и artifacts; итоговый report объединяет
@@ -264,7 +265,7 @@ workers и их дочерние процессы. Общий guard провер
 Отдельный Python-набор разделяется максимум на четыре непустых набора файлов.
 Python сохраняет четыре workers и при одновременном запуске browser или tools; tools — два.
 Каждый выбранный файл выполняется один раз. В полном прогоне вместе с browser это
-не более семи владельцев тестовых групп. Отчёты и artifacts каждого Python worker находятся
+не более восьми владельцев тестовых групп (включая короткую Node-группу). Отчёты и artifacts каждого Python worker находятся
 в `parallel/python-tests-1` … `parallel/python-tests-4` и соответствующих каталогах tools.
 Общий результат требует успеха всех workers; SIGINT завершает их дочерние процессы.
 По умолчанию выполняются восемь браузерных файлов на машинах с 12 и более
@@ -335,9 +336,10 @@ RSSSource с MockTransport проходит все 1000 страниц, вклю
 из четырёх библиотек, но ждёт сигнал DOM observer через animation frame вместо
 100ms polling между измерениями. Порог p95 <200ms и реальный click сохраняются.
 
-Три чистых контракта SDK/fetch (`test_transport_contract.ts`) запускаются Node без
+Чистые контракты SDK/fetch (`tests/node/test_transport_contract.ts`), матрица
+настроек и валидация fixtures расположены в `tests/node` и запускаются `check node` без
 браузера и reader: binary bytes/headers, авторизация, JSON, keepalive и все шесть
-ошибочных ответов. Они остаются в существующем обнаружении TypeScript-тестов.
+ошибочных ответов. Они входят в `ui`/`all` и отдельную Node job CI. `check browser` запускает только Playwright.
 `test_transport.ts` сохраняет браузерные pagehide/pageshow и отображение ошибки
 с повтором diagnostics для той же occurrence.
 
@@ -380,3 +382,14 @@ Store, соединения, Runtime и результаты проверок н
 Runtime и очисткой. Hooks общих владельцев выполняются в конце группы.
 `--files`, имена сценариев, `--match` и ненулевой статус при падении сохраняются.
 Performance-файл запускается отдельной командой после функциональных сценариев.
+
+## Отчёт по четырём группам
+
+`report.json.test_groups` и `scripts/check-report` разделяют Python (включая HTTP),
+tools (все `tests/development` и проверки API-генератора), Node и Playwright.
+Каждая группа содержит counts (passed/failed/skipped/total) и duration_seconds.
+Группы выполняются параллельно; их времена не складываются в wall-clock всего
+прогона. Python включает предварительный HTTP-набор, когда он выбран отдельно.
+Сборка, типизация и остальные служебные проверки видны отдельно в suites и входят
+в Total. Старые отчёты читаются без переписывания. Node-набор не запускает Python-тесты, Chrome
+или reader-сервер; сам runner по-прежнему требует Python 3.11+. `--files` и `--match` доступны для Node и Playwright.

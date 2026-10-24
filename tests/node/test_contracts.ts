@@ -1,5 +1,5 @@
 import {test} from 'node:test';
-import {validate} from './contracts.ts';
+import {validate} from '../browser/contracts.ts';
 import assert from 'node:assert/strict';
 
 test('fixture contracts reject missing ids, invalid counts and incomplete history', () => {

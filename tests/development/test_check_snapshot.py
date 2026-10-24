@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
 
@@ -19,7 +20,7 @@ def fixture(tmp_path):
     for name in ('check', 'task_changes.py', 'check_snapshot.py'):
         if (SCRIPTS / name).exists():
             shutil.copy2(SCRIPTS / name, root / 'scripts' / name)
-    for name in ('frontend/app.ts', 'tests/browser/test_example.ts'):
+    for name in ('frontend/app.ts', 'tests/browser/test_example.ts', 'tests/node/test_example.ts'):
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('')
@@ -38,6 +39,11 @@ def fixture(tmp_path):
     runtime.write_text('''#!/usr/bin/env python3
 import os, pathlib, sys
 if '-e' in sys.argv: print(sys.executable)
+if '--test' in sys.argv and os.environ.get('MUTATE_SNAPSHOT'):
+    owner='node-tests' if any('/tests/node/' in arg for arg in sys.argv) else 'browser'
+    if owner!=os.environ.get('MUTATION_OWNER','browser'):
+        print('# pass 1')
+        sys.exit(0)
 if '--test' in sys.argv:
     assert pathlib.Path('document.md').read_text() == 'captured'
     assert pathlib.Path('new.txt').read_text() == 'staged'
@@ -78,14 +84,15 @@ def test_all_isolates_working_files_and_excludes_untracked_data(tmp_path):
         assert (snapshot / name / 'installed').read_text() == name
 
 
-def test_snapshot_still_detects_test_mutation(tmp_path):
+@pytest.mark.parametrize('owner',['browser','node-tests'])
+def test_snapshot_still_detects_test_mutation(tmp_path,owner):
     root, env = fixture(tmp_path)
     reports = tmp_path / 'reports'
-    result = run(root, dict(env, MUTATE_SNAPSHOT='1'), reports)
+    result = run(root, dict(env, MUTATE_SNAPSHOT='1',MUTATION_OWNER=owner), reports)
     assert result.returncode == 1, result.stdout + result.stderr
     report = json.loads(next(reports.glob('*/report.json')).read_text())
     assert report['checkout'] == {'status': 'FAIL', 'changed_files': ['document.md']}
-    assert report['suites']['browser']['status'].startswith('PASS')
+    assert all(report['suites'][group]['status'].startswith('PASS') for group in ('browser','node-tests'))
     assert (root/'document.md').read_text() == 'edited during checks'
 
 

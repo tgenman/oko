@@ -6,13 +6,35 @@ import httpx
 import pytest
 
 from tests.support.publication_pipeline import publication_root
-from tests.reviews.test_processing_coordination import coordinated_transport
+from tests.support.models import model_transport
+from tests.support.filters import FilterSource
+import time
 from tests.support.app import create_app
 from tests.support.presence import presence
 from tests.support.reader import HEADERS, wait_for
 from tests.support.telegram import configure_fast_web, settled
 from tests.support.telegram_web import page
 from tests.support.v3 import TestClient
+
+
+def coordinated_transport(calls):
+    native = model_transport([])
+
+    def respond(request):
+        if request.url.path != '/v1/chat/completions':
+            return native.handler(request)
+        task = json.loads(json.loads(request.content)['messages'][1]['content'])
+        calls.append(task)
+        sources = task['sources']
+        if task['operation'] == 'filter':
+            text = sources[0]['text']
+            result = dict(hidden=text.startswith('Реклама:'), reason='Реклама' if 'Реклама:' in text else '',
+                          removed=['Реклама: купите курс.'] if text.startswith('Открылась') else [])
+        else:
+            result = dict(points=[dict(text=sources[0]['text'], sources=[dict(id=sources[0]['id'], url=sources[0]['url'])])])
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(result)}}]})
+
+    return httpx.MockTransport(respond)
 
 
 def stored(root,item):
@@ -29,7 +51,8 @@ def setup(client):
     client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
     client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'Убери рекламу.'})
     presence(client,'reader')
-    client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+    connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+    assert connected.status_code==200,connected.text
 
 
 def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_path):
@@ -40,10 +63,17 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
         if request.url.host=='cdn.example':
             return httpx.Response(200,content=request.url.path.encode(),headers={'content-type':'image/jpeg'})
         media='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+photo[0]+'.jpg\')"></a>'
-        return httpx.Response(200,text=page([(11,'Открылась выставка. Реклама: купите курс.'+media)]))
-    with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
+        posts=[(11,'Открылась выставка. Реклама: купите курс.'+media),(12,'Изменён закон о выборах.'),(13,'Реклама: купите курс.')]
+        before=int(request.url.params.get('before','0'))
+        return httpx.Response(200,text=page([(identity,text) for identity,text in posts if not before or identity<before]))
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls))
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'originals':False})
         setup(client)
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        cards=wait_for(client,lambda:rows if len(rows:=client.get('/api/v3/cards').json())==2 and all(c['theses']['result'] for c in rows) else None)
+        assert all('Реклама:' not in c['snippet'] for c in cards)
+        assert {'filter','theses'}<={c['operation'] for c in calls}
+        card=next(c for c in cards if c['source_url'].endswith('/11'))
         item=card['id']
         row=stored(root,item)
         assert row['status']=='ready'
@@ -56,13 +86,32 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
         assert all(b['source_publication_id']==item for b in row['filtered_content']['blocks'])
         accepted=row['processing_metadata']
         count=len(calls)
+        original=client.get('/api/v3/materials/'+item).json()
+        assert original['originals'] is False and original['content']['text'] and original['theses']['result']
+        client.patch('/api/v3/settings/feed/'+card['feed_id'],json={'originals':True})
+        assert client.get('/api/v3/materials/'+item).json()['originals'] is True
+        assert client.get('/api/v3/settings/feed/'+card['feed_id']).json()['effective']['theses']['value'] is True
+        assert client.get('/api/v3/materials/'+item).json()['theses']['result']==original['theses']['result']
+        assert len(calls)==count
         photo[0]='second'
         client.post('/api/v3/materials/'+item+'/retry')
-        settled(client)
+        settled(client,count=2)
         updated=stored(root,item)
         assert updated['processing_metadata']==accepted
         ids=json.loads(updated['media_ids'])
         assert all(b['media_id'] in ids for b in updated['filtered_content']['blocks'] if b['type']=='media')
+        assert len(calls)==count
+
+        wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        saved=client.get('/api/v3/cards').json()
+        time.sleep(1.2)  # More than two periodic reconciliation passes.
+        assert len(calls)==count
+        assert [c['theses'] for c in client.get('/api/v3/cards').json()]==[c['theses'] for c in saved]
+    with TestClient(create_app(root,**options),headers=HEADERS) as client:
+        presence(client,'reader')
+        wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        assert [c['theses'] for c in client.get('/api/v3/cards').json()]==[c['theses'] for c in saved]
+        assert stored(root,item)['processing_metadata']==accepted
         assert len(calls)==count
 
 
@@ -197,7 +246,8 @@ def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_
             configure_fast_web(client)
             client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
             feed=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()['feed_id']
-            wait_for(client,lambda:any(card['availability']=='available' for card in client.get('/api/v3/cards').json()))
+            card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['availability']=='available'),None))
+            item=card['id']
             client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
             client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':False})
             client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'Filter'})
@@ -206,6 +256,8 @@ def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_
             release.set()
             wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status').json()['work']))
             assert calls==[]
+            assert client.get('/api/v3/status').json()['problems']['current']==[]
+            assert all(c['theses']['result'] is None for c in client.get('/api/v3/cards').json())
             item=client.get('/api/v3/cards').json()[0]['id']
             assert stored(root,item)['filtered_content']=={}
             assert stored(root,item)['summarized_content']=={}
@@ -463,3 +515,16 @@ def test_persisted_empty_job_completes_without_a_model_after_restart(tmp_path):
         assert row['processing_metadata']['filter']['reason']=='no_input'
         assert row['processing_metadata']['summary']['reason']=='no_input'
         assert calls==[]
+
+
+def test_folder_completion_includes_hidden_publications(tmp_path):
+    with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=coordinated_transport([])), headers=HEADERS) as client:
+        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
+        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': False, 'prompt_filters': 'Убери рекламу.'})
+        presence(client, 'reader')
+        wait_for(client, lambda: len(c := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c))
+        assert len(client.get('/api/v3/cards').json()) == 2
+        preview = client.post('/api/v3/folders/demo/completion/preview').json()
+        assert preview['cards_count'] == preview['publications_count'] == 3
+        assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
+        assert client.get('/api/v3/cards?show_hidden=true').json() == []

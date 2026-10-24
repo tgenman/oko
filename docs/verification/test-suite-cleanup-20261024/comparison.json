@@ -1,0 +1,25 @@
+{
+  "method": "Sequential complete runs on the same machine; group times overlap and are not summed.",
+  "groups": {
+    "Python": {
+      "before_seconds": 155.3805,
+      "after_seconds": 200.454
+    },
+    "tools": {
+      "before_seconds": 141.5991,
+      "after_seconds": 185.4224
+    },
+    "Node": {
+      "before_seconds": 1.4315,
+      "after_seconds": 1.2262
+    },
+    "Playwright": {
+      "before_seconds": 142.4347,
+      "after_seconds": 184.9998
+    }
+  },
+  "total": {
+    "before_seconds": 172.73,
+    "after_seconds": 219.33
+  }
+}

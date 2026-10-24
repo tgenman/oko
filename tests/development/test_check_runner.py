@@ -17,7 +17,7 @@ def runner_checkout(tmp_path_factory):
     checkout = tmp_path_factory.mktemp('runner-checkout')
     (checkout / 'scripts').mkdir()
     shutil.copy2(REPO / 'scripts/check', checkout / 'scripts/check')
-    for name in ('frontend/app.ts', 'tests/browser/test_material_list.ts',
+    for name in ('frontend/app.ts', 'tests/node/test_owner.ts', 'tests/browser/test_material_list.ts',
                  'tests/browser/test_opened_material.ts', 'tests/browser/test_settings_navigation.ts',
                  'tests/browser/test_ui_lifecycle.ts', 'tests/reader/test_web_assets.py',
                  'tests/reader/test_frontend_build.py'):
@@ -209,7 +209,8 @@ def test_ui_checks_production_http_modules_before_browser(tmp_path):
     result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'ui'],
                             env=runtimes(tmp_path), capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.index('RUN http') < result.stdout.index('RUN browser\n')
+    import re
+    assert result.stdout.index('RUN http') < re.search(r'\nRUN browser(?:\n| \()',result.stdout).start()
     assert 'PASS http' in result.stdout
 
 
@@ -546,7 +547,7 @@ def test_types_run_before_long_checks_and_failure_skips_them(tmp_path, sets):
         assert 'NOT RUN browser' in result.stdout
 
 
-def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_path):
+def test_full_python_collection_excludes_tools_and_already_selected_http_modules(tmp_path):
     import ast
     env = runtimes(tmp_path)
     record = tmp_path / 'commands'
@@ -559,7 +560,8 @@ def test_full_python_collection_excludes_only_already_selected_http_modules(tmp_
     pytest = [command for command in commands if 'pytest' in command]
     assert len(pytest) == 2
     modules = pytest[0][pytest[0].index('-q') + 1:]
-    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore=' + name for name in [*modules, 'tests/development/test_agent_tools.py', 'tests/development/test_update_checkout.py', 'tests/development/test_check_report.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py']}
+    tool_files=[str(path.relative_to(REPO)) for path in (REPO/'tests/development').glob('test_*.py')]
+    assert set(pytest[1][pytest[1].index('-q') + 1:]) == {'--ignore='+name for name in [*modules,*tool_files,'tests/api/test_governance.py','tests/api/test_strict_generation.py']}
     record.write_text('')
     result = run_check_in_process([sys.executable, str(ROOT / 'scripts/check'), 'python', '--files',
                              'tests/reader/test_frontend_build.py'], env=env, capture_output=True, text=True)
@@ -914,3 +916,23 @@ def test_browser_worker_budget_respects_host_and_explicit_override(tmp_path, mon
                                  env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert f'--test-concurrency={expected}' in record.read_text()
+
+
+def test_node_selection_reports_counts_without_browser_probe(tmp_path):
+    env=runtimes(tmp_path)
+    env.pop('OKO_BROWSER_EXECUTABLE')
+    env['OKO_PYTHON']=str(tmp_path/'missing-python')
+    record=tmp_path/'commands'
+    runtime=Path(env['OKO_NODE'])
+    runtime.write_text(runtime.read_text().replace('sys.exit(0)',
+        "from pathlib import Path\nwith Path("+repr(str(record))+").open('a') as out: out.write(repr(sys.argv)+'\\n')\nif '--test' in sys.argv: print('# tests 2\\n# pass 1\\n# fail 0\\n# skipped 1\\n# cancelled 0')\nsys.exit(0)"))
+    result=run_check_in_process([sys.executable,str(ROOT/'scripts/check'),'node','--files','tests/node/test_owner.ts'],env=env,capture_output=True,text=True)
+    assert result.returncode==0,result.stdout+result.stderr
+    calls=record.read_text()
+    assert 'run-browser-tests' not in calls and "'-e'" not in calls
+    assert calls.count('test_owner.ts')==1
+    import json
+    report=json.loads(Path(result.stdout.split('Report: ')[-1].strip()).read_text())
+    assert report['test_groups']['Node']['counts']==dict(total=2,passed=1,failed=0,skipped=1,cancelled=0)
+    assert report['test_groups']['Node']['duration_seconds']>=0
+    assert 'Playwright' not in report['test_groups']

@@ -51,8 +51,15 @@ class Report:
     def failure(self, line):
         if self.current:
             passed = re.match(r'^# pass (\d+)$', line)
-            if self.current == 'browser' and passed:
-                self.data['suites']['browser']['passed_scenarios'] = int(passed.group(1))
+            if self.current in ('browser','node-tests'):
+                if passed:
+                    suite=self.data['suites'][self.current]
+                    suite['passed_scenarios']=suite.get('passed_scenarios',0)+int(passed.group(1))
+                count=re.match(r'^# (tests|pass|fail|skipped|cancelled) (\d+)$',line)
+                if count:
+                    key={'tests':'total','pass':'passed','fail':'failed'}.get(count[1],count[1])
+                    counts=self.data['suites'][self.current].setdefault('counts',{})
+                    counts[key]=counts.get(key,0)+int(count[2])
             match = re.match(r'^(?:FAILED|ERROR) (.+?)(?: - |$)', line)
             tap = re.match(r'^\s*not ok \d+ - (.+)', line)
             failure = match.group(1) if match else tap.group(1).strip() if tap else None
@@ -71,9 +78,29 @@ class Report:
         self.failure(self.pending_line)
         self.pending_line = ''
 
+    def test_groups(self, results):
+        groups={}
+        for label, names in [('Python',('python-tests','http')),('tools',('tool-tests',)),
+                             ('Node',('node-tests',)),('Playwright',('browser',))]:
+            selected=[name for name in names if name in results]
+            if not selected:
+                continue
+            counts={}
+            seconds=0.0
+            for name in selected:
+                suite=self.data['suites'][name]
+                seconds+=suite.get('duration_seconds',sum(c.get('duration_seconds',0) for c in suite['commands']))
+                for key,value in suite.get('counts',{}).items():
+                    counts[key]=counts.get(key,0)+value
+            groups[label]=dict(status='PASS' if all(results[n].startswith('PASS') for n in selected) else 'FAIL' if any(results[n].startswith('FAIL') for n in selected) else 'INTERRUPTED' if any(results[n]=='INTERRUPTED' for n in selected) else 'NOT RUN',
+                counts=counts,duration_seconds=round(seconds,4))
+        self.data['test_groups']=groups
+        return groups
+
     def finish(self, results, exit_code, started):
         for name, status in results.items():
             self.data['suites'][name]['status'] = status
+        self.test_groups(results)
         self.data.update(exit_code=exit_code, duration_seconds=round(time.monotonic() - started, 2),
                          log=str(self.directory / 'output.log'))
         (self.directory / 'report.json').write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + '\n')
@@ -182,9 +209,15 @@ def execute(command, env, report=None, **output):
             if timing_path and timing_path.is_file():
                 suite = report.data['suites'][report.current]
                 try:
+                    cases=list(ET.parse(timing_path).iter('testcase'))
                     durations = [dict(file=case.get('file', ''), name=case.get('name', ''),
                                       classname=case.get('classname', ''), seconds=float(case.get('time', '0')))
-                                 for case in ET.parse(timing_path).iter('testcase')]
+                                 for case in cases]
+                    counts=suite.setdefault('counts',{})
+                    totals=dict(total=len(cases),failed=sum(c.find('failure') is not None for c in cases),
+                        errors=sum(c.find('error') is not None for c in cases),skipped=sum(c.find('skipped') is not None for c in cases))
+                    totals['passed']=totals['total']-totals['failed']-totals['errors']-totals['skipped']
+                    for key,value in totals.items(): counts[key]=counts.get(key,0)+value
                     suite.setdefault('test_durations', []).extend(durations)
                     files = suite.setdefault('file_durations', {})
                     for case in durations:
@@ -226,7 +259,7 @@ def checkout_state(excluded):
     return result
 
 
-TOOL_TESTS = ('tests/development/test_agent_tools.py', 'tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
+TOOL_TESTS = ('tests/development/test_fixture_contracts.py', 'tests/development/test_test_environment.py', 'tests/development/test_update_working_oko.py', 'tests/development/test_agent_tools.py', 'tests/development/test_docker_release.py', 'tests/development/test_library_templates.py', 'tests/development/test_update_checkout.py', 'tests/development/test_check_snapshot.py', 'tests/development/test_check_report.py', 'tests/development/test_api_generation.py', 'tests/development/test_browser_host.py', 'tests/development/test_build_speed.py', 'tests/development/test_check_runner.py', 'tests/development/test_frontend_builder.py', 'tests/development/test_github_issues.py', 'tests/development/test_hooks.py', 'tests/development/test_process_logs.py', 'tests/development/test_task_changes.py', 'tests/api/test_governance.py', 'tests/api/test_strict_generation.py')
 TOOL_INPUTS = ('scripts/', '.githooks/', '.github/', 'api/', 'tests/development/',
                'tests/support/', 'frontend/src/api/generated/',
                'oko/reader/generated/',
@@ -353,7 +386,7 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                             code = execute(command, child_env, report=child_report)
                             if code:
                                 break
-                        if name == 'browser' and match is not None and not child_report.data['suites'][name].get('passed_scenarios'):
+                        if name in ('browser','node-tests') and match is not None and not child_report.data['suites'][name].get('passed_scenarios'):
                             child_report.output('No browser scenarios matched the requested filter.\n')
                             code = 1
                         status = f'{"FAIL" if code else "PASS"} ({time.monotonic() - tick:.2f}s)'
@@ -432,6 +465,9 @@ def parallel_tests(names, commands, environment, report, results, match=None):
                     aggregate['commands'].extend(data['commands'])
                     aggregate['failures'] = list(dict.fromkeys([*aggregate['failures'], *data['failures']]))
                     aggregate.setdefault('workers', {})[name] = data
+                    for key,value in data.get('counts',{}).items():
+                        counts=aggregate.setdefault('counts',{})
+                        counts[key]=counts.get(key,0)+value
                     aggregate.setdefault('test_durations', []).extend(data.get('test_durations', []))
                     files = aggregate.setdefault('file_durations', {})
                     for filename, seconds in data.get('file_durations', {}).items():
@@ -460,9 +496,10 @@ def parallel_tests(names, commands, environment, report, results, match=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    groups = {'ui': ['build', 'syntax', 'lint', 'http', 'browser', 'diff'],
-              'all': ['contracts', 'build', 'syntax', 'lint', 'types', 'http', 'browser', 'diff', 'python-tests', 'entrypoint'],
+    groups = {'ui': ['build', 'syntax', 'lint', 'http', 'node-tests', 'browser', 'diff'],
+              'all': ['contracts', 'build', 'syntax', 'lint', 'types', 'http', 'node-tests', 'browser', 'diff', 'python-tests', 'entrypoint'],
               'python': ['contracts', 'python-tests'],
+              'node': ['node-tests'],
               'tools': ['contracts', 'tool-tests'],
               'lifecycle': ['build', 'syntax', 'lint', 'browser', 'diff']}
     suites = ('contracts', 'build', 'syntax', 'lint', 'http', 'browser', 'browser-types', 'tooling-types', 'diff', 'types', 'entrypoint', 'staged')
@@ -491,16 +528,16 @@ def main():
             names.append('tool-tests')
     if args.if_changed and not tools_required:
         names.remove('tool-tests')
-    if {'build','syntax','lint','browser'} & set(names) and 'tooling-types' not in names:
+    if {'build','syntax','lint','browser','node-tests'} & set(names) and 'tooling-types' not in names:
         names.insert(0, 'tooling-types')
-    if 'browser' in names and 'browser-types' not in names:
-        names.insert(names.index('browser'), 'browser-types')
-    if {'browser', 'python-tests', 'tool-tests'} & set(names):
+    if {'browser','node-tests'} & set(names) and 'browser-types' not in names:
+        names.insert(min(names.index(n) for n in ('browser','node-tests') if n in names), 'browser-types')
+    if {'browser', 'node-tests', 'python-tests', 'tool-tests'} & set(names):
         early = [name for name in ['contracts','tooling-types','syntax','lint','types','browser-types','build','http'] if name in names]
         names = early + [name for name in names if name not in early]
-    if args.match is not None and 'browser' not in names:
-        parser.error('--match requires browser checks')
-    selected_files = {'browser': [], 'python-tests': [], 'tool-tests': [], 'syntax': [], 'lint': []}
+    if args.match is not None and not {'browser','node-tests'} & set(names):
+        parser.error('--match requires browser or Node checks')
+    selected_files = {'browser': [], 'node-tests': [], 'python-tests': [], 'tool-tests': [], 'syntax': [], 'lint': []}
     for value in args.files or []:
         filename, *node_id = value.split('::', 1)
         candidate = (ROOT / filename).resolve()
@@ -510,9 +547,10 @@ def main():
         matched = False
         for name in names:
             browser = name == 'browser' and relative.parts[:2] == ('tests', 'browser') and candidate.name.startswith('test_') and candidate.suffix == '.ts' and not node_id
+            node_test = name == 'node-tests' and relative.parts[:2] == ('tests','node') and candidate.name.startswith('test_') and candidate.suffix == '.ts' and not node_id
             python_test = name in ('python-tests', 'tool-tests') and relative.parts[0] == 'tests' and candidate.suffix == '.py'
             javascript = ((name in ('syntax', 'lint') and candidate.suffix in ('.js', '.cjs', '.mjs', '.ts', '.tsx', '.cts', '.mts')) or (name == 'syntax' and candidate.suffix in ('.ts', '.tsx'))) and not node_id
-            if browser or python_test or javascript:
+            if browser or node_test or python_test or javascript:
                 selected_files[name].append(str(candidate) + ('::' + node_id[0] if node_id else ''))
                 matched = True
         if not matched:
@@ -560,7 +598,7 @@ def main():
     try:
         if os.name != 'posix':
             raise RuntimeError('This check runner requires a POSIX host (macOS or Linux).')
-        node = executable(env.get('OKO_NODE', 'node'), 'Node') if {'build', 'syntax', 'lint', 'browser', 'browser-types', 'tooling-types'} & set(names) else None
+        node = executable(env.get('OKO_NODE', 'node'), 'Node') if {'build', 'syntax', 'lint', 'browser', 'browser-types', 'tooling-types', 'node-tests'} & set(names) else None
         executable('git', 'Git')
         executable('ps', 'POSIX ps')
         descendants(os.getpid())  # Require process inspection before launching checks.
@@ -585,6 +623,9 @@ def main():
             if probe_code:
                 raise RuntimeError('Browser dependencies unavailable. See tests/browser/README.md.\n' + probe_text)
             env['OKO_BROWSER_EXECUTABLE'] = probe_text.strip()
+        node_files=list(dict.fromkeys(selected_files['node-tests'] or map(str,sorted((ROOT/'tests/node').glob('test_*.ts')))))
+        if 'node-tests' in names and not node_files:
+            raise RuntimeError('Node test files missing. See tests/browser/README.md.')
         browser_files=list(dict.fromkeys(selected_files['browser'] or map(str, sorted((ROOT / 'tests/browser').glob('test_*.ts')))))
         # Latency acceptance needs a free browser worker, after functional cases.
         # It remains mandatory in browser/ui/all and retains its 200ms budget.
@@ -596,6 +637,7 @@ def main():
             'lint': [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/lint-js.cts'), *dict.fromkeys(selected_files['lint'])]],
             'tooling-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.tooling.json']],
             'browser-types': [[node, '--import', 'tsx', str(ROOT / 'scripts/check-types.mts'), 'tsconfig.browser-tests.json']],
+            'node-tests': [[node,'--require','tsx/cjs','--require',str(ROOT/'scripts/register-browser-typescript.cts'),'--test','--test-reporter=tap',*(['--test-name-pattern='+args.match] if args.match is not None else []),*node_files]],
             'browser': [[node, '--require', 'tsx/cjs', str(ROOT / 'scripts/run-browser-tests.cts'), '--require', 'tsx/cjs', '--require', str(ROOT / 'scripts/register-browser-typescript.cts'), '--enable-source-maps', '--test', '--test-reporter=tap', '--test-concurrency=' + str(args.browser_workers), *(['--test-name-pattern=' + args.match] if args.match is not None else []), *batch] for batch in browser_batches],
             'diff': [['git', 'diff', '--check'], ['git', 'diff', '--cached', '--check']],
         }
@@ -617,12 +659,12 @@ def main():
                 commands['python-tests'][0].extend('--ignore=' + name for name in commands['http'][0][4:])
         def blocked(name):
             return (any(results.get(gate, '').startswith('FAIL') for gate in ('tooling-types', 'build', 'types'))
-                    or (name == 'browser' and any(results.get(gate, '').startswith('FAIL') for gate in ('syntax', 'lint', 'browser-types'))))
+                    or (name in ('browser','node-tests') and any(results.get(gate, '').startswith('FAIL') for gate in ('syntax', 'lint', 'browser-types'))))
         for current in names:
             if results[current] != 'NOT RUN':
                 continue
-            if current in ('browser', 'python-tests', 'tool-tests'):
-                runnable = [name for name in names if name in ('browser', 'python-tests', 'tool-tests') and results[name] == 'NOT RUN' and not blocked(name)]
+            if current in ('browser', 'node-tests', 'python-tests', 'tool-tests'):
+                runnable = [name for name in names if name in ('browser', 'node-tests', 'python-tests', 'tool-tests') and results[name] == 'NOT RUN' and not blocked(name)]
                 if len(runnable) > 1 or current in ('python-tests', 'tool-tests'):
                     parallel_tests(runnable, commands, env, report, results, args.match)
                     if results[current] != 'NOT RUN':
@@ -646,7 +688,7 @@ def main():
             report.output(f'\nRUN {current}\n')
             tick = time.monotonic()
             baseline = None
-            if current in ['browser','python-tests','tool-tests']:
+            if current in ['browser','node-tests','python-tests','tool-tests']:
                 artifact_dir = report.directory / 'artifacts' / current
                 artifact_dir.mkdir(parents=True, exist_ok=True)
                 env['OKO_TEST_ARTIFACT_DIR'] = str(artifact_dir)
@@ -656,11 +698,12 @@ def main():
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
                     break
             else:
-                if current == 'browser' and args.match is not None and not report.data['suites']['browser'].get('passed_scenarios'):
+                if current in ('browser','node-tests') and args.match is not None and not report.data['suites'][current].get('passed_scenarios'):
                     report.output('No browser scenarios matched the requested filter.\n')
                     results[current] = f'FAIL ({time.monotonic() - tick:.2f}s)'
                 else:
                     results[current] = f'PASS ({time.monotonic() - tick:.2f}s)'
+            report.data['suites'][current]['duration_seconds']=round(time.monotonic()-tick,4)
             if baseline is not None:
                 after = checkout_state(report.directory)
                 changed = sorted(name for name in baseline.keys() | after.keys() if baseline.get(name) != after.get(name))
@@ -692,6 +735,9 @@ def main():
         for name, suite in report.data['suites'].items():
             for failure in suite['failures']:
                 report.output(f'  {name}: {failure}\n')
+        for label,group in report.test_groups(results).items():
+            counts=group['counts']
+            report.output(f"Tests {label}: {group['status']}, {counts.get('passed','?')} passed, {counts.get('skipped',0)} skipped, {group['duration_seconds']:.2f}s\n")
         report.output(f'Total {time.monotonic() - started:.2f}s\n')
         report.output(f'Report: {report.directory / "report.json"}\n')
         report.finish(results, exit_code, started)

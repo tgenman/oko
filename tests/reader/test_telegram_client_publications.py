@@ -259,19 +259,19 @@ def test_changing_native_profile_does_not_reuse_other_accounts_read_frontier(tmp
         assert acknowledgements==[('one',11),('two',11)]
 
 
-@pytest.mark.parametrize('kind,forum', [('group',False),('group',True),('channel',True)])
-def test_group_cannot_be_connected_before_new_pagination(tmp_path,kind,forum):
+def test_group_cannot_be_connected_before_new_pagination(tmp_path):
     root=publication_root(tmp_path)
     class Client(Telegram):
         async def info(self,*args):
             return dict(peer=-1001234567890,username='fixture',title='Group',kind=kind,forum=forum)
     with TestClient(create_app(root,token='test',api_only=True,telegram_client=Client()),headers=HEADERS) as client:
         presence(client,'reader')
-        connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
-        assert connected.status_code==400,connected.text
-        assert connected.json()['code']=='source_connection_invalid'
-        assert connected.json()['details']['reason']=='unsupported_group'
-        assert client.get('/api/v3/subscriptions').json()['feeds']==[]
+        for kind,forum in [('group',False),('group',True),('channel',True)]:
+            connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
+            assert connected.status_code==400,connected.text
+            assert connected.json()['code']=='source_connection_invalid'
+            assert connected.json()['details']['reason']=='unsupported_group'
+            assert client.get('/api/v3/subscriptions').json()['feeds']==[]
 
 
 def test_true_feed_id_conflict_refuses_switch_without_merging_or_overwriting(tmp_path):
@@ -354,31 +354,38 @@ def test_native_peer_proof_handles_known_rename_and_keeps_publication_after_rest
 
 
 
-def test_native_album_growth_updates_same_publication_and_its_members(tmp_path):
+def test_native_album_growth_keeps_media_members_and_card_through_retry_and_collect(tmp_path):
     root=publication_root(tmp_path)
-    expanded=[False]
+    parts=[dict(id=11,date=time.time()-60,text='First album part',group=77,
+        media=dict(kind='image',extension='jpg',mime='image/jpeg'))]
     class Client(Telegram):
         async def info(self,*args):
             return dict(peer=-1001234567890,username='fixture',title='Channel',kind='channel',forum=False)
         async def page(self,*args):
-            rows=[dict(id=11,date=time.time()-60,text='First album part',group=77,media=None)]
-            if expanded[0]:
-                rows.append(dict(id=12,date=time.time()-60,text='Second album part',group=77,media=None))
-            return dict(messages=rows,more=False,gap=None)
+            return dict(messages=parts,more=False,gap=None)
         async def messages(self,*args):
-            return (await self.page())['messages']
+            return parts
     with TestClient(create_app(root,token='test',api_only=True,telegram_client=Client()),headers=HEADERS) as client:
         presence(client,'reader')
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
         assert connected.status_code==200,connected.text
-        item=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))['id']
-        expanded[0]=True
-        assert client.post('/api/v3/collect').status_code==200
-        wait_for(client,lambda:'Second album part' in client.get('/api/v3/materials/'+item).json()['content']['text'])
-        value=client.get('/api/v3/materials/'+item).json()
+        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if len(c['attachments'])==1),None))
+        item=card['id']
+        parts.append(dict(id=12,date=time.time()-60,text='Second album part',group=77,
+            media=dict(kind='video',extension='mp4',mime='video/mp4')))
+        assert client.post('/api/v3/materials/'+item+'/retry').status_code==200
+        value=wait_for(client,lambda:m if len((m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'])==2 else None)
+        assert value['content']['completeness']['state']=='complete'
         assert value['source']['message_ids']==['11','12']
-        assert [card['id'] for card in client.get('/api/v3/cards').json()]==[item]
+        assert 'First album part' in value['content']['text'] and 'Second album part' in value['content']['text']
+        assert [c['id'] for c in client.get('/api/v3/cards').json()]==[item]
+        parts.append(dict(id=13,date=time.time()-60,text='Third album part',group=77,media=None))
+        assert client.post('/api/v3/collect').status_code==200
+        value=wait_for(client,lambda:m if 'Third album part' in (m:=client.get('/api/v3/materials/'+item).json())['content']['text'] else None)
+        assert value['source']['message_ids']==['11','12','13']
+        assert value['content']['completeness']['state']=='complete' and len(value['content']['attachments'])==2
+        assert [c['id'] for c in client.get('/api/v3/cards').json()]==[item]
 
 
 def test_native_media_change_refreshes_description_and_retries_same_file_after_backoff(tmp_path):
