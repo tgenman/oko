@@ -29,6 +29,17 @@ an applied receipt is retried, and ordinary start cannot acknowledge an unloaded
 certificate. Existing database credentials are never regenerated when absent.
 Strict mypy passed for the changed application modules.
 
+The final isolated affected-suite run passed **37 tests** after building the
+frontend in that new checkout. Its initial attempt had 12 missing-frontend
+failures; source was unchanged between that attempt and the prepared rerun.
+Docker Desktop readiness now runs service control inside the reader container,
+so its bridge forwarding does not conflict with the loopback peer requirement.
+The Docker release file passed **30 tests** with that compatibility correction,
+including per-exec subprocess timeouts. The same stdlib-only probe passed in an
+isolated container from the previous Mac image (network disabled, read-only root,
+synthetic tmpfs data), proving old images need no new control module. That test
+container was removed; the actual Mac installation was not restarted.
+
 An independent reviewer inspected the external-state paths. Their first
 combined TLS/operator/readiness run had 14 passes and one HTTP ReadTimeout;
 the unchanged PostgreSQL CLI file then passed all 4 cases. This is recorded as

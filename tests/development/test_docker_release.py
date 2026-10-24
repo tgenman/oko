@@ -453,3 +453,37 @@ def test_unreachable_helper_exits_at_deadline_and_stops_new_reader(tmp_path,monk
     monkeypatch.setitem(scope,'compose',compose)
     with pytest.raises(urllib.error.URLError):maintenance['start'](home)
     assert attempts==[True] and stopped==[True]
+
+
+def test_reader_readiness_uses_container_loopback_instead_of_desktop_forwarding(tmp_path,monkeypatch):
+    import runpy
+    import subprocess
+    maintenance=runpy.run_path(str(SCRIPT));scope=maintenance['readiness'].__globals__
+    calls=[]
+    def compose(home,*args,**options):
+        assert home==tmp_path
+        assert 0 < options['timeout'] <= 5
+        calls.append(args)
+        if len(calls)==1:raise subprocess.CalledProcessError(1,['synthetic reader still starting'])
+        if len(calls)==2:raise subprocess.TimeoutExpired(['synthetic stalled daemon'],options['timeout'])
+    monkeypatch.setitem(scope,'compose',compose)
+    monkeypatch.setattr(scope['time'],'sleep',lambda _:None)
+    maintenance['readiness'](tmp_path)
+    assert len(calls)==3 and calls[0]==calls[1]==calls[2]
+    assert calls[0][:-1]==('exec','--no-TTY','reader','python','-c')
+    assert 'oko.reader.control' not in calls[0][-1]
+    assert '/data/runtime.json' in calls[0][-1] and 'http://127.0.0.1:8765/api/v3/status' in calls[0][-1]
+
+
+def test_compose_forwards_readiness_deadline_to_subprocess(tmp_path,monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+    maintenance=runpy.run_path(str(SCRIPT));scope=maintenance['compose'].__globals__
+    monkeypatch.setitem(scope,'release',lambda *args:(tmp_path,dict(image='synthetic-image')))
+    calls=[]
+    def execute(*args,**options):
+        calls.append(options)
+        return SimpleNamespace(stdout='')
+    monkeypatch.setattr(scope['subprocess'],'run',execute)
+    maintenance['compose'](tmp_path,'exec','--no-TTY','reader','true',timeout=1.25)
+    assert calls[0]['timeout']==1.25
