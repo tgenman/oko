@@ -1,3 +1,4 @@
+from oko.execution import read_locked
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
 from oko.storage.reading import reading_snapshot
 from pathlib import Path
@@ -8,13 +9,15 @@ from oko.reader.http_schemas import SchemaRoute
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Request
 from fastapi.responses import Response
+from oko.reader.media_response import OpenMediaResponse
 
 from oko.reader import projection_v3 as project
 from oko.reader.api_v3 import ApiError, invalid, no_query, scalar_boolean
 from oko.reader.commands_v3 import track
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
-from oko.reader.runtime import Runtime, ActionError
+from oko.application.reader import ReaderApplication
+from oko.execution import ActionError
 from oko.reviews.coordination import ProcessingWait
 
 
@@ -90,11 +93,11 @@ class Common(TypedDict):
     theses: wire.ThesesState
 
 
-def saved_filter(runtime: Runtime, item: str, value: facts.Filter | None) -> wire.FilterState:
-    current=runtime.require_store()
+def saved_filter(runtime: ReaderApplication, item: str, value: facts.Filter | None) -> wire.FilterState:
+    current=runtime.queries
     filtered = filter_state(value, runtime.processing_wait(item, 'filter'))
     if filtered.root.result is not None:
-        saved = current.publications.provenance(item,'filter')
+        saved = current.provenance(item,'filter')
         if saved:
             from pydantic import TypeAdapter
             origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
@@ -102,8 +105,8 @@ def saved_filter(runtime: Runtime, item: str, value: facts.Filter | None) -> wir
     return filtered
 
 
-def common(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed) -> Common:
-    current = runtime.require_store()
+def common(runtime: ReaderApplication, value: facts.Card, feed: wire.SubscriptionFeed) -> Common:
+    current = runtime.queries
     source: wire.DemoSourceReference | wire.RssSourceReference | wire.YoutubeSourceReference | wire.TelegramSourceReference
     fid, url = wire.FeedId(value.feed_id), wire.SourceUrl(value.url)
     owner = feed.root
@@ -128,8 +131,8 @@ def attachments(values: list[facts.Attachment]) -> list[wire.Attachment]:
     return [wire.Attachment(kind=a.kind, mime=a.mime, url=media_url(a.url)) for a in values]
 
 
-def card(runtime: Runtime, value: facts.Card, feed: wire.SubscriptionFeed, shared: Common | None = None) -> wire.ReadingCard:
-    current = runtime.require_store()
+def card(runtime: ReaderApplication, value: facts.Card, feed: wire.SubscriptionFeed, shared: Common | None = None) -> wire.ReadingCard:
+    current = runtime.queries
     shared = shared if shared is not None else common(runtime, value, feed)
     if not value.complete:
         return wire.ReadingCard(wire.PendingReadingCard(**shared, availability='pending', loading=value.loading is not False))
@@ -162,32 +165,35 @@ def preview(value: facts.CompletionPreview) -> wire.CompletionPreview:
     return wire.CompletionPreview(cards_count=value.cards, publications_count=value.originals, token=value.token)
 
 
-def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMaterial]:
+def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.ReadableMaterial]:
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
-        saved = runtime.require_store().subscriptions
+        saved = runtime.queries
         rows=saved.feeds() if identity is None else saved.feeds(identity)
-        bindings=saved.telegram.bindings([row['id'] for row in rows])
+        bindings=saved.bindings([row['id'] for row in rows])
         return {v['id']:project.subscription(facts.SubscriptionFeed.model_validate(v),bindings.get(v['id'])) for v in rows}
 
     def composition() -> wire.ReadingComposition:
-        current = runtime.require_store()
-        value = facts.Navigation.model_validate(current.reading.navigation())
+        current = runtime.queries
+        value = facts.Navigation.model_validate(current.navigation())
         owners = feeds()
         return wire.ReadingComposition(count=value.count, folders=[wire.ReadingFolder(id=wire.FolderId(f.id), title=f.title, position=f.position if isinstance(f.position, int) else 0, count=f.count) for f in value.folders], feeds=[wire.NavigationFeed(feed=owners[f.id], count=f.count, has_unviewed=f.has_unviewed) for f in value.feeds])
 
     @router.get('/api/v3/reading-composition', response_model=wire.ReadingComposition)
+    @read_locked(runtime.execution)
     async def navigation() -> wire.ReadingComposition:
         with reading_snapshot():
             return composition()
 
     @router.get('/api/v3/folders', response_model=list[wire.ReadingFolder])
+    @read_locked(runtime.execution)
     async def folders() -> list[wire.ReadingFolder]:
         with reading_snapshot():
             return composition().folders
 
     @app.get('/api/v3/cards', response_model=list[wire.ReadingCard])
+    @read_locked(runtime.execution)
     async def cards(request: Request) -> list[wire.ReadingCard]:
         with reading_snapshot():
             allowed = {'folder', 'feed', 'sort', 'show_hidden'}
@@ -204,8 +210,8 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
                         wire.FolderId(value) if key == 'folder' else wire.FeedId(value)
                     except ValueError:
                         raise ApiError(422, invalid('query', key)) from None
-            current = runtime.require_store()
-            values = [facts.Card.model_validate(v) for v in current.reading.cards(scalar_boolean(request, 'show_hidden'), folder, feed)]
+            current = runtime.queries
+            values = [facts.Card.model_validate(v) for v in current.cards(scalar_boolean(request, 'show_hidden'), folder, feed)]
             if sort == 'importance':
                 values.sort(key=lambda c: (-{'normal':0, 'elevated':1, 'high':2}[c.importance], -c.published, c.id))
             else:
@@ -216,14 +222,15 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
             return [card(runtime, value, owners[value.feed_id]) for value in values]
 
     @router.get('/api/v3/materials/{item}', response_model=wire.ReadableMaterial)
+    @read_locked(runtime.execution)
     async def material(item: str) -> wire.ReadableMaterial:
         return read_material(item)
 
     def read_material(item: str) -> wire.ReadableMaterial:
         with reading_snapshot():
             identity(item)
-            current = runtime.require_store()
-            raw = current.reading.material(item)
+            current = runtime.queries
+            raw = current.material(item)
             if raw is None:
                 raise missing(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=identity(item))))
             value = facts.Material.model_validate(raw)
@@ -251,18 +258,20 @@ def register(app: FastAPI, runtime: Runtime) -> Callable[[str], wire.ReadableMat
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:
         identity(item)
-        current = runtime.require_store()
-        value=current.media.file(item,name) if kind=='media' else None
+        current = runtime.queries
+        value=current.media_file(item,name) if kind=='media' else None
         if value is None:
             raise ApiError(404,wire.ErrorEnvelope(wire.MediaUnavailableError(code='media_unavailable',message='Вложение недоступно',details=wire.MediaUnavailableErrorDetails(material_id=identity(item),name=name),command_id=None,diagnostic_id=None)))
         path,mime=value
-        return Response(path.read_bytes(),media_type=mime,headers={'Content-Disposition':'inline'})
+        return OpenMediaResponse(path.open('rb'), mime)
 
     @router.get('/api/v3/materials/{item}/images/{name}')
+    @read_locked(runtime.execution)
     async def image(item: str, name: str) -> Response:
         return read_media(item, 'images', name)
 
     @router.get('/api/v3/materials/{item}/media/{name}')
+    @read_locked(runtime.execution)
     async def attachment(item: str, name: str) -> Response:
         return read_media(item, 'media', name)
 

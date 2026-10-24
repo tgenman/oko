@@ -1,4 +1,5 @@
-"""Versioned HTTP boundary; domain execution remains owned by Runtime.
+from oko.execution import read_locked
+"""Versioned HTTP boundary; domain execution remains owned by ReaderApplication.
 
 Execution policy, neutral client presence and migrated domain families share
 this boundary. Remaining operations migrate with their domain consumers.
@@ -16,7 +17,7 @@ from oko.reader import projection_v3 as project
 from oko.reader import snapshots as facts
 from oko.reader.generated import models as wire
 from oko.reader.lifetime import Lifetime
-from oko.reader.runtime import Runtime
+from oko.application.reader import ReaderApplication
 
 
 class ApiError(Exception):
@@ -54,7 +55,7 @@ def error_response(status: int, value: wire.ErrorEnvelope) -> JSONResponse:
     return JSONResponse(value.model_dump(mode='json'), status_code=status, headers={'Cache-Control': 'no-store'})
 
 
-def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Callable[[], float], journal: Journal) -> None:
+def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_clock: Callable[[], float], journal: Journal) -> None:
     from oko.reader import settings_v3, commands_v3, processors_v3, diagnostics_v3, reading_v3, connections_v3
     from oko.reader import telegram_v3
     from oko.reader import collection_v3
@@ -93,16 +94,17 @@ def register(app: FastAPI, runtime: Runtime, lifetime: Lifetime, wall_clock: Cal
             renew_after_seconds=lifetime.renew_after_seconds)
 
     @app.get('/api/v3/status', response_model=wire.RuntimeStatus)
+    @read_locked(runtime.execution)
     async def status() -> wire.RuntimeStatus:
         return status_data()
 
     def status_data() -> wire.RuntimeStatus:
         snapshot = runtime.status_snapshot()
         old = facts.Status.model_validate(snapshot.state)
-        current = runtime._store if not runtime.stopped else None
+        current = runtime.queries if runtime.has_storage and not runtime.stopped else None
         bindings = {identity: wire.TelegramAccess.model_validate(binding) for identity, binding in snapshot.bindings.items()}
         identities = {obj.id for p in [*old.problems.current, *old.problems.recent] for obj in p.objects if obj.kind == 'material'} if isinstance(old.problems, facts.ProblemSnapshot) else set()
-        material_feeds = {row['id']: row['feed_id'] for row in current.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 AND id IN (' + ','.join('?' for _ in identities) + ')', tuple(identities))} if current and identities else {}
+        material_feeds = current.material_feeds(identities) if current else {}
         policy: wire.ExplicitLifetimePolicy | wire.ClientPresenceLifetimePolicy
         if lifetime.mode == 'explicit':
             policy = wire.ExplicitLifetimePolicy(kind='explicit')

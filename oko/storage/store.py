@@ -30,7 +30,8 @@ from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.reviews.filtering import Filters
 from oko.reviews.coordination import ProcessingCoordination
 from oko.collection.contracts import ReplyPreview, SourceError, SourceDeleted, Material, Publication, SourceManifest
-from oko.subscriptions.subscriptions import Subscriptions
+from oko.storage.subscriptions import SubscriptionRepository
+from oko.storage.transaction import begin_write
 from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.execution import CodexSettings
@@ -59,7 +60,7 @@ class Store:
     def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
                                auto_read: bool | None) -> dict[str,Any]:
         with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+            begin_write(self.db)
             result=self.subscriptions.telegram.change_access(feed,binding,info,auto_read,self.subscriptions)
             self.publications.configure_feed(feed)
             self.publications.changed_adapter(feed)
@@ -104,7 +105,7 @@ class Store:
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_next ON jobs(next,kind,item) WHERE status='pending'")
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_pending_kind_item ON jobs(kind,item,next,id) WHERE status='pending'")
         self.db.execute("CREATE INDEX IF NOT EXISTS jobs_problems ON jobs(kind,item) WHERE problem_code IS NOT NULL OR error IS NOT NULL")
-        self.subscriptions = Subscriptions(self.db, self.fault, wall_clock=self.wall_clock)
+        self.subscriptions = SubscriptionRepository(self.db, self.fault, wall_clock=self.wall_clock)
         self.publications = Publications(self)
         self.media = MediaFiles(self)
         self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock)
@@ -562,7 +563,7 @@ class Store:
                 self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND viewed=0',(member,))
         self.read_sync.sync()
         self.processing.sync()
-        self.fault('after_viewed_commit')
+        self.db.after_commit(lambda: self.fault('after_viewed_commit'))
         return True
 
     def remove_feed(self, feed: str) -> None:
@@ -593,7 +594,7 @@ class Store:
                 self.db.execute('UPDATE items SET viewed=1,complete=0 WHERE id=?', (item,))
                 self.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,generation=generation+1", (item,))
             self.db.execute("INSERT OR IGNORE INTO jobs(kind,item) VALUES ('feed-delete',?)", (feed,))
-        self.fault('after_feed_delete_commit')
+        self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def finish_feed_deletion(self, job: Job) -> None:
         feed = job.item

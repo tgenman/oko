@@ -11,6 +11,7 @@ import binascii
 import re
 import secrets
 import sqlite3
+from oko.storage.transaction import begin_write
 from typing import Any
 from collections.abc import Callable
 from urllib.parse import urlsplit
@@ -53,7 +54,7 @@ class TelegramAccess:
         self.modified = modified
         # No executescript here: migrations and their ownership rows are atomic.
         with db:
-            db.execute('BEGIN IMMEDIATE')
+            begin_write(db)
             db.execute('CREATE TABLE IF NOT EXISTS telegram_avatars (feed TEXT PRIMARY KEY, image BLOB NOT NULL, mime TEXT NOT NULL, digest TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS telegram_bindings (feed TEXT PRIMARY KEY, binding TEXT NOT NULL)')
             db.execute('''CREATE TABLE IF NOT EXISTS telegram_profiles (
@@ -93,7 +94,7 @@ class TelegramAccess:
 
     def save_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> dict[str, Any]:
         with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+            begin_write(self.db)
             old = self.profile(role)
             if (old['generation'] if old else 0) != generation:
                 raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Профиль изменился; повторите проверку', 503)
@@ -142,7 +143,7 @@ class TelegramAccess:
 
     def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: Any, auto_read: bool, subscriptions: Any) -> dict[str, Any]:
         with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+            begin_write(self.db)
             claims = self.claims(info)
             duplicates = self.conflicts(claims, info.get('peer'))
             if duplicates:
@@ -207,7 +208,7 @@ class TelegramAccess:
     def refresh(self, feed: str, info: dict[str, Any]) -> None:
         claims = self.claims(info)
         with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+            begin_write(self.db)
             self.conflicts(claims, info.get('peer'))
             for claim in claims:
                 owners = self.owners([claim])

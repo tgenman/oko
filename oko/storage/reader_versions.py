@@ -6,7 +6,9 @@ no database cursor or event history. Lists retain only a digest of service IDs.
 import hashlib
 import json
 import sqlite3
+from oko.storage.transaction import begin_write
 import uuid
+from _thread import RLock
 from typing import Any, TYPE_CHECKING, cast, Literal
 from collections.abc import Callable
 
@@ -24,6 +26,28 @@ class ReadingConnection(sqlite3.Connection):
     reading_lists: bool | None = None
     membership_feeds: set[str]
     membership_folders: set[str]
+    transaction_depth: int = 0
+    transaction_failed: bool = False
+    commit_callbacks: list[Callable[[], None]] | None = None
+    _access_lock: RLock | None = None
+
+    @property
+    def access_lock(self) -> RLock:
+        if self._access_lock is None:
+            self._access_lock = RLock()
+        return self._access_lock
+
+    def __enter__(self) -> 'ReadingConnection':
+        self.access_lock.acquire()
+        return self
+
+    def after_commit(self, callback: Callable[[], None]) -> None:
+        if self.transaction_depth:
+            if self.commit_callbacks is None:
+                self.commit_callbacks = []
+            self.commit_callbacks.append(callback)
+        else:
+            callback()
 
     def flush_reading_lists(self) -> None:
         if not self.in_transaction:
@@ -62,21 +86,40 @@ class ReadingConnection(sqlite3.Connection):
             self.execute("UPDATE reader_lists SET pending=1 WHERE scope='folder' AND owner=?",(folder,))
 
     def commit(self) -> None:
+        if self.transaction_depth:
+            return
         try:
             self.flush_reading_lists()
             super().commit()
         except BaseException:
             self.rollback()
             raise
+        callbacks, self.commit_callbacks = self.commit_callbacks or [], None
+        for callback in callbacks:
+            callback()
+
+    def rollback(self) -> None:
+        if self.transaction_depth:
+            self.transaction_failed = True
+            return
+        super().rollback()
+        self.commit_callbacks = None
+        self.membership_feeds = set()
+        self.membership_folders = set()
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Literal[False]:
-        if exc_type is None:
-            self.commit()
-        else:
-            self.rollback()
+        try:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
+        finally:
+            self.access_lock.release()
         return False
 
     def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
+        if self.transaction_depth:
+            raise RuntimeError('Schema scripts cannot join an action transaction')
         # CPython's executescript commits through C, bypassing commit overrides.
         # Production scripts are schema/trigger setup, not data-write batches.
         self.commit()
@@ -216,7 +259,7 @@ class ReaderVersions:
         status = self._bump('status', "'runtime'")
         navigation = self._bump('navigation', "'navigation'")
         with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+            begin_write(self.db)
             for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reader_v_%'").fetchall():
                 self.db.execute('DROP TRIGGER "' + row[0].replace('"','""') + '"')
             for event,alias in [('INSERT','NEW'),('DELETE','OLD')]:

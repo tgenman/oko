@@ -1,4 +1,4 @@
-"""Selective, versioned reading over the same Runtime and Store owners."""
+"""Selective, versioned reading over the same ReaderApplication and Store owners."""
 from collections.abc import Callable
 from oko.collection.external_media import saved_external
 from oko.collection.telegram.reading import saved_preview
@@ -12,7 +12,7 @@ from oko.reader.generated import models as wire
 from oko.reader import projection_v3 as project, snapshots as facts
 from oko.reader.api_v3 import ApiError, invalid, no_query
 from oko.reader.composition import snippet, telegram_title
-from oko.reader.runtime import Runtime
+from oko.application.reader import ReaderApplication
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage import material_read, publication_links
 from oko.storage.reading import reading_snapshot, stable_reader_time, reader_now
@@ -25,14 +25,14 @@ def _state(status: str | None, error: str | None = None) -> str:
 
 
 class VersionedReading:
-    def __init__(self, runtime: Runtime, status: Callable[[], wire.RuntimeStatus],
+    def __init__(self, runtime: ReaderApplication, status: Callable[[], wire.RuntimeStatus],
                  material: Callable[[str], wire.ReadableMaterial], metadata: Callable[[], dict[str, Any]]) -> None:
         self.runtime, self.status, self.material, self.metadata = runtime, status, material, metadata
         self.final: dict[str, Any] | None = None
 
     def compact(self, identity: str) -> dict[str, Any] | None:
-        store = self.runtime.require_store()
-        row = material_read.item(store.db, identity)
+        store = self.runtime.queries
+        row = store.item(identity)
         if row is None or row['viewed']:
             return None
         result: dict[str, Any] = dict(id=identity,feed_id=row['feed_id'],title='Материал загружается',
@@ -40,44 +40,44 @@ class VersionedReading:
             source_url=row['url'],snippet='',availability='pending',loading=False,changed=False,
             revision_id=None,preview_url=None,hidden=False,filter_state='disabled',theses_state='disabled')
         if not row['complete']:
-            job = material_read.jobs(store.db, identity).get('fetch')
+            job = store.jobs(identity).get('fetch')
             result['loading'] = bool(job and job['status'] in ('pending', 'running'))
             return result
         header,text=store.original(identity)
-        filtered=store.filters.read(identity)
+        filtered=store.filter(identity)
         description=header.get('description','')
         preview=description or text
         if filtered['status']=='done':
             for _ in range(1 if description else 2):
                 for fragment in filtered['removed']:
                     preview=preview.replace(fragment,'')
-        settings=store.subscriptions.effective('feed',row['feed_id'], details=False)
+        settings=store.effective('feed',row['feed_id'], details=False)
         title=header['title']
         if settings['feed']['kind']=='telegram' and settings['feed'].get('transport')!='rss':
             title=telegram_title(header,text)
         image=None
         attachment=next((a for a in header.get('attachments',[]) if a['kind']=='image'),None)
-        jobs = material_read.jobs(store.db, identity)
+        jobs = store.jobs(identity)
         fetch = jobs.get('fetch')
         theses=jobs.get('theses')
-        theses_state=_state(theses['status'] if theses else 'pending',theses['error'] if theses else None) if store.processing.theses.signature(identity) else 'disabled'
+        theses_state=_state(theses['status'] if theses else 'pending',theses['error'] if theses else None) if store.theses_signature(identity) else 'disabled'
         result.update(title=title,snippet=snippet(preview),availability='available',hidden=bool(filtered['hidden']),
             filter_state=_state(filtered['status'],filtered.get('error')),theses_state=theses_state,
             changed=bool(header.get('changed')),revision_id=store.content_version(identity),
             loading=bool(fetch and (fetch['status']=='running' or fetch['status']=='pending' and fetch['next']<=reader_now(store.clock()))),
             preview_url=header.get('_media_urls',{}).get(image.name,f'/api/v3/materials/{identity}/images/{image.name}') if image else header.get('_media_urls',{}).get(attachment['name'],f"/api/v3/materials/{identity}/media/{attachment.get('media_id',attachment['name'])}") if attachment else None)
-        result['loading'] = result['loading'] or row['platform'] is not None and store.media.loading(identity)
+        result['loading'] = result['loading'] or row['platform'] is not None and store.media_loading(identity)
         external = saved_external(header,f'/api/v3/materials/{identity}')
         result['post_web_unavailable'] = external['post_web_unavailable']
         result['external_attachment_kinds'] = list(dict.fromkeys(a['kind'] for a in external['external_attachments']))
         return result
 
     def text(self, identity: str) -> dict[str, Any]:
-        store=self.runtime.require_store()
-        row=material_read.item(store.db,identity)
+        store=self.runtime.queries
+        row=store.item(identity)
         if row is None or row['viewed']:
             raise ValueError('Material unavailable')
-        feed=material_read.feed(store.db,row['feed_id'])
+        feed=store.feed(row['feed_id'])
         header,text=store.original(identity) if row['complete'] else ({},'')
         source=dict(kind=feed['kind'],feed_id=row['feed_id'],source_url=row['url'])
         if feed['kind']=='youtube':source['captions']=header.get('captions') or 'not_requested'
@@ -87,10 +87,10 @@ class VersionedReading:
             saved.update(original_urls=json.loads(saved['original_urls']),initial_history=None)
             access=project.telegram_access(facts.SubscriptionFeed.model_validate(saved),binding)
             source.update(access=access.model_dump(mode='json'),message_ids=[str(n) for n in json.loads(row['members'])])
-        settings=store.subscriptions.effective('feed',row['feed_id'],details=False)
-        job=material_read.jobs(store.db,identity).get('fetch')
+        settings=store.effective('feed',row['feed_id'],details=False)
+        job=store.jobs(identity).get('fetch')
         loading=bool(job and (job['status']=='running' or job['status']=='pending' and (not row['complete'] or job['next']<=reader_now(store.clock()))))
-        loading=loading or row['platform'] is not None and store.media.loading(identity)
+        loading=loading or row['platform'] is not None and store.media_loading(identity)
         title=header.get('title','Материал загружается')
         if feed['kind']=='telegram' and feed['transport']!='rss' and row['complete']:title=telegram_title(header,text)
         data=dict(id=identity,title=title,feed_id=row['feed_id'],published_at=project.timestamp(row['published']).root if row['published_known'] else None,
@@ -102,15 +102,15 @@ class VersionedReading:
         external = saved_external(header,f'/api/v3/materials/{identity}')
         linked=saved_preview(header)
         if row['platform']=='telegram':
-            linked=publication_links.reading(store,identity,store.publications.original(identity)[1]) or linked
+            linked=store.linked_preview(identity) or linked
         return dict(data,availability='available',content=dict(availability='available',linked_content=linked,post_web_unavailable=external['post_web_unavailable'],text=text,description=header.get('description',''),reply_preview=header.get('reply_preview'),
             completeness=completeness(full,header.get('reason',''),external['external_only'],external['post_web_unavailable']).model_dump(mode='json'),loading=loading,
-            changed=bool(header.get('changed')),source_deleted=store.publications.source_deleted(identity),
+            changed=bool(header.get('changed')),source_deleted=store.source_deleted(identity),
             revision_id=store.content_version(identity),version=1))
 
     def media(self, identity: str) -> dict[str, Any]:
-        store=self.runtime.require_store()
-        row=material_read.item(store.db,identity)
+        store=self.runtime.queries
+        row=store.item(identity)
         if not row or not row['complete']:
             return dict(revision_id=None,images=[],attachments=[])
         header,_=store.original(identity)
@@ -120,23 +120,17 @@ class VersionedReading:
             attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{identity}/media/{a.get('media_id',a['name'])}"),kind=a['kind'],mime=a['mime']) for a in header.get('attachments',[])])
 
     def navigation(self) -> dict[str, Any]:
-        store=self.runtime.require_store()
-        folders=store.subscriptions.folders()
-        versions=store.read_versions.batch({('folder',f['id']) for f in folders})
-        counts={row['folder']:row['visible'] for row in store.db.execute('SELECT * FROM reader_folder_counts')}
-        feeds=[dict(id=r['id'],count=r['visible'] or 0,has_unviewed=bool(r['unviewed'])) for r in store.db.execute('SELECT f.id,c.visible,c.unviewed FROM feeds f LEFT JOIN reader_feed_counts c ON c.feed=f.id ORDER BY f.rowid')]
-        return dict(folders=[dict(id=f['id'],title=f['title'],position=f['position'] or 0,count=counts.get(f['id'],0),version=str(versions['folder',f['id']]['version'])) for f in folders],feeds=feeds,count=store.db.execute('''SELECT count(*) FROM items i LEFT JOIN reader_visibility v ON v.item=i.id
-            WHERE i.viewed=0 AND coalesce(v.hidden,0)=0 AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)''').fetchone()[0])
+        return self.runtime.queries.navigation_versions()
 
     async def finish(self) -> None:
-        store=self.runtime._store
+        store=self.runtime.final_queries if self.runtime.has_storage else None
         if store is None:return
-        store.read_versions.advance(self.metadata())
+        store.versions.advance(self.metadata())
         data=self.status().model_dump(mode='json')
-        row=store.read_versions.version('status','runtime')
+        row=store.versions.version('status','runtime')
         assert row is not None
         data['problems']['updated_at']=project.timestamp(row['changed'])
-        self.final=dict(state='current',storage_id=store.read_versions.identity,resources=[dict(kind='status',id='runtime',state='changed',version=str(row['version']),data=data)])
+        self.final=dict(state='current',storage_id=store.versions.identity,resources=[dict(kind='status',id='runtime',state='changed',version=str(row['version']),data=data)])
 
     async def read(self, body: dict[str, Any]) -> dict[str, Any]:
         if self.runtime.stopped and self.final is not None:
@@ -155,14 +149,14 @@ class VersionedReading:
                 else:stopped_resources.append(dict(kind=kind,id=identity,state='unavailable',version=None,reason='runtime_stopped'))
             return dict(state='current',storage_id=final['storage_id'],resources=stopped_resources)
         async with self.runtime._actions:
-            store=self.runtime.require_store()
-            owner=store.read_versions
+            store=self.runtime.queries
+            owner=store.versions
             now,wall=store.clock(),store.wall_clock()
             if body['storage_id'] is not None and body['storage_id']!=owner.identity:
                 return dict(state='reset',storage_id=owner.identity)
             requested: dict[tuple[str,str], dict[str,Any]]={}
             lists: dict[str, tuple[dict[str,Any], Any, list[str] | None]]={}
-            row: sqlite3.Row | None = None
+            row: dict[str, Any] | None = None
             for request in body['resources']:
                 kind=request['kind']
                 if kind=='list':
@@ -171,7 +165,7 @@ class VersionedReading:
                     target=options['target']
                     scope=target['scope']
                     key=target.get('feed_id',target.get('folder_id',''))
-                    exists=scope=='all' or store.db.execute('SELECT 1 FROM '+('feeds' if scope=='feed' else 'folders')+' WHERE id=?',(key,)).fetchone()
+                    exists=store.scope_exists(scope, key)
                     if not exists:
                         lists[identity]=(request,None,None)
                     else:
@@ -215,7 +209,7 @@ class VersionedReading:
                         and request['known_version']!=str(versions[kind,identity]['version'])
                         and versions[kind,identity]['item_exists'] is not None and not versions[kind,identity]['viewed']}
                     from contextlib import nullcontext
-                    with material_read.material_inputs(store.db,changed_items) if changed_items else nullcontext():
+                    with store.inputs(changed_items) if changed_items else nullcontext():
                         for (kind,identity),request in requested.items():
                             row=versions.get((kind,identity))
                             resource: dict[str,Any]=dict(kind=kind,id=identity)
@@ -229,20 +223,19 @@ class VersionedReading:
                                 if kind=='status': data=status_data
                                 elif kind=='navigation': data=nav
                                 elif kind=='feed':
-                                    feeds=store.subscriptions.feeds(identity)
-                                    data=project.subscription(facts.SubscriptionFeed.model_validate(feeds[0]),store.subscriptions.telegram.binding(identity)).model_dump(mode='json') if feeds else None
+                                    feeds=store.feeds(identity)
+                                    data=project.subscription(facts.SubscriptionFeed.model_validate(feeds[0]),store.binding(identity)).model_dump(mode='json') if feeds else None
                                 elif kind=='card':data=self.compact(identity)
                                 elif kind=='media':data=self.media(identity)
                                 elif kind in ('filter','theses'):
                                     from oko.reader.reading_v3 import saved_filter, theses_parts
-                                    complete=material_read.item(store.db,identity)
+                                    complete=store.item(identity)
                                     revision=store.content_version(identity) if complete and complete['complete'] else None
                                     if kind=='filter':
-                                        filtered=facts.Filter.model_validate(store.filters.read(identity))
+                                        filtered=facts.Filter.model_validate(store.filter(identity))
                                         data=dict(revision_id=revision,filter=saved_filter(self.runtime,identity,filtered).model_dump(mode='json'))
                                     else:
-                                        theses=store.processing.theses
-                                        summary,origin,ai=theses.read(identity),theses.provenance(identity),theses.status(identity)
+                                        summary,origin,ai=store.theses_parts(identity)
                                         projected=theses_parts(facts.Summary.model_validate(summary) if summary else None,
                                             TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(origin) if origin else None,
                                             facts.AI.model_validate(ai) if ai else None,self.runtime.processing_wait(identity,'theses'))
@@ -262,11 +255,11 @@ class VersionedReading:
             return dict(state='current',storage_id=owner.identity,resources=resources)
 
 
-def register(app: FastAPI, runtime: Runtime, status: Callable[[], wire.RuntimeStatus],
+def register(app: FastAPI, runtime: ReaderApplication, status: Callable[[], wire.RuntimeStatus],
              material: Callable[[str], wire.ReadableMaterial], metadata: Callable[[], dict[str, Any]]) -> None:
     reading=VersionedReading(runtime,status,material,metadata)
     runtime.reader_finish=reading.finish
-    runtime.reader_advance=lambda: runtime.require_store().read_versions.advance(metadata())
+    runtime.reader_advance=lambda: runtime.queries.versions.advance(metadata())
 
     @app.post('/api/v3/reading/check',response_model=wire.ReadingCheckResponse,dependencies=[Depends(no_query)])
     async def check(body: wire.ReadingCheckRequest) -> wire.ReadingCheckResponse:

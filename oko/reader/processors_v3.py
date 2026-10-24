@@ -1,4 +1,5 @@
-"""Generated processor contracts backed by the existing Runtime owners."""
+from oko.execution import read_locked
+"""Generated processor contracts backed by the existing ReaderApplication owners."""
 from oko.reader.http_schemas import SchemaRoute
 
 from fastapi import APIRouter, Depends, FastAPI, Request
@@ -9,16 +10,18 @@ from oko.processing.llamacpp import ProcessorConfig
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.reader import projection_v3 as project
-from oko.reader.runtime import Runtime, ActionError
+from oko.application.reader import ReaderApplication
+from oko.execution import ActionError
 
 
-def register(app: FastAPI, runtime: Runtime) -> None:
+def register(app: FastAPI, runtime: ReaderApplication) -> None:
     from oko.reader.api_v3 import no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     from oko.reader.api_v3 import ApiError, invalid
     from oko.reader.commands_v3 import track
 
     @router.get('/api/v3/processors/codex', response_model=wire.CodexProcessorState)
+    @read_locked(runtime.execution)
     async def state() -> wire.CodexProcessorState:
         return project.codex(facts.CodexState.model_validate(runtime.codex_status()))
 
@@ -46,8 +49,9 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             return project.codex(facts.CodexState.model_validate(runtime.codex_status())).availability
 
     @router.get('/api/v3/processors/llamacpp', response_model=wire.LocalProcessorState)
+    @read_locked(runtime.execution)
     async def local_state() -> wire.LocalProcessorState:
-        config = runtime.require_store().processor_config()
+        config = runtime.queries.processor_config()
         return wire.LocalProcessorState(configuration=wire.LocalProcessorConfiguration.model_validate(config.model_dump()) if config else None)
 
     @router.put('/api/v3/processors/llamacpp', response_model=wire.LocalProcessorState)

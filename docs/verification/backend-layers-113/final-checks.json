@@ -1,0 +1,182 @@
+{
+  "started_at": "20261024T082541Z",
+  "selected_files": {
+    "browser": [],
+    "node-tests": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (0.94s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.9439
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.9439
+    },
+    "diff": {
+      "status": "PASS (0.07s)",
+      "commands": [
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.0342
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--cached",
+            "--check"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.0377
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.072
+    },
+    "syntax": {
+      "status": "PASS (0.59s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/scripts/check-ts.cts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/docs/initializer.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/errors.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/client/client.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/client/index.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/client/types.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/client/utils.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/client.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/auth.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/bodySerializer.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/params.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/pathSerializer.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/queryKeySerializer.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/serverSentEvents.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/types.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/core/utils.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/index.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/media.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/revision.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/sdk.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/generated/types.gen.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/reader.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/api/transport.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/browser-auth.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/browser-platform.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/main.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reader-session.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/completion.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/coordination.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/external-attachments.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/feed-actions.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/folder-actions.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/folder-menu.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/linked-content.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/list.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/markdown-links.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/markdown.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/news-actions.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/opened.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/position.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/post-web-unavailable.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/resources.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/store.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/telegram-reply.prototype.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/title.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/tree.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/renderer.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/service-text.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/connections.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/editor.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/feed-details.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/history.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/menus.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/models.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/operations.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/owner.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/telegram.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/settings/youtube.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/shell.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/status/actions.ts",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/status/collection.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/status/debug.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/status/panel.tsx",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/status/recovery.ts"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.5386
+        },
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--check",
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/frontend/src/reading/telegram-reply.prototype.mjs"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.0468
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.5855
+    },
+    "types": {
+      "status": "PASS (2.24s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/.venv/bin/python",
+            "-m",
+            "mypy",
+            "oko",
+            "tests/support/codex.py",
+            "tests/support/app.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 2.2406
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 2.2406
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "tests/support/runtime_clock.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {},
+  "exit_code": 0,
+  "duration_seconds": 3.95,
+  "log": "/Users/dabondarev/.codex/worktrees/backend-layers-113/oko/.scratch/check-runs/20261024T082541Z-9be9bb0a/output.log"
+}

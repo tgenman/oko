@@ -1,3 +1,4 @@
+from oko.execution import read_locked
 """Single-source connections and archive controls over the reader runtime."""
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -12,7 +13,8 @@ from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.reader import projection_v3 as project
 from oko.reader.commands_v3 import track
-from oko.reader.runtime import Runtime, ActionError
+from oko.application.reader import ReaderApplication
+from oko.execution import ActionError
 from oko.subscriptions.history import InitialHistory
 from oko.subscriptions.subscriptions import AddFeed, FeedURL
 
@@ -26,22 +28,24 @@ def selection(value: wire.HistoryCountSelection) -> InitialHistory:
         raise ApiError(422, invalid('body', 'initial_history')) from None
 
 
-def register(app: FastAPI, runtime: Runtime) -> None:
+def register(app: FastAPI, runtime: ReaderApplication) -> None:
     from oko.reader.api_v3 import ApiError, no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
     @router.get('/api/v3/subscriptions', response_model=wire.SubscriptionCatalog)
+    @read_locked(runtime.execution)
     async def subscriptions() -> wire.SubscriptionCatalog:
-        saved = runtime.require_store().subscriptions
-        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(v), saved.telegram.binding(v['id'])) for v in saved.feeds()])
+        saved = runtime.queries
+        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(v), saved.binding(v['id'])) for v in saved.feeds()])
 
     @router.get('/api/v3/feeds/{feed}/avatar/{revision}')
+    @read_locked(runtime.execution)
     async def feed_avatar(feed: str, revision: str) -> Response:
-        current = runtime.require_store()
-        row = current.db.execute("SELECT a.image,a.mime FROM telegram_avatars a JOIN feeds f ON f.id=a.feed WHERE a.feed=? AND a.digest=? AND f.connection!='deleting'", (feed, revision)).fetchone()
+        current = runtime.queries
+        row = current.avatar(feed, revision)
         if not row:
             raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message='Аватар недоступен', details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed',feed_id=wire.FeedId(feed)))), command_id=None, diagnostic_id=None)))
-        return Response(bytes(row['image']), media_type=row['mime'])
+        return Response(row[0], media_type=row[1])
 
     def folder_id(folder: str) -> wire.FolderId:
         from oko.reader.api_v3 import invalid
@@ -92,6 +96,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             return project.subscription(facts.SubscriptionFeed.model_validate(result))
 
     @router.get('/api/v3/youtube', response_model=wire.YouTubeState)
+    @read_locked(runtime.execution)
     async def youtube() -> wire.YouTubeState:
         return project.youtube(facts.YouTube.model_validate(runtime.youtube_status()))
 
@@ -123,11 +128,11 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                 if runtime.stopped or error.kind == 'unavailable' or error.code == 'runtime_disabled':
                     raise
                 command_id = wire.CommandId(request.state.command_id)
-                saved = runtime.require_store().subscriptions.feeds(identity)
+                saved = runtime.queries.feeds(identity)
                 if not saved:
                     raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), diagnostic_id=None, command_id=command_id,
                         details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(identity))))))) from None
-                state = project.subscription(facts.SubscriptionFeed.model_validate(saved[0]),runtime.require_store().subscriptions.telegram.binding(identity)).root.history
+                state = project.subscription(facts.SubscriptionFeed.model_validate(saved[0]),runtime.queries.binding(identity)).root.history
                 raise ApiError(409, wire.ErrorEnvelope(wire.HistoryConflictError(code='history_conflict', message=str(error.detail), diagnostic_id=None, command_id=command_id,
                     details=wire.HistoryConflictErrorDetails(feed_id=wire.FeedId(identity), history=state)))) from None
 

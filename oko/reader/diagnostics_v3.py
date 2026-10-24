@@ -1,3 +1,4 @@
+from oko.execution import read_locked
 """Masked diagnostics, including explicit acknowledgement of forgotten content."""
 from oko.reader.http_schemas import SchemaRoute
 
@@ -7,13 +8,14 @@ from oko.diagnostics import BrowserError, Journal
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.reader.projection_v3 import diagnostic
-from oko.reader.runtime import Runtime
+from oko.application.reader import ReaderApplication
 
 
-def register(app: FastAPI, runtime: Runtime, journal: Journal) -> None:
+def register(app: FastAPI, runtime: ReaderApplication, journal: Journal) -> None:
     from oko.reader.api_v3 import no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     @router.get('/api/v3/diagnostics', response_model=wire.DiagnosticJournal)
+    @read_locked(runtime.execution)
     async def entries() -> wire.DiagnosticJournal:
         return wire.DiagnosticJournal(groups=[diagnostic(facts.DiagnosticEntry.model_validate(entry)) for entry in journal.entries()], persistence_error=journal.persistence_error or None)
 

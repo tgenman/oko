@@ -1,3 +1,4 @@
+from oko.execution import read_locked
 """Typed command observations over the existing persisted action journal."""
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -7,8 +8,8 @@ from oko.reader.http_schemas import SchemaRoute
 from fastapi import APIRouter, Depends, FastAPI, Request
 
 from oko.reader.generated import models as wire
-from oko.reader.runtime import Runtime
-from oko.reader.runtime import ActionError
+from oko.application.reader import ReaderApplication
+from oko.execution import ActionError
 from oko.storage.problems import CommandContextMismatch
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -36,12 +37,12 @@ def context_record(context: wire.CommandContext) -> dict[str, object]:
 
 
 @asynccontextmanager
-async def track(runtime: Runtime, request: Request, context: wire.CommandContext) -> AsyncIterator[None]:
+async def track(runtime: ReaderApplication, request: Request, context: wire.CommandContext) -> AsyncIterator[None]:
     from oko.reader.api_v3 import ApiError
     identity = request.state.command_id
     context = canonical_context(context)
     check_context(runtime, identity, context)
-    prior = runtime.require_store().problems.command_record(identity)
+    prior = runtime.queries.command_record(identity)
     try:
         await runtime.action_started(identity, context_record(context), restart=True, expected_identity=prior.identity if prior else None)
     except CommandContextMismatch:
@@ -73,16 +74,16 @@ def stored_context(value: str | None) -> wire.CommandContext | None:
         return None
 
 
-def check_context(runtime: Runtime, identity: str, context: wire.CommandContext) -> None:
-    row = runtime.require_store().problems.command_record(identity)
+def check_context(runtime: ReaderApplication, identity: str, context: wire.CommandContext) -> None:
+    row = runtime.queries.command_record(identity)
     old = stored_context(row.context_json) if row else None
     if row is not None and (old is None or canonical_context(old) != canonical_context(context)):
         raise mismatch(identity)
 
 
-def receipt(runtime: Runtime, identity: str) -> wire.CommandReceipt:
+def receipt(runtime: ReaderApplication, identity: str) -> wire.CommandReceipt:
     from oko.reader.api_v3 import timestamp
-    row = runtime.require_store().problems.command_record(identity)
+    row = runtime.queries.command_record(identity)
     command_id = wire.CommandId(identity)
     context = stored_context(row.context_json) if row else None
     if row is None or row.result=='unknown' or context is None:
@@ -99,7 +100,7 @@ def receipt(runtime: Runtime, identity: str) -> wire.CommandReceipt:
     return wire.CommandReceipt(wire.CommandReceiptPending(id=command_id, context=saved_context, outcome='pending', updated_at=updated))
 
 
-def register(app: FastAPI, runtime: Runtime) -> None:
+def register(app: FastAPI, runtime: ReaderApplication) -> None:
     from oko.reader.api_v3 import no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     @router.post('/api/v3/problems/{identity}/abandon', response_model=wire.CommandAcknowledgement)
@@ -108,6 +109,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     @router.get('/api/v3/commands/{identity}', response_model=wire.CommandReceipt)
+    @read_locked(runtime.execution)
     async def get_receipt(identity: str) -> wire.CommandReceipt:
         from oko.reader.api_v3 import ApiError, invalid
         try:
@@ -119,7 +121,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
     @router.post('/api/v3/command-observations', response_model=wire.CommandReceipt)
     async def observe(body: wire.CommandObservation) -> wire.CommandReceipt:
         check_context(runtime, body.id.root, body.context)
-        record = runtime.require_store().problems.command_record(body.id.root)
+        record = runtime.queries.command_record(body.id.root)
         if record and record.result in ('succeeded', 'failed', 'abandoned'):
             return receipt(runtime, body.id.root)
         context = context_record(body.context)

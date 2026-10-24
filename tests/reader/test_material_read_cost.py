@@ -122,6 +122,8 @@ def test_split_text_projection_parity_for_source_kinds(tmp_path,kind,complete):
     # Both real projection paths, with independent SQLite/files per case.
     # No scheduler, HTTP/lifespan or external adapters are needed for this matrix.
     from types import SimpleNamespace
+    from oko.execution import Execution
+    from oko.services.queries import ReadingQueries
     from fastapi import FastAPI
     from oko.reader.reading_v3 import register
     from oko.reader.versions_v3 import VersionedReading
@@ -129,7 +131,7 @@ def test_split_text_projection_parity_for_source_kinds(tmp_path,kind,complete):
     item=source_library(tmp_path,kind,complete)
     store=Store(tmp_path,lambda _:None)
     try:
-        runtime=SimpleNamespace(require_store=lambda:store,
+        runtime=SimpleNamespace(execution=Execution(lambda: True), queries=ReadingQueries(lambda: store),
             processing_wait=lambda item,kind:store.processing.waiting(item,kind,store.clock(),store.wall_clock()))
         legacy=register(FastAPI(),runtime)(item).model_dump(mode='json')
         reading=VersionedReading(runtime,None,None,None)
