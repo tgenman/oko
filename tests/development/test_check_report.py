@@ -67,3 +67,21 @@ def test_compact_report_exposes_worker_times_and_slowest_files_and_tests(tmp_pat
     assert suite['worker_durations']['python-tests-2']==3
     assert suite['slow_files'][0]==dict(file='tests/slow.py',seconds=2)
     assert suite['slow_tests'][0]['name']=='test_bad'
+
+
+def test_saved_report_retains_early_failure_reason_log_and_retry(tmp_path):
+    report=tmp_path/'report.json'
+    detail=dict(test='tests/test_example.py::test_retry',reason='expected detail',log='/tmp/shard.log',retry='./scripts/check python --files tests/test_example.py::test_retry')
+    report.write_text(json.dumps(dict(exit_code=1,duration_seconds=2,log='/tmp/full.log',suites={'python-tests':dict(status='FAIL',failures=[detail['test']],failure_details=[detail])})))
+    result=subprocess.run([sys.executable,str(CLI),str(report),'--json'],text=True,capture_output=True)
+    assert result.returncode==1
+    assert json.loads(result.stdout)['suites']['python-tests']['failure_details']==[detail]
+    result=subprocess.run([sys.executable,str(CLI),str(report)],text=True,capture_output=True)
+    assert 'expected detail' in result.stdout and 'Retry:' in result.stdout and '/tmp/shard.log' in result.stdout
+
+
+def test_report_rejects_nontext_early_failure_details(tmp_path):
+    report=tmp_path/'report.json'
+    report.write_text(json.dumps(dict(exit_code=1,duration_seconds=1,log='/tmp/full.log',suites={'python-tests':dict(status='FAIL',failures=['test'],failure_details=[dict(test='test',reason={'raw':'bad'},log='/tmp/shard',retry='retry')])})))
+    result=subprocess.run([sys.executable,str(CLI),str(report),'--json'],text=True,capture_output=True)
+    assert result.returncode==2 and result.stdout==''

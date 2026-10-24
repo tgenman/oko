@@ -24,7 +24,9 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await expect(r.page.locator('#completeness')).toContainText('недоступна');
  await expect(r.page.locator('#text')).toContainText(own);
  await r.page.screenshot({path:artifactPath(`linked-${kind}-error.png`)});
- await r.setArticleState('ready');
+ // Make the source available at the real retry, before the backend receives it.
+ // An automatic retry before the click would otherwise stage a new version.
+ await r.page.route('**/api/v3/materials/*/retry',async route=>{await r.setArticleState('ready');await route.continue();},{times:1});
  await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
  await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
  await expect(r.page.locator('#text')).toContainText('Article text arrived.');

@@ -363,9 +363,42 @@ def verify(plan, remote):
                         for identity, issue in selected.items()})
 
 
+def search_call(repo, query, limit):
+    """Prepare connector orchestration; never perform network or print issue bodies."""
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
+        raise ExportError('Repository must be owner/name')
+    if not query.strip() or not 1 <= limit <= 100:
+        raise ExportError('Search needs a nonempty query and a limit from 1 to 100')
+    arguments = dict(repository_full_name=repo, query=query, topn=limit)
+    key = 'github-issue-search:' + fingerprint(arguments)[:16]
+    return 'const githubSearchResult = await tools.mcp__codex_apps__github_search_issues('+json.dumps(arguments)+r""");
+store("""+json.dumps(key)+r""", githubSearchResult);
+const githubSearchData = githubSearchResult.structuredContent;
+if (githubSearchResult.isError || !githubSearchData || !Array.isArray(githubSearchData.issues)) {
+  text({ok:false,error:'GitHub search failed or returned an unsupported shape',raw_response_key:"""+json.dumps(key)+r"""});
+} else {
+  const issues = githubSearchData.issues.map(issue => !issue || typeof issue !== 'object' ? null : ({
+    number:issue.issue_number ?? issue.number,
+    title:issue.title,
+    state:issue.state ?? null,
+    url:issue.display_url ?? issue.html_url ?? issue.url
+  }));
+  if (issues.some(issue => !issue || !Number.isInteger(issue.number) || typeof issue.title !== 'string' || typeof issue.url !== 'string' || ![null,'open','closed'].includes(issue.state))) {
+    text({ok:false,error:'Unsupported issue summary fields',raw_response_key:"""+json.dumps(key)+r"""});
+  } else {
+    text({ok:true,returned:issues.length,issues,raw_response_key:"""+json.dumps(key)+r"""});
+  }
+}
+"""
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
+    search = commands.add_parser('search-call', help='Print MCP orchestration that retains the full response and emits compact issue metadata')
+    search.add_argument('--repo', required=True)
+    search.add_argument('--query', required=True)
+    search.add_argument('--limit', type=int, default=20)
     command = commands.add_parser('plan', help='Create an immutable publication plan without API calls')
     command.add_argument('feature', type=Path)
     command.add_argument('--repo', required=True)
@@ -378,6 +411,9 @@ def main():
         command.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     try:
+        if args.command == 'search-call':
+            print(search_call(args.repo, args.query, args.limit))
+            return 0
         if args.command == 'plan':
             root = Path(git(Path.cwd(), 'rev-parse', '--show-toplevel').decode().strip())
             links = json.loads(args.links.read_text()) if args.links else {}

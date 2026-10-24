@@ -7,6 +7,9 @@ class Clock:
         self.now = 100
     def __call__(self):
         return self.now
+    def options(self):
+        """Control lease expiry and wall-clock discontinuities with the same clock."""
+        return dict(clock=self, wall_clock=self)
 
 
 HEADERS = {'Authorization': 'Bearer test'}

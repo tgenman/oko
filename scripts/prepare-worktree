@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Reuse installed worktree dependencies, then build and validate frontend assets."""
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--from', dest='source', type=Path, help='Checkout with installed .venv and node_modules; defaults to the main Git worktree')
+    args = parser.parse_args()
+    try:
+        missing = []
+        for name in ('.venv', 'node_modules'):
+            target = ROOT/name
+            if target.is_dir():
+                continue
+            if target.exists() or target.is_symlink():
+                raise RuntimeError('Keep existing path; repair it explicitly: '+str(target))
+            missing.append(name)
+        donor = args.source.resolve() if args.source else ROOT
+        if missing and args.source is None:
+            common = subprocess.check_output(['git','rev-parse','--path-format=absolute','--git-common-dir'],cwd=ROOT,text=True).strip()
+            common_path = Path(common)
+            if common_path.name != '.git':
+                raise RuntimeError('Cannot locate a dependency checkout; pass --from PATH')
+            donor = common_path.parent
+        # Validate all dependencies before creating any links. Existing paths stay.
+        for name in missing:
+            if not (donor/name).is_dir():
+                raise RuntimeError('Installed dependency missing: '+str(donor/name))
+        venv = donor/'.venv' if '.venv' in missing else ROOT/'.venv'
+        default_python = venv/'bin/python'
+        if not default_python.is_file():
+            raise RuntimeError('Installed Python environment missing: '+str(default_python))
+        python = shutil.which(os.environ.get('OKO_PYTHON', str(default_python)))
+        npm = shutil.which('npm')
+        if not python or not npm:
+            raise RuntimeError('Prepared Python and npm are required; dependencies are not installed by this command')
+        for name in missing:
+            (ROOT/name).symlink_to((donor/name).resolve(), target_is_directory=True)
+        subprocess.run([npm,'run','build'],cwd=ROOT,check=True)
+        subprocess.run([python,'-c','from oko.reader.static import validate_frontend; validate_frontend()'],cwd=ROOT,check=True)
+        print('Prepared and validated:',ROOT)
+        return 0
+    except subprocess.CalledProcessError as error:
+        print('Preparation stopped at: '+ ' '.join(error.cmd),file=sys.stderr)
+        return error.returncode if error.returncode > 0 else 1
+    except (OSError,RuntimeError) as error:
+        print(str(error),file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
