@@ -1,3 +1,4 @@
+from oko.execution import read_locked
 """Read-only collection progress boundary. Diagnostics are loaded per source."""
 from collections import Counter
 from typing import Any
@@ -5,7 +6,8 @@ from oko.reader.http_schemas import SchemaRoute
 
 from fastapi import APIRouter, Depends, FastAPI
 from oko.reader.generated import models as wire
-from oko.reader.runtime import Runtime, ActionError
+from oko.application.reader import ReaderApplication
+from oko.execution import ActionError
 from oko.storage.collection_status import timestamp
 
 
@@ -18,7 +20,7 @@ def source(value: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def register(app: FastAPI, runtime: Runtime) -> None:
+def register(app: FastAPI, runtime: ReaderApplication) -> None:
     from oko.reader.api_v3 import no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
@@ -29,6 +31,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         return value, rows
 
     @router.get('/api/v3/collection-status', response_model=wire.CollectionSnapshot)
+    @read_locked(runtime.execution)
     async def status() -> wire.CollectionSnapshot:
         meta, rows = snapshot()
         counts = Counter(row['state'] for row in rows)
@@ -36,6 +39,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             counts={state: counts[state] for state in ('collecting','queued','waiting','error','paused','complete','never','deleting','unavailable')}))
 
     @router.get('/api/v3/collection-status/{feed_id}', response_model=wire.CollectionDetails)
+    @read_locked(runtime.execution)
     async def details(feed_id: str) -> wire.CollectionDetails:
         meta, rows = snapshot()
         row = next((r for r in rows if r['feed_id'] == feed_id), None)

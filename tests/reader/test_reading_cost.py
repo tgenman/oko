@@ -17,7 +17,8 @@ def test_reading_http_budgets(tmp_path, count):
         response = client.get('/api/v3/reading-composition')
         assert response.status_code == 200
         assert response.json()['count'] == count * 4
-        assert int(response.headers['X-Test-SQL']) < 80 + 2 * count * 4
+        # Baseline for both library sizes: the service must reuse feed facts.
+        assert int(response.headers['X-Test-SQL']) <= 11
         response = client.get('/api/v3/cards', params={'feed': feeds[0]})
         assert response.status_code == 200
         assert len(response.json()) == count
@@ -30,7 +31,7 @@ def test_reading_http_budgets(tmp_path, count):
         response = client.get('/api/v3/materials/' + items[0])
         assert response.status_code == 200
         assert response.json()['content']['description'] == 'Synthetic video'
-        assert int(response.headers['X-Test-SQL']) < 35
+        assert int(response.headers['X-Test-SQL']) <= 23
         jobs = [q for q in app.state.last_sql if re.search(r'\bFROM jobs\b', q, re.IGNORECASE)]
         # The compatible legacy response also reads history and fetch state.
         # The shared job snapshot must not be queried twice.

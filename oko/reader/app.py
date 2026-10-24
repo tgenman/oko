@@ -19,7 +19,9 @@ from fastapi.responses import JSONResponse, Response
 from oko.collection.contracts import Source
 from oko.processing.codex import CodexClient
 from oko.collection.telegram.source import TelegramClient
-from oko.reader.runtime import Runtime, ActionError
+from oko.reader.runtime import Runtime
+from oko.application.reader import ReaderApplication
+from oko.execution import ActionError
 from oko.reader.lifetime import Lifetime
 from oko.reader.browser_auth import BrowserSessions, COOKIE, MAX_AGE
 from oko.reader import api_v3
@@ -53,6 +55,12 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
     runtime = Runtime(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
+    runtime.application = ReaderApplication(runtime.execution, runtime.jobs, clock=clock, wall_clock=wall_clock,
+        sources=runtime._sources, bindings=runtime._telegram_bindings, sync_sources=runtime._sync_sources,
+        interval_changed=lambda value: setattr(runtime, '_collection_interval', value), stage=lambda: runtime._ai_stage,
+        source_description=runtime._collection.description, rss_transport=rss_transport, ai_transport=ai_transport,
+        telegram=telegram_client, telegram_http=runtime._telegram_http, codex=runtime._codex_client,
+        stop=runtime.stop, admission_changed=runtime.admission_changed, set_power=runtime.set_power)
     journal = Journal(root, token)
     runtime.diagnostics = journal
 
@@ -102,6 +110,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.router.route_class = SchemaRoute
     app.state.runtime = runtime
+    app.state.application = runtime.application
 
     @app.exception_handler(ActionError)
     async def action_error(request: Request, error: ActionError) -> JSONResponse:
@@ -209,7 +218,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             response.headers['X-Oko-Browser-Session'] = 'remembered'
         return response
 
-    api_v3.register(app, runtime, lifetime, wall_clock, journal)
+    api_v3.register(app, runtime.application, lifetime, wall_clock, journal)
 
     @app.delete('/api/v3/browser-session', response_model=BrowserSessionRevoked)
     async def revoke_browser_session(request: Request) -> BrowserSessionRevoked:

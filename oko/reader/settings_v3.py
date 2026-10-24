@@ -1,3 +1,4 @@
+from oko.execution import read_locked
 """Settings boundary: one typed operation for all inheritance levels."""
 from typing import Literal
 
@@ -7,7 +8,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
-from oko.reader.runtime import Runtime
+from oko.application.reader import ReaderApplication
 from oko.subscriptions.subscriptions import Overrides, GLOBAL_SERVICE_SETTINGS
 
 
@@ -41,7 +42,7 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.E
     return wire.EffectiveSettingsSnapshot(wire.FeedSettingsSnapshot(scope='feed', owner=wire.FeedId(owner), effective=values, overrides=overrides, feed=subscription(value.feed, binding), activity=activity))
 
 
-def register(app: FastAPI, runtime: Runtime) -> None:
+def register(app: FastAPI, runtime: ReaderApplication) -> None:
     from oko.reader.api_v3 import no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     from oko.reader.api_v3 import ApiError
@@ -50,7 +51,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         if scope != 'feed':
             return None
         from oko.reader.projection_v3 import timestamp
-        result = runtime.require_store().subscriptions.details.snapshot(owner)
+        result = runtime.queries.feed_details(owner)
         for field in ('created', 'modified', 'updated', 'marked_read'):
             if result[field] is not None:
                 result[field] = timestamp(result[field])
@@ -67,30 +68,34 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             from oko.reader.api_v3 import invalid
             raise ApiError(422, invalid('path', 'owner')) from None
         try:
-            runtime.require_store().subscriptions.check_owner(scope, owner)
+            runtime.queries.check_owner(scope, owner)
         except LookupError:
             raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message='Настройки не найдены', diagnostic_id=None, command_id=None,
                 details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.SettingsResource(kind='settings', target=result)))))) from None
         return result
 
     @router.get('/api/v3/settings/feed-refresh', response_model=wire.EffectiveFeedRefreshMinutes)
+    @read_locked(runtime.execution)
     async def feed_refresh_settings() -> wire.EffectiveFeedRefreshMinutes:
-        value = runtime.require_store().subscriptions.effective('oko', 'global')['effective']['feed_refresh_minutes']
+        value = runtime.queries.effective('oko', 'global')['effective']['feed_refresh_minutes']
         return wire.EffectiveFeedRefreshMinutes.model_validate({
             'value': value['value'], 'origin': {'scope': value['scope'], **({'owner': 'global'} if value['scope'] == 'oko' else {})}})
 
     @router.get('/api/v3/settings/telegram-http', response_model=wire.EffectiveTelegramHttpRps)
+    @read_locked(runtime.execution)
     async def telegram_http_settings() -> wire.EffectiveTelegramHttpRps:
-        return wire.EffectiveTelegramHttpRps.model_validate(runtime.require_store().subscriptions.telegram_http_settings())
+        return wire.EffectiveTelegramHttpRps.model_validate(runtime.queries.telegram_http_settings())
 
     @router.get('/api/v3/settings/retries', response_model=wire.RetrySettings)
+    @read_locked(runtime.execution)
     async def retry_settings() -> wire.RetrySettings:
-        return wire.RetrySettings.model_validate(runtime.require_store().subscriptions.retry_settings())
+        return wire.RetrySettings.model_validate(runtime.queries.retry_settings())
 
     @router.get('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
+    @read_locked(runtime.execution)
     async def settings(scope: Literal['oko', 'folder', 'feed'], owner: str) -> wire.EffectiveSettingsSnapshot:
         target(scope, owner)
-        return snapshot(scope, owner, facts.EffectiveSettings.model_validate(runtime.require_store().subscriptions.effective(scope, owner)), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None, activity_for(scope, owner))
+        return snapshot(scope, owner, facts.EffectiveSettings.model_validate(runtime.queries.effective(scope, owner)), runtime.queries.binding(owner) if scope == 'feed' else None, activity_for(scope, owner))
 
     @router.patch('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def patch(request: Request, scope: Literal['oko', 'folder', 'feed'], owner: str, body: wire.SettingsPatch) -> wire.EffectiveSettingsSnapshot:
@@ -105,7 +110,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                     diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
             if retry_keys:
                 try:
-                    runtime.require_store().subscriptions.validate_retry_settings(body.model_dump(exclude_unset=True))
+                    runtime.queries.validate_retry_settings(body.model_dump(exclude_unset=True))
                 except ValueError:
                     from oko.reader.api_v3 import invalid
                     raise ApiError(422, invalid('body', 'retry_max_seconds')) from None
@@ -120,7 +125,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
                     details=wire.SettingScopeInvalidErrorDetails(reason='telegram_http_is_global_only'),
                     diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
             result = await runtime.update_settings(scope, owner, Overrides.model_validate(body.model_dump(exclude_unset=True)))
-            return snapshot(scope, owner, facts.EffectiveSettings.model_validate(result), runtime.require_store().subscriptions.telegram.binding(owner) if scope == 'feed' else None, activity_for(scope, owner))
+            return snapshot(scope, owner, facts.EffectiveSettings.model_validate(result), runtime.queries.binding(owner) if scope == 'feed' else None, activity_for(scope, owner))
 
     async def immutable_access(request: Request, identity: str) -> None:
         # Check immutable bindings before request DTO rejection; no write occurs.
@@ -130,7 +135,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             return
         if not isinstance(payload, dict) or not set(payload).intersection(('access', 'account', 'peer', 'profile', 'telegram_account', 'telegram_peer', 'role')):
             return
-        feeds = runtime.require_store().subscriptions.feeds(identity)
+        feeds = runtime.queries.feeds(identity)
         if feeds and feeds[0]['kind'] == 'telegram':
             raise ApiError(409, wire.ErrorEnvelope(wire.AccessImmutableError(code='access_immutable', message='Привязку Telegram нельзя менять настройкой фида', details=wire.AccessImmutableErrorDetails(feed_id=wire.FeedId(identity)), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
 
@@ -143,7 +148,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         if 'title' in body.model_fields_set and (not isinstance(body.title, str) or not 1 <= len(body.title.strip()) <= 200):
             from oko.reader.api_v3 import invalid
             raise ApiError(422, invalid('body', 'title'))
-        feed = facts.SubscriptionFeed.model_validate(runtime.require_store().subscriptions.feeds(identity)[0])
+        feed = facts.SubscriptionFeed.model_validate(runtime.queries.feeds(identity)[0])
         context = wire.CommandContext(wire.CommandFeedPatch(operation='feed_patch', feed_id=wire.FeedId(identity), fields=[wire.FeedField.model_validate(key) for key in sorted(body.model_fields_set - GLOBAL_SERVICE_SETTINGS)]))
         async with track(runtime, request, context):
             if feed.kind == 'telegram' and 'transport' in body.model_fields_set:
@@ -151,6 +156,6 @@ def register(app: FastAPI, runtime: Runtime) -> None:
             if feed.kind == 'telegram' and feed.transport != 'telegram' and body.model_fields_set.intersection(('auto_read', 'read_history')):
                 raise ApiError(400, wire.ErrorEnvelope(wire.SourceConnectionInvalidError(code='source_connection_invalid', message='Веб-доступ не поддерживает отметки Telegram', details=wire.SourceConnectionInvalidErrorDetails(reason='telegram_web_read_unavailable'), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
             result = await runtime.patch_feed(identity, FeedPatch.model_validate(body.model_dump(exclude_unset=True)))
-            return subscription(facts.SubscriptionFeed.model_validate(result), runtime.require_store().subscriptions.telegram.binding(identity))
+            return subscription(facts.SubscriptionFeed.model_validate(result), runtime.queries.binding(identity))
 
     app.include_router(router)

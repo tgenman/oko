@@ -1,0 +1,6 @@
+{
+  "tested_tree": "8b97411226609df95df9babcb930d74861898220",
+  "production_files_compared": 33,
+  "semantic_delta_excluding_docs": [],
+  "additional_test": "test_sql_scope_contract: 1 passed; plus reading budgets: 6 passed"
+}

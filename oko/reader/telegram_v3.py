@@ -1,4 +1,4 @@
-"""Telegram binding/profile HTTP actions over Runtime, with canonical typed errors."""
+"""Telegram binding/profile HTTP actions over ReaderApplication, with canonical typed errors."""
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from typing import Literal
@@ -8,14 +8,15 @@ from oko.reader.http_schemas import SchemaRoute
 from fastapi import APIRouter, Depends, FastAPI, Request
 
 from oko.reader.generated import models as wire
-from oko.reader.runtime import Runtime, ActionError
+from oko.application.reader import ReaderApplication
+from oko.execution import ActionError
 from oko.reader.commands_v3 import track
 from oko.reader.connections_v3 import selection
 from oko.subscriptions.history import InitialHistory
 from oko.subscriptions.telegram import TelegramConflict
 
 
-def register(app: FastAPI, runtime: Runtime) -> None:
+def register(app: FastAPI, runtime: ReaderApplication) -> None:
     from oko.reader.api_v3 import ApiError, no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
@@ -56,7 +57,7 @@ def register(app: FastAPI, runtime: Runtime) -> None:
         feed_id=value.feed_id.root if isinstance(value.feed_id,wire.FeedId) else None
         async with operation(request, dict(operation='telegram_connect')):
             result = await runtime.connect_telegram_binding(value.source_locator, value.folder, history, role, auto_read,feed_id)
-            binding = runtime.require_store().subscriptions.telegram.binding(result['id'])
+            binding = runtime.queries.binding(result['id'])
             return wire.TelegramConnectResult(feed_id=wire.FeedId(result['id']), access=wire.TelegramConfirmedAccess.model_validate(binding))
 
     @router.delete('/api/v3/feeds/{identity}', response_model=wire.RemoveFeedResult)

@@ -192,9 +192,9 @@ def test_stopped_check_returns_final_status_and_explicit_unavailability(tmp_path
         assert client.post('/api/v3/stop').status_code==200
         import time
         for _ in range(100):
-            if app.state.runtime._store is None:break
+            if app.state.runtime.execution._store is None:break
             time.sleep(.01)
-        assert app.state.runtime._store is None
+        assert app.state.runtime.execution._store is None
         request=[{'kind':'status','known_version':None},{'kind':'material','id':items[0],'known_version':None}]
         stopped=check(client,request,first['storage_id']).json()
         assert stopped['resources'][0]['data']['runtime_state']=='stopped'
