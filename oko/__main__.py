@@ -58,14 +58,18 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--host', choices=('127.0.0.1', '0.0.0.0'), default='127.0.0.1')
     parser.add_argument('--public-url', help='Внешний локальный origin читателя, например http://oko')
     parser.add_argument('--codex-url', help='Адрес установленного процесса Codex на Mac')
+    parser.add_argument('--codex-socket', type=Path, help='Приватный Unix socket host-helper (Linux)')
     parser.add_argument('--codex-token-file', type=Path)
     parser.add_argument('--initially-disabled', action='store_true', help='Остановить работу при первом создании хранилища')
     parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--lease', type=float, default=6, help='Срок клиентской сессии, секунд')
     parser.add_argument('--grace', type=float, default=15, help='Ожидание переподключения, секунд')
     args = parser.parse_args()
-    if bool(args.codex_url) != bool(args.codex_token_file):
-        parser.error('--codex-url and --codex-token-file must be supplied together')
+    if args.codex_socket and args.codex_url:
+        parser.error('--codex-url and --codex-socket are separate transports')
+    codex_url = 'http://localhost' if args.codex_socket else args.codex_url
+    if bool(codex_url) != bool(args.codex_token_file):
+        parser.error('Codex transport and --codex-token-file must be supplied together')
     if args.persistent and args.api_only:
         parser.error('--persistent and --api-only are separate profiles')
     if not all(math.isfinite(value) and value > 0 for value in (args.lease, args.grace)):
@@ -97,9 +101,9 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                 finally:
                     store.db.close()
         codex_client = None
-        if args.codex_url:
+        if codex_url:
             from oko.processing.codex_bridge.client import RemoteCodex
-            codex_client = RemoteCodex(args.codex_url, args.codex_token_file.read_text().strip())
+            codex_client = RemoteCodex(codex_url, args.codex_token_file.read_text().strip(), socket_path=args.codex_socket)
         token = secrets.token_urlsafe(32)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:

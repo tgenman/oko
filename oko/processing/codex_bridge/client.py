@@ -14,7 +14,8 @@ from .protocol import VERSION, JOB_SECONDS, MAX_REQUEST_BYTES, MAX_RESULT_BYTES,
 
 
 class RemoteCodex:
-    def __init__(self, url: str, token: str) -> None:
+    def __init__(self, url: str, token: str, *, socket_path: Path | None = None) -> None:
+        self.socket_path = socket_path
         self.url = url.rstrip('/')
         self.token = token
         self.session_id = uuid.uuid4().hex
@@ -47,7 +48,8 @@ class RemoteCodex:
         path = '/v1/jobs/' + job_id
         boot: str | None = None
         created = False
-        async with httpx.AsyncClient(base_url=self.url, headers=headers, timeout=3, trust_env=False) as client:
+        transport = httpx.AsyncHTTPTransport(uds=str(self.socket_path)) if self.socket_path is not None else None
+        async with httpx.AsyncClient(base_url=self.url, headers=headers, timeout=3, trust_env=False, transport=transport) as client:
             async def request(method: str, route: str, **kwargs: Any) -> dict[str, Any]:
                 async with client.stream(method, route, **kwargs) as response:
                     response.raise_for_status()

@@ -47,7 +47,9 @@ class Job:
 
 
 class Bridge:
-    def __init__(self, config: BridgeConfig, factory: Callable[[], CodexClient]) -> None:
+    def __init__(self, config: BridgeConfig, factory: Callable[[], CodexClient], on_fatal: Callable[[], None] | None = None) -> None:
+        self.on_fatal = on_fatal
+        self.supervisor_lost = False
         self.config = config
         token_path = config.token_file
         if token_path.stat().st_mode & 0o077:
@@ -100,18 +102,22 @@ class Bridge:
                         if not job.lease:
                             job.state = 'released'
                         job.error = message.get('error', '')
+                        if message['state'] == 'error' and (self.config.scratch_root / 'active.json').exists():
+                            self.supervisor_lost = True
                         job.finished = now
                         job.control.close()
                         job.control = None
                     elif not job.process.is_alive():
                         job.state = 'error'
                         job.error = 'Codex supervisor stopped; recovery required'
+                        self.supervisor_lost = True
                         job.finished = now
                         job.control.close()
                         job.control = None
                 except (EOFError, OSError):
                     job.state = 'error'
                     job.error = 'Codex supervisor disconnected; recovery required'
+                    self.supervisor_lost = True
                     job.finished = now
                     job.control = None
             if job.lease and (now >= min(job.lease, job.deadline) or mono >= job.mono_lease):
@@ -124,6 +130,9 @@ class Bridge:
     async def watch(self) -> None:
         while True:
             self.update()
+            if self.supervisor_lost and self.on_fatal is not None:
+                self.on_fatal()
+                return
             await asyncio.sleep(.1)
 
     async def close(self) -> None:
@@ -135,8 +144,8 @@ class Bridge:
             await asyncio.to_thread(job.process.join, 10)
 
 
-def create_app(config: BridgeConfig, *, adapter_factory: Callable[[], CodexClient] = LocalCodex) -> FastAPI:
-    bridge = Bridge(config, adapter_factory)
+def create_app(config: BridgeConfig, *, adapter_factory: Callable[[], CodexClient] = LocalCodex, on_fatal: Callable[[], None] | None = None) -> FastAPI:
+    bridge = Bridge(config, adapter_factory, on_fatal)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -175,6 +184,8 @@ def create_app(config: BridgeConfig, *, adapter_factory: Callable[[], CodexClien
             return message
         request._receive = receive
         bridge.update()
+        if bridge.supervisor_lost and bridge.on_fatal is not None:
+            return JSONResponse({'detail': 'helper generation requires restart'}, status_code=503)
         return await call_next(request)
 
     def identity(request: Request) -> None:

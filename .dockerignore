@@ -1,6 +1,8 @@
 # Explicit source allowlist: private data never enters the build context.
 **
 !Dockerfile
+!deployment/
+!deployment/**
 !pyproject.toml
 !uv.lock
 !package.json

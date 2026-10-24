@@ -1,0 +1,38 @@
+[Unit]
+Description=Oko private Codex helper
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=okocodex
+Group=oko-ipc
+WorkingDirectory=/srv/oko/codex/current
+Environment=HOME=/var/lib/oko-codex
+Environment=CODEX_HOME=/var/lib/oko-codex/auth
+Environment=OKO_CODEX_BINARY=/opt/oko/codex/0.164.0/bin/codex
+Environment=PATH=/opt/oko/codex/0.164.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/oko/codex/current/.venv/bin/python -m oko.processing.codex_bridge --config /var/lib/oko-codex/helper.json
+RuntimeDirectory=oko-codex
+RuntimeDirectoryMode=0750
+UMask=0007
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/oko-codex /run/oko-codex
+PrivateTmp=true
+KillMode=control-group
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=3
+MemoryMax=1G
+TasksMax=128
+LimitCORE=0
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

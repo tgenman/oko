@@ -1,8 +1,8 @@
-"""Ephemeral Codex CLI connection, isolated by an audited macOS OS profile."""
+"""Ephemeral Codex CLI connection, isolated by audited macOS/Linux OS policies."""
 
 from oko.diagnostics import record_caught
 import asyncio
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
@@ -14,6 +14,7 @@ import sqlite3
 import sys
 import tempfile
 from typing import Any, Protocol
+from collections.abc import Iterator
 
 from oko.processing.contracts import ProcessingError, ProcessingRequest, Theses, FilterResult, result_type, processing_instruction
 
@@ -29,35 +30,50 @@ def status() -> dict[str, Any]:
     return dict(available=False, reason=UNAVAILABLE, limits_checked=False)
 
 
+@contextmanager
+def invocation_auth() -> Iterator[Path]:
+    original = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).resolve()
+    if sys.platform == 'linux':
+        from oko.processing.codex_linux import credentials
+        with credentials(original) as view:
+            yield view
+    else:
+        yield original
+
+
 async def _probe(binary: str, directory: str, *args: str) -> tuple[int, str]:
-    process = await asyncio.create_subprocess_exec(
-        binary, *args, cwd=directory, stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        start_new_session=True)
-    assert process.stdout is not None
-
-    async def read() -> tuple[int, str]:
+    with invocation_auth() as auth:
+        environment = {key:value for key,value in os.environ.items() if key in ('HOME','CODEX_HOME','PATH','LANG','LC_ALL')}
+        environment['CODEX_HOME'] = str(auth)
+        process = await asyncio.create_subprocess_exec(
+            binary, *args, cwd=directory, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            env=environment,
+            start_new_session=True)
         assert process.stdout is not None
-        output = bytearray()
-        while chunk := await process.stdout.read(4096):
-            output.extend(chunk)
-            if len(output) > 16_384:
-                raise ValueError('probe output exceeded limit')
-        return await process.wait(), output.decode('utf-8', errors='replace')
 
-    try:
-        return await asyncio.wait_for(read(), timeout=5)
-    finally:
-        # Include descendants even if their parent already exited.
-        # Only this owned process group. No shared Codex sessions are touched.
-        if os.name == 'posix':
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        elif process.returncode is None:
-            process.kill()
-        await process.communicate()
+        async def read() -> tuple[int, str]:
+            assert process.stdout is not None
+            output = bytearray()
+            while chunk := await process.stdout.read(4096):
+                output.extend(chunk)
+                if len(output) > 16_384:
+                    raise ValueError('probe output exceeded limit')
+            return await process.wait(), output.decode('utf-8', errors='replace')
+
+        try:
+            return await asyncio.wait_for(read(), timeout=5)
+        finally:
+            # Include descendants even if their parent already exited.
+            # Only this owned process group. No shared Codex sessions are touched.
+            if os.name == 'posix':
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            elif process.returncode is None:
+                process.kill()
+            await process.communicate()
 
 
 async def diagnose() -> dict[str, Any]:
@@ -130,7 +146,12 @@ def binary_path() -> Path | None:
 
 def supported_binary() -> Path | None:
     path = binary_path()
-    if sys.platform != 'darwin' or not path or not Path('/usr/bin/sandbox-exec').exists():
+    if not path:
+        return None
+    if sys.platform == 'linux':
+        from oko.processing.codex_linux import approved
+        return path.resolve() if approved(path.resolve()) else None
+    if sys.platform != 'darwin' or not Path('/usr/bin/sandbox-exec').exists():
         return None
     binary = path.resolve()
     try:
@@ -157,6 +178,14 @@ def sandbox_profile(binary: Path, directory: Path, auth_root: Path) -> str:
             '(deny file-read-data (require-not (require-any ' + allowed + ')))'
             '(deny file-write* (require-not (require-any ' + writes + ')))'
             '(deny process-exec (require-not (literal ' + json.dumps(str(binary)) + ')))')
+
+
+def sandbox_command(binary: Path, work: Path, auth: Path) -> list[str]:
+    if sys.platform == 'linux':
+        from oko.processing.codex_linux import prefix
+        return prefix(binary, work, auth)
+    return ['/usr/bin/sandbox-exec', '-p', sandbox_profile(binary, work, auth), str(binary)]
+
 
 
 async def run_isolated(args: list[str], prompt: bytes, directory: Path) -> tuple[int, bytes]:
@@ -217,21 +246,22 @@ async def run_isolated(args: list[str], prompt: bytes, directory: Path) -> tuple
 
 async def quota_before_turn(binary: Path, work: Path, auth: Path) -> list[dict[str, Any]]:
     # Only initialize and account/rateLimits/read. No thread/turn is created and
-    # there is no source input. Config reads remain blocked by the OS profile.
-    args = ['/usr/bin/sandbox-exec', '-p', sandbox_profile(binary, work, auth),
-            str(binary), 'app-server']
+    # there is no source input. The OS profile/credential-only Linux directory
+    # excludes external configuration and rules.
+    args = [*sandbox_command(binary, work, auth), 'app-server']
     for feature in FEATURES:
         args.extend(['--disable', feature])
     args.extend(['-c', 'mcp_servers={}', '-c', 'sqlite_home=' + json.dumps(str(work)),
                  '-c', 'log_dir=' + json.dumps(str(work)), '-c', 'analytics.enabled=false'])
     env = {k: v for k, v in os.environ.items() if k in ('HOME', 'CODEX_HOME', 'PATH', 'LANG', 'LC_ALL')}
     env.update(RUST_LOG='off', TMPDIR=str(work), RUST_BACKTRACE='0')
+    env['CODEX_HOME'] = str(auth)
     process = await asyncio.create_subprocess_exec(*args, cwd=work, env=env,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL, start_new_session=True, limit=2_000_000)
     async def receive() -> dict[str, Any]:
         assert process.stdin is not None and process.stdout is not None
-        messages = [{'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'oko_quota', 'version': '1'}}},
+        messages = [{'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'oko_quota', 'title': 'Oko quota', 'version': '1'}}},
                     {'method': 'initialized'}, {'id': 2, 'method': 'account/rateLimits/read'}]
         for message in messages:
             process.stdin.write((json.dumps(message) + '\n').encode())
@@ -305,11 +335,9 @@ class LocalCodex:
             return result
         # Probe the actual OS profile before reporting readiness, without inference.
         try:
-            with tempfile.TemporaryDirectory(prefix='oko-codex-check-') as folder:
+            with tempfile.TemporaryDirectory(prefix='oko-codex-check-') as folder, invocation_auth() as auth:
                 work = Path(folder).resolve()
-                auth = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).resolve()
-                code, _ = await run_isolated(['/usr/bin/sandbox-exec', '-p',
-                    sandbox_profile(binary, work, auth), str(binary), '--version'], b'', work)
+                code, _ = await run_isolated([*sandbox_command(binary, work, auth), '--version'], b'', work)
                 if code:
                     return dict(result, reason='Внешний sandbox Codex недоступен. ' + UNAVAILABLE)
                 if result['auth'] != 'chatgpt':
@@ -329,20 +357,19 @@ class LocalCodex:
             raise ProcessingError(UNAVAILABLE)
         directory.mkdir(parents=True, exist_ok=True)
         try:
-            with tempfile.TemporaryDirectory(prefix='codex-', dir=directory) as folder:
+            with tempfile.TemporaryDirectory(prefix='codex-', dir=directory) as folder, invocation_auth() as auth:
                 work = Path(folder).resolve()
-                auth = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).resolve()
                 schema_file = work / 'schema.json'
                 schema_file.write_text(json.dumps(schema), encoding='utf-8')
-                args = ['/usr/bin/sandbox-exec', '-p', sandbox_profile(binary, work, auth),
-                        str(binary), 'exec', '--ephemeral', '--ignore-user-config',
+                args = [*sandbox_command(binary, work, auth), 'exec', '--ephemeral', '--ignore-user-config',
                         '--ignore-rules', '--skip-git-repo-check', '--json', '-C', str(work),
                         '--model', choice.model, '-c', 'model_reasoning_effort=' + json.dumps(choice.reasoning_effort),
                         '-c', 'service_tier=' + json.dumps('fast' if choice.fast else 'default'),
                         '--enable' if choice.fast else '--disable', 'fast_mode']
                 for feature in FEATURES:
                     args.extend(['--disable', feature])
-                args.extend(['-c', 'mcp_servers={}', '-c', 'web_search="disabled"',
+                args.extend(['--sandbox', 'read-only', '-c', 'approval_policy="never"',
+                             '-c', 'mcp_servers={}', '-c', 'web_search="disabled"',
                              '-c', 'tools.view_image=false', '-c', 'sqlite_home=' + json.dumps(str(work)),
                              '-c', 'log_dir=' + json.dumps(str(work)), '--output-schema', str(schema_file), '-'])
                 code, output = await run_isolated(args, prompt.encode(), work)

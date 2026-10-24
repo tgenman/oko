@@ -9,7 +9,7 @@ import signal
 import tempfile
 from typing import Any
 
-from oko.processing.codex import FEATURES, UNAVAILABLE, sandbox_profile, supported_binary
+from oko.processing.codex import FEATURES, UNAVAILABLE, sandbox_command, supported_binary, invocation_auth
 from oko.processing.contracts import ProcessingError
 
 
@@ -18,13 +18,12 @@ async def catalog() -> list[dict[str, Any]]:
     if binary is None:
         raise ProcessingError(UNAVAILABLE)
     try:
-        with tempfile.TemporaryDirectory(prefix='oko-codex-catalog-') as folder:
+        with tempfile.TemporaryDirectory(prefix='oko-codex-catalog-') as folder, invocation_auth() as auth:
             work = Path(folder).resolve()
-            auth = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).resolve()
-            # app-server does not expose exec's ignore flags. The OS profile
-            # denies user/project config and rules reads, including descendants.
-            args = ['/usr/bin/sandbox-exec', '-p', sandbox_profile(binary, work, auth),
-                    str(binary), 'app-server', '--stdio']
+            # app-server does not expose exec's ignore flags. macOS denies
+            # config reads; Linux requires a credential-only CODEX_HOME and
+            # mounts no ambient user/project directories.
+            args = [*sandbox_command(binary, work, auth), 'app-server']
             for feature in FEATURES:
                 args.extend(['--disable', feature])
             args.extend(['-c', 'mcp_servers={}', '-c', 'analytics.enabled=false',
@@ -32,7 +31,7 @@ async def catalog() -> list[dict[str, Any]]:
                          '-c', 'log_dir=' + json.dumps(str(work))])
             env = {key: value for key, value in os.environ.items()
                    if key in ('HOME', 'CODEX_HOME', 'PATH', 'LANG', 'LC_ALL')}
-            env.update(RUST_LOG='off', RUST_BACKTRACE='0', TMPDIR=str(work))
+            env.update(RUST_LOG='off', RUST_BACKTRACE='0', TMPDIR=str(work), CODEX_HOME=str(auth))
             process = await asyncio.create_subprocess_exec(
                 *args, cwd=work, env=env, stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
@@ -73,7 +72,7 @@ async def _receive(process: asyncio.subprocess.Process) -> list[dict[str, Any]]:
                 return result
         raise ValueError('catalogue interrupted')
 
-    await request(1, 'initialize', dict(clientInfo=dict(name='oko_catalog', version='1')))
+    await request(1, 'initialize', dict(clientInfo=dict(name='oko_catalog', title='Oko catalogue', version='1')))
     writer.write(b'{"method":"initialized"}\n')
     await writer.drain()
     rows: list[dict[str, Any]] = []

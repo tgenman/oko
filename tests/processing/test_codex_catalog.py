@@ -53,6 +53,7 @@ def transport(monkeypatch, pages):
         return server
 
     monkeypatch.setattr(codex_catalog, 'supported_binary', lambda: Path('/synthetic/codex'))
+    monkeypatch.setattr(codex_catalog,'sandbox_command',lambda binary,work,auth: ['/usr/bin/sandbox-exec','-p','synthetic-policy',str(binary)])
     monkeypatch.setattr(codex_catalog.asyncio, 'create_subprocess_exec', spawn)
     monkeypatch.setattr(codex_catalog.os, 'killpg', lambda pid, sig: None)
     return server, calls
