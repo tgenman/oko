@@ -29,7 +29,7 @@ def _steps(store, **options):
     steps=[0]
     store.db.set_progress_handler(lambda:steps.__setitem__(0,steps[0]+100) or 0,100)
     try:
-        result=store.next_job(store.clock(),**options)
+        result=store.jobs.next_job(store.clock(),**options)
     finally:
         store.db.set_progress_handler(None,0)
     return steps[0],result
@@ -64,7 +64,7 @@ def test_scheduling_one_publication_does_not_scan_foreign_media_jobs(tmp_path):
             store.db.set_progress_handler(lambda:steps.__setitem__(0,steps[0]+100) or 0,100)
             try:
                 with store.db:
-                    store.media.schedule(item)
+                    store.jobs.schedule_media(item)
             finally:
                 store.db.set_progress_handler(None,0)
             samples.append(steps[0])
@@ -86,7 +86,7 @@ def test_non_youtube_subtitle_file_uses_the_common_media_worker(tmp_path):
                 if block.get('media_id')==row['id']:
                     block['role']='subtitles'
             store.db.execute('UPDATE items SET content=? WHERE id=?',(json.dumps(content),row['publication_id']))
-        job=store.next_job(store.clock(),feeds=[feeds[0]],media_only=True)
+        job=store.jobs.next_job(store.clock(),feeds=[feeds[0]],media_only=True)
         assert job is not None and job.item==row['id']
     finally:
         store.db.close()
@@ -142,10 +142,11 @@ def test_readiness_waits_for_viewed_publication_cleanup(tmp_path):
         item=store.db.execute('SELECT id FROM items WHERE feed_id=? LIMIT 1',(feeds[0],)).fetchone()[0]
         assert store.ready_sources([feeds[0]])==1
         store.viewed(item)
+        with store.db:store.jobs.reconcile_cleanup()
         assert store.ready_sources([feeds[0]])==0
-        job=store.next_job(store.clock(),deleting_only=True)
+        job=store.jobs.next_job(store.clock(),deleting_only=True)
         assert job is not None and job.kind=='delete'
-        store.delete(job)
+        store.jobs.delete(job)
         assert store.ready_sources([feeds[0]])==1
     finally:
         store.db.close()

@@ -17,7 +17,7 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
     store=Store(root,lambda _:None)
     try:
         store.subscriptions.update_settings('oko','global',Overrides(theses=False,prompt_filters='',processor='llamacpp'))
-        while job:=store.next_job(store.clock(),feeds=feeds):
+        while job:=store.jobs.next_job(store.clock(),feeds=feeds):
             assert job.kind=='fetch',job
             save_material(store,job,Material('Publication '+job.item,'Publication '+job.item+'\n'+('Synthetic saved text. '*100),captions='available'))
         store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))

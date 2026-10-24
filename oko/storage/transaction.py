@@ -1,5 +1,5 @@
 """One synchronous write boundary shared by repositories on one connection."""
-from collections.abc import Iterator
+from collections.abc import Iterator, Callable
 from contextlib import contextmanager
 import sqlite3
 from typing import TYPE_CHECKING
@@ -19,9 +19,11 @@ def begin_write(db: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def transaction(db: 'ReadingConnection') -> Iterator[None]:
+def transaction(db: 'ReadingConnection', *, admitted: Callable[[], bool] = lambda: True) -> Iterator[None]:
     """One short SQL lock, independent of longer lifecycle cleanup waits."""
     with db.access_lock:
+        if not admitted():
+            raise InterruptedError('Storage admission closed')
         with _transaction(db):
             yield
 

@@ -3,13 +3,16 @@ from oko.collection.request_observation import Capture
 import asyncio
 from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 from oko.collection.contracts import Source
-from oko.storage.store import Job, Store
+from oko.storage.store import Store
+from oko.storage.job_types import Job
 from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource
 from oko.diagnostics import Journal, record_caught
 from oko.execution import Execution
-from oko.storage.reader_facts import ReaderFacts
+from oko.services.queries import ReadingQueries
+from oko.storage.job_repository import JobRepository
+from oko.services.processing import ProcessingService
 
 @dataclass
 class _CollectionAttempt:
@@ -28,6 +31,7 @@ class JobControl:
         self._lanes: dict[str, asyncio.Task[None]] = {}
         self._media_jobs: dict[str, Job] = {}
         self._lane_feeds: dict[str, str] = {}
+        self.stage = 'Проверка обработчика'
         self._ai_feed: str | None = None
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()
@@ -43,10 +47,12 @@ class JobControl:
 
     def invalidate(self, feeds: set[str] | None = None) -> None:
         if self._store:
-            for attempt in list(self._collection_active.values()):
-                if feeds is None or attempt.feed in feeds:
-                    self._store.collection_status.interrupt(attempt.job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started))
-            self._store.interrupted(feeds)
+            with self._store.jobs.cancellation():
+                for attempt in list(self._collection_active.values()):
+                    if feeds is None or attempt.feed in feeds:
+                        self._store.jobs.collection_interrupt(attempt.job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started))
+                self._store.jobs.interrupted(feeds)
+                self._store.jobs.invalidate_processing()
 
     async def cancel(self, feeds: set[str] | None = None, *, invalidate: bool = True) -> None:
         if feeds is None:
@@ -109,38 +115,61 @@ class JobControl:
 
 
     async def _drain_deletions(self, current: Store) -> None:
-        feeds = ReaderFacts(lambda: current).deletion_feeds()
+        feeds = ReadingQueries(lambda: current).deletion_feeds()
         if feeds:
             await self.cancel(feeds)
-        job = current.next_job(self._clock(), deleting_only=True)
+        job = current.jobs.next_job(self._clock(), deleting_only=True)
         while job:
             self._delete(job, current)
-            job = current.next_job(self._clock(), deleting_only=True)
+            job = current.jobs.next_job(self._clock(), deleting_only=True)
 
 
     def _delete(self, job: Job, current: Store) -> None:
         try:
             if job.kind == 'feed-delete':
-                current.finish_feed_deletion(job)
+                current.jobs.finish_feed_deletion(job)
             else:
-                current.delete(job)
+                current.jobs.delete(job)
         except Exception:
             record_caught('runtime._delete')
-            if current.valid(job):
-                current.retry(job, self._clock(), 'Ошибка удаления', code='delete')
+            if current.jobs.valid(job):
+                current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete')
 
 
     def retry_material(self, identity: str) -> bool:
-        return self.execution.require_store().retry_material(identity)
+        return self.execution.require_store().jobs.retry_material(identity)
 
     def retry_filter(self, identity: str) -> bool:
-        return self.execution.require_store().filters.retry(identity)
+        return self._retry_processing(identity,'filter')
 
     def retry_theses(self, identity: str) -> bool:
-        return self.execution.require_store().processing.retry_theses(identity)
+        return self._retry_processing(identity,'theses')
 
     def refresh_feed(self, identity: str) -> None:
-        self.execution.require_store().refresh_feed(identity)
+        self.execution.require_store().jobs.refresh_feed(identity)
 
     def enqueue_discovery(self, identity: str) -> None:
-        self.execution.require_store().enqueue_discovery(identity)
+        self.execution.require_store().jobs.enqueue_discovery(identity)
+
+    def _retry_processing(self, identity: str, kind: Literal['filter','theses']) -> bool:
+        store=self.execution.require_store()
+        service=ProcessingService(self.execution.require_store)
+        repository=JobRepository(store)
+        repository.reconcile(kind,service.candidates(kind))
+        if not service.regenerate(identity,kind):
+            return True
+        return repository.retry_processing(identity,kind)
+
+    def reconcile_cleanup(self) -> None:
+        store=self.execution.require_store()
+        store.jobs.reconcile_cleanup()
+        store.jobs.sync_reads()
+
+    def change_adapter(self, feed: str) -> None:
+        self.execution.require_store().jobs.change_adapter(feed)
+
+    def remove_feed(self, feed: str, members: set[str]) -> None:
+        self.execution.require_store().jobs.remove_feed(feed,members)
+
+    def cancel_history(self, feed: str) -> None:
+        self.execution.require_store().jobs.cancel_history(feed)

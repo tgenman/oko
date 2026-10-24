@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 
 if TYPE_CHECKING:
-    from oko.storage.store import Store, Job
+    from oko.storage.store import Store
+from oko.storage.job_types import Job
 
 _TARGET = "kind IN ('discover','fetch','filter','theses','download_media')"
 
@@ -21,6 +22,7 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             continue
         until = (max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay'])) if backoff
             else row['retry_at'] if row['wait_scope'] else None)
+        store.db.execute("UPDATE execution_settings SET generation=? WHERE job=? AND generation=?",(row['generation']+1,row['id'],row['generation']))
         store.db.execute("UPDATE jobs SET status='pending',generation=generation+1,retry_at=?,next=? WHERE id=?",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
 
@@ -39,7 +41,7 @@ def failure_status(issue: AdapterIssue) -> str:
 
 
 def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = False) -> None:
-    if not store.valid(job):
+    if not store.jobs.valid(job):
         return
     row = store.db.execute('SELECT retry_delay FROM jobs WHERE id=?',(job.id,)).fetchone()
     settings = store.subscriptions.retry_settings()

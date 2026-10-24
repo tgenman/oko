@@ -1,3 +1,4 @@
+from tests.support.collection_acceptance import discovered
 """Bound HTTP reading work independently of machine speed and background work."""
 from contextvars import ContextVar
 
@@ -26,10 +27,10 @@ def build_library(root, counts):
                 url='https://fixture.test/feed/'+str(index),
                 title=f'Synthetic {index}', folder=f'Folder {index}', verification='synthetic'))['id']
             feeds.append(feed)
-            store.enqueue_discovery(feed)
-            job = store.next_job(0, feeds=[feed])
+            store.jobs.enqueue_discovery(feed)
+            job = store.jobs.next_job(0, feeds=[feed])
             assert job is not None
-            store.discovered([publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
+            discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
             items.append(store.db.execute('SELECT id FROM items WHERE feed_id=? ORDER BY id', (feed,)).fetchone()[0])
@@ -62,4 +63,4 @@ def tracing(client, app):
         queries = request_sql.get()
         if queries is not None:
             queries.append(query)
-    client.portal.call(lambda: app.state.runtime.require_store().db.set_trace_callback(record))
+    client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(record))

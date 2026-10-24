@@ -1,3 +1,4 @@
+from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
 """Reproduce synthetic background/scaling and archived SQLite plan evidence."""
 from pathlib import Path
@@ -59,9 +60,9 @@ def background_evidence():
       viewed=cost(lambda:s.viewed(items[0]))
 
       with s.db:s.db.execute("UPDATE jobs SET status='pending',next=0 WHERE kind='discover' AND item=?",(feeds[0],))
-      job=s.next_job(s.clock(),feeds=[feeds[0]],include_deletions=False)
+      job=s.jobs.next_job(s.clock(),feeds=[feeds[0]],include_deletions=False)
       assert job and job.kind=='discover'
-      changed=cost(lambda:s.discovered([publication_packet(Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested')))],'{}',job,feeds[0]))
+      changed=cost(lambda:discovered(s,[publication_packet(Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested')))],'{}',job,feeds[0]))
       output['background'].append(dict(total=count*4,idle_processing_sql=idle,viewed_store_sql=viewed,new_publication_transaction_sql=changed))
       s.db.close()
     for count in [4,20]:
@@ -81,7 +82,7 @@ def background_evidence():
         s.db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,telegram_peer,auto_read) VALUES (?,?,?,'telegram','folder','[]','connected','telegram',?,0)",(feed,feed,feed,-1000000-i))
         s.db.execute('INSERT INTO telegram_bindings VALUES (?,?)',(feed,json.dumps(dict(kind='client',role='personal',peer_id=str(-1000000-i)))))
         s.db.execute('INSERT INTO telegram_read_state(feed,since) VALUES (?,0)',(feed,))
-      q=[];s.db.set_trace_callback(q.append);s.read_sync.sync();s.db.set_trace_callback(None)
+      q=[];s.db.set_trace_callback(q.append);s.jobs.sync_reads();s.db.set_trace_callback(None)
       output['telegram'].append(dict(feeds=count,sql=len(q)));s.db.close()
     return output
 

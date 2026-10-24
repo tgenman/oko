@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 from uuid import uuid4
 
 from oko.collection.adapters import ExternalReference
+from oko.domain.collection import CollectionEffects
 from oko.storage.reading import reading_value
 
 if TYPE_CHECKING:
@@ -17,7 +18,7 @@ def children(store: 'Store',item: str) -> list[Any]:
         WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY l.rowid''',(item,)).fetchall()
 
 
-def sync(store: 'Store', item: str, references: tuple[ExternalReference,...]) -> bool:
+def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], effects: CollectionEffects) -> bool:
     owner=store.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone()
     if owner['feed_id'] is None:
         return False
@@ -32,19 +33,16 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...]) ->
             store.db.execute('''INSERT INTO items(id,source_id,url,published,feed_id,members,published_known,
                 platform,external_id,discovered_at) VALUES (?,?,?,0,NULL,'[]',0,?,?,?)''',
                 (identity,'linked:'+identity,ref.url,ref.key.platform.value,ref.key.external_id,store.wall_clock()))
-            store.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?)",(identity,))
+            effects.fetch[identity]=False
         else:
             identity=row['id']
             if row['url']!=ref.url:
                 raise ValueError('Conflicting linked publication identity')
             if row['viewed'] and row['feed_id'] is None:
                 store.db.execute('UPDATE items SET viewed=0,complete=0 WHERE id=?',(identity,))
-                store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1 WHERE kind='delete' AND item=?",(identity,))
-                store.enqueue_fetch(identity)
+                effects.fetch[identity]=True
             elif owner['platform']=='rss':
-                # RSS rechecks the main article in each observed finite window.
-                # Pending waits and permanent failures keep their existing policy.
-                store.db.execute("UPDATE jobs SET status='pending',next=0,generation=generation+1 WHERE kind='fetch' AND item=? AND status='done' AND error IS NULL",(identity,))
+                effects.refresh_links.add(identity)
         targets.append(identity)
     previous={row[0] for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,))}
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id=?',(item,))
@@ -78,6 +76,7 @@ def notify_parents(store: 'Store', item: str) -> None:
         store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(row[0],))
         store.db.execute('''INSERT OR IGNORE INTO telegram_read_dirty
             SELECT feed_id FROM items WHERE id=? AND feed_id IS NOT NULL''',(row[0],))
+        store.publications.reconcile(row[0])
         store.read_versions.linked_changed(row[0])
 
 
@@ -95,8 +94,6 @@ def prune(store: 'Store', candidates: set[str]) -> None:
         store.filters.forget(item)
         store.db.execute('DELETE FROM thesis_inputs WHERE item=?',(item,))
         store.db.execute('UPDATE items SET viewed=1,complete=0 WHERE id=?',(item,))
-        store.db.execute("UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL WHERE item=? AND kind!='delete'",(item,))
-        store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=generation+1,next=0",(item,))
 
 
 def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str,Any]:
@@ -116,13 +113,6 @@ def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str
     result['reason']='; '.join(dict.fromkeys(reasons))
     result['full']=result.get('full',True) and not reasons
     return result
-
-
-def retry(store: 'Store', item: str) -> None:
-    for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,)).fetchall():
-        store.enqueue_fetch(row[0])
-        store.db.execute("UPDATE jobs SET manual_once=1 WHERE kind='fetch' AND item=?",(row[0],))
-        store.media.retry(row[0],revalidate_ready=False)
 
 
 def reading(store: 'Store', item: str, post: str) -> dict[str,Any] | None:

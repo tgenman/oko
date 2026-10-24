@@ -124,12 +124,13 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     return digest([None if youtube else row['title'],selected,relevant])
 
 
-def snapshot(store: 'Store', item: str, generation: int) -> None:
+def snapshot(store: 'Store', item: str) -> None:
     row=store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
     metadata=json.loads(row[0])
     rules=live_settings(store,item)
-    if metadata.get('_pass',{}).get('settings')!=rules:
-        metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),settings_version=store.settings_version(rules['feed_id']),generation=generation)
+    current_revision=revision(store,item)
+    if metadata.get('_pass',{}).get('settings')!=rules or metadata.get('_pass',{}).get('revision')!=current_revision:
+        metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),settings_version=store.settings_version(rules['feed_id']),revision=current_revision)
         with store.db:
             store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
 
@@ -161,3 +162,20 @@ def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict
     if result['hidden']:
         output['blocks']=[]
     return output
+
+
+def input_hash(store: 'Store', item: str) -> str:
+    selected=content(store,item)
+    youtube=selected.get('extra',{}).get('youtube',{})
+    row=material_read.item(store.db,item)
+    return digest([row['title'] if row and not youtube else None,
+        [youtube.get('captions'),youtube.get('captions_digest')] if youtube else blocks(selected),live_settings(store,item)])
+
+
+def revision(store: 'Store', item: str) -> str:
+    row=material_read.item(store.db,item)
+    metadata=json.loads(row['processing_metadata']) if row else {}
+    current=input_hash(store,item)
+    if metadata.get('_revision_input')!=current:
+        return digest(['unreconciled',metadata.get('_revision'),current])
+    return str(metadata.get('_revision',''))

@@ -416,12 +416,18 @@ def test_cleanup_between_move_and_commit_keeps_the_admitted_final_file(tmp_path)
             store.media.cleanup()
     store=Store(root,fault)
     try:
-        job=store.next_job(store.clock()+3600,feeds=[connected['feed_id']],media_only=True)
+        job=store.jobs.next_job(store.clock()+3600,feeds=[connected['feed_id']],media_only=True)
         assert job is not None
-        download=store.media.begin(job)
+        download=store.media.begin(job.item,str(job.id)+'-'+str(job.generation),False)
         assert download is not None
         download.temporary.write_bytes(b'complete-file')
-        assert store.media.complete(job,download,replace(download.media,size_bytes=13))
+        from oko.storage.transaction import transaction
+        from oko.storage.job_repository import JobRepository
+        actual=replace(download.media,size_bytes=13)
+        staged=store.media.stage(job.item,download,actual)
+        with transaction(store.db):
+            assert store.media.accept(job.item,download,actual,staged)
+            JobRepository(store).finish(job)
         stored=store.media.file(item,job.item)
         assert stored is not None and stored[0].read_bytes()==b'complete-file'
         store.media.release(download)
@@ -708,11 +714,11 @@ def test_manual_fetch_retry_is_immediate_after_restart_without_resetting_backoff
                 return db.execute("SELECT j.retry_delay,j.item FROM jobs j JOIN publication_links l ON l.target_publication_id=j.item WHERE j.kind='fetch' AND l.source_publication_id=? AND j.status='pending' AND j.error IS NOT NULL",(item,)).fetchone()
         delay,article=wait_for(client,failed)
     store=Store(root,lambda _:None)
-    assert store.retry_material(item)
+    assert store.jobs.retry_material(item)
     store.db.close()
     store=Store(root,lambda _:None)
     try:
-        job=store.next_job(store.clock(),feeds=[feed],include_deletions=False)
+        job=store.jobs.next_job(store.clock(),feeds=[feed],include_deletions=False)
         assert job is not None and job.kind=='fetch' and job.item==article
         assert store.db.execute('SELECT retry_delay FROM jobs WHERE id=?',(job.id,)).fetchone()[0]==delay
     finally:

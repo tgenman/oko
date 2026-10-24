@@ -130,9 +130,9 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         assert not captions.calls and not ai
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True, 'processor': 'llamacpp'})
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        material = wait(client, lambda m: m['source'].get('captions') == 'unavailable')
+        material = wait(client, lambda m: m['source'].get('captions') == 'unavailable' and m['theses']['attempt']['state']=='ready')
         assert material['content']['completeness'].get('message','') == 'Субтитры недоступны' and material['content']['text'] == ''
-        assert material['theses']['result'] is None and not ai
+        assert material['theses']['result']['points']==[] and not ai
         captions.outcome = 'error'
         # Advance both admission clocks; never wait for real rate-limit time.
         wall[0] += 10

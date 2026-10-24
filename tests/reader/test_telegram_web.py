@@ -383,7 +383,7 @@ def test_retry_and_save_do_not_read_all_retained_media_into_ram(tmp_path,monkeyp
 
 def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync(tmp_path,monkeypatch):
     from oko.collection.telegram.source import _TelegramWorker
-    from oko.collection.telegram.read_sync import ReadSync
+    from oko.storage.read_sync import ReadSync
     def forbidden(*args,**kwargs):
         raise AssertionError('Web must never allocate a Telegram worker or register read eligibility')
     monkeypatch.setattr(_TelegramWorker,'__init__',forbidden)

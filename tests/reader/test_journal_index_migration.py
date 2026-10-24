@@ -53,7 +53,7 @@ def test_viewing_does_not_scan_unrelated_receipt_bodies(tmp_path):
             if request_sql.get() is not None:
                 ticks.append(1)
             return 0
-        client.portal.call(lambda: app.state.runtime.require_store().db.set_progress_handler(progress, 100))
+        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(progress, 100))
         response = client.post(f'/api/v3/materials/{items[0]}/viewed')
         assert response.status_code == 200, response.text
         assert len(ticks) * 100 < 50000, len(ticks) * 100

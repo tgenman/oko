@@ -50,7 +50,7 @@ def test_response_schema_compiles_once_across_direct_included_and_concurrent_app
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         apps = list(pool.map(build, range(8)))
-    assert len({id(app.state.runtime) for app in apps}) == 8
+    assert len({id(app.state.host) for app in apps}) == 8
     for index, app in enumerate(apps):
         with TestClient(app, headers={'Authorization':'Bearer test'}) as client:
             assert client.get('/api/v3/probe-direct').json() == {'value':index}
@@ -150,7 +150,7 @@ def test_live_readers_keep_tokens_settings_diagnostics_and_shutdown_independent(
 def test_prepared_schemas_do_not_retain_application_or_runtime(tmp_path):
     def build():
         app = create_app(tmp_path, api_only=True, token='test')
-        return weakref.ref(app), weakref.ref(app.state.runtime)
+        return weakref.ref(app), weakref.ref(app.state.host)
     application, runtime = build()
     # FastAPI itself memoizes endpoint callables (which close over Runtime).
     # Release only that unrelated reflection cache; keep prepared schemas warm.

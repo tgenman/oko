@@ -1,0 +1,54 @@
+{
+  "started_at": "20261024T094153Z",
+  "selected_files": {
+    "browser": [],
+    "node-tests": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "staged": {
+      "status": "PASS (8.57s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/.venv/bin/python",
+            "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/scripts/check-staged"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 8.5728
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 8.5728
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "tests/development/test_test_environment.py",
+      "tests/support/collection_acceptance.py",
+      "tests/support/performance_seed.py",
+      "tests/support/processing_jobs.py",
+      "tests/support/reading_cost.py",
+      "tests/support/reading_measurements.py",
+      "tests/support/runtime_clock.py",
+      "tests/support/source.py",
+      "tests/support/sql_acceptance_evidence.py",
+      "tests/support/worker_library.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {},
+  "exit_code": 0,
+  "duration_seconds": 8.84,
+  "log": "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/.scratch/check-runs/20261024T094153Z-c494ba60/output.log"
+}

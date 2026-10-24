@@ -122,7 +122,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         summary=next(call for call in calls if call['operation']=='theses')
         assert summary['sources'][0]['text']=='Useful words. Ad text.'
         import sqlite3
-        from oko.reviews.publication_input import digest
+        from oko.storage.processing_input import digest
         with sqlite3.connect(root/'state.sqlite') as db:
             saved=db.execute('SELECT processing_metadata,content FROM items WHERE id=?',(card['id'],)).fetchone()
             metadata=json.loads(saved[0])

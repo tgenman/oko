@@ -12,7 +12,7 @@ class ReaderClock:
 
     def advance_and_wait(self, client, seconds=0.):
         async def observe():
-            runtime = client.app.state.runtime.execution
+            runtime = client.app.state.host.execution
             original = runtime.reader_advance
             assert original is not None
             try:
