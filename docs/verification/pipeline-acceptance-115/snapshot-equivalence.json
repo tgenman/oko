@@ -1,0 +1,12 @@
+{
+  "base": "c2310069edd0797d0cc64a2fbdf6538dece6ab75",
+  "tree": "3f9eb5f7046edc6d4856311144c0d31952be169e",
+  "matched": true,
+  "files": {
+    "oko/storage/migration.py": "099334a4718cd562eb126812b72483466293f0c264b22792a264d91a003a951f",
+    "scripts/oko-release": "778dbfa4f7ff6c1c21717de8dfc9ad2f8acad120e52ebc313265de835923bedb",
+    "tests/reader/test_pipeline_acceptance.py": "0b5960e9dee52f5f0be5df61f3968512658263b97ca944d696160e5213d5ce67",
+    "tests/development/test_docker_release.py": "21ff6365b99da903af40e2d1d607598aa17834227416c769a21b1763e3fe2110",
+    "tests/processing/test_codex_bridge.py": "a030f36375660897c2e1fa6782f4c3e0f20602dc91b4fbef184b7847f91c8736"
+  }
+}

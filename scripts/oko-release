@@ -266,6 +266,8 @@ def backup(home):
         target.mkdir(parents=True, mode=0o700)
         digest = tree_digest(root)
         shutil.copytree(root, target / 'data')
+        if tree_digest(target / 'data') != digest or tree_digest(root) != digest:
+            raise ValueError('Backup verification failed; incomplete copy retained for inspection')
         save(target / 'backup.json', dict(release=read(home / 'current.json')['release'], digest=digest))
         return target
 
@@ -279,22 +281,32 @@ def migrate(args):
         raise ValueError('Migration requires empty destination data; original data was preserved')
     if not (source / 'state.sqlite').is_file():
         raise ValueError('Source does not contain an Oko store')
-    with (source / 'instance.lock').open('a') as lock:
+    if (source / 'instance.lock').is_symlink():
+        raise ValueError('Source lock must not be a symlink')
+    with (source / 'instance.lock').open('rb') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise ValueError('Stop the old instance before migration') from exc
-        tree_digest(source)
+        digest = tree_digest(source)
         if destination.exists():
             destination.rmdir()
-        shutil.copytree(source, destination)
-    for name in ('runtime.json', 'runtime.tmp'):
-        (destination / name).unlink(missing_ok=True)
-    folder, _ = release(args.home)
-    run([folder / 'source/.venv/bin/python', '-c',
-         'from pathlib import Path; from oko.storage.store import Store; import sys; '
-         's=Store(Path(sys.argv[1]), lambda _: None); s.set_work_enabled(False); s.db.close()', destination],
-         cwd=folder / 'source')
+        try:
+            shutil.copytree(source, destination)
+            if tree_digest(destination) != digest or tree_digest(source) != digest:
+                raise ValueError('Migration copy verification failed')
+            for name in ('runtime.json', 'runtime.tmp'):
+                (destination / name).unlink(missing_ok=True)
+            folder, _ = release(args.home)
+            run([folder / 'source/.venv/bin/python', '-c',
+                 'from pathlib import Path; from oko.storage.store import Store; import sys; '
+                 's=Store(Path(sys.argv[1]), lambda _: None); s.set_work_enabled(False); s.db.close()', destination],
+                 cwd=folder / 'source')
+        except BaseException:
+            # Destination was empty; never leave a partially imported installation.
+            if destination.exists():
+                shutil.rmtree(destination)
+            raise
     print('Copied data with collection disabled. Original preserved. Validate Telegram paths before enabling.')
 
 

@@ -30,7 +30,8 @@ def group_guard(db: sqlite3.Connection) -> dict[str, Any]:
         raise MigrationRefused('Source schema has no proven Telegram channel type')
     for row in db.execute("SELECT id,config FROM feeds WHERE kind='telegram'"):
         try:
-            kind=json.loads(row[1]).get('source_kind')
+            config=json.loads(row[1])
+            kind=config.get('source_kind') if isinstance(config,dict) else None
         except (TypeError,ValueError):
             kind=None
         if kind!='channel':
@@ -39,6 +40,7 @@ def group_guard(db: sqlite3.Connection) -> dict[str, Any]:
         for row in db.execute('SELECT feed,binding FROM telegram_bindings'):
             try:
                 binding=json.loads(row[1])
+                if not isinstance(binding,dict):binding={}
             except (TypeError,ValueError):
                 binding={}
             if binding.get('kind') not in ('web','client'):
@@ -47,13 +49,39 @@ def group_guard(db: sqlite3.Connection) -> dict[str, Any]:
                 conflicts.append(dict(kind='unproven_binding_owner',feed=row[0]))
     # Historical group/topic tables count even without a surviving feed or messages.
     for table in sorted(tables):
-        if any(part in table.lower() for part in ('topic','group','chat')) and db.execute('SELECT 1 FROM '+quote(table)+' LIMIT 1').fetchone():
+        if any(part in table.lower() for part in ('topic','group','chat','message')) and db.execute('SELECT 1 FROM '+quote(table)+' LIMIT 1').fetchone():
             conflicts.append(dict(kind='legacy_group_data',table=table))
     for table,column in (('jobs','kind'),('settings','scope')):
         if table in tables:
             for row in db.execute('SELECT DISTINCT '+quote(column)+' FROM '+quote(table)):
                 if row[0] and any(part in row[0].lower() for part in ('group','topic','chat')):
                     conflicts.append(dict(kind='legacy_group_reference',table=table,value=row[0]))
+    # A detached record has no proven channel owner. Inspect references before
+    # Store recovery can normalize them; SQLite foreign keys were not always on.
+    references=(('initial_history','feed','feeds'),('history_members','feed','feeds'),
+                ('history_members','item','items'),('feed_publications','feed_id','feeds'),
+                ('feed_publications','publication_id','items'),('media_files','publication_id','items'),
+                ('items','feed_id','feeds'),('telegram_read_members','feed','feeds'),
+                ('telegram_read_state','feed','feeds'),('telegram_claim_owners','feed','feeds'),
+                ('telegram_avatars','feed','feeds'))
+    for table,column,owner in references:
+        if table not in tables or owner not in tables:continue
+        for row in db.execute('SELECT DISTINCT r.'+quote(column)+' FROM '+quote(table)+
+                ' r LEFT JOIN '+quote(owner)+' o ON o.id=r.'+quote(column)+
+                ' WHERE r.'+quote(column)+' IS NOT NULL AND o.id IS NULL'):
+            conflicts.append(dict(kind='unproven_owner',table=table,column=column,value=row[0]))
+    if 'settings' in tables:
+        for row in db.execute("SELECT DISTINCT owner FROM settings WHERE scope='feed' AND owner NOT IN (SELECT id FROM feeds)"):
+            conflicts.append(dict(kind='unproven_owner',table='settings',value=row[0]))
+    if 'jobs' in tables:
+        owners={'discover':'feeds','read':'feeds','feed-delete':'feeds',
+                'fetch':'items','filter':'items','theses':'items','delete':'items',
+                'download_media':'media_files'}
+        for row in db.execute('SELECT id,kind,item FROM jobs'):
+            job_owner=owners.get(row[1])
+            identity='demo' if row[1]=='discover' and row[2]=='' else row[2]
+            if job_owner is None or job_owner not in tables or db.execute('SELECT 1 FROM '+quote(job_owner)+' WHERE id=?',(identity,)).fetchone() is None:
+                conflicts.append(dict(kind='unproven_job_owner',job=row[0],operation=row[1],value=row[2]))
     if conflicts:
         raise MigrationRefused(json.dumps(dict(reason='group_or_unknown_data',conflicts=conflicts),ensure_ascii=False))
     return dict(telegram_types='channels_only',group_data='absent',checked_tables=sorted(tables))

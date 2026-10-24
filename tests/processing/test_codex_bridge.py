@@ -313,7 +313,15 @@ def test_supervisor_crash_blocks_new_work_until_owned_process_cleanup(tmp_path):
                 assert old['state'] == 'error'
                 next_body = dict(boot_id=headers['X-Oko-Boot'], session_id=headers['X-Oko-Session'],
                                  operation='check', deadline=time.time() + 30)
-                assert client.put('/v1/jobs/' + 'f' * 32, json=next_body).status_code == 503
+                # Pipe EOF can publish error before the killed supervisor is
+                # reaped. Both busy and recovery-required must reject new work.
+                for _ in range(200):
+                    blocked = client.put('/v1/jobs/' + 'f' * 32, json=next_body)
+                    assert blocked.status_code in (409, 503)
+                    if blocked.status_code == 503:
+                        break
+                    time.sleep(.01)
+                assert blocked.status_code == 503
                 assert marker.exists()
             finally:
                 try:
