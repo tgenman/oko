@@ -19,7 +19,7 @@ def fixture(tmp_path):
     for name in ('check', 'task_changes.py', 'check_snapshot.py'):
         if (SCRIPTS / name).exists():
             shutil.copy2(SCRIPTS / name, root / 'scripts' / name)
-    for name in ('frontend/app.ts', 'tests/browser/test_example.ts'):
+    for name in ('frontend/app.ts', 'tests/browser/test_example.ts', 'tests/node/test_example.ts'):
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('')

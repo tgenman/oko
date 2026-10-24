@@ -43,6 +43,14 @@ def summary(path):
         raise ValueError('Invalid checkout result')
     result = dict(exit_code=code, duration_seconds=duration, suites=suites,
                   checkout=guard, log=data['log'], report=str(path.resolve()))
+    if 'test_groups' in data:
+        groups=data['test_groups']
+        if not isinstance(groups,dict) or not all(isinstance(name,str) and isinstance(group,dict)
+            and isinstance(group.get('status'),str) and valid_seconds(group.get('duration_seconds'))
+            and isinstance(group.get('counts'),dict) and all(isinstance(key,str) and type(value) is int and value>=0
+                for key,value in group['counts'].items()) for name,group in groups.items()):
+            raise ValueError('Invalid test groups')
+        result['test_groups']=groups
     if 'snapshot' in data:
         snapshot = data['snapshot']
         if not all(isinstance(snapshot[key], str) and snapshot[key] for key in ('source', 'checkout', 'head', 'tree')):
@@ -75,6 +83,8 @@ def main():
                     print('  ' + failure)
                 for file in suite.get('slow_files', [])[:3]:
                     print(f"  slow: {file['seconds']:.3f}s {file['file']}")
+            for name,group in value.get('test_groups',{}).items():
+                print(f"Tests {name}: {group['status']}, {group['counts'].get('passed','?')} passed, {group['duration_seconds']:.2f}s")
             guard = value['checkout']
             print('checkout: ' + guard['status'])
             for name in guard['changed_files']:

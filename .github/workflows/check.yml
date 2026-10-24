@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [python, browser, tools]
+        suite: [python, node, browser, tools]
     steps:
       - uses: actions/checkout@v4
         with:

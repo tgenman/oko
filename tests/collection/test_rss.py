@@ -123,11 +123,12 @@ def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path
     with TestClient(create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
         import_feed(client)
         presence(client, 'test')
-        card = wait_cards(client)[0]
+        wait_cards(client)
+        card = wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if len([m for m in c['attachments'] if m['kind']=='image'])==1),None))
         assert (card['completeness']['state']=='complete') is False and len([media for media in card['attachments'] if media['kind']=='image']) == 1
         available = True
         client.post('/api/v3/materials/' + card['id'] + '/retry')
-        card = wait_cards(client)[0]
+        card = wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if len([m for m in c['attachments'] if m['kind']=='image'])==2),None))
         assert (card['completeness']['state']=='complete') is True and len([media for media in card['attachments'] if media['kind']=='image']) == 2
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
         assert all(client.get(url).status_code == 404 for url in [media['url'] for media in card['attachments'] if media['kind']=='image'])

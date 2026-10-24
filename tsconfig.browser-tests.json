@@ -26,6 +26,7 @@
     "tsBuildInfoFile": "./.scratch/check-cache/types/browser.tsbuildinfo"
   },
   "include": [
-    "tests/browser/**/*.ts"
+    "tests/browser/**/*.ts",
+    "tests/node/**/*.ts"
   ]
 }
