@@ -18,7 +18,7 @@ from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
-from oko.reviews.coordination import ProcessingWait
+from oko.domain.processing import ProcessingWait
 
 
 def media_url(value: str) -> wire.MediaUrl:
@@ -235,7 +235,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
                 raise missing(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=identity(item))))
             value = facts.Material.model_validate(raw)
             owner = feeds(value.feed_id)[value.feed_id]
-            from oko.reader.composition import snippet
+            from oko.storage.composition import snippet
             data = value.model_dump(exclude_unset=True)
             for key in ('text', 'description', 'display_text', 'reply_preview', 'linked_content'):
                 data.pop(key, None)

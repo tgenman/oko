@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 from oko.reader.generated import models as wire
 from oko.reader import projection_v3 as project, snapshots as facts
 from oko.reader.api_v3 import ApiError, invalid, no_query
-from oko.reader.composition import snippet, telegram_title
+from oko.storage.composition import snippet, telegram_title
 from oko.application.reader import ReaderApplication
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage import material_read, publication_links

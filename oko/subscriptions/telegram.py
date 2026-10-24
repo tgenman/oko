@@ -1,6 +1,6 @@
 """Durable Telegram bindings, verified profiles and source claim ownership.
 
-All mutations run on the existing Subscriptions SQLite connection under Runtime
+All mutations run on the existing Subscriptions SQLite connection under shared
 admission. No network, credentials, SDK or file deletion belongs here.
 """
 from oko.storage.reading import reading_value
@@ -219,7 +219,9 @@ class TelegramAccess:
             self.save_metadata(feed, info)
 
     def save_metadata(self, feed: str, info: dict[str, Any]) -> None:
-        if info.get('kind') in ('channel','group','supergroup'):
+        if info.get('kind') in ('group','supergroup') or info.get('forum',False):
+            raise TelegramConflict('source_connection_invalid',dict(reason='unsupported_group'),'Группы Telegram пока не поддерживаются; подключите канал',400)
+        if info.get('kind')=='channel':
             row=self.db.execute('SELECT config FROM feeds WHERE id=?',(feed,)).fetchone()
             if row:
                 config=json.loads(row[0])

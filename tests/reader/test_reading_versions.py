@@ -1,3 +1,5 @@
+from tests.support.processing_jobs import save_derivative
+from tests.support.processing_jobs import reconcile
 """Persisted resource versions and selective delivery at the real HTTP seam."""
 import time
 from fastapi.testclient import TestClient
@@ -98,7 +100,7 @@ def test_feed_version_increments_once_and_sql_rollback_keeps_it(tmp_path):
         assert int(renamed['version'])==int(before['version'])+1
         assert renamed['data']['title']=='Renamed'
         def rollback():
-            store=app.state.runtime.require_store()
+            store=app.state.host.require_store()
             with store.db:
                 store.db.execute('BEGIN IMMEDIATE')
                 store.db.execute("UPDATE feeds SET title='Uncommitted' WHERE id=?",(feeds[0],))
@@ -117,7 +119,7 @@ def test_due_fetch_publishes_a_new_material_version_without_dispatch(tmp_path):
     app=traced_app(tmp_path,clock=lambda:clock[0],wall_clock=lambda:1800000000+clock[0])
     with TestClient(app,headers=HEADERS) as client:
         def schedule():
-            store=app.state.runtime.require_store()
+            store=app.state.host.require_store()
             with store.db:
                 store.db.execute("UPDATE jobs SET next=10,error='Synthetic wait',problem_code='source-connection' WHERE kind='fetch' AND item=?",(items[0],))
         client.portal.call(schedule)
@@ -159,8 +161,8 @@ def test_theses_completion_delivers_no_text_or_media(tmp_path):
     with TestClient(app,headers=HEADERS) as client:
         assert client.patch('/api/v3/settings/oko/global',json={'theses':True}).status_code==200
         def complete():
-            store=app.state.runtime.require_store()
-            job=store.next_job(store.clock(),feeds=[store.item_feed(items[0])])
+            store=app.state.host.require_store()
+            job=store.jobs.next_job(store.clock(),feeds=[store.item_feed(items[0])])
             assert job is not None and job.kind=='fetch'
             from tests.support.source import save_material
             save_material(store,job,Material('Synthetic','Long original text '*1000,captions='available'))
@@ -169,13 +171,13 @@ def test_theses_completion_delivers_no_text_or_media(tmp_path):
         assert all(r['state']=='changed' for r in first['resources'])
         requests=[{'kind':r['kind'],'id':r['id'],'known_version':r['version']} for r in first['resources']]
         def summarize():
-            store=app.state.runtime.require_store()
-            store.processing.sync_stage('theses')
-            job=store.next_job(store.clock(),ai_only=True)
+            store=app.state.host.require_store()
+            reconcile(store,'theses')
+            job=store.jobs.next_job(store.clock(),ai_only=True)
             assert job is not None and job.kind=='theses'
             signature=store.processing.theses.signature(job.item)
             assert signature is not None
-            store.save_derivative(job,signature,{'points':[{'text':'Synthetic summary','sources':[{'id':job.item,'url':'https://example.org/0/0'}]}]},'Synthetic summary',provenance=None)
+            save_derivative(store,job,signature,{'points':[{'text':'Synthetic summary','sources':[{'id':job.item,'url':'https://example.org/0/0'}]}]},'Synthetic summary',provenance=None)
         client.portal.call(summarize)
         current=check(client,requests,first['storage_id']).json()
         changed=[r for r in current['resources'] if r['state']=='changed']
@@ -192,9 +194,9 @@ def test_stopped_check_returns_final_status_and_explicit_unavailability(tmp_path
         assert client.post('/api/v3/stop').status_code==200
         import time
         for _ in range(100):
-            if app.state.runtime.execution._store is None:break
+            if app.state.host.execution._store is None:break
             time.sleep(.01)
-        assert app.state.runtime.execution._store is None
+        assert app.state.host.execution._store is None
         request=[{'kind':'status','known_version':None},{'kind':'material','id':items[0],'known_version':None}]
         stopped=check(client,request,first['storage_id']).json()
         assert stopped['resources'][0]['data']['runtime_state']=='stopped'

@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Any, cast
 from oko.collection.youtube.access import proxy_settings
 
 if TYPE_CHECKING:
-    from oko.storage.store import Job, Store
+    from oko.storage.store import Store
+from oko.storage.job_types import Job
 
 
 class YouTubeAccess:
@@ -78,8 +79,3 @@ class YouTubeAccess:
     def completed(self) -> None:
         with self.db:
             self.db.execute('UPDATE youtube_access SET strikes=0,blocked_until=0 WHERE id=1')
-
-    def defer(self, job: 'Job', now: float, delay: float, reason: str, *, blocked: bool = False) -> None:
-        with self.db:
-            self.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=? WHERE id=? AND generation=?",
-                            (now + max(.05, delay), reason, 'youtube-admission' if blocked else None, job.id, job.generation))

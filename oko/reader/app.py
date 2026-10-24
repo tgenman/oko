@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from oko.collection.contracts import Source
 from oko.processing.codex import CodexClient
 from oko.collection.telegram.source import TelegramClient
-from oko.reader.runtime import Runtime
+from oko.host import Host
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
 from oko.reader.lifetime import Lifetime
@@ -54,14 +54,17 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     browser_sessions = BrowserSessions(root, wall_clock) if persistent else None
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
-    runtime = Runtime(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
-    runtime.application = ReaderApplication(runtime.execution, runtime.jobs, clock=clock, wall_clock=wall_clock,
-        sources=runtime._sources, bindings=runtime._telegram_bindings, sync_sources=runtime._sync_sources,
-        interval_changed=lambda value: setattr(runtime, '_collection_interval', value), stage=lambda: runtime._ai_stage,
-        source_description=runtime._collection.description, rss_transport=rss_transport, ai_transport=ai_transport,
-        telegram=telegram_client, telegram_http=runtime._telegram_http, codex=runtime._codex_client,
+    runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
+    application = ReaderApplication(runtime.execution, runtime.jobs, clock=clock, wall_clock=wall_clock,
+        sources=runtime.collection._sources, bindings=runtime.collection._telegram_bindings, sync_sources=runtime.collection._sync_sources,
+        interval_changed=lambda value: setattr(runtime.collection, '_collection_interval', value), stage=lambda: runtime.jobs.stage,
+        source_description=runtime.collection._collection.description, rss_transport=rss_transport, ai_transport=ai_transport,
+        telegram=telegram_client, telegram_http=runtime.collection._telegram_http, codex=runtime.codex,
         stop=runtime.stop, admission_changed=runtime.admission_changed, set_power=runtime.set_power)
     journal = Journal(root, token)
+    runtime.collection.clean_collection=application._clean_collection
+    runtime.collection.verify_telegram_profile=application._verify_telegram_profile
+    runtime.clear_feed_checks=application._feed_checks.clear
     runtime.diagnostics = journal
 
     @asynccontextmanager
@@ -109,8 +112,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.router.route_class = SchemaRoute
-    app.state.runtime = runtime
-    app.state.application = runtime.application
+    app.state.host = runtime
+    app.state.application = application
 
     @app.exception_handler(ActionError)
     async def action_error(request: Request, error: ActionError) -> JSONResponse:
@@ -218,7 +221,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             response.headers['X-Oko-Browser-Session'] = 'remembered'
         return response
 
-    api_v3.register(app, runtime.application, lifetime, wall_clock, journal)
+    api_v3.register(app, application, lifetime, wall_clock, journal)
 
     @app.delete('/api/v3/browser-session', response_model=BrowserSessionRevoked)
     async def revoke_browser_session(request: Request) -> BrowserSessionRevoked:

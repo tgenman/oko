@@ -1,0 +1,295 @@
+{
+  "started_at": "20261024T094247Z",
+  "selected_files": {
+    "browser": [],
+    "node-tests": [],
+    "python-tests": [
+      "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/tests/reader/test_worker_transactions.py"
+    ],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "contracts": {
+      "status": "PASS (0.66s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/.venv/bin/python",
+            "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/scripts/check_test_contracts.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.6567
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 0.6567
+    },
+    "python-tests": {
+      "status": "PASS (4.10s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/.venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "--rootdir=/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko",
+            "--junitxml=/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/.scratch/check-runs/20261024T094247Z-e877454b/parallel/python-tests/20261024T094248Z-39c5d10a/pytest-2e6bd29fc06a4036bc5c3bcdaa1059e3.xml",
+            "-o",
+            "junit_family=xunit1",
+            "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/tests/reader/test_worker_transactions.py"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 4.077
+        }
+      ],
+      "failures": [],
+      "counts": {
+        "total": 31,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 31
+      },
+      "test_durations": [
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_result_and_done_survive_or_rollback_together[processing_after_result]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.106
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_result_and_done_survive_or_rollback_together[processing_after_finish]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.096
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_result_and_done_survive_or_rollback_together[processing_after_commit]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.096
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_conditional_finish_zero_rows_rolls_back_domain_result",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.076
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_new_input_rejects_old_success_and_old_error_without_harming_replacement[False]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.099
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_new_input_rejects_old_success_and_old_error_without_harming_replacement[True]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.078
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_claim_and_saved_context_are_one_transaction_and_survive_restart",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.104
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_disabled_admission_never_begins_and_next_transaction_is_usable",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.07
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_nested_service_uses_one_begin_and_a_caught_failure_cannot_commit",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.069
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_overlapping_cron_ticks_claim_one_attempt",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.078
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_periodic_pass_keeps_stopped_work_and_source_wait_after_restart[failed]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.102
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_periodic_pass_keeps_stopped_work_and_source_wait_after_restart[unavailable]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.106
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_periodic_pass_keeps_stopped_work_and_source_wait_after_restart[cancelled]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.093
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_periodic_pass_keeps_stopped_work_and_source_wait_after_restart[source_wait]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.099
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_common_feed_context_survives_restart_without_second_feed_substitution",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.102
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_revision_change_without_filter_signature_change_replaces_old_attempt",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.074
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_collection_failure_does_not_stop_filter_and_summary_crons",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.485
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_uncommitted_result_is_invisible_to_an_independent_reader",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.081
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_recovery_keeps_execution_choice_for_the_interrupted_pass",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.125
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_new_revision_does_not_shorten_source_wait",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.074
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_input_changed_during_adapter_check_cancels_without_leaving_open_sql",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.077
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_previous_schema_terminal_job_is_not_reopened_by_payload_upgrade[failed]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.112
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_previous_schema_terminal_job_is_not_reopened_by_payload_upgrade[unavailable]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.105
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_previous_schema_terminal_job_is_not_reopened_by_payload_upgrade[cancelled]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.101
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_preparation_distinguishes_all_four_domain_outcomes[model]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.069
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_preparation_distinguishes_all_four_domain_outcomes[no_input]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.068
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_preparation_distinguishes_all_four_domain_outcomes[waiting]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.068
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_preparation_distinguishes_all_four_domain_outcomes[disabled]",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.071
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_return_to_previous_input_does_not_reuse_a_processing_revision",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.067
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_task_cancelled_before_sql_entry_never_begins_or_owns_the_connection",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.064
+        },
+        {
+          "file": "tests/reader/test_worker_transactions.py",
+          "name": "test_restart_after_new_input_before_the_processing_cron_keeps_the_work",
+          "classname": "tests.reader.test_worker_transactions",
+          "seconds": 0.087
+        }
+      ],
+      "file_durations": {
+        "tests/reader/test_worker_transactions.py": 3.102
+      },
+      "duration_seconds": 4.0961,
+      "worker_durations": {
+        "python-tests": 4.0961
+      },
+      "worker_results": {
+        "python-tests": "PASS (4.08s)"
+      },
+      "checkout_changes": []
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": true,
+    "inputs": [
+      "tests/development/test_test_environment.py",
+      "tests/support/collection_acceptance.py",
+      "tests/support/performance_seed.py",
+      "tests/support/processing_jobs.py",
+      "tests/support/reading_cost.py",
+      "tests/support/reading_measurements.py",
+      "tests/support/runtime_clock.py",
+      "tests/support/source.py",
+      "tests/support/sql_acceptance_evidence.py",
+      "tests/support/worker_library.py"
+    ],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {
+    "Python": {
+      "status": "PASS",
+      "counts": {
+        "total": 31,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 31
+      },
+      "duration_seconds": 4.0961
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 5.17,
+  "log": "/Users/dabondarev/.codex/worktrees/pipeline-workers-114/oko/.scratch/check-runs/20261024T094247Z-e877454b/output.log"
+}

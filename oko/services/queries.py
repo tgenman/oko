@@ -13,7 +13,7 @@ from oko.storage.problems import CommandRecord
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage.reader_facts import ReaderFacts
 from oko.processing.llamacpp import ProcessorConfig
-from oko.reader.composition import Navigation
+from oko.storage.composition import Navigation
 
 from oko.storage.access import repository_access
 

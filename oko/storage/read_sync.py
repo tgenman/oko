@@ -7,7 +7,7 @@ from oko.collection.telegram.contracts import HistoryEnvelope
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from oko.storage.store import Store, Job
+    from oko.storage.store import Store
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class ReadSync:
               WHEN NEW.initial IS NOT OLD.initial OR NEW.since IS NOT OLD.since
               BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
             """)
-        self.sync()
+        self.store.jobs.sync_reads()
 
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:
         db = self.store.db
@@ -104,48 +104,6 @@ class ReadSync:
     def signature(self, request: dict[str, Any]) -> str:
         return json.dumps({k: v for k, v in request.items() if k != 'initial'}, sort_keys=True)
 
-    def sync(self) -> None:
-        db = self.store.db
-        revision = self.store.subscriptions.source_revision()
-        if revision != self._configuration:
-            configs = self.store.subscriptions.feeds(transport='telegram')
-        else:
-            pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_dirty')]
-            if not pending:
-                return
-            configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed, transport='telegram')]
-        bindings = self.store.subscriptions.telegram.bindings()
-        profiles = self.store.subscriptions.telegram.profiles()
-        for config in configs:
-            feed = config['id']
-            binding = bindings.get(feed)
-            if config['transport'] == 'telegram' and config['connection'] != 'deleting' and binding and binding['kind'] == 'client':
-                with db:
-                    if config['auto_read']:
-                        eligible = {r[0] for r in db.execute('SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1', (feed,))}
-                        for row in db.execute('SELECT * FROM items WHERE feed_id=? AND complete=1 AND viewed=0', (feed,)).fetchall():
-                            members = json.loads(row['members'])
-                            if members and not set(members) <= eligible:
-                                try:
-                                    header, _ = self.store.original(row['id'])
-                                except (OSError, ValueError, KeyError):
-                                    continue
-                                if isinstance(header.get('title'), str) and header.get('full', True) and (not header.get('members') or set(header['members']) == set(members)):
-                                    self.eligible(feed, members, 'saved')
-                    request = self._request(config, binding, profiles.get(binding['role']))
-                    if request is not None:
-                        state = db.execute('SELECT signature,waiting FROM telegram_read_state WHERE feed=?', (feed,)).fetchone()
-                        if request['eligible'] or request['read_history'] or state['waiting']:
-                            signature = self.signature(request)
-                            if state['signature'] != signature:
-                                db.execute('UPDATE telegram_read_state SET signature=? WHERE feed=?', (signature, feed))
-                                db.execute("INSERT INTO jobs(kind,item) VALUES ('read',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1", (feed,))
-            with db:
-                db.execute('DELETE FROM telegram_read_dirty WHERE feed=?', (feed,))
-        # Deleted and non-Telegram feeds need no read-frontier work.
-        with db:
-            db.execute("DELETE FROM telegram_read_dirty WHERE NOT EXISTS (SELECT 1 FROM feeds WHERE id=telegram_read_dirty.feed AND transport='telegram' AND connection!='deleting')")
-        self._configuration = revision
 
     def plan(self, request: dict[str, Any], state: dict[str, Any], window: dict[str, Any] | None = None) -> ReadPlan:
         confirmed = int(state['read_max'])
@@ -180,20 +138,9 @@ class ReadSync:
 
 
 
-    def completed(self, job: 'Job', plan: ReadPlan, confirmed: int, now: float) -> None:
-        with self.store.db:
-            self.store.db.executemany('UPDATE telegram_read_members SET missing=1 WHERE feed=? AND member=?',
-                                      [(job.item, member) for member in plan.missing])
-            self.store.db.execute('''UPDATE telegram_read_state SET initial=COALESCE(initial,?),
-              confirmed=MAX(confirmed,?),waiting=?,error=NULL WHERE feed=?''', (plan.initial, confirmed, plan.waiting, job.item))
-            if plan.waiting:
-                self.store.db.execute("UPDATE jobs SET status='pending',next=?,error=?,problem_code=NULL WHERE id=? AND generation=? AND status='running'", (now + (.1 if plan.waiting == 'Продолжение проверки истории Telegram' else 30), plan.waiting, job.id, job.generation))
-            else:
-                self.store.finish(job)
-
-    def suspend(self, job: 'Job') -> None:
-        with self.store.db:
-            self.store.finish(job)
+    def completed(self, feed: str, plan: ReadPlan, confirmed: int) -> None:
+        self.store.db.executemany('UPDATE telegram_read_members SET missing=1 WHERE feed=? AND member=?',[(feed,member) for member in plan.missing])
+        self.store.db.execute("UPDATE telegram_read_state SET initial=COALESCE(initial,?),confirmed=MAX(confirmed,?),waiting=?,error=NULL WHERE feed=?",(plan.initial,confirmed,plan.waiting,feed))
 
     def failed(self, feed: str, label: str) -> None:
         with self.store.db:

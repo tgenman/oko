@@ -74,7 +74,7 @@ class ReadingMeasurements:
         def tick():
             if request_sql.get() is not None:self.counts['vm']+=100
             return 0
-        self.client.portal.call(lambda:self.app.state.runtime.require_store().db.set_progress_handler(tick,100))
+        self.client.portal.call(lambda:self.app.state.host.require_store().db.set_progress_handler(tick,100))
         return self
 
     def request(self,name,method,url,**options):
@@ -91,5 +91,5 @@ class ReadingMeasurements:
         return response,result
 
     def __exit__(self,*args):
-        self.client.portal.call(lambda:self.app.state.runtime.require_store().db.set_progress_handler(None,0))
+        self.client.portal.call(lambda:self.app.state.host.require_store().db.set_progress_handler(None,0))
         self.stack.close()

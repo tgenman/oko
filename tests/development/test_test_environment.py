@@ -54,9 +54,9 @@ def test_factory_collects_youtube_without_starting_a_real_caption_worker(tmp_pat
         client.patch('/api/v3/settings/oko/global', json={'theses':True})
         subscribe(client)
         presence(client, 'reader')
-        card = wait_for(client, lambda: (c[0] if len(c:=client.get('/api/v3/cards').json())==1 and c[0]['availability']=='available' and not c[0].get('loading') else None))
+        card = wait_for(client, lambda: (c[0] if len(c:=client.get('/api/v3/cards').json())==1 and c[0]['availability']=='available' and not c[0].get('loading') and c[0]['theses']['attempt']['state']=='ready' else None))
         assert card['source']['captions']=='unavailable'
-        assert card['theses']['result'] is None
+        assert card['theses']['result']['points']==[]
 
 
 def test_factory_http_transport_rejects_external_hosts_before_connecting():

@@ -5,7 +5,7 @@ from collections.abc import Callable
 import secrets
 from typing import Any, Literal
 from oko.domain.errors import ActionError
-from oko.reader.composition import FolderContents
+from oko.storage.composition import FolderContents
 from oko.storage.store import Store
 
 class ReadingService:

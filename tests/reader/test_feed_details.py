@@ -1,3 +1,4 @@
+from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
 """Feed information through HTTP and atomic storage lifecycle boundaries."""
 from dataclasses import replace
@@ -163,16 +164,16 @@ def test_stale_and_rolled_back_discovery_cannot_advance_date(tmp_path):
             raise RuntimeError('Synthetic crash')
     store = Store(tmp_path, fault, wall_clock=lambda: clock[0])
     store.subscriptions.ensure_demo()
-    store.enqueue_discovery()
-    job = store.next_job(0)
+    store.jobs.enqueue_discovery()
+    job = store.jobs.next_job(0)
     assert job
     publications = [publication_packet(Publication('one', 'https://example.test/one', 1800000000.))]
     with pytest.raises(RuntimeError, match='Synthetic crash'):
-        store.discovered(publications, 'one', job, description='Uncommitted')
+        discovered(store,publications, 'one', job, description='Uncommitted')
     assert store.subscriptions.details.snapshot('demo')['updated'] is None
     assert store.subscriptions.details.snapshot('demo')['description'] is None
-    store.retry(job, 0, 'stale', 1)
-    store.discovered(publications, 'two', job, description='Stale')
+    store.jobs.retry(job, 0, 'stale', 1)
+    discovered(store,publications, 'two', job, description='Stale')
     assert store.subscriptions.details.snapshot('demo')['updated'] is None
     assert store.subscriptions.details.snapshot('demo')['unread'] == 0
     store.db.close()

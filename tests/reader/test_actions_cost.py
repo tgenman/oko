@@ -82,7 +82,7 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
         original_problem = next(p for p in first.json()['problems']['current'] if p['code'] == 'material_incomplete')
 
         def change_fixture():
-            store = app.state.runtime.require_store()
+            store = app.state.host.require_store()
             with store.db:
                 store.db.execute("UPDATE items SET content=json_set(content,'$.extra._reader.full',json('true'),'$.extra._reader.reason','') WHERE id=?",(items[0],))
                 store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch' AND item=?", (items[0],))
@@ -119,9 +119,9 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
                 if request_sql.get() is not None:
                     steps.append(1)
                 return 0
-            client.portal.call(lambda: app.state.runtime.require_store().db.set_progress_handler(tick, 100))
+            client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(tick, 100))
             response = client.get('/api/v3/status')
-            client.portal.call(lambda: app.state.runtime.require_store().db.set_progress_handler(None, 0))
+            client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(None, 0))
             assert response.status_code == 200
             problems = response.json()['problems']['current']
             assert len(problems) == 2999
@@ -153,9 +153,9 @@ def test_viewed_uses_point_updates_in_large_service_archive(tmp_path):
             if request_sql.get() is not None:
                 steps.append(1)
             return 0
-        client.portal.call(lambda: app.state.runtime.require_store().db.set_progress_handler(tick, 100))
+        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(tick, 100))
         response = client.post('/api/v3/materials/' + items[0] + '/viewed')
-        client.portal.call(lambda: app.state.runtime.require_store().db.set_progress_handler(None, 0))
+        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(None, 0))
         assert response.status_code == 200
         assert client.get('/api/v3/materials/' + items[0]).status_code == 404
         assert len(steps) * 100 < 5000, len(steps) * 100
@@ -179,8 +179,8 @@ def test_status_does_not_scan_completed_job_archive(tmp_path):
             if request_sql.get() is not None:
                 steps.append(1)
             return 0
-        client.portal.call(lambda: app.state.runtime.require_store().db.set_progress_handler(tick, 100))
+        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(tick, 100))
         response = client.get('/api/v3/status')
-        client.portal.call(lambda: app.state.runtime.require_store().db.set_progress_handler(None, 0))
+        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(None, 0))
         assert response.status_code == 200
         assert len(steps) * 100 < 10000, len(steps) * 100

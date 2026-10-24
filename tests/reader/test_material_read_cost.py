@@ -1,3 +1,5 @@
+from tests.support.processing_jobs import save_derivative
+from tests.support.processing_jobs import reconcile
 from tests.support.source import save_material
 """Cost and response parity of the actual browser opening endpoint."""
 import json
@@ -7,7 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 from tests.support.source import SyntheticMaterial,Image
 from oko.processing.llamacpp import ProcessorConfig
-from oko.storage.store import Store, Job
+from oko.storage.store import Store
+from oko.storage.job_types import Job
 from oko.subscriptions.subscriptions import Overrides
 from tests.support.reader import HEADERS
 from tests.support.reading_cost import library, traced_app
@@ -27,23 +30,23 @@ def prepared(root, count, processed):
             with store.db:store.db.execute("UPDATE jobs SET status='running' WHERE id=?",(row['id'],))
             return Job(row['id'],kind,items[0],row['generation'])
         for index in range(2):
-            if index: assert store.retry_material(items[0])
-            job=store.next_job(store.clock(),feeds=[feeds[0]])
+            if index: assert store.jobs.retry_material(items[0])
+            job=store.jobs.next_job(store.clock(),feeds=[feeds[0]])
             assert job is not None and job.kind=='fetch'
             # Select the fixture's own first fetch, without relying on generated IDs.
             items[0]=job.item
             save_material(store,job,SyntheticMaterial('Saved title',f'Saved text {index}\nAdvertisement',captions='available',images=(Image('image-1.png',b'fixture'),)))
-            store.processing.sync_stage('filter')
+            reconcile(store,'filter')
             filter_job=claim('filter')
             assert filter_job is not None and filter_job.kind=='filter'
             signature=store.filters.signature(filter_job.item)
-            store.save_derivative(filter_job,signature,dict(hidden=False,reason='ad',removed=['Advertisement']),'filtered',provenance=None)
+            save_derivative(store,filter_job,signature,dict(hidden=False,reason='ad',removed=['Advertisement']),'filtered',provenance=None)
             store.processing.sync()
-            store.processing.sync_stage('theses')
+            reconcile(store,'theses')
             thesis_job=claim('theses')
             assert thesis_job is not None and thesis_job.kind=='theses'
             signature=store.processing.theses.signature(thesis_job.item)
-            store.save_derivative(thesis_job,signature,dict(points=[dict(text='Saved summary',sources=[dict(id=thesis_job.item,url='https://example.org/0/0')])]),'summary',provenance=None)
+            save_derivative(store,thesis_job,signature,dict(points=[dict(text='Saved summary',sources=[dict(id=thesis_job.item,url='https://example.org/0/0')])]),'summary',provenance=None)
         store.db.close()
     return feeds,items
 

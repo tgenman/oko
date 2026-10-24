@@ -2,7 +2,7 @@
 from oko.storage.reading import reading_snapshot
 import asyncio
 from dataclasses import dataclass
-from oko.reviews.coordination import ProcessingWait
+from oko.domain.processing import ProcessingWait
 from collections.abc import Awaitable, Callable
 import secrets
 import sqlite3
@@ -15,7 +15,7 @@ from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, status as codex_status
-from oko.reader.telegram_http import TelegramHTTP
+from oko.collection.telegram.http import TelegramHTTP
 from oko.storage.store import Store
 from oko.collection.telegram.contracts import TelegramBinding
 from oko.collection.telegram.source import LocalTelegram, TelegramClient
@@ -24,7 +24,7 @@ from oko.subscriptions.history import InitialHistory
 from oko.subscriptions.telegram import TelegramConflict
 from oko.diagnostics import Journal, diagnostic_source, record_caught
 from oko.execution import Execution, ActionError, _ExternalCheck
-from oko.application.jobs import JobControl
+from oko.workers.control import JobControl
 from oko.storage.transaction import transaction
 from oko.services.subscriptions import SubscriptionService
 from oko.services.queries import ReadingQueries
@@ -284,6 +284,7 @@ class ReaderApplication:
             current = self.require_store()
             with transaction(current.db):
                 members = self.reading.viewed(item)
+                self.jobs.reconcile_cleanup()
             if self.diagnostics:
                 self.diagnostics.forget_materials(members)
             await self._drain_deletions(current)
@@ -312,6 +313,7 @@ class ReaderApplication:
             current = self.require_store()
             with transaction(current.db):
                 members = self.reading.complete(folder, token, scope)
+                self.jobs.reconcile_cleanup()
             self.reading.accepted(folder, token, scope)
             if self.diagnostics and members:
                 self.diagnostics.forget_materials(members)
@@ -345,6 +347,7 @@ class ReaderApplication:
             try:
                 with transaction(current.db):
                     result = self.subscriptions.change_history(identity, selection)
+                    if selection is None:self.jobs.cancel_history(identity)
                     self.jobs.invalidate()
             except LookupError as error:
                 raise ActionError('missing', str(error)) from None
@@ -717,6 +720,7 @@ class ReaderApplication:
                 try:
                     with transaction(current.db):
                         result=self.connections.change_access(feed_id,binding,info,auto_read)
+                        self.jobs.change_adapter(feed_id)
                         self.jobs.invalidate({feed_id})
                 except sqlite3.IntegrityError:
                     raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Внешний ключ уже принадлежит другому фиду') from None
@@ -770,6 +774,7 @@ class ReaderApplication:
             members = self.queries.feed_members(identity)
             with transaction(current.db):
                 self.subscriptions.remove_feed(identity)
+                self.jobs.remove_feed(identity,members)
                 self.jobs.invalidate({identity})
             if self.diagnostics:
                 self.diagnostics.forget_materials(members)

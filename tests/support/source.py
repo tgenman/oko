@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.collection_acceptance import save
 """Synthetic provider for behavioural scenarios, using the current adapter contract."""
 from dataclasses import dataclass,replace
 from datetime import datetime,timezone
@@ -7,7 +8,8 @@ import json
 from typing import Any, BinaryIO
 from pydantic import JsonValue
 from oko.collection.contracts import Material, Publication, DiscoveryResult, FetchResult
-from oko.storage.store import Store, Job
+from oko.storage.store import Store
+from oko.storage.job_types import Job
 from oko.collection.adapters import ExternalKey,ExternalReference,Platform,PublicationContent,PublicationMetadata,MediaReference,AdapterException,AdapterIssue,AdapterErrorKind
 from oko.collection.contracts import SourceError
 
@@ -126,15 +128,20 @@ def save_material(store: Store,job: Job,material: Material) -> None:
     owner=StructuredSource(None)
     publication=store.publication(job.item)
     assert publication is not None
-    store.save(job,owner.describe(publication,material))
+    save(store,job,owner.describe(publication,material))
     while store.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE m.publication_id=? AND j.status='pending'",(job.item,)).fetchone():
-        media_job=store.next_job(store.clock(),feeds=[store.item_feed(job.item)],media_only=True)
+        media_job=store.jobs.next_job(store.clock(),feeds=[store.item_feed(job.item)],media_only=True)
         assert media_job is not None
-        download=store.media.begin(media_job)
+        download=store.media.begin(media_job.item,str(media_job.id)+'-'+str(media_job.generation),store.jobs.manual(media_job))
         assert download is not None
         try:
-            with MediaOutput(download.temporary,lambda:store.valid(media_job)) as output:
+            with MediaOutput(download.temporary,lambda:store.jobs.valid(media_job)) as output:
                 actual=asyncio.run(owner.publication_adapter().download_media(download.publication,download.media,output))
-            assert store.media.complete(media_job,download,actual)
+            from oko.storage.transaction import transaction
+            from oko.storage.job_repository import JobRepository
+            staged=store.media.stage(media_job.item,download,actual)
+            with transaction(store.db):
+                assert store.media.accept(media_job.item,download,actual,staged)
+                JobRepository(store).finish(media_job)
         finally:
             store.media.release(download)

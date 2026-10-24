@@ -1,3 +1,4 @@
+from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
 """Cost and freshness observed through HTTP while the real reader loop runs."""
 import time
@@ -17,9 +18,9 @@ def library(root, count):
         feed = store.subscriptions.add_feed(AddFeed(
             url='https://www.youtube.com/channel/UC' + str(n).zfill(22),
             title=f'Channel {n}', folder=f'Folder {n}', verification='synthetic'))['id']
-        store.enqueue_discovery(feed)
-        job = store.next_job(0, feeds=[feed])
-        store.discovered([publication_packet(Publication(str(i), f'https://example.org/{n}/{i}', i,
+        store.jobs.enqueue_discovery(feed)
+        job = store.jobs.next_job(0, feeds=[feed])
+        discovered(store,[publication_packet(Publication(str(i), f'https://example.org/{n}/{i}', i,
             teaser=Material(f'Video {i}', 'Useful source text', description='Synthetic')))
             for i in range(count)], '{}', job, feed)
     store.db.close()
@@ -33,9 +34,9 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
         assert client.get('/api/v3/reading-composition').json()['count'] == 4 * count
         time.sleep(.15)
         queries = []
-        client.portal.call(lambda: app.state.runtime.require_store().db.set_trace_callback(queries.append))
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
         time.sleep(.65)
-        client.portal.call(lambda: app.state.runtime.require_store().db.set_trace_callback(None))
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
         # Include background dispatch/presence work, independently of content size.
         assert len(queries) < 1000, len(queries)
         assert not any('SELECT id FROM items WHERE viewed=0' in q for q in queries)
@@ -79,7 +80,7 @@ def test_telegram_reconciliation_scales_linearly(tmp_path, count):
             store.db.execute('INSERT INTO telegram_read_state(feed,since) VALUES (?,0)', (feed,))
     queries = []
     store.db.set_trace_callback(queries.append)
-    store.read_sync.sync()
+    store.jobs.sync_reads()
     store.db.set_trace_callback(None)
     assert len(queries) < 40 + count * 20, len(queries)
     store.db.close()
@@ -96,10 +97,10 @@ def test_pending_dispatch_ignores_completed_archive_and_keeps_priorities(tmp_pat
         store.db.execute('ANALYZE')
     steps = []
     store.db.set_progress_handler(lambda: steps.append(1) or 0, 1)
-    ai = store.next_job(0, ai_only=True)
-    deletion = store.next_job(0)
-    discovery = store.next_job(0)
-    assert store.next_job(0, ai_only=True) is None
+    ai = store.jobs.next_job(0, ai_only=True)
+    deletion = store.jobs.next_job(0)
+    discovery = store.jobs.next_job(0)
+    assert store.jobs.next_job(0, ai_only=True) is None
     store.db.set_progress_handler(None, 0)
     assert ai.kind == 'filter' and ai.item == 'processing'
     assert deletion.kind == 'delete' and discovery.kind == 'discover'
@@ -116,21 +117,21 @@ def test_progress_writes_do_not_rebuild_source_configuration(tmp_path):
     with store.db:
         store.db.execute("INSERT INTO telegram_profiles VALUES ('personal','synthetic',101,1,'ready',0,NULL)")
         store.db.execute("INSERT OR REPLACE INTO initial_history(feed,selection) VALUES (?,?)", (feed, '{"mode":"count","count":20,"since":null,"date":null,"timezone":"UTC"}'))
-    store.read_sync.sync()
+    store.jobs.sync_reads()
     with store.db:
         store.db.execute("UPDATE feeds SET title=title")
         store.db.execute("UPDATE telegram_profiles SET checked=10,message='checked'")
         store.db.execute("UPDATE initial_history SET selection=json_set(selection,'$.warnings',json('[\"progress\"]'))")
     queries = []
     store.db.set_trace_callback(queries.append)
-    store.read_sync.sync()
+    store.jobs.sync_reads()
     store.db.set_trace_callback(None)
     assert not any('FROM feeds' in q for q in queries), queries
     with store.db:
         store.db.execute("UPDATE telegram_profiles SET user_id=202,state='unavailable'")
     queries.clear()
     store.db.set_trace_callback(queries.append)
-    store.read_sync.sync()
+    store.jobs.sync_reads()
     store.db.set_trace_callback(None)
     assert any('FROM feeds' in q for q in queries)
     store.db.close()

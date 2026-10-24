@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from oko.collection.contracts import SourceDeferred
-from oko.reader.source_http import retry_after
+from oko.collection.http import retry_after
 from oko.collection.telegram.media import PublicTransport
 
 

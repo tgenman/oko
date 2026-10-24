@@ -1,0 +1,10 @@
+{
+  "checked_tree": "dc9edc459e701e92ae1828c4e85d391af18dd04b",
+  "production_files": 138,
+  "production_bytes_equal": true,
+  "changed_production": [],
+  "post_full_changes": [
+    "verification documentation and copied evidence",
+    "one additional restart-before-worker test, passed in the 31-test transaction file"
+  ]
+}

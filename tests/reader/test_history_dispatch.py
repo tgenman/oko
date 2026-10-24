@@ -33,12 +33,12 @@ def test_history_admission_only_blocks_enrolled_fetches(tmp_path, transport, mod
                                          ('filter', 'enrolled', 0), ('delete', 'enrolled', 0),
                                          ('fetch', 'later', 200)]:
                 store.db.execute('INSERT INTO jobs(kind,item,next) VALUES (?,?,?)', (kind, item, deadline))
-        ai = store.next_job(100, ai_only=True)
+        ai = store.jobs.next_job(100, ai_only=True)
         assert ai and (ai.kind, ai.item) == ('filter', 'enrolled')
-        deletion = store.next_job(100)
+        deletion = store.jobs.next_job(100)
         assert deletion and (deletion.kind, deletion.item) == ('delete', 'enrolled')
         ready = []
-        while job := store.next_job(100):
+        while job := store.jobs.next_job(100):
             ready.append(job.item)
         assert ready == (['live'] if blocked else ['enrolled', 'live'])
         assert store.db.execute("SELECT status FROM jobs WHERE item='later'").fetchone()[0] == 'pending'
@@ -64,7 +64,7 @@ def test_nullable_history_ids_keep_existing_dispatch_outcome(tmp_path, item, mem
             store.db.execute('INSERT INTO initial_history(feed,selection,paused) VALUES (?,?,?)',
                              ('demo', json.dumps(dict(cancelled=bool(paused))), paused))
             store.db.execute("INSERT INTO history_members(feed,item) VALUES ('demo',?)", (member,))
-        job = store.next_job(0)
+        job = store.jobs.next_job(0)
         assert (job is not None) is expected
         if job:
             assert job.item == item
@@ -93,7 +93,7 @@ def test_foreign_cancelled_history_does_not_add_linear_dispatch_work(tmp_path, a
             steps = []
             store.db.set_progress_handler(lambda: steps.append(1) or 0, 1)
             try:
-                job = store.next_job(0)
+                job = store.jobs.next_job(0)
             finally:
                 store.db.set_progress_handler(None, 0)
             assert job and (job.kind, job.item) == ('fetch', 'live')

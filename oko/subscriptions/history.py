@@ -104,7 +104,6 @@ class History:
         value = json.loads(row['selection'])
         value.update(cancelled=True, waiting=False, stop_reason='cancelled')
         self.db.execute('UPDATE initial_history SET selection=?,paused=1 WHERE feed=?', (json.dumps(value), feed))
-        self.db.execute("UPDATE jobs SET status='done',generation=generation+1 WHERE kind='fetch' AND item IN (SELECT item FROM history_members WHERE feed=?)", (feed,))
         result = self.status(feed)
         assert result is not None
         return result
