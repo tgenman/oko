@@ -1,16 +1,18 @@
 """Persistent feed information; callers own the transaction of each real change."""
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row, Database
 from collections.abc import Callable
-import sqlite3
 from typing import Any, Literal
 
 
 class FeedDetails:
-    def __init__(self, db: sqlite3.Connection, clock: Callable[[], float]) -> None:
+    def __init__(self, db: Database, clock: Callable[[], float]) -> None:
         self.db, self.clock = db, clock
-        db.execute('''CREATE TABLE IF NOT EXISTS feed_details (
-            feed TEXT PRIMARY KEY, created REAL, modified REAL, updated REAL,
-            marked_read REAL, description TEXT)''')
-        db.commit()
+        if is_sqlite(db):
+            db.execute('''CREATE TABLE IF NOT EXISTS feed_details (
+                feed TEXT PRIMARY KEY, created REAL, modified REAL, updated REAL,
+                marked_read REAL, description TEXT)''')
+            db.commit()
 
     def created(self, feed: str) -> None:
         now = self.clock()
@@ -26,5 +28,5 @@ class FeedDetails:
     def snapshot(self, feed: str) -> dict[str, Any]:
         row = self.db.execute('SELECT * FROM feed_details WHERE feed=?', (feed,)).fetchone()
         result = {field: row[field] if row else None for field in ('created', 'modified', 'updated', 'marked_read', 'description')}
-        result['unread'] = self.db.execute('SELECT COUNT(*) FROM items WHERE feed_id=? AND viewed=0', (feed,)).fetchone()[0]
+        result['unread'] = expect_row(self.db.execute('SELECT COUNT(*) FROM items WHERE feed_id=? AND viewed=0', (feed,)).fetchone())[0]
         return result

@@ -3,6 +3,8 @@
 All mutations run on the existing Subscriptions SQLite connection under shared
 admission. No network, credentials, SDK or file deletion belongs here.
 """
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row, Database
 from oko.storage.reading import reading_value
 import json
 import base64
@@ -10,7 +12,6 @@ import hashlib
 import binascii
 import re
 import secrets
-import sqlite3
 from oko.storage.transaction import begin_write
 from typing import Any
 from collections.abc import Callable
@@ -49,20 +50,21 @@ def locator(value: str) -> tuple[str, str | int]:
 
 
 class TelegramAccess:
-    def __init__(self, db: sqlite3.Connection, modified: Callable[[str], None] = lambda _: None) -> None:
+    def __init__(self, db: Database, modified: Callable[[str], None] = lambda _: None) -> None:
         self.db = db
         self.modified = modified
         # No executescript here: migrations and their ownership rows are atomic.
         with db:
             begin_write(db)
-            db.execute('CREATE TABLE IF NOT EXISTS telegram_avatars (feed TEXT PRIMARY KEY, image BLOB NOT NULL, mime TEXT NOT NULL, digest TEXT NOT NULL)')
-            db.execute('CREATE TABLE IF NOT EXISTS telegram_bindings (feed TEXT PRIMARY KEY, binding TEXT NOT NULL)')
-            db.execute('''CREATE TABLE IF NOT EXISTS telegram_profiles (
-                role TEXT PRIMARY KEY, account TEXT, user_id INTEGER, generation INTEGER NOT NULL,
-                state TEXT, checked REAL, message TEXT)''')
-            db.execute('CREATE TABLE IF NOT EXISTS telegram_source_claims (kind TEXT, value TEXT, PRIMARY KEY(kind,value))')
-            db.execute('''CREATE TABLE IF NOT EXISTS telegram_claim_owners (
-                kind TEXT, value TEXT, feed TEXT, evidence TEXT, PRIMARY KEY(kind,value,feed))''')
+            if is_sqlite(db):
+                db.execute('CREATE TABLE IF NOT EXISTS telegram_avatars (feed TEXT PRIMARY KEY, image BLOB NOT NULL, mime TEXT NOT NULL, digest TEXT NOT NULL)')
+                db.execute('CREATE TABLE IF NOT EXISTS telegram_bindings (feed TEXT PRIMARY KEY, binding TEXT NOT NULL)')
+                db.execute('''CREATE TABLE IF NOT EXISTS telegram_profiles (
+                    role TEXT PRIMARY KEY, account TEXT, user_id INTEGER, generation INTEGER NOT NULL,
+                    state TEXT, checked REAL, message TEXT)''')
+                db.execute('CREATE TABLE IF NOT EXISTS telegram_source_claims (kind TEXT, value TEXT, PRIMARY KEY(kind,value))')
+                db.execute('''CREATE TABLE IF NOT EXISTS telegram_claim_owners (
+                    kind TEXT, value TEXT, feed TEXT, evidence TEXT, PRIMARY KEY(kind,value,feed))''')
             db.execute("UPDATE telegram_profiles SET state='unavailable',message='Требуется проверка сессии после запуска'")
 
     def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
@@ -169,14 +171,14 @@ class TelegramAccess:
         return result
 
     def duplicates(self, feeds: list[str]) -> dict[str, Any]:
-        return dict(existing_feeds=[dict(feed_id=feed, title=self.db.execute('SELECT title FROM feeds WHERE id=?', (feed,)).fetchone()[0], access=self.binding(feed)) for feed in feeds])
+        return dict(existing_feeds=[dict(feed_id=feed, title=expect_row(self.db.execute('SELECT title FROM feeds WHERE id=?', (feed,)).fetchone())[0], access=self.binding(feed)) for feed in feeds])
 
 
     def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
                       auto_read: bool | None, subscriptions: Any) -> dict[str,Any]:
         """Apply verified channel access inside Runtime's acceptance transaction."""
         subscriptions.check_owner('feed',feed)
-        row=self.db.execute('SELECT * FROM feeds WHERE id=?',(feed,)).fetchone()
+        row=expect_row(self.db.execute('SELECT * FROM feeds WHERE id=?',(feed,)).fetchone())
         previous=self.binding(feed)
         if row['kind']!='telegram' or row['transport']=='rss' or row['connection']=='deleting' or not previous:
             raise TelegramConflict('access_immutable',dict(feed_id=feed),'Способ доступа этого фида изменить нельзя')

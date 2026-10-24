@@ -3,10 +3,13 @@
 Triggers keep these projections in the same transaction, including legacy writes.
 Only initial migration scans the journal; its authoritative JSON stays unchanged.
 """
-import sqlite3
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import Database, Row
 
 
-def install(db: sqlite3.Connection) -> None:
+def install(db: Database) -> None:
+    if not is_sqlite(db):
+        return
     migrated = db.execute("SELECT 1 FROM state WHERE key='journal-index-version' AND value='1'").fetchone()
     db.executescript('''
         CREATE TABLE IF NOT EXISTS reader_material_links (
@@ -57,7 +60,7 @@ def install(db: sqlite3.Connection) -> None:
             db.execute("INSERT OR REPLACE INTO state VALUES ('journal-index-version','1')")
 
 
-def material_records(db: sqlite3.Connection, kind: str, members: set[str]) -> list[sqlite3.Row]:
+def material_records(db: Database, kind: str, members: set[str]) -> list[Row]:
     table = {'problem': 'reader_problems', 'action': 'reader_action_results'}[kind]
     rows = {}
     ids = sorted(members)
@@ -68,6 +71,6 @@ def material_records(db: sqlite3.Connection, kind: str, members: set[str]) -> li
     return list(rows.values())
 
 
-def cleanup(db: sqlite3.Connection, cutoff: float, limit: int = 200) -> None:
+def cleanup(db: Database, cutoff: float, limit: int = 200) -> None:
     db.execute('''DELETE FROM reader_action_results WHERE sequence IN (
         SELECT sequence FROM reader_action_superseded WHERE completed<=? ORDER BY completed LIMIT ?)''', (cutoff, limit))

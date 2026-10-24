@@ -1,7 +1,8 @@
 """Durable initial-history selection, independent from processing and reading."""
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row, Database, Row
 from datetime import date, datetime, time
 import json
-import sqlite3
 import secrets
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -37,13 +38,14 @@ class InitialHistory(BaseModel):
 
 
 class History:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: Database) -> None:
         self.db = db
-        db.executescript('''
-        CREATE TABLE IF NOT EXISTS initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0,scan_complete INTEGER DEFAULT 1);
-        CREATE TABLE IF NOT EXISTS history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));
-        ''')
-        db.execute('CREATE INDEX IF NOT EXISTS history_members_item ON history_members(item)')
+        if is_sqlite(db):
+            db.executescript('''
+            CREATE TABLE IF NOT EXISTS initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0,scan_complete INTEGER DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));
+            ''')
+            db.execute('CREATE INDEX IF NOT EXISTS history_members_item ON history_members(item)')
 
     def member(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM history_members WHERE item=?', (item,)).fetchone() is not None
@@ -100,7 +102,7 @@ class History:
         current = self.status(feed)
         if current is None:
             raise ValueError('История не настроена')
-        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone())
         value = json.loads(row['selection'])
         value.update(cancelled=True, waiting=False, stop_reason='cancelled')
         self.db.execute('UPDATE initial_history SET selection=?,paused=1 WHERE feed=?', (json.dumps(value), feed))
@@ -126,7 +128,7 @@ class History:
         if status.get('cancelled'):
             raise ValueError('История остановлена; начните новый подбор')
         if not paused and not status.get('stop_reason'):
-            row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+            row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone())
             selection = json.loads(row['selection'])
             selection.update(resume=selection.get('resume', 0) + 1, waiting=False, discovery_error=None)
             self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
@@ -165,7 +167,7 @@ class History:
         return {row['feed']:self._status(row,counts.get(row['feed'],{}),errors.get(row['feed'],[])) for row in rows}
 
     @staticmethod
-    def _status(row: sqlite3.Row, counts: dict[str,int], errors: list[dict[str,Any]]) -> dict[str,Any]:
+    def _status(row: Row, counts: dict[str,int], errors: list[dict[str,Any]]) -> dict[str,Any]:
         result: dict[str, Any] = json.loads(row['selection'])
         result.pop('date',None)
         result.pop('timezone',None)

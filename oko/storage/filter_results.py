@@ -1,4 +1,5 @@
 """Current filtered Publication content and its processing work."""
+from oko.storage.sqlite_schema import is_sqlite
 import json
 from typing import Any,TYPE_CHECKING
 from oko.storage import material_read
@@ -13,7 +14,8 @@ if TYPE_CHECKING:
 class FilterResults:
     def __init__(self,store: 'Store') -> None:
         self.store=store
-        store.db.execute('CREATE TABLE IF NOT EXISTS filter_inputs (item TEXT PRIMARY KEY,signature TEXT)')
+        if is_sqlite(store.db):
+            store.db.execute('CREATE TABLE IF NOT EXISTS filter_inputs (item TEXT PRIMARY KEY,signature TEXT)')
 
     @reading_value
     def signature(self,item: str) -> str | None:

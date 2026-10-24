@@ -1,11 +1,12 @@
 """Durable YouTube caption admission state, owned by Store."""
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row, Row
 import json
-import sqlite3
 from oko.storage.reading import reading_value, reader_wall
 import os
 from pathlib import Path
 import tempfile
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from oko.collection.youtube.access import proxy_settings
 
@@ -21,12 +22,13 @@ class YouTubeAccess:
         self.store = store
         self.db = store.db
         self.path = store.root / 'youtube-proxy.json'
-        self.db.executescript('''
-            CREATE TABLE IF NOT EXISTS youtube_access (
-              id INTEGER PRIMARY KEY CHECK(id=1), next_at REAL DEFAULT 0,
-              blocked_until REAL DEFAULT 0, strikes INTEGER DEFAULT 0);
-            INSERT OR IGNORE INTO youtube_access(id) VALUES (1);
-        ''')
+        if is_sqlite(self.db):
+            self.db.executescript('''
+                CREATE TABLE IF NOT EXISTS youtube_access (
+                  id INTEGER PRIMARY KEY CHECK(id=1), next_at REAL DEFAULT 0,
+                  blocked_until REAL DEFAULT 0, strikes INTEGER DEFAULT 0);
+                INSERT OR IGNORE INTO youtube_access(id) VALUES (1);
+            ''')
 
     @reading_value
     def config(self) -> dict[str, str]:
@@ -57,10 +59,10 @@ class YouTubeAccess:
                     reason='YouTube ограничил получение субтитров' if row['blocked_until'] > wall else '')
 
     @reading_value
-    def _limits(self) -> sqlite3.Row:
+    def _limits(self) -> Row:
         row = self.db.execute('SELECT * FROM youtube_access WHERE id=1').fetchone()
         assert row is not None
-        return cast(sqlite3.Row, row)
+        return row
 
     def ready_at(self) -> float:
         row = self._limits()
@@ -72,7 +74,7 @@ class YouTubeAccess:
 
     def blocked(self, wall: float, retry_after: float) -> None:
         with self.db:
-            strikes = min(6, self.db.execute('SELECT strikes FROM youtube_access WHERE id=1').fetchone()[0] + 1)
+            strikes = min(6, expect_row(self.db.execute('SELECT strikes FROM youtube_access WHERE id=1').fetchone())[0] + 1)
             until = wall + max(min(900 * 2 ** (strikes - 1), 21600), retry_after)
             self.db.execute('UPDATE youtube_access SET strikes=?,blocked_until=? WHERE id=1', (strikes, until))
 

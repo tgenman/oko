@@ -1,4 +1,5 @@
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
+from oko.storage.database import expect_row
 from oko.storage.reading import reading_snapshot
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -111,9 +112,9 @@ class ReadingComposition:
         feeds = self._store.subscriptions.feeds()
         folder_counts={row['folder']:row['visible'] for row in self._store.db.execute('SELECT folder,visible FROM reader_folder_counts')}
         feed_counts={row['feed']:row for row in self._store.db.execute('SELECT feed,visible,unviewed FROM reader_feed_counts')}
-        visible=self._store.db.execute("""SELECT count(*) FROM items i LEFT JOIN reader_visibility v ON v.item=i.id
+        visible=expect_row(self._store.db.execute("""SELECT count(*) FROM items i LEFT JOIN reader_visibility v ON v.item=i.id
             WHERE i.viewed=0 AND coalesce(v.hidden,0)=0
-            AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)""").fetchone()[0]
+            AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)""").fetchone())[0]
         return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],
                     feeds=[dict(feed,count=feed_counts[feed['id']]['visible'],has_unviewed=bool(feed_counts[feed['id']]['unviewed'])) for feed in feeds],
                     count=visible)

@@ -1,4 +1,6 @@
 """Current reader obstacles; identity and recovery are independent of message text."""
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row
 import json
 from oko.collection.contracts import SourceManifest
 from oko.collection.external_media import expected_incomplete
@@ -29,19 +31,20 @@ class Problems:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self.db = store.db
-        self.db.executescript('''
-            CREATE TABLE IF NOT EXISTS reader_problems (
-              id TEXT PRIMARY KEY, identity TEXT NOT NULL, origin TEXT NOT NULL,
-              body TEXT NOT NULL, created REAL NOT NULL, finished REAL, outcome TEXT);
-            CREATE UNIQUE INDEX IF NOT EXISTS reader_problems_current
-              ON reader_problems(identity) WHERE finished IS NULL;
-            CREATE TABLE IF NOT EXISTS reader_action_results (
-              sequence INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, identity TEXT NOT NULL,
-              body TEXT NOT NULL, started REAL NOT NULL, completed REAL, result TEXT NOT NULL);
-        ''')
-        self.db.execute('CREATE INDEX IF NOT EXISTS reader_action_identity_sequence ON reader_action_results(identity,sequence)')
-        problem_links.install(self.db)
-        self.db.execute("CREATE INDEX IF NOT EXISTS reader_action_unresolved ON reader_action_results(result,identity,sequence) WHERE result IN ('failed','unknown','pending')")
+        if is_sqlite(self.db):
+            self.db.executescript('''
+                CREATE TABLE IF NOT EXISTS reader_problems (
+                  id TEXT PRIMARY KEY, identity TEXT NOT NULL, origin TEXT NOT NULL,
+                  body TEXT NOT NULL, created REAL NOT NULL, finished REAL, outcome TEXT);
+                CREATE UNIQUE INDEX IF NOT EXISTS reader_problems_current
+                  ON reader_problems(identity) WHERE finished IS NULL;
+                CREATE TABLE IF NOT EXISTS reader_action_results (
+                  sequence INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, identity TEXT NOT NULL,
+                  body TEXT NOT NULL, started REAL NOT NULL, completed REAL, result TEXT NOT NULL);
+            ''')
+            self.db.execute('CREATE INDEX IF NOT EXISTS reader_action_identity_sequence ON reader_action_results(identity,sequence)')
+            problem_links.install(self.db)
+            self.db.execute("CREATE INDEX IF NOT EXISTS reader_action_unresolved ON reader_action_results(result,identity,sequence) WHERE result IN ('failed','unknown','pending')")
         # Recovery projection only: preserve the original service records for rollback.
         self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result='pending'")}
 
@@ -157,11 +160,11 @@ class Problems:
             CASE WHEN i.platform='youtube' THEN EXISTS (
                 SELECT 1 FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media'
                 WHERE m.publication_id=i.id AND m.resource_key='youtube:subtitles'
-                    AND j.status='pending' AND j.problem_code IS NULL) ELSE 0 END AS caption_waiting
+                    AND j.status='pending' AND j.problem_code IS NULL) ELSE FALSE END AS caption_waiting
             FROM items i LEFT JOIN source_deleted d ON d.item=i.id
             LEFT JOIN jobs f ON f.item=i.id AND f.kind='fetch'
             WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.complete=1 AND d.item IS NULL
-                AND json_extract(i.content,'$.extra._reader.full')=0""").fetchall()
+                AND CAST(json_extract(i.content,'$.extra._reader.full') AS INTEGER)=0""").fetchall()
         for row in saved:
             if row['id'] in affected:
                 continue
@@ -249,7 +252,7 @@ class Problems:
     def report_action(self, identity: str, context: dict[str, Any], result: str, now: float) -> str:
         existed = self.command_record(identity)
         self.action_started(identity, context, now)
-        row = self.db.execute('SELECT * FROM reader_action_results WHERE id=?', (identity,)).fetchone()
+        row = expect_row(self.db.execute('SELECT * FROM reader_action_results WHERE id=?', (identity,)).fetchone())
         if row['identity'] != context['identity']:
             raise CommandContextMismatch('Контекст действия не совпадает')
         if existed and existed.result == 'pending' and existed.context_json:
@@ -320,10 +323,10 @@ class Problems:
                 # v3 carries resource identities; it never archives object titles.
                 body['objects'] = [{key: value for key, value in obj.items() if key != 'label'} for obj in candidate['objects']]
                 encoded = json.dumps(body)
-                row = existing.get(identity)
-                if row:
-                    if row['body'] != encoded:
-                        self.db.execute('UPDATE reader_problems SET body=? WHERE id=?', (encoded, row['id']))
+                prior_problem = existing.get(identity)
+                if prior_problem:
+                    if prior_problem['body'] != encoded:
+                        self.db.execute('UPDATE reader_problems SET body=? WHERE id=?', (encoded, prior_problem['id']))
                 else:
                     self.db.execute('INSERT INTO reader_problems VALUES (?,?,?,?,?,NULL,NULL)',
                                     (uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', json.dumps(body), now))

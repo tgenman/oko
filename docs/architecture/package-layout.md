@@ -13,8 +13,8 @@
   воркером пайплайна. Общие типы и ошибки — в collection/contracts.py.
 - `oko/processing` содержит контракт AI, атрибуцию, инструкции, ошибки и адаптеры
   Codex/llama.cpp. Контракт не импортирует адаптеры.
-- `oko/storage` содержит SQLite, файлы, репозитории сущностей, JobRepository и
-  recovery; FilterResults/SummaryResults/ProcessingState заменяют старый reviews.
+- `oko/storage` содержит локальный SQLite и облачный PostgreSQL, файлы, репозитории сущностей, JobRepository и
+  recovery; общая граница БД — `database.py`, нативная схема PostgreSQL — версионируемые SQL-миграции. FilterResults/SummaryResults/ProcessingState заменяют старый reviews.
   ReadSync хранит границы чтения каналов, JobRepository владеет его заданиями.
 - `oko/subscriptions` содержит модели подписок и наследование правил.
 - `oko/host.py` собирает технический lifecycle; `oko/execution.py` — общий допуск.

@@ -55,7 +55,7 @@ function createHost() {
 }
 export const prepare = (data:string,perFeed:26|100,active:boolean) => serverProcess().request('prepare',{data,per_feed:perFeed,active:Number(active)});
 export const preparePublications = (data:string) => serverProcess().request('prepare-publications',{data});
-export const start = (data: string,token: string,persistent=false,hostname='127.0.0.1',options:{collection?:boolean;processingDelay?:number}={}) => serverProcess().request('start',{data,token,persistent:Number(persistent),hostname,collection:Number(options.collection!==false),processing_delay:options.processingDelay??0});
+export const start = (data: string,token: string,persistent=false,hostname='127.0.0.1',options:{collection?:boolean;processingDelay?:number;databaseUrlFile?:string}={}) => serverProcess().request('start',{data,token,persistent:Number(persistent),hostname,collection:Number(options.collection!==false),processing_delay:options.processingDelay??0,database_url_file:options.databaseUrlFile??''});
 export const stop = (scenario: number) => serverProcess().request('stop',{scenario});
 export const restart = (scenario: number) => serverProcess().request('restart',{scenario});
 after(async()=>{if(host) await host.close();});

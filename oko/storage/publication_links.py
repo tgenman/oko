@@ -1,4 +1,5 @@
 """Direct article dependencies; external identities come only from adapters."""
+from oko.storage.database import expect_row, Row
 import json
 from typing import Any, TYPE_CHECKING
 from uuid import uuid4
@@ -12,14 +13,14 @@ if TYPE_CHECKING:
 
 
 @reading_value
-def children(store: 'Store',item: str) -> list[Any]:
-    return store.db.execute('''SELECT i.*,j.error AS fetch_error FROM publication_links l
+def children(store: 'Store',item: str) -> list[Row]:
+    return list(store.db.execute('''SELECT i.*,j.error AS fetch_error FROM publication_links l
         JOIN items i ON i.id=l.target_publication_id LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
-        WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY l.rowid''',(item,)).fetchall()
+        WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY l.rowid''',(item,)).fetchall())
 
 
 def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], effects: CollectionEffects) -> bool:
-    owner=store.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone()
+    owner=expect_row(store.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone())
     if owner['feed_id'] is None:
         return False
     targets=[]

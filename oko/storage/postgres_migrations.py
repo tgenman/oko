@@ -38,7 +38,7 @@ def _validate(migrations: Sequence[Migration]) -> None:
         raise ValueError('Schema migrations need a name and SQL')
 
 
-def _installed(db: psycopg.Connection[tuple[Any, ...]], migrations: Sequence[Migration]) -> int:
+def _installed(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> int:
     rows = db.execute('SELECT version,name,checksum FROM oko_schema_migrations ORDER BY version').fetchall()
     if len(rows) > len(migrations):
         raise SchemaMismatch('Database schema is newer than this release')
@@ -48,14 +48,22 @@ def _installed(db: psycopg.Connection[tuple[Any, ...]], migrations: Sequence[Mig
     return len(rows)
 
 
-def migrate(db: psycopg.Connection[tuple[Any, ...]], migrations: Sequence[Migration]) -> None:
+def schema_lock_key(db: psycopg.Connection[Any]) -> int:
+    row = db.execute('SELECT hashtextextended(current_schema(),%s)', (_LOCK,)).fetchone()
+    if row is None or row[0] is None:
+        raise SchemaMismatch('Database search_path must name a schema')
+    return int(row[0])
+
+
+def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> None:
     """Apply the entire pending release or roll it back, including its ledger."""
     _validate(migrations)
     if not db.autocommit or db.info.transaction_status != TransactionStatus.IDLE:
         raise ValueError('Migrations require an idle autocommit connection')
-    locked = db.execute('SELECT pg_try_advisory_lock(%s)', (_LOCK,)).fetchone()
+    key = schema_lock_key(db)
+    locked = db.execute('SELECT pg_try_advisory_lock(%s)', (key,)).fetchone()
     if not locked or not locked[0]:
-        raise RuntimeError('Another schema migration is running')
+        raise RuntimeError('Schema is busy: another reader or migration is running')
     try:
         with db.transaction():
             db.execute('''CREATE TABLE IF NOT EXISTS oko_schema_migrations (
@@ -67,10 +75,10 @@ def migrate(db: psycopg.Connection[tuple[Any, ...]], migrations: Sequence[Migrat
                 db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
                            (migration.version, migration.name, migration.checksum))
     finally:
-        db.execute('SELECT pg_advisory_unlock(%s)', (_LOCK,))
+        db.execute('SELECT pg_advisory_unlock(%s)', (key,))
 
 
-def verify(db: psycopg.Connection[tuple[Any, ...]], migrations: Sequence[Migration]) -> None:
+def verify(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> None:
     """Check compatibility without creating or changing any schema object."""
     _validate(migrations)
     schema = db.execute("SELECT to_regclass('oko_schema_migrations')").fetchone()
@@ -78,3 +86,23 @@ def verify(db: psycopg.Connection[tuple[Any, ...]], migrations: Sequence[Migrati
         raise SchemaMismatch('Database has not been migrated')
     if _installed(db, migrations) != len(migrations):
         raise SchemaMismatch('Database needs migration before starting this release')
+
+
+def main() -> None:
+    import argparse
+    from pathlib import Path
+    from oko.storage.credentials import private_database_url
+    from oko.storage.postgres_schema import MIGRATIONS
+
+    parser = argparse.ArgumentParser(description='Oko PostgreSQL release schema')
+    parser.add_argument('--database-url-file', type=Path, required=True)
+    parser.add_argument('--check', action='store_true', help='Verify only; never execute DDL')
+    args = parser.parse_args()
+    dsn = private_database_url(args.database_url_file)
+    with psycopg.connect(dsn, autocommit=True) as db:
+        verify(db, MIGRATIONS) if args.check else migrate(db, MIGRATIONS)
+    print('PostgreSQL schema verified: version ' + str(len(MIGRATIONS)))
+
+
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,5 @@
 """Durable, content-free eligibility and cumulative Telegram confirmation."""
+from oko.storage.sqlite_schema import is_sqlite
 import json
 from oko.storage.reading import reading_value
 from dataclasses import dataclass
@@ -24,40 +25,42 @@ class ReadSync:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self._configuration: int | None = None
-        store.db.executescript('''
-        CREATE TABLE IF NOT EXISTS telegram_read_members (
-          feed TEXT, member INTEGER, eligible INTEGER DEFAULT 0, reason TEXT, missing INTEGER DEFAULT 0,
-          PRIMARY KEY(feed,member));
-        CREATE TABLE IF NOT EXISTS telegram_read_state (
-          feed TEXT PRIMARY KEY, since REAL, initial INTEGER,
-          confirmed INTEGER DEFAULT 0, signature TEXT, waiting TEXT, error TEXT);
-        ''')
-        columns = {r['name'] for r in store.db.execute('PRAGMA table_info(telegram_read_members)')}
-        if 'missing' not in columns:
-            with store.db:
-                store.db.execute('ALTER TABLE telegram_read_members ADD COLUMN missing INTEGER DEFAULT 0')
+        if is_sqlite(store.db):
+            store.db.executescript('''
+            CREATE TABLE IF NOT EXISTS telegram_read_members (
+              feed TEXT, member INTEGER, eligible INTEGER DEFAULT 0, reason TEXT, missing INTEGER DEFAULT 0,
+              PRIMARY KEY(feed,member));
+            CREATE TABLE IF NOT EXISTS telegram_read_state (
+              feed TEXT PRIMARY KEY, since REAL, initial INTEGER,
+              confirmed INTEGER DEFAULT 0, signature TEXT, waiting TEXT, error TEXT);
+            ''')
+            columns = {r['name'] for r in store.db.execute('PRAGMA table_info(telegram_read_members)')}
+            if 'missing' not in columns:
+                with store.db:
+                    store.db.execute('ALTER TABLE telegram_read_members ADD COLUMN missing INTEGER DEFAULT 0')
 
     def recover(self) -> None:
         """Reconcile current channel read eligibility on startup."""
         db = self.store.db
-        with db:
-            db.execute('CREATE TABLE IF NOT EXISTS telegram_read_dirty (feed TEXT PRIMARY KEY)')
-            for event in ('INSERT', 'UPDATE'):
-                db.execute(f"""CREATE TRIGGER IF NOT EXISTS telegram_read_member_{event}
-                    AFTER {event} ON telegram_read_members BEGIN
-                    INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END""")
-            db.executescript("""
-            CREATE TRIGGER IF NOT EXISTS telegram_read_item_added AFTER INSERT ON items
-              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed_id) ON CONFLICT(feed) DO NOTHING; END;
-            CREATE TRIGGER IF NOT EXISTS telegram_read_item_changed AFTER UPDATE OF complete,members,viewed ON items
-              WHEN NEW.complete IS NOT OLD.complete OR NEW.members IS NOT OLD.members OR NEW.viewed IS NOT OLD.viewed
-              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed_id) ON CONFLICT(feed) DO NOTHING; END;
-            CREATE TRIGGER IF NOT EXISTS telegram_read_initial_added AFTER INSERT ON telegram_read_state
-              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
-            CREATE TRIGGER IF NOT EXISTS telegram_read_initial_changed AFTER UPDATE OF initial,since ON telegram_read_state
-              WHEN NEW.initial IS NOT OLD.initial OR NEW.since IS NOT OLD.since
-              BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
-            """)
+        if is_sqlite(db):
+            with db:
+                db.execute('CREATE TABLE IF NOT EXISTS telegram_read_dirty (feed TEXT PRIMARY KEY)')
+                for event in ('INSERT', 'UPDATE'):
+                    db.execute(f"""CREATE TRIGGER IF NOT EXISTS telegram_read_member_{event}
+                        AFTER {event} ON telegram_read_members BEGIN
+                        INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END""")
+                db.executescript("""
+                CREATE TRIGGER IF NOT EXISTS telegram_read_item_added AFTER INSERT ON items
+                  BEGIN INSERT INTO telegram_read_dirty SELECT NEW.feed_id WHERE NEW.feed_id IS NOT NULL ON CONFLICT(feed) DO NOTHING; END;
+                CREATE TRIGGER IF NOT EXISTS telegram_read_item_changed AFTER UPDATE OF complete,members,viewed ON items
+                  WHEN NEW.complete IS NOT OLD.complete OR NEW.members IS NOT OLD.members OR NEW.viewed IS NOT OLD.viewed
+                  BEGIN INSERT INTO telegram_read_dirty SELECT NEW.feed_id WHERE NEW.feed_id IS NOT NULL ON CONFLICT(feed) DO NOTHING; END;
+                CREATE TRIGGER IF NOT EXISTS telegram_read_initial_added AFTER INSERT ON telegram_read_state
+                  BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
+                CREATE TRIGGER IF NOT EXISTS telegram_read_initial_changed AFTER UPDATE OF initial,since ON telegram_read_state
+                  WHEN NEW.initial IS NOT OLD.initial OR NEW.since IS NOT OLD.since
+                  BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
+                """)
         self.store.jobs.sync_reads()
 
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:

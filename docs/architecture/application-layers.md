@@ -21,7 +21,7 @@ flowchart TB
     T --> JR
     J --> JR
     S --> R["Репозитории сущностей"]
-    JR --> DB[("Одна SQLite")]
+    JR --> DB[("База Око: SQLite или PostgreSQL")]
     R --> DB
     R --> FS["Локальные файлы"]
     E["Execution: общий допуск и epoch"] -.-> C
@@ -57,8 +57,8 @@ flowchart TB
 
 ## Одна короткая SQL-транзакция
 
-У Store одно ReadingConnection и одна общая SQL-блокировка access_lock (RLock).
-Порядок JobRepository.transaction: блокировка → проверка допуска → BEGIN IMMEDIATE →
+У Store одно соединение через `storage/database.py` и одна общая SQL-блокировка access_lock (RLock).
+Порядок JobRepository.transaction: блокировка → проверка допуска → BEGIN IMMEDIATE (SQLite) / BEGIN (PostgreSQL) →
 операции → COMMIT/ROLLBACK → освобождение. Сервисные чтения и HTTP-снимки используют
 ту же блокировку. Вложенные репозитории присоединяются к текущей транзакции;
 внутренний connection-контекст не выполняет второй BEGIN или commit.
@@ -140,3 +140,5 @@ Guard допускает исключение только для существ
 Аудит не участвует в выборе работы и не возобновляет Job. Штатное удаление либо
 новая корректная строка не блокируются старым аудитом; для изменённого orphan
 исключение больше не действует. Исходная SQLite и все её строки сохраняются.
+
+Облачный backend, права ролей, lease и отдельные миграции описаны в [PostgreSQL](../development/postgresql.md). Тексты и результаты остаются SQL-данными, медиа — локальными файлами.

@@ -40,7 +40,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                public_url: str | None = None, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
                telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
-               youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time) -> FastAPI:
+               youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> FastAPI:
     if not api_only:
         from oko.reader.static import validate_frontend
         validate_frontend()
@@ -57,7 +57,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     lifetime = Lifetime('explicit' if api_only or persistent else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
-    runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock)
+    runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)
     application = ReaderApplication(runtime.execution, runtime.jobs, clock=clock, wall_clock=wall_clock,
         sources=runtime.collection._sources, bindings=runtime.collection._telegram_bindings, sync_sources=runtime.collection._sync_sources,
         interval_changed=lambda value: setattr(runtime.collection, '_collection_interval', value), stage=lambda: runtime.jobs.stage,

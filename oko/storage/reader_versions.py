@@ -1,15 +1,17 @@
 """Persisted versions of reader entities and their derived membership.
 
-Versions are updated by the same SQLite transaction as their inputs. There is
+Versions are updated by the same database transaction as their inputs. There is
 no database cursor or event history. Lists retain only a digest of service IDs.
 """
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row, Connection, Row
 import hashlib
 import json
 import sqlite3
 from oko.storage.transaction import begin_write
 from oko.storage.connection import ReadingConnection
 import uuid
-from typing import Any, TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
 
 if TYPE_CHECKING:
@@ -21,32 +23,34 @@ class ReaderVersions:
         self.store, self.db = store, store.db
         self.offset = store.wall_clock() - store.clock()
         self._next_action_cleanup = float('-inf')
-        self.db.executescript('''
-        CREATE TABLE IF NOT EXISTS reader_identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS reader_entities (
-          kind TEXT, identity TEXT, version INTEGER NOT NULL, changed REAL NOT NULL,
-          PRIMARY KEY(kind,identity));
-        CREATE TABLE IF NOT EXISTS reader_originals (feed TEXT PRIMARY KEY, value INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS reader_visibility (item TEXT PRIMARY KEY, hidden INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS reader_feed_counts (feed TEXT PRIMARY KEY, unviewed INTEGER NOT NULL, visible INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS reader_folder_counts (folder TEXT PRIMARY KEY, visible INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS reader_lists (
-          identity TEXT PRIMARY KEY, scope TEXT, owner TEXT, sort TEXT, hidden INTEGER,
-          version INTEGER NOT NULL, changed REAL NOT NULL, digest TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS reader_job_time (job INTEGER PRIMARY KEY, deadline REAL, ready INTEGER);
-        CREATE INDEX IF NOT EXISTS reader_job_due ON reader_job_time(deadline) WHERE ready=0;
-        CREATE TABLE IF NOT EXISTS reader_runtime (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS reader_youtube_time (id INTEGER PRIMARY KEY CHECK(id=1), paused INTEGER NOT NULL);
-        CREATE INDEX IF NOT EXISTS reader_problem_expiry ON reader_problems(finished) WHERE finished IS NOT NULL;
-        CREATE INDEX IF NOT EXISTS reader_action_expiry ON reader_action_results(completed) WHERE completed IS NOT NULL;
-        ''')
-        if not any(row['name']=='pending' for row in self.db.execute('PRAGMA table_info(reader_lists)')):
-            with self.db:
-                for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reader_v_%'").fetchall():
-                    self.db.execute('DROP TRIGGER "'+row['name'].replace('"','""')+'"')
-                self.db.execute('ALTER TABLE reader_lists ADD COLUMN pending INTEGER NOT NULL DEFAULT 0')
+        if is_sqlite(self.db):
+            self.db.executescript('''
+            CREATE TABLE IF NOT EXISTS reader_identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS reader_entities (
+              kind TEXT, identity TEXT, version INTEGER NOT NULL, changed REAL NOT NULL,
+              PRIMARY KEY(kind,identity));
+            CREATE TABLE IF NOT EXISTS reader_originals (feed TEXT PRIMARY KEY, value INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS reader_visibility (item TEXT PRIMARY KEY, hidden INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS reader_feed_counts (feed TEXT PRIMARY KEY, unviewed INTEGER NOT NULL, visible INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS reader_folder_counts (folder TEXT PRIMARY KEY, visible INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS reader_lists (
+              identity TEXT PRIMARY KEY, scope TEXT, owner TEXT, sort TEXT, hidden INTEGER,
+              version INTEGER NOT NULL, changed REAL NOT NULL, digest TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS reader_job_time (job INTEGER PRIMARY KEY, deadline REAL, ready INTEGER);
+            CREATE INDEX IF NOT EXISTS reader_job_due ON reader_job_time(deadline) WHERE ready=0;
+            CREATE TABLE IF NOT EXISTS reader_runtime (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS reader_youtube_time (id INTEGER PRIMARY KEY CHECK(id=1), paused INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS reader_problem_expiry ON reader_problems(finished) WHERE finished IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS reader_action_expiry ON reader_action_results(completed) WHERE completed IS NOT NULL;
+            ''')
+            if not any(row['name']=='pending' for row in self.db.execute('PRAGMA table_info(reader_lists)')):
+                with self.db:
+                    for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reader_v_%'").fetchall():
+                        self.db.execute('DROP TRIGGER "'+row['name'].replace('"','""')+'"')
+                    self.db.execute('ALTER TABLE reader_lists ADD COLUMN pending INTEGER NOT NULL DEFAULT 0')
         self.db.before_commit=lambda: self.flush_reading_lists(self.db)
-        self.db.execute('CREATE INDEX IF NOT EXISTS reader_lists_pending ON reader_lists(identity) WHERE pending=1')
+        if is_sqlite(self.db):
+            self.db.execute('CREATE INDEX IF NOT EXISTS reader_lists_pending ON reader_lists(identity) WHERE pending=1')
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO reader_identity VALUES (1,?)', (str(uuid.uuid4()),))
             for kind, identity in [('status', 'runtime'), ('navigation', 'navigation')]:
@@ -67,26 +71,31 @@ class ReaderVersions:
                 ON CONFLICT(folder) DO UPDATE SET visible=excluded.visible WHERE visible IS NOT excluded.visible''')
             self.db.execute('''INSERT INTO reader_job_time SELECT id,next,CASE WHEN next<=? OR status!='pending' THEN 1 ELSE 0 END FROM jobs WHERE kind IN ('fetch','filter','theses')
                 ON CONFLICT(job) DO NOTHING''', (store.clock(),))
-        self.identity = str(self.db.execute('SELECT value FROM reader_identity WHERE id=1').fetchone()[0])
-        self._install()
+        self.identity = str(expect_row(self.db.execute('SELECT value FROM reader_identity WHERE id=1').fetchone())[0])
+        if is_sqlite(self.db):
+            self._install()
         with self.db:
             self.db.membership_feeds={r[0] for r in self.db.execute('SELECT id FROM feeds')}
             self.db.membership_folders={r[0] for r in self.db.execute('SELECT id FROM folders')}
             self.refresh_memberships(self.db)
 
     @staticmethod
-    def flush_reading_lists(db: ReadingConnection) -> None:
+    def flush_reading_lists(db: Connection) -> None:
+        if not is_sqlite(db):
+            for row in db.execute('SELECT kind,identity FROM reader_membership_dirty'):
+                (db.membership_feeds if row['kind']=='feed' else db.membership_folders).add(row['identity'])
+            db.execute('DELETE FROM reader_membership_dirty')
         if getattr(db,'membership_feeds',None) or getattr(db,'membership_folders',None):
             ReaderVersions.refresh_memberships(db)
         rows=db.execute('SELECT identity,scope,owner,sort,hidden,digest FROM reader_lists WHERE pending=1').fetchall()
         for identity,scope,owner,sort,hidden,previous in rows:
             ids=[row[0] for row in db.execute(ReaderVersions._ids(scope,':owner',':sort',':hidden'),dict(scope=scope,owner=owner,sort=sort,hidden=hidden))]
             digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
-            db.execute('UPDATE reader_lists SET version=version+?,changed=CASE WHEN ? THEN oko_reader_time() ELSE changed END,digest=?,pending=0 WHERE identity=?',
+            db.execute('UPDATE reader_lists SET version=version+?,changed=CASE WHEN ?=1 THEN oko_reader_time() ELSE changed END,digest=?,pending=0 WHERE identity=?',
                          (int(digest!=previous),int(digest!=previous),digest,identity))
 
     @staticmethod
-    def refresh_memberships(db: ReadingConnection) -> None:
+    def refresh_memberships(db: Connection) -> None:
         feeds: set[str]=getattr(db,'membership_feeds',set())
         folders: set[str]=getattr(db,'membership_folders',set())
         db.membership_feeds=set()
@@ -155,9 +164,9 @@ class ReaderVersions:
     @staticmethod
     def _originals(where: str) -> str:
         return f"""INSERT INTO reader_originals SELECT f.id,coalesce(
-            (SELECT json_extract(value,'$') FROM settings WHERE scope='feed' AND owner=f.id AND field='originals'),
-            (SELECT json_extract(value,'$') FROM settings WHERE scope='folder' AND owner=f.folder_id AND field='originals'),
-            (SELECT json_extract(value,'$') FROM settings WHERE scope='oko' AND owner='global' AND field='originals'),1)
+            (SELECT CAST(json_extract(value,'$') AS INTEGER) FROM settings WHERE scope='feed' AND owner=f.id AND field='originals'),
+            (SELECT CAST(json_extract(value,'$') AS INTEGER) FROM settings WHERE scope='folder' AND owner=f.folder_id AND field='originals'),
+            (SELECT CAST(json_extract(value,'$') AS INTEGER) FROM settings WHERE scope='oko' AND owner='global' AND field='originals'),1)
             FROM feeds f WHERE {where} ON CONFLICT(feed) DO UPDATE SET value=excluded.value WHERE value IS NOT excluded.value;"""
 
     @staticmethod
@@ -172,7 +181,7 @@ class ReaderVersions:
             WHERE i.viewed=0 AND ({hidden}=1 OR coalesce(v.hidden,0)=0)
               AND {membership}
             ORDER BY CASE WHEN {sort}='importance' THEN CASE f.importance WHEN 'high' THEN -2 WHEN 'elevated' THEN -1 ELSE 0 END ELSE 0 END,
-              CASE WHEN {sort}!='importance' THEN NOT i.published_known ELSE 0 END,
+              CASE WHEN {sort}!='importance' THEN CAST(i.published_known=0 AS INTEGER) ELSE 0 END,
               CASE WHEN {sort}='importance' THEN -i.published WHEN i.published_known=0 THEN 0 WHEN {sort}='oldest' THEN i.published ELSE -i.published END,
               CASE WHEN {sort}!='importance' THEN i.feed_id ELSE '' END,
               CASE WHEN {sort}='importance' THEN 0 WHEN {sort}='oldest' THEN -coalesce(i.source_order,0) ELSE coalesce(i.source_order,0) END,i.id"""
@@ -222,7 +231,7 @@ class ReaderVersions:
                           'NEW.visible IS NOT OLD.visible')
             self._trigger('item_insert', 'INSERT', 'items', self._material('NEW.id') + self._related('NEW.id') + status + '''
                 INSERT INTO reader_visibility VALUES (NEW.id,0) ON CONFLICT(item) DO NOTHING;
-                INSERT INTO reader_feed_counts VALUES (NEW.feed_id,CASE WHEN NEW.viewed=0 THEN 1 ELSE 0 END,CASE WHEN NEW.viewed=0 THEN 1 ELSE 0 END)
+                INSERT INTO reader_feed_counts SELECT NEW.feed_id,CASE WHEN NEW.viewed=0 THEN 1 ELSE 0 END,CASE WHEN NEW.viewed=0 THEN 1 ELSE 0 END WHERE NEW.feed_id IS NOT NULL
                 ON CONFLICT(feed) DO UPDATE SET unviewed=unviewed+excluded.unviewed,visible=visible+excluded.visible;''')
             fields = ('feed_id','url','published','published_known','source_order','complete','members','viewed')
             self._trigger('item_data','UPDATE','items', self._material('NEW.id') + status,
@@ -231,15 +240,15 @@ class ReaderVersions:
                 'NEW.complete IS NOT OLD.complete OR NEW.members IS NOT OLD.members OR NEW.feed_id IS NOT OLD.feed_id')
             self._trigger('item_media_available','UPDATE','items',self._bump('media','NEW.id'),'NEW.complete IS NOT OLD.complete')
             self._trigger('item_membership','UPDATE','items', '''
-                UPDATE reader_feed_counts SET unviewed=unviewed-(OLD.viewed=0),
+                UPDATE reader_feed_counts SET unviewed=unviewed-CASE WHEN OLD.viewed=0 THEN 1 ELSE 0 END,
                     visible=visible-CASE WHEN OLD.viewed=0 AND coalesce((SELECT hidden FROM reader_visibility WHERE item=OLD.id),0)=0 THEN 1 ELSE 0 END WHERE feed=OLD.feed_id;
-                UPDATE reader_feed_counts SET unviewed=unviewed+(NEW.viewed=0),
+                UPDATE reader_feed_counts SET unviewed=unviewed+CASE WHEN NEW.viewed=0 THEN 1 ELSE 0 END,
                     visible=visible+CASE WHEN NEW.viewed=0 AND coalesce((SELECT hidden FROM reader_visibility WHERE item=NEW.id),0)=0 THEN 1 ELSE 0 END WHERE feed=NEW.feed_id;
                 ''', 'NEW.viewed IS NOT OLD.viewed OR NEW.feed_id IS NOT OLD.feed_id')
             self._trigger('item_order','UPDATE','items', self._feed_lists('NEW.feed_id'),
                           'NEW.published IS NOT OLD.published OR NEW.published_known IS NOT OLD.published_known OR NEW.source_order IS NOT OLD.source_order')
             self._trigger('item_delete','DELETE','items', self._material('OLD.id') + self._related('OLD.id') + status + '''
-                UPDATE reader_feed_counts SET unviewed=unviewed-(OLD.viewed=0),
+                UPDATE reader_feed_counts SET unviewed=unviewed-CASE WHEN OLD.viewed=0 THEN 1 ELSE 0 END,
                 visible=visible-CASE WHEN OLD.viewed=0 AND coalesce((SELECT hidden FROM reader_visibility WHERE item=OLD.id),0)=0 THEN 1 ELSE 0 END WHERE feed=OLD.feed_id;
                 DELETE FROM reader_visibility WHERE item=OLD.id;''')
             self._trigger('hidden','UPDATE','reader_visibility', self._bump('card','NEW.item')+self._bump('filter','NEW.item')+self._bump('theses','NEW.item') + '''
@@ -345,10 +354,10 @@ class ReaderVersions:
         else:
             with self.db:self.db.execute(query,(item,int(hidden)))
 
-    def version(self, kind: str, identity: str) -> sqlite3.Row | None:
-        return cast(sqlite3.Row | None, self.db.execute('SELECT version,changed FROM reader_entities WHERE kind=? AND identity=?', (kind,identity)).fetchone())
+    def version(self, kind: str, identity: str) -> Row | None:
+        return self.db.execute('SELECT version,changed FROM reader_entities WHERE kind=? AND identity=?', (kind,identity)).fetchone()
 
-    def batch(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], sqlite3.Row]:
+    def batch(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], Row]:
         result = {}
         ordered=sorted(keys)
         for start in range(0,len(ordered),499):
@@ -372,11 +381,11 @@ class ReaderVersions:
         sql=self._ids(target['scope'],':owner',':sort',':hidden')
         return [r[0] for r in self.db.execute(sql,dict(scope=target['scope'],owner=target.get('feed_id',target.get('folder_id','')),sort=options['sort'],hidden=int(options['show_hidden'])))]
 
-    def list_version(self, options: dict[str, Any]) -> sqlite3.Row:
+    def list_version(self, options: dict[str, Any]) -> Row:
         identity=self.list_identity(options)
         self.db.flush()
         row=self.db.execute('SELECT version,changed FROM reader_lists WHERE identity=?',(identity,)).fetchone()
-        if row:return cast(sqlite3.Row,row)
+        if row:return row
         ids=self.ids(options)
         # Match SQLite's canonical JSON array used by write-side list maintenance.
         digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
@@ -385,14 +394,14 @@ class ReaderVersions:
             self.db.execute('INSERT INTO reader_lists(identity,scope,owner,sort,hidden,version,changed,digest) VALUES (?,?,?,?,?,1,?,?)',(identity,target['scope'],target.get('feed_id',target.get('folder_id','')),options['sort'],int(options['show_hidden']),self.store.wall_clock(),digest))
         row=self.db.execute('SELECT version,changed FROM reader_lists WHERE identity=?',(identity,)).fetchone()
         assert row is not None
-        return cast(sqlite3.Row,row)
+        return row
 
     def advance(self, metadata: dict[str, Any], now: float | None = None, wall: float | None = None) -> None:
         now=self.store.clock() if now is None else now
         wall=self.store.wall_clock() if wall is None else wall
         with self.db:
             self.db.execute('UPDATE reader_job_time SET ready=1 WHERE ready=0 AND deadline<=?',(now,))
-            self.db.execute('INSERT INTO reader_youtube_time SELECT 1,blocked_until>? FROM youtube_access WHERE id=1 ON CONFLICT(id) DO UPDATE SET paused=excluded.paused WHERE paused IS NOT excluded.paused',(wall,))
+            self.db.execute('INSERT INTO reader_youtube_time SELECT 1,CASE WHEN blocked_until>? THEN 1 ELSE 0 END FROM youtube_access WHERE id=1 ON CONFLICT(id) DO UPDATE SET paused=excluded.paused WHERE paused IS NOT excluded.paused',(wall,))
             self.db.execute('DELETE FROM reader_problems WHERE rowid IN (SELECT rowid FROM reader_problems WHERE finished<=? ORDER BY finished LIMIT 200)',(wall-86400,))
             if now >= self._next_action_cleanup:
                 from oko.storage.problem_links import cleanup

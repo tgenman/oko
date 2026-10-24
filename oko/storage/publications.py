@@ -1,7 +1,9 @@
-"""Latest Publication and results in SQLite; files belong to MediaFile.
+"""Latest Publication and results in the database; files belong to MediaFile.
 
 All supported sources use the same current storage.
 """
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row
 from copy import deepcopy
 from datetime import datetime, timezone
 from oko.storage import processing_input as publication_input
@@ -54,34 +56,35 @@ class Publications:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         db = store.db
-        with db:
-            for table, additions in (('items', PUBLICATION_COLUMNS), ('feeds', FEED_COLUMNS)):
-                columns = {r['name'] for r in db.execute('PRAGMA table_info('+table+')')}
-                for name, declaration in additions.items():
-                    if name not in columns:
-                        db.execute(f'ALTER TABLE {table} ADD COLUMN {name} {declaration}')
-        db.executescript('''
-        CREATE UNIQUE INDEX IF NOT EXISTS publication_external_key ON items(platform,external_id) WHERE platform IS NOT NULL;
-        CREATE UNIQUE INDEX IF NOT EXISTS feed_external_key ON feeds(platform,external_id) WHERE platform IS NOT NULL;
-        CREATE INDEX IF NOT EXISTS publication_stage ON items(status,id) WHERE platform IS NOT NULL AND viewed=0;
-        CREATE TABLE IF NOT EXISTS feed_publications (
-          feed_id TEXT REFERENCES feeds(id), publication_id TEXT REFERENCES items(id),
-          PRIMARY KEY(feed_id,publication_id));
-        CREATE INDEX IF NOT EXISTS feed_publications_publication ON feed_publications(publication_id,feed_id);
-        DROP VIEW IF EXISTS reading_memberships;
-        CREATE VIEW reading_memberships AS SELECT publication_id,feed_id FROM feed_publications;
-        CREATE TABLE IF NOT EXISTS publication_links (
-          source_publication_id TEXT REFERENCES items(id), target_publication_id TEXT REFERENCES items(id),
-          PRIMARY KEY(source_publication_id,target_publication_id));
-        CREATE TABLE IF NOT EXISTS media_files (
-          id TEXT PRIMARY KEY, publication_id TEXT NOT NULL REFERENCES items(id), resource_key TEXT NOT NULL,
-          source_locator TEXT NOT NULL, name TEXT NOT NULL, mime_type TEXT, size_bytes INTEGER,
-          storage_key TEXT, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
-          UNIQUE(publication_id,resource_key));
-        ''')
-        if 'resource_identity' not in {r['name'] for r in db.execute('PRAGMA table_info(media_files)')}:
-            db.execute('ALTER TABLE media_files ADD COLUMN resource_identity TEXT')
-            db.commit()
+        if is_sqlite(db):
+            with db:
+                for table, additions in (('items', PUBLICATION_COLUMNS), ('feeds', FEED_COLUMNS)):
+                    columns = {r['name'] for r in db.execute('PRAGMA table_info('+table+')')}
+                    for name, declaration in additions.items():
+                        if name not in columns:
+                            db.execute(f'ALTER TABLE {table} ADD COLUMN {name} {declaration}')
+            db.executescript('''
+            CREATE UNIQUE INDEX IF NOT EXISTS publication_external_key ON items(platform,external_id) WHERE platform IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS feed_external_key ON feeds(platform,external_id) WHERE platform IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS publication_stage ON items(status,id) WHERE platform IS NOT NULL AND viewed=0;
+            CREATE TABLE IF NOT EXISTS feed_publications (
+              feed_id TEXT REFERENCES feeds(id), publication_id TEXT REFERENCES items(id),
+              PRIMARY KEY(feed_id,publication_id));
+            CREATE INDEX IF NOT EXISTS feed_publications_publication ON feed_publications(publication_id,feed_id);
+            DROP VIEW IF EXISTS reading_memberships;
+            CREATE VIEW reading_memberships AS SELECT publication_id,feed_id FROM feed_publications;
+            CREATE TABLE IF NOT EXISTS publication_links (
+              source_publication_id TEXT REFERENCES items(id), target_publication_id TEXT REFERENCES items(id),
+              PRIMARY KEY(source_publication_id,target_publication_id));
+            CREATE TABLE IF NOT EXISTS media_files (
+              id TEXT PRIMARY KEY, publication_id TEXT NOT NULL REFERENCES items(id), resource_key TEXT NOT NULL,
+              source_locator TEXT NOT NULL, name TEXT NOT NULL, mime_type TEXT, size_bytes INTEGER,
+              storage_key TEXT, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+              UNIQUE(publication_id,resource_key));
+            ''')
+            if 'resource_identity' not in {r['name'] for r in db.execute('PRAGMA table_info(media_files)')}:
+                db.execute('ALTER TABLE media_files ADD COLUMN resource_identity TEXT')
+                db.commit()
         (store.root/'media').mkdir(exist_ok=True)
 
     def owns(self, item: str) -> bool:
@@ -153,7 +156,7 @@ class Publications:
              json.dumps({k: v['value'] for k, v in effective.items() if k in ('theses', 'prompt_theses', 'processor')}), feed))
 
     def identify(self, item: str, ref: ExternalReference) -> None:
-        row = self.store.db.execute('SELECT * FROM items WHERE id=?', (item,)).fetchone()
+        row = expect_row(self.store.db.execute('SELECT * FROM items WHERE id=?', (item,)).fetchone())
         self.store.db.execute('''UPDATE items SET platform=?,external_id=?,url=?,published_at=?,discovered_at=COALESCE(discovered_at,?) WHERE id=?''',
             (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))
@@ -184,7 +187,7 @@ class Publications:
             if not existing and publication.members:
                 placeholders = ','.join('?' for _ in publication.members)
                 existing = self.store.db.execute(f'''SELECT DISTINCT i.id,i.source_id FROM items i JOIN json_each(i.members) m
-                    WHERE i.feed_id=? AND m.value IN ({placeholders})''', (feed, *publication.members)).fetchall()
+                    WHERE i.feed_id=? AND CAST(m.value AS BIGINT) IN ({placeholders})''', (feed, *publication.members)).fetchall()
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:
@@ -303,7 +306,7 @@ class Publications:
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
-        old = store.db.execute('SELECT content,platform FROM items WHERE id=?', (item,)).fetchone()
+        old = expect_row(store.db.execute('SELECT content,platform FROM items WHERE id=?', (item,)).fetchone())
         previous = json.loads(old['content'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         if 'youtube' in content.get('extra',{}):
@@ -347,8 +350,8 @@ class Publications:
         if not same:
             store.db.execute("UPDATE items SET filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id=?", (item,))
         elif previous:
-            row=store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()
-            filtered=json.loads(row[0])
+            filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone())
+            filtered=json.loads(filtered_row[0])
             if filtered:
                 result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
                 refreshed=publication_input.filtered(publication_input.content(store,item),item,result)
@@ -373,7 +376,7 @@ class Publications:
 
     def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
         """Publish a validated result and its provenance in the caller's transaction."""
-        row=self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
+        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone())
         content=publication_input.content(self.store,item)
         metadata=json.loads(row[0])
         operation='filter' if kind=='filter' else 'summary'
@@ -393,12 +396,12 @@ class Publications:
     def complete_empty(self, item: str, kind: str, signature: str) -> None:
         result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
         self.accept_result(item,kind,signature,result,None)
-        row=self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone()
+        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone())
         metadata=json.loads(row[0])
         metadata['filter' if kind=='filter' else 'summary']['reason']='no_input'
         self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
         if kind=='filter':
-            row=self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()
+            row=expect_row(self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone())
             filtered=json.loads(row[0])
             filtered['blocks']=[]
             self.store.db.execute('UPDATE items SET filtered_content=? WHERE id=?',(json.dumps(filtered,ensure_ascii=False),item))

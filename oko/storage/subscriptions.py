@@ -1,10 +1,12 @@
+from oko.storage.database import INTEGRITY_ERRORS
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import expect_row, Database, Row
 from oko.storage import material_read
 from oko.storage.reading import reading_value
 import json
 import re
 import secrets
 from uuid import uuid4
-import sqlite3
 from oko.storage.transaction import begin_write
 import time
 from collections.abc import Callable
@@ -16,28 +18,31 @@ from oko.subscriptions.details import FeedDetails
 from oko.subscriptions.subscriptions import AddFeed, Overrides, FeedPatch, key, identify, FolderConflict, DEFAULT_FEED_REFRESH_MINUTES, DEFAULTS
 
 class SubscriptionRepository:
-    def __init__(self, db: sqlite3.Connection, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, db: Database, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
         self._feed_batch: dict[str,dict[str,Any]] | None=None
         self.db = db
         self.history = History(db)
-        db.executescript('''
-        CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, title TEXT UNIQUE, position INTEGER);
-        CREATE TABLE IF NOT EXISTS feeds (
-          id TEXT PRIMARY KEY, identity TEXT UNIQUE, title TEXT, kind TEXT, folder_id TEXT,
-          original_urls TEXT, connection TEXT, transport TEXT,
-          importance TEXT DEFAULT 'normal', initial_days INTEGER DEFAULT 1,
-          public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER,
-          telegram_peer INTEGER,telegram_account TEXT,telegram_username TEXT);
-        CREATE INDEX IF NOT EXISTS feeds_folder ON feeds(folder_id);
-        CREATE TABLE IF NOT EXISTS settings (scope TEXT, owner TEXT, field TEXT, value TEXT,
-          PRIMARY KEY(scope,owner,field));
-        ''')
+        if is_sqlite(db):
+            db.executescript('''
+            CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, title TEXT UNIQUE, position INTEGER);
+            CREATE TABLE IF NOT EXISTS feeds (
+              id TEXT PRIMARY KEY, identity TEXT UNIQUE, title TEXT, kind TEXT, folder_id TEXT,
+              original_urls TEXT, connection TEXT, transport TEXT,
+              importance TEXT DEFAULT 'normal', initial_days INTEGER DEFAULT 1,
+              public_ai INTEGER DEFAULT 0, read_history INTEGER DEFAULT 0, auto_read INTEGER,
+              telegram_peer INTEGER,telegram_account TEXT,telegram_username TEXT);
+            CREATE INDEX IF NOT EXISTS feeds_folder ON feeds(folder_id);
+            CREATE TABLE IF NOT EXISTS settings (scope TEXT, owner TEXT, field TEXT, value TEXT,
+              PRIMARY KEY(scope,owner,field));
+            ''')
 
         self.details = FeedDetails(db, wall_clock)
         self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
 
     def watch_configuration(self) -> None:
         """A durable revision of source inputs, independent of progress writes."""
+        if not is_sqlite(self.db):
+            return
         columns = {
             'feeds': ('id', 'identity', 'kind', 'folder_id', 'original_urls', 'connection', 'transport',
                       'importance', 'initial_days', 'public_ai', 'read_history', 'auto_read',
@@ -61,11 +66,11 @@ class SubscriptionRepository:
                     guard = ' WHEN ' + predicate if event == 'UPDATE' else ''
                     self.db.execute(f"""CREATE TRIGGER {name} AFTER {event} ON {table}{guard} BEGIN
                         INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
-                        DO UPDATE SET value=CAST(state.value AS INTEGER)+1; END""")
+                        DO UPDATE SET value=CAST(CAST(state.value AS INTEGER)+1 AS TEXT); END""")
             self.db.execute("""CREATE TRIGGER IF NOT EXISTS source_read_initial AFTER UPDATE OF initial ON telegram_read_state
               WHEN NEW.initial IS NOT OLD.initial BEGIN
               INSERT INTO state VALUES ('sources-version','1') ON CONFLICT(key)
-              DO UPDATE SET value=CAST(state.value AS INTEGER)+1; END""")
+              DO UPDATE SET value=CAST(CAST(state.value AS INTEGER)+1 AS TEXT); END""")
 
     def source_revision(self) -> int:
         row = self.db.execute("SELECT value FROM state WHERE key='sources-version'").fetchone()
@@ -93,7 +98,7 @@ class SubscriptionRepository:
         Never derive identity from a mutable title or reuse a deleted ID.
         """
         self.db.execute('INSERT OR IGNORE INTO folders VALUES (?,?,?)', (secrets.token_hex(16), title, len(self.folders())))
-        return str(self.db.execute('SELECT id FROM folders WHERE title=?', (title,)).fetchone()[0])
+        return str(expect_row(self.db.execute('SELECT id FROM folders WHERE title=?', (title,)).fetchone())[0])
 
     def rename_folder(self, identity: str, title: str) -> dict[str, Any]:
         with self.db:
@@ -101,7 +106,7 @@ class SubscriptionRepository:
             self.check_owner('folder', identity)
             try:
                 self.db.execute('UPDATE folders SET title=? WHERE id=?', (title.strip(), identity))
-            except sqlite3.IntegrityError:
+            except INTEGRITY_ERRORS:
                 raise FolderConflict('folder_name_conflict', 'A folder with this name already exists.') from None
         return next(folder for folder in self.folders() if folder['id'] == identity)
 
@@ -162,7 +167,7 @@ class SubscriptionRepository:
         return self._feed_value(row,binding,self.history.status(identity),avatar[0] if avatar else None,profile)
 
     @staticmethod
-    def _feed_value(row: sqlite3.Row, binding: dict[str,Any] | None, history: dict[str,Any] | None,
+    def _feed_value(row: Row, binding: dict[str,Any] | None, history: dict[str,Any] | None,
                     avatar: str | None, profile: dict[str,Any] | None) -> dict[str,Any]:
         feed = dict(row)
         # The existing reader DTO contains subscription settings only. New
@@ -171,6 +176,7 @@ class SubscriptionRepository:
         for field in FEED_COLUMNS:
             feed.pop(field, None)
         feed.pop('telegram_topic', None)
+        feed.pop('rowid', None)
         if avatar:
             feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar
         feed['original_urls'] = json.loads(feed['original_urls'])
@@ -241,7 +247,7 @@ class SubscriptionRepository:
             raise ValueError('Максимальная задержка должна быть не меньше начальной')
 
     @reading_value
-    def _settings(self, scope: str, owner: str) -> list[sqlite3.Row]:
+    def _settings(self, scope: str, owner: str) -> list[Row]:
         return material_read.settings(self.db,scope,owner)
 
     @reading_value
@@ -255,15 +261,15 @@ class SubscriptionRepository:
         feeds=self.feeds()
         identities=json.dumps([feed['id'] for feed in feeds])
         folders=json.dumps(list({feed['folder_id'] for feed in feeds}))
-        settings: dict[tuple[str,str],list[sqlite3.Row]]={}
+        settings: dict[tuple[str,str],list[Row]]={}
         for row in self.db.execute("""SELECT scope,owner,field,value FROM settings WHERE (scope='oko' AND owner='global')
                 OR (scope='feed' AND owner IN (SELECT value FROM json_each(?)))
                 OR (scope='folder' AND owner IN (SELECT value FROM json_each(?)))""",(identities,folders)):
             settings.setdefault((row['scope'],row['owner']),[]).append(row)
         return {feed['id']:self._effective_value('feed',feed['id'],feed,settings) for feed in feeds}
 
-    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | sqlite3.Row | None,
-                         settings: dict[tuple[str,str],list[sqlite3.Row]] | None = None) -> dict[str,Any]:
+    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None,
+                         settings: dict[tuple[str,str],list[Row]] | None = None) -> dict[str,Any]:
         chain = [('oko', 'global')]
         if scope == 'feed':
             assert feed is not None

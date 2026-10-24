@@ -1,3 +1,4 @@
+from oko.storage.database import INTEGRITY_ERRORS
 """Application actions and reader state; background scheduling stays outside."""
 from oko.storage.reading import reading_snapshot
 import asyncio
@@ -5,7 +6,6 @@ from dataclasses import dataclass
 from oko.domain.processing import ProcessingWait
 from collections.abc import Awaitable, Callable
 import secrets
-import sqlite3
 from typing import Any, Literal, TypeVar
 import httpx
 from oko.collection.rss import RSSSource, feed_title, normalized
@@ -722,7 +722,7 @@ class ReaderApplication:
                         result=self.connections.change_access(feed_id,binding,info,auto_read)
                         self.jobs.change_adapter(feed_id)
                         self.jobs.invalidate({feed_id})
-                except sqlite3.IntegrityError:
+                except INTEGRITY_ERRORS:
                     raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Внешний ключ уже принадлежит другому фиду') from None
                 await self.jobs.cancel({feed_id}, invalidate=False)
                 self._sources.pop(feed_id,None)

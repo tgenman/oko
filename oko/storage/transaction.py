@@ -1,25 +1,25 @@
 """One synchronous write boundary shared by repositories on one connection."""
+from oko.storage.database import Database, Connection
 from collections.abc import Iterator, Callable
 from contextlib import contextmanager
-import sqlite3
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from oko.storage.connection import ReadingConnection
+from oko.storage.postgres_connection import PostgresConnection
 
 
 class TransactionAborted(RuntimeError):
     pass
 
 
-def begin_write(db: sqlite3.Connection) -> None:
+def begin_write(db: Database | PostgresConnection) -> None:
     """Existing repositories join a caller's transaction without a nested BEGIN."""
     if not db.in_transaction:
-        db.execute('BEGIN IMMEDIATE')
+        if isinstance(db, PostgresConnection):
+            db.begin()
+        else:
+            db.execute('BEGIN IMMEDIATE')
 
 
 @contextmanager
-def transaction(db: 'ReadingConnection', *, admitted: Callable[[], bool] = lambda: True) -> Iterator[None]:
+def transaction(db: Connection, *, admitted: Callable[[], bool] = lambda: True) -> Iterator[None]:
     """One short SQL lock, independent of longer lifecycle cleanup waits."""
     with db.access_lock:
         if not admitted():
@@ -29,12 +29,12 @@ def transaction(db: 'ReadingConnection', *, admitted: Callable[[], bool] = lambd
 
 
 @contextmanager
-def _transaction(db: 'ReadingConnection') -> Iterator[None]:
+def _transaction(db: Connection) -> Iterator[None]:
     if db.transaction_depth:
         raise RuntimeError('Pass the existing transaction to nested services')
     if db.in_transaction:
         raise RuntimeError('Unowned transaction at action entry')
-    db.execute('BEGIN IMMEDIATE')
+    begin_write(db)
     db.transaction_depth = 1
     db.transaction_failed = False
     try:

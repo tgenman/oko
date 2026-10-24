@@ -2,6 +2,7 @@
 
 Mutations participate in the caller's transaction; no external work happens here.
 """
+from oko.storage.database import expect_row
 from typing import TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind
@@ -43,7 +44,7 @@ def failure_status(issue: AdapterIssue) -> str:
 def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = False) -> None:
     if not store.jobs.valid(job):
         return
-    row = store.db.execute('SELECT retry_delay FROM jobs WHERE id=?',(job.id,)).fetchone()
+    row = expect_row(store.db.execute('SELECT retry_delay FROM jobs WHERE id=?',(job.id,)).fetchone())
     settings = store.subscriptions.retry_settings()
     delay = min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
     status = 'cancelled' if cancelled else failure_status(issue)

@@ -1,8 +1,9 @@
 """Durable, bounded collection attempts; independent of processing and read sync."""
+from oko.storage.sqlite_schema import is_sqlite
+from oko.storage.database import Database
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
-import sqlite3
 from typing import Any
 from oko.diagnostics import redact, exception_details
 
@@ -17,31 +18,32 @@ def clipped(value: str, limit: int) -> tuple[str, bool]:
 
 
 class CollectionStatus:
-    def __init__(self, db: sqlite3.Connection, clock: Callable[[], float], wall: Callable[[], float]) -> None:
+    def __init__(self, db: Database, clock: Callable[[], float], wall: Callable[[], float]) -> None:
         self.db, self.clock, self.wall = db, clock, wall
-        if 'queued_wall' not in {r['name'] for r in db.execute('PRAGMA table_info(jobs)')}:
-            db.execute('ALTER TABLE jobs ADD COLUMN queued_wall REAL')
-        db.executescript('''
-          CREATE TABLE IF NOT EXISTS collection_attempts (job INTEGER PRIMARY KEY, feed TEXT, data TEXT NOT NULL);
-          CREATE TABLE IF NOT EXISTS collection_results (feed TEXT PRIMARY KEY, data TEXT NOT NULL);
-          DROP TRIGGER IF EXISTS collection_queued_insert;
-          DROP TRIGGER IF EXISTS collection_queued_update;
-          CREATE TRIGGER collection_queued_insert AFTER INSERT ON jobs
-          WHEN NEW.kind IN ('discover','fetch','download_media') BEGIN
-            UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
-          END;
-          CREATE TRIGGER collection_queued_update AFTER UPDATE OF status ON jobs
-          WHEN NEW.kind IN ('discover','fetch','download_media') AND NEW.status='pending' AND OLD.status!='pending' BEGIN
-            UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
-          END;
-          CREATE TRIGGER IF NOT EXISTS collection_job_deleted AFTER DELETE ON jobs BEGIN
-            DELETE FROM collection_attempts WHERE job=OLD.id;
-          END;
-          CREATE TRIGGER IF NOT EXISTS collection_feed_deleted AFTER DELETE ON feeds BEGIN
-            DELETE FROM collection_results WHERE feed=OLD.id;
-            DELETE FROM collection_attempts WHERE feed=OLD.id;
-          END;
-        ''')
+        if is_sqlite(db):
+            if 'queued_wall' not in {r['name'] for r in db.execute('PRAGMA table_info(jobs)')}:
+                db.execute('ALTER TABLE jobs ADD COLUMN queued_wall REAL')
+            db.executescript('''
+              CREATE TABLE IF NOT EXISTS collection_attempts (job INTEGER PRIMARY KEY, feed TEXT, data TEXT NOT NULL);
+              CREATE TABLE IF NOT EXISTS collection_results (feed TEXT PRIMARY KEY, data TEXT NOT NULL);
+              DROP TRIGGER IF EXISTS collection_queued_insert;
+              DROP TRIGGER IF EXISTS collection_queued_update;
+              CREATE TRIGGER collection_queued_insert AFTER INSERT ON jobs
+              WHEN NEW.kind IN ('discover','fetch','download_media') BEGIN
+                UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
+              END;
+              CREATE TRIGGER collection_queued_update AFTER UPDATE OF status ON jobs
+              WHEN NEW.kind IN ('discover','fetch','download_media') AND NEW.status='pending' AND OLD.status!='pending' BEGIN
+                UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
+              END;
+              CREATE TRIGGER IF NOT EXISTS collection_job_deleted AFTER DELETE ON jobs BEGIN
+                DELETE FROM collection_attempts WHERE job=OLD.id;
+              END;
+              CREATE TRIGGER IF NOT EXISTS collection_feed_deleted AFTER DELETE ON feeds BEGIN
+                DELETE FROM collection_results WHERE feed=OLD.id;
+                DELETE FROM collection_attempts WHERE feed=OLD.id;
+              END;
+            ''')
 
     def read(self, job: int) -> dict[str, Any]:
         row = self.db.execute('SELECT data FROM collection_attempts WHERE job=?', (job,)).fetchone()

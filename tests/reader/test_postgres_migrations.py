@@ -1,31 +1,19 @@
 """Release migration failures and concurrency on an actual, isolated PostgreSQL."""
 from contextlib import contextmanager
-import os
-from uuid import uuid4
 
 import psycopg
-from psycopg import sql
 import pytest
 
 from oko.storage.postgres_migrations import Migration, SchemaMismatch, migrate, verify
 
 
 @pytest.fixture
-def connections():
-    dsn = os.environ.get('OKO_TEST_POSTGRES_URL')
-    if not dsn:
-        pytest.skip('Set OKO_TEST_POSTGRES_URL to an isolated PostgreSQL for integration checks')
-    schema = 'test_' + uuid4().hex
-    with psycopg.connect(dsn, autocommit=True) as admin:
-        admin.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
-        @contextmanager
-        def connect():
-            with psycopg.connect(dsn, autocommit=True, options='-csearch_path=' + schema) as db:
-                yield db
-        try:
-            yield connect
-        finally:
-            admin.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
+def connections(postgres_database_url):
+    @contextmanager
+    def connect():
+        with psycopg.connect(postgres_database_url, autocommit=True) as db:
+            yield db
+    yield connect
 
 
 def test_atomic_release_and_restart(connections):
@@ -63,16 +51,17 @@ def test_incompatible_or_changed_history_is_rejected(connections):
 
 
 def test_second_migration_cannot_enter_locked_release(connections):
-    from oko.storage.postgres_migrations import _LOCK
+    from oko.storage.postgres_migrations import schema_lock_key
     first = Migration(1, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
     with connections() as owner, connections() as contender:
-        owner.execute('SELECT pg_advisory_lock(%s)', (_LOCK,))
+        key = schema_lock_key(owner)
+        owner.execute('SELECT pg_advisory_lock(%s)', (key,))
         try:
-            with pytest.raises(RuntimeError, match='Another schema migration'):
+            with pytest.raises(RuntimeError, match='another reader or migration'):
                 migrate(contender, [first])
             assert contender.execute("SELECT to_regclass('oko_schema_migrations')").fetchone()[0] is None
         finally:
-            owner.execute('SELECT pg_advisory_unlock(%s)', (_LOCK,))
+            owner.execute('SELECT pg_advisory_unlock(%s)', (key,))
         migrate(contender, [first])
         verify(contender, [first])
 
@@ -90,3 +79,27 @@ def test_verification_is_read_only_and_migration_requires_idle_owner(connections
             with pytest.raises(ValueError, match='idle autocommit'):
                 migrate(db, [first])
         verify(db, [first])
+
+
+def test_native_library_constraints_and_persistent_job_identity(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS)
+        verify(db, MIGRATIONS)
+        assert db.execute("SELECT value FROM state WHERE key='work-enabled'").fetchone() == ('false',)
+        with db.transaction():
+            db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://source.test'),('second','rss','https://other.test')")
+            db.execute("INSERT INTO items(id,platform,external_id,published) VALUES ('article','rss','https://source.test/article',1792870000.123456)")
+            db.execute("INSERT INTO feed_publications VALUES ('first','article'),('second','article')")
+            db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,size_bytes) VALUES ('media','article','image','https://media.test/image','image','pending',5000000000)")
+            first_job = db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch','article') RETURNING id").fetchone()[0]
+        with pytest.raises(psycopg.errors.UniqueViolation), db.transaction():
+            db.execute("INSERT INTO items(id,platform,external_id) VALUES ('duplicate','rss','https://source.test/article')")
+        with pytest.raises(psycopg.errors.ForeignKeyViolation), db.transaction():
+            db.execute("DELETE FROM items WHERE id='article'")
+    with connections() as restarted:
+        second_job = restarted.execute("INSERT INTO jobs(kind,item) VALUES ('filter','article') RETURNING id").fetchone()[0]
+        assert second_job > first_job
+        assert restarted.execute("SELECT published FROM items WHERE id='article'").fetchone()[0] == 1792870000.123456
+        assert restarted.execute("SELECT size_bytes FROM media_files WHERE id='media'").fetchone()[0] == 5000000000
+        assert restarted.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 2

@@ -48,6 +48,7 @@ def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: b
 def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None = None) -> None:
     parser = argparse.ArgumentParser(description='Око — локальный читатель')
     parser.add_argument('--data', type=Path, default=Path('data'))
+    parser.add_argument('--database-url-file', type=Path, help='Закрытый файл подключения PostgreSQL; схема устанавливается отдельной командой миграции')
     parser.add_argument('--telegram-env', type=Path, help='Путь к существующей .env с авторизацией Telegram')
     parser.add_argument('--telegram-project', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
@@ -69,6 +70,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
         parser.error('--persistent and --api-only are separate profiles')
     if not all(math.isfinite(value) and value > 0 for value in (args.lease, args.grace)):
         parser.error('Таймауты должны быть положительными')
+    from oko.storage.credentials import private_database_url
+    database_url = private_database_url(args.database_url_file) if args.database_url_file else None
     telegram_env = args.telegram_env or (args.telegram_project / '.env' if args.telegram_project else None)
     root = args.data.resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -79,19 +82,20 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
         except BlockingIOError:
             existing(root, not (args.no_browser or args.api_only), api_only=args.api_only, persistent=args.persistent)
             return
-        fresh=not (root/'state.sqlite').exists()
-        from oko.storage.bootstrap import prepare
-        try:
-            prepare(root)
-        except ValueError as error:
-            raise SystemExit(str(error)) from None
-        if args.initially_disabled and fresh:
-            from oko.storage.store import Store
-            store = Store(root, fault=fault)
+        if database_url is None:
+            fresh=not (root/'state.sqlite').exists()
+            from oko.storage.bootstrap import prepare
             try:
-                store.set_work_enabled(False)
-            finally:
-                store.db.close()
+                prepare(root)
+            except ValueError as error:
+                raise SystemExit(str(error)) from None
+            if args.initially_disabled and fresh:
+                from oko.storage.store import Store
+                store = Store(root, fault=fault)
+                try:
+                    store.set_work_enabled(False)
+                finally:
+                    store.db.close()
         codex_client = None
         if args.codex_url:
             from oko.processing.codex_bridge.client import RemoteCodex
@@ -113,7 +117,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
             app = create_app(root, source=source or (DemoSource() if args.demo else None),
                              token=token, fault=fault, shutdown=shutdown,
                              lease=args.lease, grace=args.grace, api_only=args.api_only, persistent=args.persistent,
-                             public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo,
+                             public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo, database_url=database_url,
                              telegram_client=LocalTelegram(telegram_env, root) if telegram_env and not args.demo else None)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2, proxy_headers=False)
             server = uvicorn.Server(config)

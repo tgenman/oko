@@ -14,8 +14,11 @@ from tests.support.browser_server import build_app
 
 
 class Scenario:
-    def __init__(self, data, token, persistent=False, port=0, hostname='127.0.0.1',collection=True,processing_delay=0):
+    def __init__(self, data, token, persistent=False, port=0, hostname='127.0.0.1',collection=True,processing_delay=0,database_url_file=None):
         self.data, self.persistent, self.hostname = data, persistent, hostname
+        self.database_url_file = database_url_file
+        from oko.storage.credentials import private_database_url
+        database_url = private_database_url(Path(database_url_file)) if database_url_file else None
         if persistent and not (Path(data) / 'access.json').exists():
             from oko.reader.password_auth import PasswordAccess
             PasswordAccess(Path(data)).set_user('reader', 'synthetic-password')
@@ -28,7 +31,7 @@ class Scenario:
         try:
             # Browser aborts can leave an unfinished HTTP request. Bound its
             # drain time before the normal application lifespan shutdown.
-            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token, persistent=persistent, public_url=self.origin,collection=collection,processing_delay=processing_delay), log_level='error',
+            self.server = uvicorn.Server(uvicorn.Config(build_app(Path(data), token, persistent=persistent, public_url=self.origin,collection=collection,processing_delay=processing_delay,database_url=database_url), log_level='error',
                                                        timeout_graceful_shutdown=1))
         except BaseException:
             self.socket.close()
@@ -81,7 +84,7 @@ def main():
                     store.db.close()
                     result = {}
                 elif command['op'] == 'start':
-                    scenario = Scenario(command['data'], command['token'], bool(command.get('persistent')), hostname=command.get('hostname', '127.0.0.1'),collection=bool(command.get('collection',1)),processing_delay=command.get('processing_delay',0))
+                    scenario = Scenario(command['data'], command['token'], bool(command.get('persistent')), hostname=command.get('hostname', '127.0.0.1'),collection=bool(command.get('collection',1)),processing_delay=command.get('processing_delay',0),database_url_file=command.get('database_url_file'))
                     scenarios[key] = scenario
                     result = {'origin': scenario.origin}
                 elif command['op'] == 'stop':
@@ -91,7 +94,7 @@ def main():
                     old = scenarios.pop(command['scenario'])
                     port = int(old.origin.rsplit(':', 1)[1])
                     old.close()
-                    scenario = Scenario(old.data, secrets.token_urlsafe(24), old.persistent, port, old.hostname,old.collection,old.processing_delay)
+                    scenario = Scenario(old.data, secrets.token_urlsafe(24), old.persistent, port, old.hostname,old.collection,old.processing_delay,old.database_url_file)
                     scenarios[command['scenario']] = scenario
                     result = {'origin': scenario.origin}
                 else:
