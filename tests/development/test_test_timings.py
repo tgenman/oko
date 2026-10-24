@@ -88,7 +88,7 @@ def test_real_runner_uses_history_and_does_not_learn_failures_or_partial_cases(t
 def test_ci_keeps_required_groups_with_seven_jobs_and_optional_timing_cache():
     import yaml
     document=yaml.safe_load((ROOT/'.github/workflows/check.yml').read_text())
-    assert set(document['jobs'])=={'build','tests','check'}
+    assert set(document['jobs'])=={'build','tests','postgres','check'}
     tests=document['jobs']['tests']
     entries=tests['strategy']['matrix']['include']
     assert {e['job']:e['suite'] for e in entries}=={'python-1':'python','python-2':'python','browser-1':'browser','browser-2':'browser','latency':'browser','node':'node','tools':'tools'}
@@ -97,8 +97,15 @@ def test_ci_keeps_required_groups_with_seven_jobs_and_optional_timing_cache():
     caches=[step for step in tests['steps'] if str(step.get('uses','')).startswith('actions/cache@')]
     assert len(caches)==1 and caches[0]['continue-on-error'] is True
     assert caches[0]['with']['path']=='.scratch/check-cache/test-timings'
-    assert document['jobs']['check']['needs']==['build','tests']
+    assert document['jobs']['check']['needs']==['build','tests','postgres']
+    postgres=document['jobs']['postgres']
+    assert postgres['services']['postgres']['image']=='postgres:18-bookworm'
+    integration=next(step for step in postgres['steps'] if 'test_postgres_migrations.py' in step.get('run',''))
+    assert integration['env']['OKO_TEST_POSTGRES_URL'].startswith('postgresql://')
     gate=document['jobs']['check']['steps']
+    required=next(step for step in gate if step.get('name')=='Require every check group to succeed')
+    assert required['env']['POSTGRES_RESULT']=='${{ needs.postgres.result }}'
+    assert 'test "$POSTGRES_RESULT" = success' in required['run']
     assert any('ci_shards.py verify' in step.get('run','') for step in gate)
     audit=next(i for i,step in enumerate(gate) if 'ci_shards.py verify' in step.get('run',''))
     assert all(i>audit and step['continue-on-error'] for i,step in enumerate(gate) if 'actions/cache/save@' in step.get('uses',''))

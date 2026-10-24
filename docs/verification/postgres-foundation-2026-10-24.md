@@ -54,6 +54,15 @@ blocking issue in the connection extraction or migration framework.
 Sandbox restrictions prevented the first runner and a direct CI-shard test
 attempt from using `ps`; those attempts do not count as successful checks.
 
+## GitHub CI follow-up
+
+The first CI run passed PostgreSQL integration, static checks, both Python
+shards, both browser shards, latency and Node checks. Tools failed because
+`test_ci_keeps_required_groups_with_seven_jobs_and_optional_timing_cache`
+expected exactly three top-level jobs before PostgreSQL was added. Update that
+contract to retain all existing shard/cache requirements and require the real
+PostgreSQL service plus its success gate. The following CI run verifies the fix.
+
 ## Remaining scope of #127
 
 The native PostgreSQL schema, SQL and triggers, reader database credentials,
