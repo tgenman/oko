@@ -22,7 +22,7 @@ jobs:
       packages: write
     env:
       RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-      IMAGE: ghcr.io/tgenman/oko
+      IMAGE: ghcr.io/tgenman/oko-runtime
     steps:
       - uses: actions/checkout@v4
         with:

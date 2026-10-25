@@ -6,6 +6,12 @@ its existing Compose/release path. PostgreSQL configuration is documented in
 
 ## Publish a checked image
 
+Production releases use the private package `ghcr.io/tgenman/oko-runtime`, linked
+to `tgenman/oko`. The earlier `ghcr.io/tgenman/oko` package is public and is not
+used for deployment: GHCR does not allow reverting a public package to private.
+The new package was initialized through the owner's CLI and its private
+visibility/repository association checked before enabling workflow publication.
+
 `Publish Linux release` starts only after `Checks` succeeds for a push to the
 same repository's `main`. PRs and fork workflows cannot publish or obtain
 production credentials. The job uses its temporary `GITHUB_TOKEN` for GHCR.

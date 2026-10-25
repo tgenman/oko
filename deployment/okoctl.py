@@ -59,7 +59,7 @@ def atomic(path, content, *, mode=0o600, uid=0, gid=0):
 def manifest(path):
     value = json.loads(path.read_text())
     if (not re.fullmatch('[0-9a-f]{40}', value.get('sha', '')) or
-        not re.fullmatch('ghcr.io/tgenman/oko@sha256:[0-9a-f]{64}', value.get('image', '')) or
+        not re.fullmatch('ghcr.io/tgenman/oko-runtime@sha256:[0-9a-f]{64}', value.get('image', '')) or
         value.get('platform') != 'linux/amd64' or value.get('helper', {}).get('release') != value['sha']):
         raise ValueError('Invalid Linux release manifest')
     return value

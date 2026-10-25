@@ -39,7 +39,7 @@ def test_manifest_pins_every_component_without_credentials(tmp_path):
     assert result.returncode == 0, result.stderr
     manifest = json.loads(output.read_text())
     assert manifest['sha'] == manifest['helper']['release'] == sha
-    assert manifest['image'] == 'ghcr.io/tgenman/oko@'+digest
+    assert manifest['image'] == 'ghcr.io/tgenman/oko-runtime@'+digest
     assert manifest['platform'] == 'linux/amd64'
     assert manifest['helper']['protocol'] == 1
     assert manifest['codex']['version'] == '0.164.0'

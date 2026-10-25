@@ -10,7 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-PACKAGE = 'https://api.github.com/users/tgenman/packages/container/oko'
+PACKAGE = 'https://api.github.com/users/tgenman/packages/container/oko-runtime'
 
 
 def request(url, headers):
@@ -39,11 +39,11 @@ def probe(sha, token, actor):
     if package.get('visibility') != 'private':
         raise RuntimeError('Refusing to publish or reuse a non-private package: visibility='+repr(package.get('visibility')))
     basic = base64.b64encode((actor+':'+token).encode()).decode()
-    url = 'https://ghcr.io/token?'+urllib.parse.urlencode(dict(service='ghcr.io', scope='repository:tgenman/oko:pull'))
+    url = 'https://ghcr.io/token?'+urllib.parse.urlencode(dict(service='ghcr.io', scope='repository:tgenman/oko-runtime:pull'))
     status, authorization, _ = request(url, {'Authorization':'Basic '+basic})
     if status != 200 or not isinstance(authorization.get('token'), str):
         raise RuntimeError('Registry read authorization failed')
-    status, manifest, headers = request('https://ghcr.io/v2/tgenman/oko/manifests/'+sha,
+    status, manifest, headers = request('https://ghcr.io/v2/tgenman/oko-runtime/manifests/'+sha,
         {'Authorization':'Bearer '+authorization['token'],
          'Accept':'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'})
     if status == 404 and any(item.get('code') == 'MANIFEST_UNKNOWN' for item in manifest.get('errors', [])):
