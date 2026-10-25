@@ -13,7 +13,11 @@ maintenance lock, creates component-only credentials, grants `pg_monitor` to
 only `oko-monitoring`. Reapplying recreates monitoring containers so atomically
 replaced file mounts use the new configuration; persistent data remains in place.
 Grafana permits 256 tasks: version 13.2.4 exceeded the former 96-task ceiling
-during startup (97 observed), independently of its 256 MiB memory limit.
+during startup (97 observed). Its hard memory ceiling is 768 MiB with a
+512 MiB Go soft limit and no swap. Real dashboard interaction exceeded the
+initial 256 MiB ceiling, and a later full browser/write scenario produced a
+kernel cgroup OOM at 512 MiB. The [hardware recommendation](https://grafana.com/docs/grafana/latest/setup-grafana/installation/)
+is a minimum; combined workload acceptance on the 4 GB VM remains separate.
 Install the reader from the same release to enable its
 separately authorized, GET-only `/metrics` endpoint. Its credential grants no
 reader or administration access. The host collector does not invoke Codex. Availability comes from actual worker
@@ -39,7 +43,7 @@ port. Loki also binds only loopback. Exporters and Alloy have no published port.
 | Loki chunks, TSDB index, WAL, compactor | `/srv/oko/loki` | 7 days; asynchronous compactor deletion after 2-hour delay; 384 MiB |
 | Alloy positions and outgoing WAL | `/srv/oko/alloy` | durable delivery state; 192 MiB |
 | Prometheus TSDB, head and WAL | `/srv/oko/prometheus` | 15 days or 2 GB, whichever removes old blocks sooner; 256 MiB |
-| Grafana users, settings, dashboards | `/srv/oko/grafana` | 256 MiB |
+| Grafana users, settings, dashboards | `/srv/oko/grafana` | 768 MiB |
 | Docker stdout/stderr | `/var/lib/docker/containers` | json-file, 3 × 10 MB per service |
 | Helper journal | `/var/log/journal` | persistent, 7 days / 200 MB |
 
