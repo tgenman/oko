@@ -136,7 +136,7 @@
       "security_opt": [
         "no-new-privileges:true"
       ],
-      "pids_limit": 96,
+      "pids_limit": 256,
       "cpus": 0.5,
       "networks": [
         "backend"

@@ -10,7 +10,11 @@ Run `sudo python3 deployment/observability/install.py` from a reviewed release
 checkout on the Oko VM. It pulls and checks images before taking the common
 maintenance lock, creates component-only credentials, grants `pg_monitor` to
 `oko_monitor`, installs persistent journald and the host collector, and starts
-only `oko-monitoring`. Install the reader from the same release to enable its
+only `oko-monitoring`. Reapplying recreates monitoring containers so atomically
+replaced file mounts use the new configuration; persistent data remains in place.
+Grafana permits 256 tasks: version 13.2.4 exceeded the former 96-task ceiling
+during startup (97 observed), independently of its 256 MiB memory limit.
+Install the reader from the same release to enable its
 separately authorized, GET-only `/metrics` endpoint. Its credential grants no
 reader or administration access. The host collector does not invoke Codex. Availability comes from actual worker
 checks or an explicit UI check and becomes unknown after five minutes. Scrapes
