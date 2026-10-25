@@ -151,7 +151,7 @@
       "image": "grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
       "platform": "linux/amd64",
       "user": "472:472",
-      "mem_limit": "256m",
+      "mem_limit": "768m",
       "command": [],
       "volumes": [
         "/srv/oko/grafana:/var/lib/grafana",
@@ -175,8 +175,10 @@
         "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES": "false",
         "GF_NEWS_NEWS_FEED_ENABLED": "false",
         "GF_PLUGINS_PREINSTALL_DISABLED": "true",
-        "GF_LOG_LEVEL": "warn"
-      }
+        "GF_LOG_LEVEL": "warn",
+        "GOMEMLIMIT": "512MiB"
+      },
+      "memswap_limit": "768m"
     },
     "node-exporter": {
       "restart": "unless-stopped",
