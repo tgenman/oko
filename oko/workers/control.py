@@ -163,7 +163,8 @@ class JobControl:
         store=self.execution.require_store()
         service=ProcessingService(self.execution.require_store)
         repository=JobRepository(store)
-        repository.reconcile(kind,service.candidates(kind))
+        store.processing.reconcile_item(identity)
+        repository.reconcile(kind,service.candidates(kind,item=identity))
         if not service.regenerate(identity,kind):
             return True
         return repository.retry_processing(identity,kind)

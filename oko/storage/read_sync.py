@@ -41,6 +41,15 @@ class ReadSync:
 
     def recover(self) -> None:
         """Reconcile current channel read eligibility on startup."""
+        self.install()
+        self.store.jobs.sync_reads()
+
+    def pending(self) -> bool:
+        return (self._configuration != self.store.subscriptions.source_revision()
+                or self.store.db.execute('SELECT 1 FROM telegram_read_dirty LIMIT 1').fetchone() is not None)
+
+    def install(self) -> None:
+        """Install local bookkeeping before reader commands can change materials."""
         db = self.store.db
         if is_sqlite(db):
             with db:
@@ -61,7 +70,6 @@ class ReadSync:
                   WHEN NEW.initial IS NOT OLD.initial OR NEW.since IS NOT OLD.since
                   BEGIN INSERT INTO telegram_read_dirty VALUES (NEW.feed) ON CONFLICT(feed) DO NOTHING; END;
                 """)
-        self.store.jobs.sync_reads()
 
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:
         db = self.store.db

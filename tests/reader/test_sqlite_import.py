@@ -2,10 +2,7 @@
 import hashlib
 import json
 import fcntl
-from pathlib import Path
 import sqlite3
-import subprocess
-import sys
 
 import httpx
 import pytest
@@ -19,35 +16,9 @@ from tests.support.youtube import PNG
 from tests.support.filters import transport
 
 
-ROOT = Path(__file__).resolve().parents[2]
+from tests.support.sqlite_import import source_library, invoke, credential_file
 EMPTY_LEGACY_TABLES = ('content_current', 'content_versions', 'filter_restores',
                        'retained_theses', 'telegram_read_topics', 'youtube_attempts')
-
-
-def source_library(root, *, processing=False):
-    def response(request):
-        if request.url.path == '/feed':
-            return httpx.Response(200, text=rss())
-        if request.url.path == '/image.png':
-            return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
-        return httpx.Response(200, text='<article><p>Imported synthetic text.</p><img src="https://source.test/image.png"></article>')
-
-    with TestClient(create_app(root, token='test', api_only=True, rss_enabled=True,
-                    rss_transport=httpx.MockTransport(response), ai_transport=transport([], theses=True)), headers=HEADERS) as client:
-        assert client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''}).status_code == 200
-        if processing:
-            assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True}).status_code == 200
-            assert client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Keep useful text'}).status_code == 200
-        feed = add_source(client, 'https://source.test/feed', 'Imported feed', 'Imported folder')
-        assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
-        item = wait_cards(client)[0]['id']
-        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        media_url = material['content']['attachments'][0]['url']
-        assert client.get(media_url).content == PNG
-        if processing:
-            material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/'+item).json())['theses']['result'] else None))
-    (root / 'instance.lock').touch(mode=0o600)
-    return feed, item, media_url, material
 
 
 def test_cli_preserves_historical_rows_in_private_archive(postgres_url, tmp_path):
@@ -214,12 +185,6 @@ def test_cli_refuses_live_or_populated_target_and_preserves_existing_library(pos
         assert subscriptions['folders'][0]['title'] == 'Keep this folder'
 
 
-def invoke(source, target, credential, report):
-    return subprocess.run([sys.executable, '-m', 'oko.storage.import_sqlite', '--source', str(source),
-        '--target-data', str(target), '--database-url-file', str(credential), '--report', str(report)],
-        cwd=ROOT, capture_output=True, text=True, timeout=45)
-
-
 @pytest.mark.parametrize('alias_target', ['source', 'target'])
 def test_cli_refuses_report_alias_into_source_without_changing_source(postgres_url, tmp_path, alias_target):
     source = tmp_path/'sqlite'
@@ -233,13 +198,6 @@ def test_cli_refuses_report_alias_into_source_without_changing_source(postgres_u
     assert not (tmp_path/'target').exists()
     assert before == {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
                       for p in source.rglob('*') if p.is_file()}
-
-
-def credential_file(tmp_path, postgres_url):
-    credential = tmp_path / 'private-dsn'
-    credential.write_text(postgres_url)
-    credential.chmod(0o600)
-    return credential
 
 
 def test_cli_import_preserves_library_and_media_without_starting_work(postgres_url, tmp_path):

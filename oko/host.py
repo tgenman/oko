@@ -26,7 +26,19 @@ class Host:
     async def admission_changed(self) -> None:
         async with self.execution._actions:
             if not self.execution._live() and not self.stopped:
-                await self.jobs.cancel()
+                await self._cancel_work()
+
+    async def _cancel_work(self) -> None:
+        """Cleanup must remain possible after a failed rollback closes SQL."""
+        try:
+            await self.jobs.cancel()
+        except DATABASE_ERRORS:
+            record_caught('Отмена работы после отказа хранилища')
+            if self.execution._error is None:
+                self.execution._error = 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'
+            # Stop intent/error and the cancellation epoch reject late results.
+            # An unusable SQL connection cannot participate in that cleanup.
+            await self.jobs.cancel(invalidate=False)
 
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
@@ -71,7 +83,7 @@ class Host:
         self.execution._stop_requested.set()
         async with self.execution._actions:
             if not self._closed:
-                await self.jobs.cancel()
+                await self._cancel_work()
 
     def require_work(self) -> None:
         self.require_store()
@@ -85,13 +97,13 @@ class Host:
             self.execution.enabled = enabled
             if not enabled:
                 self.clear_feed_checks()
-                await self.jobs.cancel()
+                await self._cancel_work()
 
 
     async def run(self) -> None:
         journal_context = active_journal.set(self.execution.diagnostics)
         try:
-            self.execution._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock, database_url=self._database_url)
+            self.execution._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock, database_url=self._database_url, defer_recovery=True)
             self.execution.enabled = self.execution._store.work_enabled()
             self.collection.initialize()
             viewed = {row['id'] for row in self.execution._store.db.execute('SELECT id FROM items WHERE viewed=1')}
@@ -100,34 +112,69 @@ class Host:
         except (*DATABASE_ERRORS,OSError,ValueError) as error:
             record_caught('runtime.run')
             self.execution._error = str(error) if str(error).startswith('Telegram:') else 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'
-        crons=[asyncio.create_task(worker.run()) for worker in (self.collection,self.filters,self.summaries)]
+        crons: list[asyncio.Task[None]] = []
+        recovering = self.execution._store is not None and self.execution._error is None
+        initial_recovery = recovering
+        next_recovery_check = 0.
         try:
             while not self.stopped:
                 async with self.execution._actions:
+                    if (self.execution._store is not None and self.execution._error is None and not self.stopped
+                            and (recovering or time.monotonic() >= next_recovery_check)):
+                        try:
+                            assert self.execution._store is not None
+                            recovering = self.execution._store.recover_step()
+                            next_recovery_check = time.monotonic()+.25
+                            if initial_recovery and not recovering:
+                                crons = [asyncio.create_task(worker.run()) for worker in (self.collection,self.filters,self.summaries)]
+                                initial_recovery = False
+                        except (*DATABASE_ERRORS,OSError,ValueError):
+                            record_caught('Восстановление хранилища')
+                            self.execution._error = 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'
+                            recovering = False
                     now=self._clock()
-                    if self.execution._store and self.execution.reader_advance and now-self._reader_advanced>=.25:
+                    if self.execution._store and self.execution._error is None and self.execution.reader_advance and now-self._reader_advanced>=.25:
                         self.execution.reader_advance()
                         self._reader_advanced=now
                     if not self.execution._live():
                         if not self._admitted():
-                            await self.jobs.cancel()
+                            await self._cancel_work()
                         if self._should_stop():
                             self.execution._stop_requested.set()
-                await asyncio.sleep(.02)
+                await asyncio.sleep(.001 if recovering else .02)
         finally:
             self.execution._stop_requested.set()
-            for task in crons:
-                task.cancel()
-            await asyncio.gather(*crons,return_exceptions=True)
-            async with self.execution._actions:
-                await self.jobs.cancel()
-                if self.execution._store:
-                    if self.execution.reader_finish:
-                        await self.execution.reader_finish()
-                    self.execution._store.db.close()
-                    self.execution._store = None
-                self._closed = True
-            await self.collection._source_http.close()
-            await self.collection._telegram_http.close()
-            self._shutdown()
-            active_journal.reset(journal_context)
+            try:
+                for task in crons:
+                    task.cancel()
+                await asyncio.gather(*crons,return_exceptions=True)
+                async with self.execution._actions:
+                    try:
+                        await self._cancel_work()
+                    finally:
+                        current = self.execution._store
+                        try:
+                            if current is not None:
+                                current.close_recovery()
+                                if self.execution.reader_finish and self.execution._error is None:
+                                    await self.execution.reader_finish()
+                        except (*DATABASE_ERRORS,OSError,ValueError):
+                            record_caught('Завершение читателя после отказа хранилища')
+                        finally:
+                            try:
+                                if current is not None:
+                                    current.db.close()
+                            finally:
+                                self.execution._store = None
+                                self._closed = True
+            finally:
+                try:
+                    try:
+                        await self.collection._source_http.close()
+                    finally:
+                        await self.collection._telegram_http.close()
+                finally:
+                    try:
+                        self._shutdown()
+                    finally:
+                        active_journal.reset(journal_context)

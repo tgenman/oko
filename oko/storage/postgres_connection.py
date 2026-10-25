@@ -40,6 +40,7 @@ class PostgresConnection:
         self.transaction_depth = 0
         self.transaction_failed = False
         self.commit_callbacks: list[Callable[[], None]] = []
+        self.rollback_callbacks: list[Callable[[], None]] = []
         self.before_commit: Callable[[], None] | None = None
         self.membership_feeds: set[str] = set()
         self.membership_folders: set[str] = set()
@@ -61,11 +62,17 @@ class PostgresConnection:
 
     @property
     def in_transaction(self) -> bool:
-        return self._db.info.transaction_status != TransactionStatus.IDLE
+        status = self._db.info.transaction_status
+        if status == TransactionStatus.UNKNOWN:
+            # A broken connection is a database failure, not an unowned action.
+            raise psycopg.OperationalError('the connection is closed or broken')
+        return status != TransactionStatus.IDLE
 
     def begin(self) -> None:
         if not self.in_transaction:
             self._db.execute('BEGIN')
+            self._db.execute("SELECT set_config('oko.clock',%s,false),set_config('oko.wall',%s,false)",
+                             (str(self._clock()), str(self._wall_clock())))
 
     def execute(self, query: str, parameters: Sequence[Any] | Mapping[str, Any] = ()) -> psycopg.Cursor[Record]:
         # Match repository implicit DML transactions while keeping plain reads idle.
@@ -73,7 +80,6 @@ class PostgresConnection:
         command = compiled.split(None, 1)[0].upper()
         if command in ('INSERT', 'UPDATE', 'DELETE'):
             self.begin()
-        self._db.execute("SELECT set_config('oko.clock',%s,false),set_config('oko.wall',%s,false)", (str(self._clock()),str(self._wall_clock())))
         bound = {key: int(value) if isinstance(value, bool) else value for key, value in parameters.items()} if isinstance(parameters, Mapping) else tuple(int(value) if isinstance(value, bool) else value for value in parameters)
         return self._db.execute(compiled, bound)
 
@@ -82,7 +88,6 @@ class PostgresConnection:
         if compiled.split(None, 1)[0].upper() not in ('INSERT','UPDATE','DELETE'):
             raise ValueError('Batch execution requires a repository write')
         self.begin()
-        self._db.execute("SELECT set_config('oko.clock',%s,false),set_config('oko.wall',%s,false)", (str(self._clock()),str(self._wall_clock())))
         with self._db.cursor() as cursor:
             cursor.executemany(compiled,
                                (tuple(int(value) if isinstance(value, bool) else value for value in row) for row in parameters))
@@ -104,6 +109,11 @@ class PostgresConnection:
         if self.in_transaction and self.before_commit is not None:
             self.before_commit()
 
+    def after_rollback(self, callback: Callable[[], None]) -> None:
+        if not self.in_transaction:
+            raise RuntimeError('Rollback callback requires an active transaction')
+        self.rollback_callbacks.append(callback)
+
     def commit(self) -> None:
         if self.transaction_depth:
             return
@@ -114,6 +124,7 @@ class PostgresConnection:
             self.rollback()
             raise
         callbacks, self.commit_callbacks = self.commit_callbacks, []
+        self.rollback_callbacks.clear()
         for callback in callbacks:
             callback()
 
@@ -121,10 +132,22 @@ class PostgresConnection:
         if self.transaction_depth:
             self.transaction_failed = True
             return
-        self._db.rollback()
-        self.commit_callbacks.clear()
-        self.membership_feeds.clear()
-        self.membership_folders.clear()
+        try:
+            self._db.rollback()
+        except BaseException as error:
+            # Discard an uncertain transaction before restoring cached values.
+            try:
+                self._db.close()
+            except BaseException as close_error:
+                raise error from close_error
+            raise
+        finally:
+            self.commit_callbacks.clear()
+            callbacks, self.rollback_callbacks = self.rollback_callbacks, []
+            self.membership_feeds.clear()
+            self.membership_folders.clear()
+            for callback in reversed(callbacks):
+                callback()
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Literal[False]:
         try:
@@ -134,8 +157,13 @@ class PostgresConnection:
         return False
 
     def close(self) -> None:
-        self._db.close()
-        self.commit_callbacks.clear()
-        self.before_commit = None
-        self.membership_feeds.clear()
-        self.membership_folders.clear()
+        try:
+            self._db.close()
+        finally:
+            callbacks, self.rollback_callbacks = self.rollback_callbacks, []
+            self.commit_callbacks.clear()
+            self.before_commit = None
+            self.membership_feeds.clear()
+            self.membership_folders.clear()
+            for callback in reversed(callbacks):
+                callback()

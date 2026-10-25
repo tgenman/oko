@@ -3,12 +3,72 @@ from datetime import date, timedelta
 from tests.support.presence import presence, close_presence
 from tests.support.telegram import connect_request
 import time
+import threading
 import pytest
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.telegram import Telegram, connect, settled
 
 H = {'Authorization': 'Bearer test'}
+
+
+def test_runtime_auto_read_batches_eligibility_and_keeps_http_responsive(tmp_path):
+    network = ReadTelegram()
+    network.history = [dict(id=i, date=time.time()-60, text=f'Synthetic {i}', group=None, media=None)
+                       for i in range(11,43)]
+    app = create_app(tmp_path, token='test', api_only=True, telegram_client=network)
+    with TestClient(app, headers=H) as client:
+        client.patch('/api/v3/settings/oko/global', json={'theses':False,'prompt_filters':''})
+        feed = connect(client, count=32)
+        settled(client, 32)
+        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
+        queries = []
+        started = threading.Event()
+        def trace(query):
+            queries.append(query)
+            if query.startswith('SELECT member FROM telegram_read_members') and ' AND member IN (' in query:
+                started.set()
+                time.sleep(.08)
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))
+        try:
+            before = time.monotonic()
+            assert client.patch('/api/v3/feeds/'+feed['id'], json={'auto_read':True}).status_code == 200
+            assert time.monotonic()-before < 1
+            assert started.wait(2)
+            before = time.monotonic()
+            assert client.get('/api/v3/cards').status_code == 200
+            assert time.monotonic()-before < 1
+            deadline = time.monotonic()+5
+            while time.monotonic() < deadline:
+                if any(row['pending'] == 32 for row in client.get('/api/v3/status').json()['telegram_reads']):
+                    break
+                time.sleep(.02)
+            assert any(row['pending'] == 32 for row in client.get('/api/v3/status').json()['telegram_reads'])
+        finally:
+            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
+        member_points = [q for q in queries if q.startswith('SELECT members FROM items WHERE id=')]
+        eligibility_batches = [q for q in queries if q.startswith('SELECT member FROM telegram_read_members') and ' AND member IN (' in q]
+        assert member_points == []
+        assert 1 <= len(eligibility_batches) <= 8, len(eligibility_batches)
+        assert network.acks == []
+
+
+def test_postgres_runtime_auto_read_frontier_follows_latest_setting(postgres_url, tmp_path):
+    network = ReadTelegram()
+    network.history = [dict(id=i, date=time.time()-60, text=f'Synthetic {i}', group=None, media=None)
+                       for i in range(11,43)]
+    with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url,
+                    telegram_client=network), headers=H) as client:
+        client.patch('/api/v3/settings/oko/global', json={'theses':False,'prompt_filters':''})
+        assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
+        feed = connect(client, count=32)
+        settled(client, 32)
+        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
+        assert client.patch('/api/v3/feeds/'+feed['id'], json={'auto_read':True}).status_code == 200
+        wait_for(client, lambda status: any(row['pending'] == 32 for row in status['telegram_reads']))
+        assert client.patch('/api/v3/feeds/'+feed['id'], json={'auto_read':False}).status_code == 200
+        wait_for(client, lambda status: all(row['pending'] == 0 for row in status['telegram_reads']))
+        assert network.acks == []
 
 
 class ReadTelegram(Telegram):

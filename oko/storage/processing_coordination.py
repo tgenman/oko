@@ -4,6 +4,7 @@ from oko.storage import material_read
 from oko.storage.reading import retry_time
 from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
+from collections.abc import Iterator
 
 from oko.processing.contracts import FilterResult, Theses
 from oko.storage.summary_results import SummaryResults
@@ -22,6 +23,8 @@ class ProcessingState:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self._repairs: set[str] = set()
+        self.recovering = False
+        self.background = False
         self.theses = SummaryResults(store)
         if is_sqlite(store.db):
             store.db.executescript("""
@@ -52,9 +55,26 @@ class ProcessingState:
 
     def recover(self) -> None:
         """Only startup scans the whole library, including interrupted file moves."""
+        for _ in self.recovery_steps():
+            pass
+        self.recovering = False
+
+    def recovery_steps(self, *, seed: bool = True) -> Iterator[None]:
+        """Commit one publication at a time; callers may yield only between steps."""
+        self.recovering = True
+        if seed:
+            with self.store.db:
+                self.store.db.execute('INSERT OR IGNORE INTO processing_dirty SELECT id FROM items WHERE viewed=0')
+            yield
+        while True:
+            self._queue_repairs()
+            row = self.store.db.execute('SELECT item FROM processing_dirty ORDER BY item LIMIT 1').fetchone()
+            if row is None:
+                break
+            self.reconcile_item(row[0])
+            yield
         with self.store.db:
-            self.store.db.execute('INSERT OR IGNORE INTO processing_dirty SELECT id FROM items WHERE viewed=0')
-        self.sync()
+            self.store.db.execute("DELETE FROM processing_stage_dirty WHERE NOT EXISTS (SELECT 1 FROM items WHERE id=processing_stage_dirty.item AND viewed=0)")
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
         query = 'SELECT DISTINCT i.id FROM items i JOIN reading_memberships m ON m.publication_id=i.id JOIN feeds f ON f.id=m.feed_id WHERE i.viewed=0'
@@ -68,20 +88,35 @@ class ProcessingState:
         """A read can discover missing bytes without writing inside its snapshot."""
         self._repairs.add(item)
 
+    def pending(self, *, stages: bool = False) -> bool:
+        query = 'SELECT 1 FROM processing_dirty'
+        if stages:
+            query += ''' UNION ALL SELECT 1 FROM processing_stage_dirty d JOIN items i ON i.id=d.item
+                WHERE d.kind IN ('filter','theses') AND i.viewed=0 AND i.platform IS NOT NULL
+                AND i.feed_id IS NOT NULL AND i.complete=1'''
+        return bool(self._repairs or self.store.db.execute(query+' LIMIT 1').fetchone())
+
     def sync(self) -> None:
         """Reconcile persisted affected publications in dependency order."""
-        if self._repairs:
-            with self.store.db:
-                self.store.db.executemany('INSERT INTO processing_dirty VALUES (?) ON CONFLICT(item) DO NOTHING', [(item,) for item in self._repairs])
-            self._repairs.clear()
+        self._queue_repairs()
+        if self.recovering or self.background:
+            return
         with self.store.db:
             self.store.db.execute("DELETE FROM processing_stage_dirty WHERE NOT EXISTS (SELECT 1 FROM items WHERE id=processing_stage_dirty.item AND viewed=0)")
         items = [row[0] for row in self.store.db.execute('SELECT item FROM processing_dirty')]
         for item in items:
-            # No suspension: changes made by this reconciliation are included
-            # before removing its dirty marker. Interrupted passes retain it.
+            self.reconcile_item(item)
+
+    def _queue_repairs(self) -> None:
+        if self._repairs:
             with self.store.db:
-                self.store.publications.reconcile(item)
-                self.store.db.executemany("INSERT OR IGNORE INTO processing_stage_dirty VALUES (?,?)",[(kind,item) for kind in ('filter','theses')])
-            with self.store.db:
-                self.store.db.execute('DELETE FROM processing_dirty WHERE item=?', (item,))
+                self.store.db.executemany('INSERT INTO processing_dirty VALUES (?) ON CONFLICT(item) DO NOTHING', [(item,) for item in self._repairs])
+            self._repairs.clear()
+
+    def reconcile_item(self, item: str) -> None:
+        # The marker belongs to the same commit as its accepted reconciliation.
+        # An interruption or rollback keeps the publication queued for recovery.
+        with self.store.db:
+            self.store.publications.reconcile(item)
+            self.store.db.executemany("INSERT OR IGNORE INTO processing_stage_dirty VALUES (?,?)",[(kind,item) for kind in ('filter','theses')])
+            self.store.db.execute('DELETE FROM processing_dirty WHERE item=?', (item,))

@@ -49,7 +49,7 @@ class Execution:
 
 
     def _live(self) -> bool:
-        return not self.stopped and self.enabled and self._admitted()
+        return not self.stopped and self._error is None and self.enabled and self._admitted()
 
 
     def require_store(self) -> Store:

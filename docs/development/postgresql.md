@@ -111,6 +111,22 @@ its saved power state.
 
 ## Transactions and SQL
 
+The Store owns an in-memory snapshot of global, folder and feed setting overrides,
+Codex/llama.cpp configuration, and the processing-related feed fields (kind,
+folder, importance, public-AI permission and transport). Each snapshot is loaded
+once when its owner opens. Configuration writes update SQL and memory together
+under the connection lock; rollback restores previous memory values in reverse
+order. A failed rollback discards the SQL connection before undoing memory. A
+new Store loads committed state again. Dynamic feed progress and description
+remain ordinary live data, and reader revision counters remain freshness facts.
+Maintenance that edits configuration directly in SQL must reopen the Store.
+
+PostgreSQL trigger clocks are set once when a write transaction begins, including
+its derived projection flush. Plain reads do not send clock-setting SQL. This
+makes time consistent within the write operation and refreshes it at the next
+transaction. No SQL transaction is retained while background recovery yields
+to HTTP requests or waits for external work.
+
 `storage/database.py` defines the row/cursor and transaction boundary. The
 PostgreSQL adapter keeps plain reads outside transactions and joins repository
 writes to the caller's owned transaction. Nested repository contexts cannot

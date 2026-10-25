@@ -1,0 +1,114 @@
+{
+  "checkout": "/Users/dabondarev/repo_personal/oko",
+  "head": "1afd6508d1481e2277c858c2215f56e3f634ef6c",
+  "fixture": {
+    "synthetic_only": true,
+    "publications": 2,
+    "feeds": 1,
+    "completed_filter_and_theses": true,
+    "source_database_sha256": "e06da983bf724eb5112dd1b65542172a6e5e044175f5fe4d3faf3a9e7811f08c"
+  },
+  "measurement": "direct Store constructor with default synchronous recovery; import/setup excluded",
+  "open_seconds": 0.072078,
+  "adapter_execute_calls": 87,
+  "adapter_sql_kinds": {
+    "DELETE": 13,
+    "INSERT": 17,
+    "SELECT": 48,
+    "UPDATE": 9
+  },
+  "settings_select_calls": 1,
+  "scoped_settings_select_calls": 0,
+  "item_by_id_select_calls": 4,
+  "feed_by_id_select_calls": 0,
+  "adapter_executemany_calls": 2,
+  "adapter_executemany_rows": 4,
+  "commit_method_calls": 12,
+  "observed_connection_execute_calls": 117,
+  "observed_clock_setup_sql_calls": 11,
+  "top_adapter_queries": [
+    {
+      "count": 9,
+      "sql_template": "SELECT kind,identity FROM reader_membership_dirty"
+    },
+    {
+      "count": 9,
+      "sql_template": "DELETE FROM reader_membership_dirty"
+    },
+    {
+      "count": 9,
+      "sql_template": "SELECT identity,scope,owner,sort,hidden,digest FROM reader_lists WHERE pending=1"
+    },
+    {
+      "count": 5,
+      "sql_template": "INSERT OR IGNORE INTO reader_entities SELECT ?,id,1,? FROM items"
+    },
+    {
+      "count": 4,
+      "sql_template": "SELECT * FROM items WHERE id=?"
+    },
+    {
+      "count": 3,
+      "sql_template": "SELECT item FROM processing_dirty ORDER BY item LIMIT 1"
+    },
+    {
+      "count": 2,
+      "sql_template": "SELECT * FROM jobs WHERE status='running' AND kind IN ('discover','fetch','filter','theses','download_media')"
+    },
+    {
+      "count": 2,
+      "sql_template": "INSERT OR IGNORE INTO reader_entities VALUES (?,?,1,?)"
+    },
+    {
+      "count": 2,
+      "sql_template": "INSERT INTO reader_visibility VALUES (?,?) ON CONFLICT(item) DO UPDATE SET hidden=excluded.hidden WHERE hidden IS NOT excluded.hidden"
+    },
+    {
+      "count": 2,
+      "sql_template": "DELETE FROM processing_dirty WHERE item=?"
+    },
+    {
+      "count": 2,
+      "sql_template": "SELECT DISTINCT m.feed_id FROM reading_memberships m WHERE m.publication_id=? OR m.publication_id IN (SELECT target_publication_id FROM publication_links WHERE source_publication_id=?)"
+    },
+    {
+      "count": 2,
+      "sql_template": "SELECT i.*,j.error AS fetch_error FROM publication_links l JOIN items i ON i.id=l.target_publication_id LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY l.rowid"
+    },
+    {
+      "count": 2,
+      "sql_template": "SELECT value FROM state WHERE key='sources-version'"
+    },
+    {
+      "count": 1,
+      "sql_template": "SELECT scope,owner,field,value FROM settings"
+    },
+    {
+      "count": 1,
+      "sql_template": "SELECT key,value FROM state WHERE key IN ('processor:codex','processor:llamacpp')"
+    }
+  ],
+  "code_sha256": {
+    "oko/storage/store.py": "fe853c10b5e5eac4ff7706bfb85d8d120d1364896124814e649d24ede06da7af",
+    "oko/storage/postgres_connection.py": "96f9ea6dd0263dfffb778bd5572a840f581c69802c8ff76a4f94c3e92a2b8d93",
+    "oko/storage/connection.py": "869006c91da86e790c6ddb78e6086777198a2b6aea44184a051b981b3c887768",
+    "oko/storage/subscriptions.py": "afa39ed27a0a2b6bef79546cd6726638a36ed0930a389e8b8bb3a9cc23130cf9",
+    "oko/storage/settings_cache.py": "5228655ee0014a3c2a1c0b44d9d4c080b3b588e7b1b0cdae4bd586125aa59e43",
+    "oko/storage/processing_coordination.py": "8edabed3d1096f5c2de9504fdaecb4e199c59b2c0b8396711a84c1f4117a1303",
+    "oko/storage/publications.py": "4c26dbcac9688eae19a618c45a13e00f80b8e3a1ef89e39dd037e62a27c6b0e0",
+    "oko/storage/material_read.py": "9cdbf78c81f75a661fa2f86b820d1bc57d5587bb89cc49a98b274fb0e47be4f1",
+    "oko/storage/reading.py": "4da64935bca20edb449901f9db57b0ef64ed722e41d097a6ff9ab22a1ef31f64",
+    "oko/storage/job_repository.py": "0e456ef30112d9412d0f8f4782c8d4f134f823058e6a3255cfeaa5e2ff9a6bf6",
+    "oko/storage/reader_versions.py": "fb29e553d44ea9dd20b8d347d3341fb9b6566d2db4f336ec3a72b0d4e6e9207b",
+    "oko/storage/read_sync.py": "2d94cd5319077debadeb57c1199b4d26c66ac6ff7c56409791f305afff57843d",
+    "oko/storage/processing_input.py": "c7dd5a07f367843d997bea24afb6fe7d20f123923fb77a15ef02fea69fcb8f76",
+    "oko/storage/filter_results.py": "3d92d969032630ef4faa0beff08d721e39f527adb423ea9110face2c65b90ffd"
+  },
+  "changed_during_measurement": [],
+  "source_unchanged": true,
+  "limitations": [
+    "single local sample; not production latency",
+    "driver execute calls, not TCP packet/roundtrip counts",
+    "cursor executemany statements are not included in connection.execute count"
+  ]
+}

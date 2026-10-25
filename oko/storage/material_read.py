@@ -20,7 +20,6 @@ class Inputs:
     jobs: dict[str, dict[str, Row]] = field(default_factory=dict)
     media_jobs: dict[str,list[Row]] = field(default_factory=dict)
     feeds: dict[str, Row] = field(default_factory=dict)
-    settings: dict[tuple[str, str], list[Row]] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
 
@@ -70,11 +69,6 @@ def feed(db: Database, identity: str) -> dict[str, Any]:
     return result
 
 
-def settings(db: Database, scope: str, owner: str) -> list[Row]:
-    value = current(db)
-    return value.settings.get((scope, owner), []) if value and (scope,owner) in value.settings else list(db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=?', (scope,owner)))
-
-
 def state(db: Database, key: str) -> str | None:
     value = current(db)
     if value is not None and key in value.state_keys:
@@ -104,14 +98,7 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
         batch = feeds[start:start+400]
         marks = ','.join('?' for _ in batch)
         value.feeds.update({r['id']: r for r in db.execute(_FEED+f' WHERE f.id IN ({marks})',batch)})
-    owners = [('oko','global')] + [('feed',f) for f in feeds] + [('folder',f) for f in sorted({r['folder_id'] for r in value.feeds.values()})]
-    value.settings={key:[] for key in owners}
-    for start in range(0,len(owners),400):
-        batch = owners[start:start+400]
-        where = ' OR '.join('(scope=? AND owner=?)' for _ in batch)
-        for r in db.execute('SELECT scope,owner,field,value FROM settings WHERE '+where,[v for pair in batch for v in pair]):
-            value.settings.setdefault((r['scope'],r['owner']),[]).append(r)
-    keys = ['processor:llamacpp','settings-version'] + ['settings-version:'+f for f in feeds]
+    keys = ['settings-version'] + ['settings-version:'+f for f in feeds]
     value.state_keys=set(keys)
     for start in range(0,len(keys),400):
         batch = keys[start:start+400]

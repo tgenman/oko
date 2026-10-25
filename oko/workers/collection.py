@@ -513,7 +513,7 @@ class CollectionWorker:
             if now-self._last_media_cleanup>=3600:
                 self.media.cleanup()
                 self._last_media_cleanup=now
-            if now - self._read_sync_at >= .5:
+            if not self.execution._store.processing.background and now - self._read_sync_at >= .5:
                 self.execution._store.jobs.sync_reads()
                 self._read_sync_at = now
             self._sync_sources()

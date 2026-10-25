@@ -7,6 +7,7 @@ from oko.storage.store import Store
 from oko.domain.processing import Kind, ProcessingInput, ProcessingPreparation
 from oko.storage.processing_state import ProcessingRepository
 from oko.storage.access import repository_access
+from oko.storage.reading import reading_snapshot
 from oko.processing.contracts import FilterResult, Theses
 
 
@@ -19,15 +20,17 @@ class ProcessingService:
         self._storage = storage
 
     @repository_access
-    def candidates(self, kind: Kind) -> list[tuple[str, str | None, bool, str]]:
+    @reading_snapshot()
+    def candidates(self, kind: Kind, *, limit: int | None = None, item: str | None = None) -> list[tuple[str, str | None, bool, str]]:
         repository=ProcessingRepository(self._storage())
-        return [(item,signature,repository.satisfied(item,kind),repository.revision(item)) for item,signature in repository.candidates(kind)]
+        return [(identity,signature,repository.satisfied(identity,kind),repository.revision(identity)) for identity,signature in repository.candidates(kind,limit=limit,item=item)]
 
     @repository_access
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
         return ProcessingRepository(self._storage()).prepare(item,kind)
 
     @repository_access
+    @reading_snapshot()
     def current(self, value: ProcessingInput) -> bool:
         return ProcessingRepository(self._storage()).current(value)
 

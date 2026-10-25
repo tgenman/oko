@@ -16,9 +16,18 @@ class ProcessingRepository:
     def __init__(self, store: 'Store') -> None:
         self.store=store
 
-    def candidates(self, kind: Kind) -> list[tuple[str,str | None]]:
-        rows=self.store.db.execute('''SELECT i.id FROM processing_stage_dirty d JOIN items i ON i.id=d.item
-            WHERE d.kind=? AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1''',(kind,)).fetchall()
+    def candidates(self, kind: Kind, *, limit: int | None = None, item: str | None = None) -> list[tuple[str,str | None]]:
+        query='''SELECT i.id FROM processing_stage_dirty d JOIN items i ON i.id=d.item
+            WHERE d.kind=? AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1
+            AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=i.id)'''
+        parameters: tuple[str | int, ...] = (kind,)
+        if item is not None:
+            query += ' AND i.id=?'
+            parameters += (item,)
+        if limit is not None:
+            query += ' ORDER BY i.id LIMIT ?'
+            parameters += (limit,)
+        rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
         return [(row[0],operation.signature(row[0])) for row in rows]
 

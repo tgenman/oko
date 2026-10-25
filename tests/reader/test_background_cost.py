@@ -32,9 +32,19 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
     app = create_app(tmp_path, token='test', api_only=True)
     with TestClient(app, headers=HEADERS) as client:
         assert client.get('/api/v3/reading-composition').json()['count'] == 4 * count
-        time.sleep(.15)
         queries = []
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
+        # HTTP is ready before the initial reconciliation finishes. Observe its
+        # completion at the database boundary before measuring steady-state cost;
+        # the readiness/latency contract is tested separately with slow SQL.
+        for _ in range(10):
+            queries.clear()
+            time.sleep(.65)
+            if len(queries) < 1000 and not any('SELECT id FROM items WHERE viewed=0' in q for q in queries):
+                break
+        else:
+            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries')
+        queries.clear()
         time.sleep(.65)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
         # Include background dispatch/presence work, independently of content size.

@@ -180,6 +180,9 @@ class JobRepository:
         if ai_only:
             query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items i WHERE i.id=jobs.item AND i.platform IS NOT NULL
                 AND i.status!=CASE jobs.kind WHEN 'filter' THEN 'pending_filtering' ELSE 'pending_summary' END)"""
+            if self.store.processing.background:
+                query += """ AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=jobs.item)
+                    AND NOT EXISTS (SELECT 1 FROM processing_stage_dirty d WHERE d.item=jobs.item AND d.kind=jobs.kind)"""
         elif deleting_only:
             query += " AND kind IN ('delete','feed-delete')"
         elif media_only:
@@ -333,6 +336,12 @@ class JobRepository:
         self.store.fault(name)
 
     def sync_reads(self) -> None:
+        if self.store.processing.background:
+            return
+        for _ in self.sync_reads_steps():
+            pass
+
+    def sync_reads_steps(self) -> Iterator[None]:
         db = self.store.db
         revision = self.store.subscriptions.source_revision()
         if revision != self.store.read_sync._configuration:
@@ -342,25 +351,54 @@ class JobRepository:
             if not pending:
                 return
             configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed, transport='telegram')]
-        bindings = self.store.subscriptions.telegram.bindings()
-        profiles = self.store.subscriptions.telegram.profiles()
+        bindings = self.store.subscriptions.telegram.bindings([config['id'] for config in configs]) if configs else {}
+        profiles = self.store.subscriptions.telegram.profiles() if any(binding['kind']=='client' for binding in bindings.values()) else {}
+        cleared = []
         for config in configs:
             feed = config['id']
             binding = bindings.get(feed)
             if config['transport'] == 'telegram' and config['connection'] != 'deleting' and binding and binding['kind'] == 'client':
+                # Claim this marker before yielding. New observations during the
+                # pass can insert another marker and must not be erased at its end.
                 with db:
-                    if config['auto_read']:
-                        eligible = {r[0] for r in db.execute('SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1', (feed,))}
-                        for row in db.execute('SELECT * FROM items WHERE feed_id=? AND complete=1 AND viewed=0', (feed,)).fetchall():
-                            members = json.loads(row['members'])
-                            if members and not set(members) <= eligible:
-                                try:
-                                    header, _ = self.store.original(row['id'])
-                                except (OSError, ValueError, KeyError):
-                                    continue
-                                if isinstance(header.get('title'), str) and header.get('full', True) and (not header.get('members') or set(header['members']) == set(members)):
-                                    self.store.read_sync.eligible(feed, members, 'saved')
-                    request = self.store.read_sync._request(config, binding, profiles.get(binding['role']))
+                    db.execute('DELETE FROM telegram_read_dirty WHERE feed=?', (feed,))
+                if config['auto_read']:
+                    identities = [row[0] for row in db.execute('SELECT id FROM items WHERE feed_id=? AND complete=1 AND viewed=0', (feed,))]
+                    size = 8 if self.store.processing.background else 256
+                    for offset in range(0,len(identities),size):
+                        if self.store.subscriptions.source_revision() != revision:
+                            return
+                        batch = identities[offset:offset+size]
+                        marks = ','.join('?' for _ in batch)
+                        rows = list(db.execute('SELECT id,members FROM items WHERE feed_id=? AND complete=1 AND viewed=0 AND id IN ('+marks+')', (feed,*batch)))
+                        members_by_item = {row['id']:json.loads(row['members']) for row in rows}
+                        members = sorted({member for values in members_by_item.values() for member in values})
+                        eligible: set[int] = set()
+                        for start in range(0,len(members),500):
+                            part = members[start:start+500]
+                            member_marks = ','.join('?' for _ in part)
+                            eligible.update(r[0] for r in db.execute('SELECT member FROM telegram_read_members WHERE feed=? AND eligible=1 AND member IN ('+member_marks+')', (feed,*part)))
+                        saved = []
+                        from oko.storage.reading import reading_snapshot
+                        with reading_snapshot(), material_read.material_inputs(db,{row['id'] for row in rows}):
+                            for row in rows:
+                                current_members = members_by_item[row['id']]
+                                if current_members and not set(current_members) <= eligible:
+                                    try:
+                                        header, _ = self.store.original(row['id'])
+                                    except (OSError, ValueError, KeyError):
+                                        continue
+                                    if isinstance(header.get('title'), str) and header.get('full', True) and (not header.get('members') or set(header['members']) == set(current_members)):
+                                        saved.append(current_members)
+                        with db:
+                            for current_members in saved:
+                                self.store.read_sync.eligible(feed,current_members,'saved')
+                        yield
+                if self.store.subscriptions.source_revision() != revision:
+                    return
+                with db:
+                    profile = profiles.get(binding['role'])
+                    request = self.store.read_sync._request(config, binding, profile)
                     if request is not None:
                         state = expect_row(db.execute('SELECT signature,waiting FROM telegram_read_state WHERE feed=?', (feed,)).fetchone())
                         if request['eligible'] or request['read_history'] or state['waiting']:
@@ -368,10 +406,17 @@ class JobRepository:
                             if state['signature'] != signature:
                                 db.execute('UPDATE telegram_read_state SET signature=? WHERE feed=?', (signature, feed))
                                 db.execute("INSERT INTO jobs(kind,item) VALUES ('read',?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=0,error=NULL,generation=generation+1", (feed,))
-            with db:
-                db.execute('DELETE FROM telegram_read_dirty WHERE feed=?', (feed,))
+                    if not self.store.processing.background:
+                        db.execute('DELETE FROM telegram_read_dirty WHERE feed=?', (feed,))
+                yield
+                if self.store.subscriptions.source_revision() != revision:
+                    return
+            else:
+                cleared.append(feed)
         # Deleted and non-Telegram feeds need no read-frontier work.
         with db:
+            if cleared:
+                db.execute('DELETE FROM telegram_read_dirty WHERE feed IN (SELECT value FROM json_each(?))', (json.dumps(cleared),))
             db.execute("DELETE FROM telegram_read_dirty WHERE NOT EXISTS (SELECT 1 FROM feeds WHERE id=telegram_read_dirty.feed AND transport='telegram' AND connection!='deleting')")
         self.store.read_sync._configuration = revision
 
@@ -549,11 +594,12 @@ class JobRepository:
             self.store.db.execute('DELETE FROM items WHERE feed_id=?', (feed,))
             for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
                 self.store.db.execute(f'DELETE FROM {table} WHERE feed=?', (feed,))
-            self.store.db.execute("DELETE FROM settings WHERE scope='feed' AND owner=?", (feed,))
+            self.store.subscriptions.clear_settings('feed', feed)
             self.store.db.execute('DELETE FROM state WHERE key=?', ('feed-status:'+feed,))
             self.store.subscriptions.telegram.release(feed)
             self.store.db.execute('DELETE FROM feed_details WHERE feed=?', (feed,))
             self.store.db.execute('DELETE FROM feeds WHERE id=?', (feed,))
+            self.store.subscriptions.settings.refresh_feed(feed)
 
 
     def delete(self, job: Job) -> None:
@@ -581,13 +627,20 @@ class JobRepository:
         self.store.db.execute("UPDATE jobs SET status='done',generation=generation+1 WHERE kind='fetch' AND item IN (SELECT item FROM history_members WHERE feed=?)",(feed,))
 
     def backfill_processing_inputs(self) -> None:
+        for _ in self.backfill_processing_steps():
+            pass
+
+    def backfill_processing_steps(self) -> Iterator[None]:
         from oko.storage import processing_input
         for kind,table in (('filter','filter_inputs'),('theses','thesis_inputs')):
-            rows=self.store.db.execute('SELECT j.id,j.item,i.signature FROM jobs j JOIN '+table+" i ON i.item=j.item WHERE j.kind=? AND json_extract(j.payload,'$.input_revision') IS NULL",(kind,)).fetchall()
-            for row in rows:
-                if row['signature'] is not None and row['signature']==processing_input.signature(self.store,row['item'],kind):
-                    payload=json.dumps(dict(input_revision=processing_input.revision(self.store,row['item'])))
-                    self.store.db.execute('UPDATE jobs SET payload=? WHERE id=?',(payload,row['id']))
+            identities = [row[0] for row in self.store.db.execute('SELECT j.id FROM jobs j JOIN '+table+" i ON i.item=j.item WHERE j.kind=? AND json_extract(j.payload,'$.input_revision') IS NULL",(kind,))]
+            for identity in identities:
+                with self.store.db:
+                    row = self.store.db.execute('SELECT j.id,j.item,i.signature FROM jobs j JOIN '+table+" i ON i.item=j.item WHERE j.id=? AND j.kind=? AND json_extract(j.payload,'$.input_revision') IS NULL",(identity,kind)).fetchone()
+                    if row is not None and row['signature'] is not None and row['signature']==processing_input.signature(self.store,row['item'],kind):
+                        payload=json.dumps(dict(input_revision=processing_input.revision(self.store,row['item'])))
+                        self.store.db.execute('UPDATE jobs SET payload=? WHERE id=?',(payload,row['id']))
+                yield
 
     def replace_media_input(self, job: Job) -> None:
         self.store.db.execute("""UPDATE jobs SET status='pending',generation=generation+1,
