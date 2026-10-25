@@ -38,6 +38,13 @@ The IPC directory is persistent: replacing a socket leaves the mounted parent
 directory intact across helper restarts. Job scratch remains in the helper's
 systemd runtime directory and is removed during group cleanup.
 
+The host helper uses UID 20002 and IPC GID 20001. Its UID must differ from
+PostgreSQL's 999 and the reader's 10001, since a host process can otherwise have
+owner access to the database's bind mount. Bootstrap rejects an older conflicting
+account; stop the whole helper cgroup and migrate only its own home/code/IPC
+ownership under the maintenance lock before retrying. Do not change PostgreSQL
+ownership as part of that account migration.
+
 ## Operator interface
 
 From an immutable, root-owned checkout at `/srv/oko/releases/<SHA>`, run the

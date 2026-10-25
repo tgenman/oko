@@ -118,3 +118,21 @@ def test_start_cannot_acknowledge_unloaded_certificate(tmp_path):
     assert (tls/'applied-version').read_text()=='versions/new\n'
     scope['start'](dict(image='synthetic'))
     assert '--force-recreate' not in calls[-1]
+
+
+def test_certificate_directory_is_traversable_with_systemd_private_umask(tmp_path,monkeypatch):
+    scope=operator()
+    cert,key=tmp_path/'cert.pem',tmp_path/'key.pem'
+    subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1',
+        '-subj','/CN=oko.observer','-keyout',str(key),'-out',str(cert)],check=True,
+        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    # Ownership is privileged in production; the regression is the real mode
+    # left by mkdir under the unit's UMask=0077, independent of local test UID.
+    monkeypatch.setattr(os,'chown',lambda *args,**kwargs:None)
+    monkeypatch.setattr(os,'fchown',lambda *args,**kwargs:None)
+    previous=os.umask(0o077)
+    try:target=scope['certificate_version'](cert,key,root=tmp_path)
+    finally:os.umask(previous)
+    assert (tmp_path/'tls/versions').stat().st_mode&0o777 == 0o750
+    assert (tmp_path/'tls'/target).stat().st_mode&0o777 == 0o750
+    assert (tmp_path/'tls'/target/'privkey.pem').stat().st_mode&0o777 == 0o640
