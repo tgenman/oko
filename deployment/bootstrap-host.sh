@@ -21,7 +21,9 @@ if ! command -v docker >/dev/null; then
 fi
 systemctl enable --now docker
 test "$(docker version --format '{{.Server.Version}}')" = 29.1.3
-test "$(docker compose version --short)" = 2.40.3
+compose_version=$(docker compose version --short)
+# Ubuntu's package includes a downstream build suffix after the pinned version.
+test "${compose_version%%+*}" = 2.40.3
 if ! getent group oko-ipc >/dev/null; then groupadd --gid 20001 oko-ipc; fi
 test "$(getent group oko-ipc | cut -d: -f3)" = 20001
 if ! id okocodex >/dev/null 2>&1; then
