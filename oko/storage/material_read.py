@@ -61,6 +61,7 @@ def feed(db: Database, identity: str) -> dict[str, Any]:
     if row is None:
         raise ValueError('Feed not found')
     result = dict(row)
+    result.pop('rowid', None)
     from oko.storage.publications import FEED_COLUMNS
     for field in FEED_COLUMNS:
         result.pop(field, None)
