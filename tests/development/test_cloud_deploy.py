@@ -122,7 +122,8 @@ elif name=='cat':
  path=r/'system'/pathlib.Path(args[-1]).name;print(path.read_text(),end='')
 elif name=='install':
  shutil.copyfile(args[-2],r/'system'/pathlib.Path(args[-1]).name)
-elif name=='id':print(20002 if '-u' in args else 20001)
+elif name=='id':print(os.environ.get('HELPER_UID','20002') if '-u' in args else os.environ.get('HELPER_PRIMARY_GID','20001'))
+elif name=='getent':print('oko-ipc:x:'+os.environ.get('IPC_GID','20001')+':okocodex')
 elif name=='restic':
  repo=pathlib.Path(os.environ['RESTIC_REPOSITORY']);repo.mkdir(exist_ok=True)
  if args[0]=='backup':
@@ -135,7 +136,7 @@ elif name=='restic':
   target=pathlib.Path(args[args.index('--target')+1]);shutil.copytree(repo/'snapshot',target/'snapshot')
 ''')
     program.chmod(0o755)
-    for name in ('git', 'docker', 'systemctl', 'cat', 'install', 'id', 'uv', 'runuser', 'python3', 'restic'):
+    for name in ('git', 'docker', 'systemctl', 'cat', 'install', 'id', 'getent', 'uv', 'runuser', 'python3', 'restic'):
         (binary / name).symlink_to(program)
     for sha in (OLD, NEW):
         source = root / 'releases' / sha
@@ -291,3 +292,19 @@ def test_different_reader_and_migration_schemas_block_deploy_before_stop(machine
     assert '"stop"' not in commands
     assert json.loads((root / 'release.json').read_text())['sha'] == OLD
     assert 'private-migrator-canary' not in result.stdout + result.stderr + commands
+
+
+def test_helper_service_uses_named_ipc_group_independent_of_primary_gid(machine):
+    root, manifest, env = machine
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'HELPER_PRIMARY_GID': '988'})
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['success'] is True
+
+
+@pytest.mark.parametrize('identity', [{'HELPER_UID':'20003'}, {'IPC_GID':'20002'}])
+def test_invalid_helper_identity_is_rejected_before_service_stop(machine, identity):
+    root, manifest, env = machine
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, **identity})
+    assert result.returncode != 0
+    assert 'Unexpected helper account identity' in result.stderr
+    assert '"stop"' not in (root / 'commands.jsonl').read_text()

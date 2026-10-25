@@ -6,6 +6,11 @@ The common `/srv/oko/maintenance.lock` serializes application deployment,
 certificate application, backups and manual maintenance. Workflows also use
 one concurrency group with `cancel-in-progress: false`.
 
+Before stopping services, deployment verifies helper UID 20002 and that the named
+`oko-ipc` service group has GID 20001. The account's primary group can differ:
+systemd explicitly runs the helper with `Group=oko-ipc`. The identity is checked
+again at activation without changing the existing account or file ownership.
+
 ## Prepare the dedicated operator
 
 Install the reviewed script from an immutable, root-owned release checkout
