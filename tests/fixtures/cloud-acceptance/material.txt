@@ -1,0 +1,2 @@
+Synthetic persistence body: PostgreSQL and media must survive restart.
+This publication contains no personal data and needs no AI processing.
