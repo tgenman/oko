@@ -84,6 +84,30 @@ def test_cli_import_archives_known_empty_legacy_tables(postgres_url, tmp_path):
         assert client.get(media_url).content == PNG
 
 
+@pytest.mark.parametrize('topic', [None, 7])
+def test_cli_accepts_legacy_topic_column_only_when_all_values_are_null(postgres_url, tmp_path, topic):
+    source = tmp_path/'sqlite'
+    _, item, media_url, _ = source_library(source)
+    with sqlite3.connect(source/'state.sqlite') as db:
+        db.execute('ALTER TABLE feeds ADD COLUMN telegram_topic INTEGER'+(' DEFAULT 7' if topic is not None else ''))
+    before = hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest()
+    target, report = tmp_path/'postgres', tmp_path/'report.json'
+    result = invoke(source, target, credential_file(tmp_path, postgres_url), report)
+    assert hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest() == before
+    if topic is not None:
+        assert result.returncode != 0
+        assert not target.exists()
+        assert not report.exists()
+        return
+    assert result.returncode == 0, result.stdout+result.stderr
+    assert json.loads(report.read_text())['archived_columns'] == {'feeds': ['telegram_topic']}
+    with sqlite3.connect(target/'migration-archive/state.sqlite') as archive:
+        assert archive.execute('SELECT telegram_topic FROM feeds').fetchall() == [(None,)]
+    with TestClient(create_app(target, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
+        assert [card['id'] for card in client.get('/api/v3/cards').json()] == [item]
+        assert client.get(media_url).content == PNG
+
+
 @pytest.mark.parametrize('table', EMPTY_LEGACY_TABLES)
 def test_cli_refuses_nonempty_legacy_table_without_archiving_live_data(postgres_url, tmp_path, table):
     source = tmp_path/'sqlite'

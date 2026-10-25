@@ -128,9 +128,15 @@ def import_library(source: Path, target: Path, credential: Path, report: Path) -
                         db.execute(sql.SQL('ALTER TABLE {} DISABLE TRIGGER USER').format(sql.Identifier(table)))
                     db.execute(sql.SQL('TRUNCATE {} RESTART IDENTITY').format(sql.SQL(',').join(map(sql.Identifier, tables))))
                     receipts = {}
+                    archived_columns: dict[str, list[str]] = {}
                     for table in sorted(source_tables & set(tables), key=lambda t: (t not in ('feeds', 'items'), t)):
                         source_columns = [r[1] for r in original.execute('PRAGMA table_info('+quote(table)+')')]
                         columns = [r[0] for r in db.execute('SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s ORDER BY ordinal_position', (table,))]
+                        if table == 'feeds' and 'telegram_topic' in source_columns and 'telegram_topic' not in columns:
+                            if original.execute('SELECT 1 FROM feeds WHERE telegram_topic IS NOT NULL LIMIT 1').fetchone():
+                                raise MigrationRefused('Legacy Telegram topic column contains data')
+                            source_columns.remove('telegram_topic')
+                            archived_columns[table] = ['telegram_topic']
                         if set(source_columns) != set(columns) - ({'rowid'} if 'rowid' not in source_columns else set()):
                             raise MigrationRefused('Source/target columns differ for table '+table)
                         rows = [tuple(row) for row in original.execute('SELECT '+','.join(quote(c) for c in columns)+' FROM '+quote(table))]
@@ -159,6 +165,7 @@ def import_library(source: Path, target: Path, credential: Path, report: Path) -
                         raise MigrationRefused('Source changed while importing')
                     receipt = {'version': 1, 'state': 'prepared', 'schema_version': len(MIGRATIONS), 'work_enabled': False,
                                'source_database_sha256': source_hash, 'tables': receipts,
+                               'archived_columns': archived_columns,
                                'files': inventory, 'archived_tables': {table: original.execute('SELECT count(*) FROM '+quote(table)).fetchone()[0] for table in sorted(source_tables-set(tables))},
                                'archive_database_sha256': file_hash(archive/'state.sqlite')}
                     (stage/'instance.lock').touch(mode=0o600)

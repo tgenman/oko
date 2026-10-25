@@ -38,6 +38,9 @@ The known legacy tables `content_current`, `content_versions`, `filter_restores`
 `retained_theses`, `telegram_read_topics` and `youtube_attempts` are accepted only
 when empty; their schemas remain in that archive and zero counts in the report.
 Any rows in those tables refuse import rather than hiding live data in an archive.
+The legacy `feeds.telegram_topic` column is accepted only if every value is NULL;
+its schema is retained in the full SQLite archive and named in `archived_columns`.
+A non-NULL topic or any other unknown column refuses import.
 Unknown tables are refused. The source is unchanged. The report and archive may
 contain private metadata; do not publish them unredacted. After interruption,
 reconcile the prepared directory, transaction outcome and receipt before retrying;
