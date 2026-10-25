@@ -48,6 +48,28 @@ def read_manifest(path):
     return validate(json.loads(path.read_text()))
 
 
+def read_pending(path):
+    if path.stat().st_size > MAX_REQUEST:
+        raise ValueError('Invalid pending deployment')
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict) or set(value) != {'release', 'components'}:
+        raise ValueError('Invalid pending deployment')
+    validate(value['release'])
+    components = value['components']
+    if (not isinstance(components, list) or len(components) > 4
+            or any(not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{40}', sha) for sha in components)):
+        raise ValueError('Invalid pending component identities')
+    return value
+
+
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def command(*args, env=None, cwd=None, timeout=120):
     return subprocess.run(list(map(str, args)), check=True, capture_output=True, text=True,
                           env=env, cwd=cwd, timeout=timeout).stdout.strip()
@@ -62,6 +84,7 @@ def atomic(path, value):
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
+        sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -83,6 +106,7 @@ def point(path, target):
     temporary.unlink(missing_ok=True)
     temporary.symlink_to(target)
     os.replace(temporary, path)
+    sync_directory(path.parent)
 
 
 def compose(root, release, *args):
@@ -134,7 +158,7 @@ def helper_identity():
         raise ValueError('Unexpected helper account identity')
 
 
-def prepare(root, release, token, *, cached=False):
+def prepare(root, release, token, *, cached=False, minimum=()):
     helper_identity()
     source = root / 'releases' / release['sha']
     source.parent.mkdir(exist_ok=True, mode=0o755)
@@ -152,6 +176,13 @@ def prepare(root, release, token, *, cached=False):
     if not cached:
         command('git', '-C', source, 'fetch', REPOSITORY, 'main', timeout=180)
         command('git', '-C', source, 'merge-base', '--is-ancestor', release['sha'], 'FETCH_HEAD')
+    for sha in minimum:
+        try:
+            command('git', '-C', source, 'merge-base', '--is-ancestor', sha, release['sha'])
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1:
+                raise ValueError('Older or divergent release is not allowed') from None
+            raise
     if json.loads((source / 'oko/processing/codex_runtime.json').read_text()) != release['codex']:
         raise ValueError('Codex pin differs from the checked source')
     unit = (source / 'deployment/systemd/oko-codex.service').read_text()
@@ -244,28 +275,36 @@ def migrate(root, release):
 
 def change(root, release, *, token=None):
     original = read_manifest(root / 'release.json')
-    rollback = release is None
-    if rollback:
-        release = read_manifest(root / 'previous-release.json')
+    pending_path = root / 'deployment-pending.json'
+    pending = read_pending(pending_path) if pending_path.exists() else None
     validate(release)
-    prepare(root, release, token, cached=rollback and token is None)
+    minimum = (original['sha'],) + ((pending['release']['sha'],) if pending else ())
+    prepare(root, release, token, cached=token is None and (release == original or pending is not None and pending['release'] == release), minimum=minimum)
     with maintenance(root):
         current = read_manifest(root / 'release.json')
-        if current != original:
+        if current != original or (read_pending(pending_path) if pending_path.exists() else None) != pending:
             raise ValueError('Installed release changed during preparation')
         database = database_state(root, current)
         version = database['version']
-        if version > release['schema']['maximum'] or (rollback and version < release['schema']['minimum']):
-            raise ValueError('Rollback/deploy blocked by incompatible database schema; explicit restore required')
-        if release == current:
-            health(root, release)
-            return dict(success=True, already_installed=True, sha=release['sha'], image=release['image'],
-                        schema_version=version, database_schema=database['schema'])
-        if (root / 'operator').resolve() != root / 'releases' / current['sha'] / 'deployment':
+        if version > release['schema']['maximum']:
+            raise ValueError('Deploy blocked by incompatible database schema; a newer release is required')
+        allowed = {current['sha']} | ({pending['release']['sha'], *pending['components']} if pending else set())
+        if (root / 'operator').resolve() not in {root / 'releases' / sha / 'deployment' for sha in allowed}:
             raise ValueError('Installed operator source is inconsistent')
         helper = json.loads(command('cat', '/var/lib/oko-codex/helper.json'))
-        if helper['release'] != current['sha'] or (root / 'codex/current').resolve() != root / 'releases' / current['sha']:
+        if helper['release'] not in allowed or (root / 'codex/current').resolve() not in {root / 'releases' / sha for sha in allowed}:
             raise ValueError('Installed helper source is inconsistent')
+        if release == current and pending is None:
+            try:
+                health(root, release)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                pass  # Repair this same confirmed release; never select an older one.
+            else:
+                return dict(success=True, already_installed=True, sha=release['sha'], image=release['image'],
+                            schema_version=version, database_schema=database['schema'])
+        components = sorted({current['sha'], helper['release'],
+                             (root / 'codex/current').resolve().name,
+                             (root / 'operator').resolve().parent.name})
         identifiers = immutable_containers()
         history = root / 'deployment-history' / (str(time.time_ns()) + '-' + release['sha'])
         history.mkdir(parents=True, mode=0o700)
@@ -276,7 +315,8 @@ def change(root, release, *, token=None):
         started = time.monotonic()
         receipt = dict(success=False, sha=release['sha'], image=release['image'], previous_sha=current['sha'],
                        schema_version=version, database_schema=database['schema'], migrated=False,
-                       rolled_back=False, timestamp=time.time())
+                       forward_repair_required=False, timestamp=time.time())
+        atomic(pending_path, dict(release=release, components=components))
         try:
             stop(root, current)
             if version < release['schema']['minimum']:
@@ -293,35 +333,27 @@ def change(root, release, *, token=None):
             health(root, release)
             if immutable_containers() != identifiers:
                 raise ValueError('Infrastructure changed during the application deployment')
-            atomic(root / 'previous-release.json', current)
-            atomic(root / 'release.json', release)
             point(root / 'operator', root / 'releases' / release['sha'] / 'deployment')
+            atomic(root / 'release.json', release)
             receipt.update(success=True, schema_version=version, maintenance_seconds=round(time.monotonic()-started, 3))
             atomic(history / 'result.json', receipt)
+            pending_path.unlink()
+            sync_directory(pending_path.parent)
             return receipt
         except BaseException as error:
             receipt['error_class'] = type(error).__name__
-            atomic(history / 'result.json', receipt)
-            # Schema migrations are forward-only. Never restore an old database
-            # or start a pair that cannot read the now-installed schema.
+            # A failed candidate stays stopped. The durable pending manifest
+            # admits a retry of that same candidate or a descendant, including
+            # after partial helper activation or a forward schema migration.
+            receipt['forward_repair_required'] = True
             try:
                 stop(root, release)
-                recovered = database_state(root, current)
-                if (recovered['database'], recovered['schema']) != (database['database'], database['schema']):
-                    raise ValueError('Active database schema changed during recovery')
-                actual = recovered['version']
-                receipt['schema_version'] = actual
-                if current['schema']['minimum'] <= actual <= current['schema']['maximum']:
-                    activate(root, current, helper, old_unit, history)
-                    health(root, current)
-                    atomic(root / 'release.json', current)
-                    point(root / 'operator', root / 'releases' / current['sha'] / 'deployment')
-                    receipt['rolled_back'] = True
-                else:
-                    receipt['recovery_required'] = True
-            except BaseException as recovery:
-                receipt['recovery_error_class'] = type(recovery).__name__
-            atomic(history / 'result.json', receipt)
+            except BaseException as stopping:
+                receipt['stop_error_class'] = type(stopping).__name__
+            try:
+                atomic(history / 'result.json', receipt)
+            except OSError:
+                print('Deployment result could not be persisted', file=sys.stderr)
             raise
 
 
@@ -391,11 +423,11 @@ def receive(root):
     if len(data) > MAX_REQUEST:
         raise ValueError('Deployment request exceeded limit')
     request = json.loads(data)
-    if not isinstance(request, dict) or request.get('action') not in ('deploy', 'rollback'):
+    if not isinstance(request, dict) or request.get('action') != 'deploy':
         raise ValueError('Unsupported operation')
     if set(request) - {'action', 'manifest', 'registry_token'}:
         raise ValueError('Unknown deployment input')
-    manifest = validate(request['manifest']) if request['action'] == 'deploy' else None
+    manifest = validate(request['manifest'])
     return change(root, manifest, token=request.get('registry_token'))
 
 
@@ -407,7 +439,6 @@ def main():
     target = sub.add_parser('deploy')
     target.add_argument('--manifest', type=Path, required=True)
     target.add_argument('--registry-token-file', type=Path)
-    sub.add_parser('rollback')
     sub.add_parser('receive')
     authorization = sub.add_parser('authorize')
     authorization.add_argument('--public-key-file', type=Path, required=True)
@@ -419,8 +450,6 @@ def main():
             result = authorize(args.root, args.public_key_file)
         elif args.operation == 'receive':
             result = receive(args.root)
-        elif args.operation == 'rollback':
-            result = change(args.root, None)
         else:
             manifest = read_manifest(args.manifest)
             token = None

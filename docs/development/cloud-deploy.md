@@ -35,13 +35,13 @@ not silently replace the privileged deployment implementation. Reauthorize from
 a reviewed new release when updating the operator itself.
 
 The endpoint accepts at most 64 KiB of JSON on stdin. It accepts only `deploy`
-with a validated manifest and optional package-scoped pull bearer, or `rollback`
-to the root-owned saved previous manifest. No path, command, shell fragment,
+with a validated manifest and optional package-scoped pull bearer. Older or
+divergent releases are rejected before stopping any service. No path, command, shell fragment,
 arbitrary image registry or source repository can be supplied by the caller.
 
 ## Release selection and Actions
 
-Use **Deploy Oko → Run workflow** on `main` with `operation=deploy` and the numeric
+Use **Deploy Oko → Run workflow** on `main` with the numeric
 ID of a successful **Publish Linux release** run. The workflow checks the exact
 publication workflow path, event, repository, branch and conclusion; downloads
 one bounded release-manifest artifact; verifies a successful push-triggered
@@ -89,42 +89,55 @@ reader container. After Compose readiness, the reader's private control request
 checks Store and authorization with verified TLS, public HTTPS is checked, and
 authenticated UDS helper health must report the expected release. These probes
 do not perform inference. Only after those checks and unchanged infrastructure
-identities does the command persist the active/previous manifests and operator
-pointer. Receipt fields include SHA/digest, previous SHA, schema, migration and
-backup result, maintenance duration, and any recovery failure.
+identities does the command persist the confirmed active manifest and operator pointer. Previous
+release/helper metadata remains in the private history directory. Receipt fields include SHA/digest, previous SHA, schema, migration and
+backup result, maintenance duration, and any stopping failure.
 
-## Rollback and failure
+## Failed releases and forward repair
 
-Choose `operation=rollback` in the same manual workflow, or run:
+Deployment only moves to the same commit or a descendant of the last confirmed
+release. If an attempt is already pending, the next candidate must also descend
+from that pending commit. Neither the CLI, forced SSH receiver nor Actions offers
+a rollback operation.
 
-```sh
-sudo python3 /srv/oko/releases/<operator-SHA>/deployment/deploy.py rollback
-```
+Before stopping the reader/helper, the operator atomically records the checked
+candidate and the observed component identities in root-private
+`deployment-pending.json`. File replacement and marker removal sync their parent
+directories. Superseding a failed candidate preserves any known partial
+helper/source/operator state for the next forward retry. A failed activation or
+healthcheck stops the candidate and records `forward_repair_required=true`.
+It never starts the previous pair or restores a database. PostgreSQL, durable
+reader files and monitoring remain in place. A failure to stop is recorded as
+`stop_error_class` alongside the original error.
 
-The root-owned `previous-release.json` selects the exact previous pair. Rollback
-uses its retained local image/source/runtime, avoiding a new registry credential
-or dependency installation. It refuses a schema outside that release's recorded
-range. No restore, SQL downgrade or deletion of newer library data occurs.
+Retry the same published candidate or deploy a newer fixed release through the
+normal interface. The pending manifest permits the known partially activated
+helper/source pair while preserving identity checks. A retry of that exact
+candidate may reuse its already checked image/runtime without another registry
+credential; a newer release receives normal preparation. Any completed schema
+migration stays in place. A failed migration can be retried with the same or a
+newer compatible release.
 
-A failed start/healthcheck returns to the old pair only while the actual schema
-remains compatible. After an incompatible successful migration, the reader/helper
-stay stopped and `recovery_required=true` is recorded; choose a compatible fixed
-release or plan a separately acknowledged restore. Failure of recovery itself is
-recorded without hiding the original failed deployment. PostgreSQL and monitoring
-are never recreated as an automatic repair.
+`release.json` and the operator pointer represent the last confirmed successful
+release until activation passes healthchecks. The pending manifest and failure
+receipt identify an incomplete attempt; they must be inspected together rather
+than treating the previous successful manifest as evidence of a running reader.
+Success writes the new manifest/pointer and removes the pending marker. A healthy
+same-release request is a no-op; a stopped or unhealthy confirmed release can
+be repaired by activating that same release. A retry
+also rechecks that both manifests were unchanged while preparing.
 
-Keep previous manifests, images, source, virtual environments and the separately
-tagged pre-migration backup until the new release has passed acceptance. Normal
-nightly retention does not remove that protected backup. Root may inspect the
-private history directory; it can contain helper metadata and is not public.
+Keep historical source, receipts and separately tagged pre-migration copies as
+records. Their presence does not authorize starting an older release or applying
+a database restore. No working-installation rollback is part of commissioning.
 
 ## Verification boundary
 
 `tests/development/test_cloud_deploy.py` drives the real CLI against synthetic
-Docker/Git/systemd/Restic executables. It checks ordering, compatible rollback,
-backup-before-migration, refusal after incompatible schema changes, failure paths,
+Docker/Git/systemd/Restic executables. It checks ordering, rejection of older releases,
+backup-before-migration, stopped failure states and forward retries,
 maintenance contention and bounded SSH input. This is not live deployment proof.
-Commissioning must separately execute successful/failed deploy and compatible
-rollback through Actions and verify the reader's preserved data through HTTPS
+Commissioning must separately execute a successful deploy through Actions
+and verify that rejected or failed attempts never select an older pair and verify the reader's preserved data through HTTPS
 and Playwright. Do not run destructive synthetic trials on the migrated personal
 library.

@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 OLD = 'a' * 40
 NEW = 'b' * 40
+THIRD = 'c' * 40
 
 
 def release(sha, schema=3):
@@ -83,6 +84,7 @@ fail=os.environ.get('FAIL_STAGE','')
 def save(): (r/'synthetic-state.json').write_text(json.dumps(state))
 if name=='git':
  if 'rev-parse' in args:print(pathlib.Path(args[args.index('-C')+1]).name)
+ if '--is-ancestor' in args and args[-2:] == ['b'*40,'a'*40]:sys.exit(1)
 elif name=='docker':
  if 'pull' in args and fail=='pull':sys.exit(1)
  if 'inspect' in args:
@@ -110,6 +112,9 @@ elif name=='docker':
    if 'up' in args:
     state['reader']=True;state['selected']=os.environ['OKO_IMAGE'].split(':')[-1][0]*40;save()
     if fail=='start' and state['selected']=='b'*40:sys.exit(1)
+   if 'exec' in args and not state['reader']:sys.exit(1)
+   if 'exec' in args and fail=='receipt' and state['selected']=='b'*40:
+    next((r/'deployment-history').iterdir()).joinpath('result.json').mkdir();sys.exit(1)
    if 'exec' in args and fail=='health' and state['selected']=='b'*40:sys.exit(1)
  if 'run' in args and 'oko.storage.postgres_migrations' in args and '--check' not in args:
   if fail=='migration':sys.exit(1)
@@ -122,6 +127,7 @@ elif name=='cat':
  path=r/'system'/pathlib.Path(args[-1]).name;print(path.read_text(),end='')
 elif name=='install':
  shutil.copyfile(args[-2],r/'system'/pathlib.Path(args[-1]).name)
+ if fail=='unit' and args[-1].endswith('.service'):sys.exit(1)
 elif name=='id':print(os.environ.get('HELPER_UID','20002') if '-u' in args else os.environ.get('HELPER_PRIMARY_GID','20001'))
 elif name=='getent':print('oko-ipc:x:'+os.environ.get('IPC_GID','20001')+':okocodex')
 elif name=='restic':
@@ -138,7 +144,7 @@ elif name=='restic':
     program.chmod(0o755)
     for name in ('git', 'docker', 'systemctl', 'cat', 'install', 'id', 'getent', 'uv', 'runuser', 'python3', 'restic'):
         (binary / name).symlink_to(program)
-    for sha in (OLD, NEW):
+    for sha in (OLD, NEW, THIRD):
         source = root / 'releases' / sha
         (source / 'deployment/systemd').mkdir(parents=True)
         (source / 'deployment/systemd/oko-codex.service').write_text('Environment=OKO_CODEX_BINARY=/opt/oko/codex/0.164.0/bin/codex\n')
@@ -172,9 +178,6 @@ def test_checked_release_switches_both_components_and_preserves_infrastructure(m
     assert not any('compose' in command and 'monitoring' in str(command) for command in commands)
     assert json.loads((root / 'release.json').read_text())['sha'] == NEW
     assert (root / 'codex/current').resolve().name == NEW
-    rollback = invoke(root, 'rollback', env=env)
-    assert rollback.returncode == 0, rollback.stderr
-    assert json.loads(rollback.stdout)['sha'] == OLD
 
 
 @pytest.mark.parametrize('failure', ['pull', 'start', 'health'])
@@ -193,7 +196,9 @@ def test_failed_release_never_reports_success_or_restores_database(machine, fail
         result_files = list((root / 'deployment-history').glob('*/result.json'))
         assert len(result_files) == 1
         receipt = json.loads(result_files[0].read_text())
-        assert receipt['success'] is False and receipt['rolled_back'] is True
+        assert receipt['success'] is False and receipt['forward_repair_required'] is True
+        state = json.loads((root / 'synthetic-state.json').read_text())
+        assert state['reader'] is False and state['helper'] is False
 
 
 def test_pre_migration_backup_is_verified_before_schema_change(machine):
@@ -211,14 +216,11 @@ def test_pre_migration_backup_is_verified_before_schema_change(machine):
     migration = next(i for i, command in enumerate(commands) if 'oko.storage.postgres_migrations' in command)
     assert verified < migration
     assert not any(command[:2] == ['restic', 'forget'] for command in commands)
-    rollback = invoke(root, 'rollback', env=env)
-    assert rollback.returncode != 0
-    assert 'incompatible database schema' in rollback.stderr
     assert json.loads((root / 'release.json').read_text())['sha'] == NEW
 
 
 @pytest.mark.parametrize('failure', ['backup', 'migration'])
-def test_failed_pre_migration_stage_preserves_prior_reader_and_data(machine, failure):
+def test_failed_pre_migration_stage_preserves_data_and_stays_stopped(machine, failure):
     root, manifest, env = machine
     manifest.write_text(json.dumps(release(NEW, schema=4)))
     env.update(TARGET_SCHEMA='4', FAIL_STAGE=failure)
@@ -227,7 +229,9 @@ def test_failed_pre_migration_stage_preserves_prior_reader_and_data(machine, fai
     assert json.loads((root / 'release.json').read_text())['sha'] == OLD
     assert (root / 'data/media/image.bin').read_bytes() == b'synthetic-persistent-media'
     assert 'pg_restore' not in (root / 'commands.jsonl').read_text()
-    assert json.loads(next((root / 'deployment-history').glob('*/result.json')).read_text())['rolled_back']
+    assert json.loads(next((root / 'deployment-history').glob('*/result.json')).read_text())['forward_repair_required']
+    state = json.loads((root / 'synthetic-state.json').read_text())
+    assert state['reader'] is False and state['helper'] is False
 
 
 def test_health_failure_after_incompatible_migration_stops_without_old_image_or_restore(machine):
@@ -237,7 +241,7 @@ def test_health_failure_after_incompatible_migration_stops_without_old_image_or_
     result = invoke(root, 'deploy', '--manifest', str(manifest), env=env)
     assert result.returncode != 0
     receipt = json.loads(next((root / 'deployment-history').glob('*/result.json')).read_text())
-    assert receipt['recovery_required'] and receipt['rolled_back'] is False
+    assert receipt['forward_repair_required']
     state = json.loads((root / 'synthetic-state.json').read_text())
     assert state['schema'] == 4 and state['reader'] is False and state['helper'] is False
     assert 'pg_restore' not in (root / 'commands.jsonl').read_text()
@@ -262,7 +266,7 @@ def test_ssh_authorization_refuses_a_command_instead_of_a_public_key(tmp_path):
     assert 'dedicated Ed25519 public key' in result.stderr
 
 
-def test_deploy_and_rollback_use_the_active_private_database_schema(machine):
+def test_deploy_uses_the_active_private_database_schema(machine):
     root, manifest, env = machine
     state = json.loads((root / 'synthetic-state.json').read_text())
     state['schema_name'] = 'oko_import146'
@@ -274,12 +278,9 @@ def test_deploy_and_rollback_use_the_active_private_database_schema(machine):
     assert result.returncode == 0, result.stderr
     receipt = json.loads(result.stdout)
     assert receipt['database_schema'] == 'oko_import146' and receipt['schema_version'] == 3
-    rollback = invoke(root, 'rollback', env=env)
-    assert rollback.returncode == 0, rollback.stderr
-    assert json.loads(rollback.stdout)['database_schema'] == 'oko_import146'
     commands = (root / 'commands.jsonl').read_text()
     for role in ('reader', 'migrator'):
-        assert 'private-' + role + '-canary' not in result.stdout + result.stderr + rollback.stdout + rollback.stderr + commands
+        assert 'private-' + role + '-canary' not in result.stdout + result.stderr + commands
 
 
 def test_different_reader_and_migration_schemas_block_deploy_before_stop(machine):
@@ -308,3 +309,96 @@ def test_invalid_helper_identity_is_rejected_before_service_stop(machine, identi
     assert result.returncode != 0
     assert 'Unexpected helper account identity' in result.stderr
     assert '"stop"' not in (root / 'commands.jsonl').read_text()
+
+
+@pytest.mark.parametrize('failure', ['start', 'health'])
+def test_failed_forward_release_stays_stopped_and_retries_the_same_candidate(machine, failure):
+    root, manifest, env = machine
+    failed = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'FAIL_STAGE': failure})
+    assert failed.returncode != 0
+    state = json.loads((root / 'synthetic-state.json').read_text())
+    assert state['selected'] == NEW
+    assert state['reader'] is False and state['helper'] is False
+    pending = json.loads((root / 'deployment-pending.json').read_text())
+    assert pending['release']['sha'] == NEW
+    manifest.write_text(json.dumps(release(OLD)))
+    older = invoke(root, 'deploy', '--manifest', str(manifest), env=env)
+    assert older.returncode != 0 and 'Older or divergent release' in older.stderr
+    assert json.loads((root / 'synthetic-state.json').read_text())['selected'] == NEW
+    manifest.write_text(json.dumps(release(NEW)))
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env=env)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['sha'] == NEW
+    assert not (root / 'deployment-pending.json').exists()
+
+
+def test_older_release_is_rejected_before_stopping_any_service(machine):
+    root, manifest, env = machine
+    assert invoke(root, 'deploy', '--manifest', str(manifest), env=env).returncode == 0
+    before = (root / 'commands.jsonl').read_text()
+    manifest.write_text(json.dumps(release(OLD)))
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env=env)
+    assert result.returncode != 0
+    assert 'Older or divergent release' in result.stderr
+    commands = (root / 'commands.jsonl').read_text()[len(before):]
+    assert '"stop"' not in commands
+    assert json.loads((root / 'release.json').read_text())['sha'] == NEW
+
+
+def test_rollback_is_not_a_cli_or_ssh_operation(machine):
+    root, manifest, env = machine
+    result = invoke(root, 'rollback', env=env)
+    assert result.returncode != 0 and 'invalid choice' in result.stderr
+    result = invoke(root, 'receive', env=env, data=json.dumps({'action':'rollback'}))
+    assert result.returncode != 0 and 'Unsupported operation' in result.stderr
+    assert not (root / 'commands.jsonl').exists()
+
+
+@pytest.mark.parametrize('failure', ['unit', 'migration'])
+def test_forward_retry_repairs_partial_activation_and_migration(machine, failure):
+    root, manifest, env = machine
+    schema = 4 if failure == 'migration' else 3
+    manifest.write_text(json.dumps(release(NEW, schema=schema)))
+    first = invoke(root, 'deploy', '--manifest', str(manifest),
+                   env={**env, 'FAIL_STAGE':failure, 'TARGET_SCHEMA':str(schema)})
+    assert first.returncode != 0
+    state = json.loads((root / 'synthetic-state.json').read_text())
+    assert not state['reader'] and not state['helper']
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'TARGET_SCHEMA':str(schema)})
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['sha'] == NEW
+    commands = [json.loads(line) for line in (root / 'commands.jsonl').read_text().splitlines()]
+    assert not any('up' in command and str(root / 'releases' / OLD / 'deployment/compose.app.yaml') in command for command in commands)
+    assert not (root / 'deployment-pending.json').exists()
+
+
+def test_newer_candidate_keeps_known_partial_components_for_forward_retry(machine):
+    root, manifest, env = machine
+    assert invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'FAIL_STAGE':'unit'}).returncode != 0
+    manifest.write_text(json.dumps(release(THIRD, schema=4)))
+    assert invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'FAIL_STAGE':'migration', 'TARGET_SCHEMA':'4'}).returncode != 0
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'TARGET_SCHEMA':'4'})
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['sha'] == THIRD
+    assert json.loads((root / 'synthetic-state.json').read_text())['selected'] == THIRD
+
+
+def test_receipt_write_failure_cannot_skip_candidate_stop(machine):
+    root, manifest, env = machine
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'FAIL_STAGE':'receipt'})
+    assert result.returncode != 0
+    state = json.loads((root / 'synthetic-state.json').read_text())
+    assert state['selected'] == NEW
+    assert state['reader'] is False and state['helper'] is False
+
+
+def test_same_confirmed_release_can_repair_stopped_services(machine):
+    root, manifest, env = machine
+    assert invoke(root, 'deploy', '--manifest', str(manifest), env=env).returncode == 0
+    state = json.loads((root / 'synthetic-state.json').read_text())
+    state.update(reader=False, helper=False)
+    (root / 'synthetic-state.json').write_text(json.dumps(state))
+    result = invoke(root, 'deploy', '--manifest', str(manifest), env=env)
+    assert result.returncode == 0, result.stderr
+    state = json.loads((root / 'synthetic-state.json').read_text())
+    assert state['reader'] and state['helper'] and state['selected'] == NEW
