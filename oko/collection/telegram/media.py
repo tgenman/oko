@@ -1,7 +1,7 @@
 """Isolated public HTTP downloads, streamed into a job-owned staging directory."""
 import asyncio
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, replace
 import json
 from email.message import Message
@@ -52,11 +52,48 @@ def public_url(url: str) -> str:
         raise SourceError('Небезопасный адрес вложения',code='media-address',retryable=False) from None
 
 
+_CORE_ERRORS: dict[type[Exception], type[httpx.RequestError]] = {
+    httpcore.TimeoutException: httpx.TimeoutException,
+    httpcore.ConnectTimeout: httpx.ConnectTimeout,
+    httpcore.ReadTimeout: httpx.ReadTimeout,
+    httpcore.WriteTimeout: httpx.WriteTimeout,
+    httpcore.PoolTimeout: httpx.PoolTimeout,
+    httpcore.NetworkError: httpx.NetworkError,
+    httpcore.ConnectError: httpx.ConnectError,
+    httpcore.ReadError: httpx.ReadError,
+    httpcore.WriteError: httpx.WriteError,
+    httpcore.ProxyError: httpx.ProxyError,
+    httpcore.UnsupportedProtocol: httpx.UnsupportedProtocol,
+    httpcore.ProtocolError: httpx.ProtocolError,
+    httpcore.LocalProtocolError: httpx.LocalProtocolError,
+    httpcore.RemoteProtocolError: httpx.RemoteProtocolError,
+}
+
+
+@contextmanager
+def _httpx_errors() -> Iterator[None]:
+    """The custom network backend retains HTTPX's public exception contract."""
+    try:
+        yield
+    except tuple(_CORE_ERRORS) as error:
+        mapped: type[httpx.RequestError] | None = None
+        for core_error, public_error in _CORE_ERRORS.items():
+            if isinstance(error, core_error) and (mapped is None or issubclass(public_error, mapped)):
+                mapped = public_error
+        assert mapped is not None
+        raise mapped(str(error)) from error
+
+
 class PublicNetwork(httpcore.AnyIOBackend):
     async def connect_tcp(self, host: str, port: int, timeout: float | None = None,
                           local_address: str | None = None, socket_options: Any = None) -> httpcore.AsyncNetworkStream:
         public_url('https://'+('['+host+']' if ':' in host else host))
-        records = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(host,port,type=socket.SOCK_STREAM),timeout)
+        try:
+            records = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(host,port,type=socket.SOCK_STREAM),timeout)
+        except TimeoutError as error:
+            raise httpcore.ConnectTimeout('DNS lookup timed out') from error
+        except socket.gaierror as error:
+            raise httpcore.ConnectError('DNS lookup failed') from error
         addresses = list(dict.fromkeys(str(row[4][0]) for row in records))
         if not addresses or any(not ip_address(address).is_global for address in addresses):
             raise SourceError('Небезопасный адрес вложения',code='media-address',retryable=False)
@@ -70,8 +107,9 @@ class CoreStream(httpx.AsyncByteStream):
         self.response = response
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
-        async for part in self.response.aiter_stream():
-            yield part
+        with _httpx_errors():
+            async for part in self.response.aiter_stream():
+                yield part
 
     async def aclose(self) -> None:
         await self.response.aclose()
@@ -83,10 +121,11 @@ class PublicTransport(httpx.AsyncBaseTransport):
             network_backend=PublicNetwork(),max_connections=2,max_keepalive_connections=1,retries=0)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        response = await self.pool.handle_async_request(httpcore.Request(method=request.method,
-            url=httpcore.URL(scheme=request.url.raw_scheme,host=request.url.raw_host,
-                             port=request.url.port,target=request.url.raw_path),
-            headers=request.headers.raw,content=request.stream,extensions=request.extensions))
+        with _httpx_errors():
+            response = await self.pool.handle_async_request(httpcore.Request(method=request.method,
+                url=httpcore.URL(scheme=request.url.raw_scheme,host=request.url.raw_host,
+                                 port=request.url.port,target=request.url.raw_path),
+                headers=request.headers.raw,content=request.stream,extensions=request.extensions))
         return httpx.Response(response.status,headers=response.headers,stream=CoreStream(response),extensions=response.extensions)
 
     async def aclose(self) -> None:
