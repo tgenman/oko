@@ -328,3 +328,33 @@ def test_operational_summary_includes_terminal_problems_without_changing_reader_
             ('fetch','failed',1,'source-failed'),('download_media','unavailable',1,'media-unavailable')}
     finally:
         store.db.close()
+
+
+def test_telegram_opened_material_has_all_reading_parts_after_restart(postgres_url, tmp_path):
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from tests.support.reader import HEADERS
+    from tests.support.telegram import Telegram, connect, settled
+
+    def app():
+        return create_app(tmp_path, token='test', api_only=True,
+                          database_url=postgres_url, telegram_client=Telegram())
+
+    identity = None
+    for _ in range(2):
+        with TestClient(app(), headers=HEADERS) as client:
+            if identity is None:
+                assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
+                connect(client)
+                identity = settled(client)[0]['id']
+                assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+            response = client.get('/api/v3/reading/materials/' + identity)
+            assert response.status_code == 200, response.text
+            parts = {part['kind']: part for part in response.json()['resources']}
+            assert set(parts) == {'material', 'filter', 'theses', 'media'}
+            assert all(part['state'] == 'changed' for part in parts.values()), parts
+            material = parts['material']['data']
+            assert material['source']['kind'] == 'telegram'
+            assert material['source']['access']['kind'] == 'client'
+            assert material['content']['text'] == 'Текст канала'
+            assert 'rowid' not in material
