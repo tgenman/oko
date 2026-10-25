@@ -1,0 +1,16 @@
+[Unit]
+Description=Create and verify encrypted off-machine Oko library backup
+After=docker.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /srv/oko/config/backup.py backup --kind nightly
+ExecStopPost=/usr/bin/python3 /srv/oko/config/backup.py recover
+TimeoutStartSec=4h
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/oko

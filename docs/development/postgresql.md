@@ -34,6 +34,10 @@ Telegram/client settings before enabling work.
 A private `migration-archive/state.sqlite` preserves the complete source database,
 including historical `migration_retired_rows`; those historical rows are reported
 as archived rather than silently discarded or loaded into the live schema.
+The known legacy tables `content_current`, `content_versions`, `filter_restores`,
+`retained_theses`, `telegram_read_topics` and `youtube_attempts` are accepted only
+when empty; their schemas remain in that archive and zero counts in the report.
+Any rows in those tables refuse import rather than hiding live data in an archive.
 Unknown tables are refused. The source is unchanged. The report and archive may
 contain private metadata; do not publish them unredacted. After interruption,
 reconcile the prepared directory, transaction outcome and receipt before retrying;

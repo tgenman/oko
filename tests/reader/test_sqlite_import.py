@@ -20,6 +20,8 @@ from tests.support.filters import transport
 
 
 ROOT = Path(__file__).resolve().parents[2]
+EMPTY_LEGACY_TABLES = ('content_current', 'content_versions', 'filter_restores',
+                       'retained_theses', 'telegram_read_topics', 'youtube_attempts')
 
 
 def source_library(root, *, processing=False):
@@ -62,6 +64,40 @@ def test_cli_preserves_historical_rows_in_private_archive(postgres_url, tmp_path
     assert archive.stat().st_mode & 0o077 == 0
     with sqlite3.connect(archive) as preserved:
         assert preserved.execute('SELECT * FROM migration_retired_rows').fetchall() == [('old-job', b'historical\x00data')]
+
+
+def test_cli_import_archives_known_empty_legacy_tables(postgres_url, tmp_path):
+    source = tmp_path/'sqlite'
+    _, item, media_url, _ = source_library(source)
+    with sqlite3.connect(source/'state.sqlite') as db:
+        for table in EMPTY_LEGACY_TABLES:
+            db.execute('CREATE TABLE '+table+' (value TEXT)')
+    target, report = tmp_path/'postgres', tmp_path/'report.json'
+    result = invoke(source, target, credential_file(tmp_path, postgres_url), report)
+    assert result.returncode == 0, result.stdout+result.stderr
+    assert json.loads(report.read_text())['archived_tables'] == {table: 0 for table in EMPTY_LEGACY_TABLES}
+    with sqlite3.connect(target/'migration-archive/state.sqlite') as archive:
+        archived = {row[0] for row in archive.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert set(EMPTY_LEGACY_TABLES) <= archived
+    with TestClient(create_app(target, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
+        assert [card['id'] for card in client.get('/api/v3/cards').json()] == [item]
+        assert client.get(media_url).content == PNG
+
+
+@pytest.mark.parametrize('table', EMPTY_LEGACY_TABLES)
+def test_cli_refuses_nonempty_legacy_table_without_archiving_live_data(postgres_url, tmp_path, table):
+    source = tmp_path/'sqlite'
+    source_library(source)
+    with sqlite3.connect(source/'state.sqlite') as db:
+        db.execute('CREATE TABLE '+table+' (value TEXT)')
+        db.execute('INSERT INTO '+table+' VALUES (?)', ('must remain live data',))
+    before = hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest()
+    target, report = tmp_path/'postgres', tmp_path/'report.json'
+    result = invoke(source, target, credential_file(tmp_path, postgres_url), report)
+    assert result.returncode != 0
+    assert not target.exists()
+    assert not report.exists()
+    assert hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest() == before
 
 
 @pytest.mark.parametrize('conflict', ['live_source', 'symlink', 'columns', 'unknown_table'])
@@ -118,6 +154,21 @@ def invoke(source, target, credential, report):
     return subprocess.run([sys.executable, '-m', 'oko.storage.import_sqlite', '--source', str(source),
         '--target-data', str(target), '--database-url-file', str(credential), '--report', str(report)],
         cwd=ROOT, capture_output=True, text=True, timeout=45)
+
+
+@pytest.mark.parametrize('alias_target', ['source', 'target'])
+def test_cli_refuses_report_alias_into_source_without_changing_source(postgres_url, tmp_path, alias_target):
+    source = tmp_path/'sqlite'
+    source_library(source)
+    before = {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in source.rglob('*') if p.is_file()}
+    alias = tmp_path/'source-alias'
+    alias.symlink_to(source if alias_target == 'source' else tmp_path/'target', target_is_directory=True)
+    result = invoke(source, tmp_path/'target', credential_file(tmp_path, postgres_url), alias/'import.json')
+    assert result.returncode != 0
+    assert not (tmp_path/'target').exists()
+    assert before == {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in source.rglob('*') if p.is_file()}
 
 
 def credential_file(tmp_path, postgres_url):

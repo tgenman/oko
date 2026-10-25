@@ -20,6 +20,12 @@ from oko.storage.postgres_migrations import schema_lock_key, verify
 from oko.storage.postgres_schema import MIGRATIONS
 
 
+EMPTY_LEGACY_TABLES = frozenset({
+    'content_current', 'content_versions', 'filter_restores', 'retained_theses',
+    'telegram_read_topics', 'youtube_attempts',
+})
+
+
 def files(root: Path) -> dict[str, str]:
     result = {}
     for path in sorted(root.rglob('*')):
@@ -60,9 +66,9 @@ def empty_target(db: psycopg.Connection[Any], tables: list[str]) -> None:
 
 
 def import_library(source: Path, target: Path, credential: Path, report: Path) -> dict[str, Any]:
-    if source.is_symlink() or target.is_symlink():
+    if source.is_symlink() or target.is_symlink() or report.is_symlink():
         raise MigrationRefused('Use explicit physical source and target directories')
-    source, target, report = source.resolve(), target.resolve(), report.absolute()
+    source, target, report = source.resolve(), target.resolve(), report.resolve()
     if source == target or source in target.parents or target in source.parents or target.exists():
         raise MigrationRefused('Target data must be a new separate directory')
     if report.exists() or report.is_symlink() or source == report or source in report.parents or target in report.parents:
@@ -92,10 +98,13 @@ def import_library(source: Path, target: Path, credential: Path, report: Path) -
                     raise MigrationRefused('Target schema is busy: stop its reader before import')
                 verify(db, MIGRATIONS)
                 tables = [r[0] for r in db.execute("SELECT tablename FROM pg_tables WHERE schemaname=current_schema() AND tablename!='oko_schema_migrations' ORDER BY tablename")]
-                unknown = source_tables - set(tables) - {'migration_retired_rows'}
+                unknown = source_tables - set(tables) - {'migration_retired_rows'} - EMPTY_LEGACY_TABLES
                 missing = set(tables) - source_tables - {'reader_membership_dirty'}
                 if unknown or missing:
                     raise MigrationRefused('Source/target table sets differ; no data imported')
+                for table in source_tables & EMPTY_LEGACY_TABLES:
+                    if original.execute('SELECT 1 FROM '+quote(table)+' LIMIT 1').fetchone():
+                        raise MigrationRefused('Legacy source table still contains live data: '+table)
                 with db.transaction():
                     db.execute(sql.SQL('LOCK TABLE {} IN ACCESS EXCLUSIVE MODE NOWAIT').format(sql.SQL(',').join(map(sql.Identifier, tables))))
                     empty_target(db, tables)

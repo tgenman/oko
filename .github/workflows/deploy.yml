@@ -1,0 +1,130 @@
+name: Deploy Oko
+on:
+  workflow_run:
+    workflows: [Publish Linux release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+        required: true
+      publish_run_id:
+        description: Successful Publish Linux release run ID (required for deploy)
+        type: string
+        required: false
+permissions:
+  contents: read
+  actions: read
+  packages: read
+concurrency:
+  group: oko-production-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (vars.OKO_DEPLOY_ENABLED == 'true' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Resolve only a successful checked main publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.publish_run_id }}
+          OPERATION: ${{ inputs.operation || 'deploy' }}
+        run: |
+          python3 - <<'PY'
+          import io,json,os,pathlib,re,urllib.parse,urllib.request,zipfile
+          token=os.environ['GH_TOKEN'];repo=os.environ['REPOSITORY']
+          def get(path):
+              request=urllib.request.Request('https://api.github.com/'+path,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+          operation=os.environ['OPERATION']
+          request={'action':operation}
+          if operation=='deploy':
+              identity=os.environ['RUN_ID']
+              if not re.fullmatch('[0-9]{1,20}',identity):raise SystemExit('Select a successful publication run ID')
+              run=get('repos/'+repo+'/actions/runs/'+identity)
+              if (run['name']!='Publish Linux release' or run['path']!='.github/workflows/publish.yml'
+                  or run['conclusion']!='success' or run['event']!='workflow_run'
+                  or run['head_branch']!='main' or run['head_repository']['full_name']!=repo):
+                  raise SystemExit('Publication is not an approved main release')
+              artifacts=get('repos/'+repo+'/actions/runs/'+identity+'/artifacts?per_page=100')
+              matches=[a for a in artifacts['artifacts'] if not a['expired'] and re.fullmatch('oko-release-[0-9a-f]{40}',a['name'])]
+              if len(matches)!=1 or matches[0]['size_in_bytes']>65536:raise SystemExit('Exactly one bounded release manifest is required')
+              download=urllib.request.Request(matches[0]['archive_download_url'],headers={'Authorization':'Bearer '+token})
+              class DropAuthorization(urllib.request.HTTPRedirectHandler):
+                  def redirect_request(self,request,*args,**kwargs):
+                      redirected=super().redirect_request(request,*args,**kwargs)
+                      if redirected is not None and urllib.parse.urlsplit(redirected.full_url).netloc!=urllib.parse.urlsplit(request.full_url).netloc:
+                          redirected.remove_header('Authorization')
+                      return redirected
+              with urllib.request.build_opener(DropAuthorization()).open(download,timeout=30) as response:raw=response.read(65537)
+              if len(raw)>65536:raise SystemExit('Manifest archive exceeded limit')
+              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                  if archive.namelist()!=['manifest.json'] or archive.getinfo('manifest.json').file_size>32768:
+                      raise SystemExit('Unexpected publication artifact')
+                  manifest=json.loads(archive.read('manifest.json'))
+              sha=manifest['sha']
+              if (matches[0]['name']!='oko-release-'+sha or not re.fullmatch('[0-9a-f]{40}',sha)
+                  or not re.fullmatch('ghcr.io/tgenman/oko-runtime@sha256:[0-9a-f]{64}',manifest['image'])):
+                  raise SystemExit('Invalid immutable release identity')
+              checks=get('repos/'+repo+'/actions/runs?event=push&head_sha='+sha+'&per_page=100')
+              if not any(r['name']=='Checks' and r['head_branch']=='main' and r['conclusion']=='success'
+                         and r['head_repository']['full_name']==repo for r in checks['workflow_runs']):
+                  raise SystemExit('This exact main commit has no successful Checks run')
+              compare=get('repos/'+repo+'/compare/'+sha+'...main')
+              if compare['status'] not in ('identical','ahead'):raise SystemExit('Release commit is not on main')
+              request['manifest']=manifest
+          elif operation!='rollback':raise SystemExit('Unsupported operation')
+          path=pathlib.Path(os.environ['RUNNER_TEMP'])/'oko-deploy-request.json'
+          path.write_text(json.dumps(request));path.chmod(0o600)
+          PY
+      - name: Deliver through the dedicated forced-command SSH principal
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          DEPLOY_KEY: ${{ secrets.OKO_DEPLOY_SSH_KEY }}
+          HOST_KEY: ${{ secrets.OKO_SSH_KNOWN_HOSTS }}
+        run: |
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,tempfile,urllib.request
+          os.umask(0o077)
+          path=pathlib.Path(os.environ['RUNNER_TEMP'])/'oko-deploy-request.json'
+          request=json.loads(path.read_text())
+          if request['action']=='deploy':
+              token=os.environ['GH_TOKEN']
+              package=urllib.request.Request('https://api.github.com/users/tgenman/packages/container/oko-runtime',headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(package,timeout=30) as response:
+                  if json.load(response)['visibility']!='private':raise SystemExit('Runtime package must remain private')
+              basic=base64.b64encode((os.environ['GH_ACTOR']+':'+token).encode()).decode()
+              authorization=urllib.request.Request('https://ghcr.io/token?service=ghcr.io&scope=repository:tgenman/oko-runtime:pull',headers={'Authorization':'Basic '+basic})
+              with urllib.request.urlopen(authorization,timeout=30) as response:request['registry_token']=json.load(response)['token']
+          with tempfile.TemporaryDirectory(prefix='oko-deploy-',dir=os.environ['RUNNER_TEMP']) as temporary:
+              private=pathlib.Path(temporary)/'key';known=pathlib.Path(temporary)/'known_hosts'
+              private.write_text(os.environ['DEPLOY_KEY'].rstrip()+'\n');private.chmod(0o600)
+              known.write_text(os.environ['HOST_KEY'].rstrip()+'\n');known.chmod(0o600)
+              completed=subprocess.run(['ssh','-T','-i',str(private),'-o','IdentitiesOnly=yes','-o','BatchMode=yes',
+                  '-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(known),'-o','ConnectTimeout=20',
+                  '-o','ServerAliveInterval=15','-o','ServerAliveCountMax=4','oko-deploy@201.79.3.253'],
+                  input=json.dumps(request),text=True,capture_output=True,timeout=2100)
+              report=pathlib.Path(os.environ['RUNNER_TEMP'])/'oko-deploy-result.txt'
+              report.write_text(completed.stdout+completed.stderr)
+              print(completed.stdout,end='')
+              if completed.returncode:raise SystemExit('Server deployment failed; inspect the sanitized result artifact')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oko-deployment-result-${{ github.run_id }}
+          path: ${{ runner.temp }}/oko-deploy-result.txt
+          if-no-files-found: ignore
+      - name: Remove request metadata
+        if: always()
+        run: rm -f "$RUNNER_TEMP/oko-deploy-request.json"
