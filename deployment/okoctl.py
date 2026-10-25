@@ -204,6 +204,7 @@ def certificate_version(cert, key, root=ROOT):
     versions=root/'tls/versions'
     versions.mkdir(parents=True,exist_ok=True,mode=0o750)
     os.chown(versions,0,10001)
+    versions.chmod(0o750)
     target=versions/revision
     if not target.exists():
         temporary=Path(tempfile.mkdtemp(dir=versions,prefix='.cert-'))

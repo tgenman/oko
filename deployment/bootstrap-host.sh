@@ -27,8 +27,9 @@ test "${compose_version%%+*}" = 2.40.3
 if ! getent group oko-ipc >/dev/null; then groupadd --gid 20001 oko-ipc; fi
 test "$(getent group oko-ipc | cut -d: -f3)" = 20001
 if ! id okocodex >/dev/null 2>&1; then
-  useradd --system --gid oko-ipc --home-dir /var/lib/oko-codex --shell /usr/sbin/nologin okocodex
+  useradd --system --uid 20002 --gid oko-ipc --home-dir /var/lib/oko-codex --shell /usr/sbin/nologin okocodex
 fi
+test "$(id -u okocodex)" = 20002
 if ! command -v uv >/dev/null; then
   python3 -m venv /opt/oko-bootstrap
   /opt/oko-bootstrap/bin/pip install uv==0.11.28
