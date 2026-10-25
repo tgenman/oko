@@ -141,7 +141,9 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
         item=settled(client)[0]['id']
-        row=wait_for(client,lambda:r if (r:=stored(root,item))['status']=='ready' else None)
+        wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['result'])
+        row=stored(root,item)
+        assert row['status']=='ready'
         assert row['summarized_content']=={'points':[],'extra':{}}
         assert row['filtered_content']['blocks']==[] and row['filtered_content']['removed']==[]
         assert row['processing_metadata']['filter']['reason']=='no_input'
@@ -439,7 +441,8 @@ def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
         card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
         item,feed=card['id'],card['feed_id']
         client.patch('/api/v3/settings/feed/'+feed,json={'theses':False,'prompt_filters':''})
-        row=stored(root,item)
+        assert client.get('/api/v3/materials/'+item).json()['theses']['result'] is None
+        row=wait_for(client,lambda:r if (r:=stored(root,item))['status']=='ready' and r['filtered_content']=={} and r['summarized_content']=={} else None)
         assert row['status']=='ready' and row['filtered_content']=={} and row['summarized_content']=={}
         def configs():
             with sqlite3.connect(root/'state.sqlite') as db:
@@ -453,7 +456,8 @@ def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
         client.patch('/api/v3/settings/feed/'+feed,json={'theses':False,'prompt_filters':''})
         count=len(calls)
         client.patch('/api/v3/settings/feed/'+feed,json={'prompt_filters':'Only filtering'})
-        wait_for(client,lambda:stored(root,item)['filtered_content'])
+        wait_for(client,lambda:any(card['id']==item and card['filter']['attempt']['state']=='ready'
+                                   for card in client.get('/api/v3/cards').json()))
         assert [c['operation'] for c in calls[count:]]==['filter']
         assert stored(root,item)['summarized_content']=={}
         count=len(calls)

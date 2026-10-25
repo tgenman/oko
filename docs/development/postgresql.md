@@ -4,6 +4,56 @@ Oko keeps the local SQLite backend and supports PostgreSQL for a cloud reader.
 The HTTP contract, reader versions, three workers and file lifetime are shared.
 There is no automatic SQLite-to-PostgreSQL import or fallback on database errors.
 
+## Explicit offline SQLite import
+
+Stop both readers, preserve consistent source and target backups, and prepare a
+new empty schema with the release migrations above. Use the schema owner's
+private DSN, not the runtime reader's restricted credential:
+
+```sh
+python -m oko.storage.import_sqlite --source /private/stopped-source-snapshot \
+  --target-data /srv/oko/new-library --database-url-file /run/secrets/migrator-dsn \
+  --report /private/import-report.json
+```
+
+The source must have its existing unlocked `instance.lock` and current publication
+schema. The importer refuses live readers, populated target schemas, existing
+target directories/reports, symlinks, special files and incompatible table/column
+sets. It never switches a running installation. It imports the complete logical
+tables and reader projections under the schema lease and a single transaction,
+preserves insertion identities and sequence allocation, and disables work before
+startup. Source and copied media hashes and per-table counts/checksums are checked.
+
+Regular source files are copied privately, except the SQLite database/sidecars,
+instance lock and runtime address/token metadata. Browser/reader account files are
+included: explicitly retain the destination's separately backed-up access files
+before activation when preserving server login is required. Codex host auth is
+outside this library and is not copied. Check absolute paths and portability of
+Telegram/client settings before enabling work.
+
+A private `migration-archive/state.sqlite` preserves the complete source database,
+including historical `migration_retired_rows`; those historical rows are reported
+as archived rather than silently discarded or loaded into the live schema.
+The known legacy tables `content_current`, `content_versions`, `filter_restores`,
+`retained_theses`, `telegram_read_topics` and `youtube_attempts` are accepted only
+when empty; their schemas remain in that archive and zero counts in the report.
+Any rows in those tables refuse import rather than hiding live data in an archive.
+The legacy `feeds.telegram_topic` column is accepted only if every value is NULL;
+its schema is retained in the full SQLite archive and named in `archived_columns`.
+A non-NULL topic or any other unknown column refuses import.
+Only `reader_feed_counts` rows with a NULL `feed` are archived instead of loaded:
+these derived rows cannot join an authoritative feed ID or contribute to reader
+navigation/folder counts. The complete SQLite archive retains their original
+values; `archived_row_counts` and each table's `source_rows`/`rows` make the
+transformation explicit. Counts for actual feeds follow existing Store recovery.
+Other invalid rows or NULL constraints are not normalized or silently omitted.
+Unknown tables are refused. The source is unchanged. The report and archive may
+contain private metadata; do not publish them unredacted. After interruption,
+reconcile the prepared directory, transaction outcome and receipt before retrying;
+there is no cross-filesystem/database atomic commit or automatic replacement of a
+partially attempted target. Keep the original installation and backups until HTTP
+and browser acceptance and the explicit operator switch have passed.
+
 ## Data ownership
 
 Publication text, structured content, processing results, subscriptions, reader
@@ -60,6 +110,22 @@ the local SQLite first-start option; restarting a PostgreSQL reader preserves
 its saved power state.
 
 ## Transactions and SQL
+
+The Store owns an in-memory snapshot of global, folder and feed setting overrides,
+Codex/llama.cpp configuration, and the processing-related feed fields (kind,
+folder, importance, public-AI permission and transport). Each snapshot is loaded
+once when its owner opens. Configuration writes update SQL and memory together
+under the connection lock; rollback restores previous memory values in reverse
+order. A failed rollback discards the SQL connection before undoing memory. A
+new Store loads committed state again. Dynamic feed progress and description
+remain ordinary live data, and reader revision counters remain freshness facts.
+Maintenance that edits configuration directly in SQL must reopen the Store.
+
+PostgreSQL trigger clocks are set once when a write transaction begins, including
+its derived projection flush. Plain reads do not send clock-setting SQL. This
+makes time consistent within the write operation and refreshes it at the next
+transaction. No SQL transaction is retained while background recovery yields
+to HTTP requests or waits for external work.
 
 `storage/database.py` defines the row/cursor and transaction boundary. The
 PostgreSQL adapter keeps plain reads outside transactions and joins repository

@@ -21,7 +21,9 @@ class ReadingConnection(sqlite3.Connection):
     transaction_depth: int = 0
     transaction_failed: bool = False
     commit_callbacks: list[Callable[[], None]] | None = None
+    rollback_callbacks: list[Callable[[], None]] | None = None
     _access_lock: RLock | None = None
+    _closed: bool = False
 
     @property
     def access_lock(self) -> RLock:
@@ -43,6 +45,13 @@ class ReadingConnection(sqlite3.Connection):
 
     before_commit: Callable[[], None] | None = None
 
+    def after_rollback(self, callback: Callable[[], None]) -> None:
+        if not self.in_transaction:
+            raise RuntimeError('Rollback callback requires an active transaction')
+        if self.rollback_callbacks is None:
+            self.rollback_callbacks = []
+        self.rollback_callbacks.append(callback)
+
     def flush(self) -> None:
         if self.in_transaction and self.before_commit is not None:
             self.before_commit()
@@ -57,6 +66,7 @@ class ReadingConnection(sqlite3.Connection):
             self.rollback()
             raise
         callbacks, self.commit_callbacks = self.commit_callbacks or [], None
+        self.rollback_callbacks = None
         for callback in callbacks:
             callback()
 
@@ -64,10 +74,25 @@ class ReadingConnection(sqlite3.Connection):
         if self.transaction_depth:
             self.transaction_failed = True
             return
-        super().rollback()
-        self.commit_callbacks = None
-        self.membership_feeds = set()
-        self.membership_folders = set()
+        try:
+            super().rollback()
+        except BaseException as error:
+            # A failed rollback must never leave SQL that could later commit
+            # after the corresponding in-memory values have been undone.
+            try:
+                super().close()
+            except BaseException as close_error:
+                raise error from close_error
+            finally:
+                self._closed = True
+            raise
+        finally:
+            self.commit_callbacks = None
+            callbacks, self.rollback_callbacks = self.rollback_callbacks or [], None
+            self.membership_feeds = set()
+            self.membership_folders = set()
+            for callback in reversed(callbacks):
+                callback()
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> Literal[False]:
         try:
@@ -78,6 +103,21 @@ class ReadingConnection(sqlite3.Connection):
         finally:
             self.access_lock.release()
         return False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            # sqlite3.close rolls back its pending transaction itself.
+            super().close()
+        finally:
+            self._closed = True
+            callbacks, self.rollback_callbacks = self.rollback_callbacks or [], None
+            self.commit_callbacks = None
+            self.membership_feeds = set()
+            self.membership_folders = set()
+            for callback in reversed(callbacks):
+                callback()
 
     def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
         if self.transaction_depth:

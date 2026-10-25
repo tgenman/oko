@@ -1,8 +1,8 @@
 from oko.storage.database import INTEGRITY_ERRORS
 from oko.storage.sqlite_schema import is_sqlite
-from oko.storage.database import expect_row, Database, Row
-from oko.storage import material_read
+from oko.storage.database import expect_row, Connection, Row
 from oko.storage.reading import reading_value
+from oko.storage.settings_cache import SettingsCache
 import json
 import re
 import secrets
@@ -18,7 +18,7 @@ from oko.subscriptions.details import FeedDetails
 from oko.subscriptions.subscriptions import AddFeed, Overrides, FeedPatch, key, identify, FolderConflict, DEFAULT_FEED_REFRESH_MINUTES, DEFAULTS
 
 class SubscriptionRepository:
-    def __init__(self, db: Database, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, db: Connection, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
         self._feed_batch: dict[str,dict[str,Any]] | None=None
         self.db = db
         self.history = History(db)
@@ -36,6 +36,7 @@ class SubscriptionRepository:
               PRIMARY KEY(scope,owner,field));
             ''')
 
+        self.settings = SettingsCache(db)
         self.details = FeedDetails(db, wall_clock)
         self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
 
@@ -81,6 +82,7 @@ class SubscriptionRepository:
             self.db.execute("INSERT OR IGNORE INTO folders VALUES ('demo','Тестовый источник',-1)")
             inserted = self.db.execute("INSERT OR IGNORE INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport) VALUES ('demo','demo','Тестовый источник','demo','demo','[]','connected','demo')")
             if inserted.rowcount:
+                self.settings.refresh_feed('demo')
                 self.details.created('demo')
 
     @reading_value
@@ -116,7 +118,7 @@ class SubscriptionRepository:
             self.check_owner('folder', identity)
             if self.db.execute('SELECT 1 FROM feeds WHERE folder_id=? LIMIT 1', (identity,)).fetchone():
                 raise FolderConflict('folder_not_empty', 'Move or delete all feeds before deleting this folder.')
-            self.db.execute("DELETE FROM settings WHERE scope='folder' AND owner=?", (identity,))
+            self.clear_settings('folder', identity)
             self.db.execute('DELETE FROM folders WHERE id=?', (identity,))
 
     @reading_value
@@ -203,6 +205,7 @@ class SubscriptionRepository:
             self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,public_ai)
                             VALUES (?,?,?,?,?,?,?,?,?)''',
                             (identity_id, identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
+            self.settings.refresh_feed(identity_id)
             self.details.created(identity_id)
             self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
@@ -222,19 +225,17 @@ class SubscriptionRepository:
             raise LookupError('Настройка не найдена')
 
     def feed_refresh_minutes(self) -> int:
-        row = self.db.execute("SELECT value FROM settings WHERE scope='oko' AND owner='global' AND field='feed_refresh_minutes'").fetchone()
-        return int(json.loads(row['value'])) if row else DEFAULT_FEED_REFRESH_MINUTES
+        return int(self._settings('oko', 'global').get('feed_refresh_minutes', DEFAULT_FEED_REFRESH_MINUTES))
 
     def telegram_http_settings(self) -> dict[str, Any]:
-        row = self.db.execute("SELECT value FROM settings WHERE scope='oko' AND owner='global' AND field='telegram_http_rps'").fetchone()
-        return dict(value=float(json.loads(row['value'])) if row else 2.,
-                    origin=dict(scope='oko', owner='global') if row else dict(scope='default'))
+        values = self._settings('oko', 'global')
+        return dict(value=float(values.get('telegram_http_rps', 2.)),
+                    origin=dict(scope='oko', owner='global') if 'telegram_http_rps' in values else dict(scope='default'))
 
     def retry_settings(self) -> dict[str, int]:
-        values = dict(initial_seconds=60, max_seconds=3600)
-        for row in self.db.execute("SELECT field,value FROM settings WHERE scope='oko' AND owner='global' AND field IN ('retry_initial_seconds','retry_max_seconds')"):
-            values[row['field'].removeprefix('retry_')] = int(json.loads(row['value']))
-        return values
+        values = self._settings('oko', 'global')
+        return dict(initial_seconds=int(values.get('retry_initial_seconds', 60)),
+                    max_seconds=int(values.get('retry_max_seconds', 3600)))
 
     def validate_retry_settings(self, patch: dict[str, Any]) -> None:
         effective = self.retry_settings()
@@ -247,29 +248,20 @@ class SubscriptionRepository:
             raise ValueError('Максимальная задержка должна быть не меньше начальной')
 
     @reading_value
-    def _settings(self, scope: str, owner: str) -> list[Row]:
-        return material_read.settings(self.db,scope,owner)
+    def _settings(self, scope: str, owner: str) -> dict[str, Any]:
+        return self.settings.values(scope, owner)
 
     @reading_value
     def effective(self, scope: str, owner: str, *, details: bool = True) -> dict[str, Any]:
         if details or scope != 'feed':
             self.check_owner(scope, owner)
-        feed = (self._feed(owner) if details else material_read.feed(self.db,owner)) if scope == 'feed' else None
+        feed = (self._feed(owner) if details else self.settings.feed_values(owner)) if scope == 'feed' else None
         return self._effective_value(scope,owner,feed)
 
     def effective_feeds(self) -> dict[str,dict[str,Any]]:
-        feeds=self.feeds()
-        identities=json.dumps([feed['id'] for feed in feeds])
-        folders=json.dumps(list({feed['folder_id'] for feed in feeds}))
-        settings: dict[tuple[str,str],list[Row]]={}
-        for row in self.db.execute("""SELECT scope,owner,field,value FROM settings WHERE (scope='oko' AND owner='global')
-                OR (scope='feed' AND owner IN (SELECT value FROM json_each(?)))
-                OR (scope='folder' AND owner IN (SELECT value FROM json_each(?)))""",(identities,folders)):
-            settings.setdefault((row['scope'],row['owner']),[]).append(row)
-        return {feed['id']:self._effective_value('feed',feed['id'],feed,settings) for feed in feeds}
+        return {feed['id']:self._effective_value('feed',feed['id'],feed) for feed in self.feeds()}
 
-    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None,
-                         settings: dict[tuple[str,str],list[Row]] | None = None) -> dict[str,Any]:
+    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None) -> dict[str,Any]:
         chain = [('oko', 'global')]
         if scope == 'feed':
             assert feed is not None
@@ -283,13 +275,12 @@ class SubscriptionRepository:
             values['theses']['value'] = True
         overrides = {}
         for level, identity in chain:
-            for row in self._settings(level,identity) if settings is None else settings.get((level,identity),[]):
-                if row['field'] not in defaults:
+            for field, value in self._settings(level,identity).items():
+                if field not in defaults:
                     continue
-                value = json.loads(row['value'])
-                values[row['field']] = dict(value=value, scope=level, owner=identity)
+                values[field] = dict(value=value, scope=level, owner=identity)
                 if (level, identity) == (scope, owner):
-                    overrides[row['field']] = value
+                    overrides[field] = value
         result: dict[str,Any] = dict(effective=values, overrides=overrides)
         if scope == 'feed':
             assert feed is not None
@@ -300,17 +291,15 @@ class SubscriptionRepository:
         self.check_owner(scope, owner)
         self.validate_retry_settings(patch.model_dump(exclude_unset=True))
         with self.db:
-            before = list(self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=? ORDER BY field', (scope, owner)))
-            for field, value in patch.model_dump(exclude_unset=True).items():
-                if value is None:
-                    self.db.execute('DELETE FROM settings WHERE scope=? AND owner=? AND field=?', (scope, owner, field))
-                else:
-                    self.db.execute('INSERT INTO settings VALUES (?,?,?,?) ON CONFLICT(scope,owner,field) DO UPDATE SET value=excluded.value',
-                                    (scope, owner, field, json.dumps(value)))
-            after = list(self.db.execute('SELECT field,value FROM settings WHERE scope=? AND owner=? ORDER BY field', (scope, owner)))
+            before = self.settings.values(scope, owner)
+            self.settings.patch(scope, owner, patch.model_dump(exclude_unset=True))
+            after = self.settings.values(scope, owner)
             if scope == 'feed' and before != after:
                 self.details.record(owner, 'modified')
         return self.effective(scope, owner)
+
+    def clear_settings(self, scope: str, owner: str) -> None:
+        self.settings.clear(scope, owner)
 
     def youtube_theses(self, feed_id: str) -> bool:
         settings = self.effective('feed', feed_id, details=False)
@@ -354,6 +343,8 @@ class SubscriptionRepository:
             changed = any(feed.get(field) != value for field, value in values.items())
             for field, value in values.items():
                 self.db.execute(f'UPDATE feeds SET {field}=? WHERE id=?', (value, feed_id))
+            if {'folder_id', 'importance', 'public_ai', 'transport'}.intersection(values):
+                self.settings.refresh_feed(feed_id)
             if 'transport' in values and values['transport'] != feed['transport']:
                 connection = 'ambiguous' if feed['kind'] == 'unresolved' and transport is None else 'needs_connection'
                 self.db.execute('UPDATE feeds SET connection=? WHERE id=?', (connection, feed_id))

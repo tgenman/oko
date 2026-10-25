@@ -14,7 +14,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from typing import Any
 
 from oko.storage.publications import Publications, PUBLICATION_COLUMNS
@@ -64,7 +64,7 @@ class Store:
             self.publications.changed_adapter(feed)
         return result
 
-    def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None) -> None:
+    def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None, defer_recovery: bool = False) -> None:
         self.root, self.fault = root, fault
         self.wall_clock = wall_clock
         self.clock = clock
@@ -134,13 +134,80 @@ class Store:
                 self.subscriptions.ensure_demo()
             self.read_versions = ReaderVersions(self)
             self.subscriptions.watch_configuration()
-            self.processing.recover()
-            with self.db:self.jobs.backfill_processing_inputs()
-            self.read_sync.recover()
+            self.read_sync.install()
+            self.processing.background = defer_recovery
+            self.processing.recovering = True
+            self._recovery: Generator[None,None,None] | None = self._recover_steps(reconcile_stages=defer_recovery)
+            if not defer_recovery:
+                while self.recover_step():
+                    pass
         except BaseException:
             if hasattr(self, 'db'):
                 self.db.close()
             raise
+
+    def _recover_steps(self, *, reconcile_stages: bool) -> Generator[None,None,None]:
+        initial = True
+        while True:
+            yield from self.processing.recovery_steps(seed=initial)
+            initial = False
+            yield from self.jobs.backfill_processing_steps()
+            yield from self.jobs.sync_reads_steps()
+            if reconcile_stages:
+                # The host must not hand a full startup queue to the first
+                # synchronous worker tick after the reader is already serving.
+                yield from self._prepare_processing_steps()
+            # User commands may have changed settings or membership between steps.
+            if (not self.processing.pending()
+                    and self.read_sync._configuration == self.subscriptions.source_revision()):
+                break
+        self.processing.recovering = False
+
+    def _prepare_processing_steps(self) -> Generator[None,None,None]:
+        from oko.storage.processing_state import ProcessingRepository
+        from oko.storage.reading import reading_snapshot
+        from oko.domain.processing import Kind
+        stages: tuple[Kind, ...] = ('filter','theses')
+        processing = ProcessingRepository(self)
+        for kind in stages:
+            while True:
+                with self.db:
+                    with reading_snapshot():
+                        candidates = [(item, signature, processing.satisfied(item,kind), processing.revision(item))
+                                      for item,signature in processing.candidates(kind, limit=1)]
+                    if not candidates:
+                        break
+                    self.jobs.reconcile(kind, candidates)
+                yield
+
+    def _reconcile_steps(self) -> Generator[None,None,None]:
+        """Runtime changes use the same bounded owner without repeating startup scans."""
+        while True:
+            yield from self.processing.recovery_steps(seed=False)
+            yield from self.jobs.sync_reads_steps()
+            yield from self._prepare_processing_steps()
+            if not self.processing.pending(stages=True) and not self.read_sync.pending():
+                break
+        self.processing.recovering = False
+
+    def recover_step(self) -> bool:
+        """Advance owned recovery without leaving an SQL transaction open."""
+        if self._recovery is None:
+            if not self.processing.background or not (self.processing.pending(stages=True) or self.read_sync.pending()):
+                return False
+            self._recovery = self._reconcile_steps()
+        try:
+            next(self._recovery)
+            return True
+        except StopIteration:
+            self._recovery = None
+            return False
+
+    def close_recovery(self) -> None:
+        """Stop iteration without consuming or discarding durable dirty markers."""
+        if self._recovery is not None:
+            self._recovery.close()
+            self._recovery = None
 
     def recover_files(self) -> None:
         # No uncommitted publication/file output is promoted on restart.
@@ -559,24 +626,24 @@ class Store:
             self.db.execute("INSERT INTO state VALUES ('work-enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('true' if enabled else 'false',))
 
     def codex_config(self) -> CodexSettings | None:
-        row = self.db.execute("SELECT value FROM state WHERE key='processor:codex'").fetchone()
-        return CodexSettings.model_validate_json(row[0]) if row else None
+        value = self.subscriptions.settings.state_value('processor:codex')
+        return CodexSettings.model_validate_json(value) if value else None
 
     def configure_codex(self, config: CodexSettings) -> None:
         # Future execution choice does not invalidate inputs or cancel work.
         with self.db:
-            self.db.execute("INSERT INTO state VALUES ('processor:codex',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
+            self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
 
     @reading_value
     def processor_config(self) -> ProcessorConfig | None:
-        value = material_read.state(self.db,'processor:llamacpp')
+        value = self.subscriptions.settings.state_value('processor:llamacpp')
         return ProcessorConfig.model_validate_json(value) if value else None
 
     def configure_processor(self, config: ProcessorConfig) -> bool:
         if self.processor_config() == config:
             return False
         with self.db:
-            self.db.execute("INSERT INTO state VALUES ('processor:llamacpp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (config.model_dump_json(),))
+            self.subscriptions.settings.set_state('processor:llamacpp', config.model_dump_json())
         self.settings_changed()
         return True
 

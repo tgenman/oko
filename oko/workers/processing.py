@@ -25,40 +25,44 @@ class ProcessingWorker:
 
     async def run(self) -> None:
         while not self.execution.stopped:
+            active = False
             try:
-                await self.tick()
+                active = await self.tick()
             except Exception:
                 record_caught('Крон '+self.kind)
-            await asyncio.sleep(.02)
+            await asyncio.sleep(.02 if active else .1)
 
-    async def tick(self) -> None:
+    async def tick(self) -> bool:
         async with self.execution._actions:
             store=self.execution._store
             if store is None or not self.execution._live() or self.tasks._cancelling:
-                return
+                return False
             jobs=JobRepository(store)
-            with jobs.transaction(self.execution._live):
-                if not self.execution._live():
-                    return
-                self.service.reconcile()
-                jobs.reconcile(self.kind,self.service.candidates(self.kind))
+            if not store.processing.background:
+                with jobs.transaction(self.execution._live):
+                    if not self.execution._live():
+                        return False
+                    self.service.reconcile()
+                    jobs.reconcile(self.kind,self.service.candidates(self.kind))
             if self.tasks._ai and self.tasks._ai.done():
                 if not self.tasks._ai.cancelled():
                     await self.tasks._ai
                 self.tasks._ai=None
-            if self.tasks._ai or self.tasks._detached_ai or jobs.deleting():
-                return
+            if self.tasks._ai or self.tasks._detached_ai:
+                return True
+            if jobs.deleting():
+                return False
             with jobs.transaction(self.execution._live):
                 if not self.execution._live():
-                    return
+                    return False
                 job=jobs.claim_processing(self.kind,self.clock())
                 if job is None:
-                    return
+                    return False
                 prepared=self.service.prepare(job.item,self.kind)
                 work=prepared.input
                 if work is None:
                     jobs.cancel(job)
-                    return
+                    return True
                 # Snapshot and successful claim are committed together.
                 request=work.request.model_copy(update={'generation':job.generation})
                 origin=jobs.origin(job,work.signature)
@@ -76,6 +80,7 @@ class ProcessingWorker:
                 work=ProcessingInput(work.item,work.kind,work.signature,work.revision,request,work.public_ai,work.no_input)
                 self.tasks._ai_feed=self.service.feed(job.item)
             self.tasks._ai=asyncio.create_task(self.execute_attempt(store,job,work,origin))
+            return True
 
     def current(self, store: Store, jobs: JobRepository, job: Job, work: ProcessingInput) -> bool:
         return (self.execution._store is store and self.execution._live() and jobs.valid(job) and self.service.current(work))

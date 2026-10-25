@@ -159,6 +159,7 @@ class TelegramAccess:
                 (identity, 'telegram-instance:' + identity, info['title'], folder_id, json.dumps([source]),
                  'telegram' if profile else None, info.get('peer'), profile['account'] if profile else None,
                  info.get('username'), auto_read if profile else None))
+            subscriptions.settings.refresh_feed(identity)
             subscriptions.details.created(identity)
             subscriptions.details.description(identity, info.get('description'))
             self.put_binding(identity, binding)
@@ -201,6 +202,7 @@ class TelegramAccess:
             connection='connected',auto_read=?,config=?,cursor='' WHERE id=?''',
             (info.get('peer',known_peer),account,info.get('username'), 'telegram' if profile else None,automatic,
              json.dumps(dict(source_kind=info.get('kind','channel'))),feed))
+        subscriptions.settings.refresh_feed(feed)
         self.save_metadata(feed,info)
         for claim in self.claims(info):
             self.claim(feed,claim,'explicit access change')

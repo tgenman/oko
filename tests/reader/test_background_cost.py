@@ -32,9 +32,19 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
     app = create_app(tmp_path, token='test', api_only=True)
     with TestClient(app, headers=HEADERS) as client:
         assert client.get('/api/v3/reading-composition').json()['count'] == 4 * count
-        time.sleep(.15)
         queries = []
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
+        # HTTP is ready before the initial reconciliation finishes. Observe its
+        # completion at the database boundary before measuring steady-state cost;
+        # the readiness/latency contract is tested separately with slow SQL.
+        for _ in range(10):
+            queries.clear()
+            time.sleep(.65)
+            if len(queries) < 1000 and not any('SELECT id FROM items WHERE viewed=0' in q for q in queries):
+                break
+        else:
+            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries')
+        queries.clear()
         time.sleep(.65)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
         # Include background dispatch/presence work, independently of content size.
@@ -106,6 +116,32 @@ def test_pending_dispatch_ignores_completed_archive_and_keeps_priorities(tmp_pat
     assert deletion.kind == 'delete' and discovery.kind == 'discover'
     assert len(steps) < 3000, len(steps)
     store.db.close()
+
+
+@pytest.mark.parametrize('saved_inputs', [0, 1])
+def test_processing_backfill_does_not_scan_unrelated_completed_archive(tmp_path, saved_inputs):
+    store = Store(tmp_path, lambda _: None)
+    try:
+        with store.db:
+            store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",
+                                [(f'old-{n}',) for n in range(20000)])
+            if saved_inputs:
+                store.db.execute("INSERT INTO filter_inputs VALUES ('synthetic-saved-input','synthetic-signature')")
+            store.db.execute('ANALYZE')
+            # Linux CI SQLite has no STAT4 histogram. Reproduce its planner
+            # information on builds that provide the optional extension.
+            if store.db.execute("SELECT 1 FROM sqlite_master WHERE name='sqlite_stat4'").fetchone():
+                store.db.execute('DELETE FROM sqlite_stat4')
+                store.db.execute('ANALYZE sqlite_schema')
+        steps = []
+        store.db.set_progress_handler(lambda: steps.append(1) or 0, 100)
+        try:
+            store.jobs.backfill_processing_inputs()
+        finally:
+            store.db.set_progress_handler(None, 0)
+        assert len(steps)*100 < 1000, 'Backfill scanned completed jobs without matching saved inputs'
+    finally:
+        store.db.close()
 
 
 

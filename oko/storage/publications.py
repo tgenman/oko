@@ -4,6 +4,7 @@ All supported sources use the same current storage.
 """
 from oko.storage.sqlite_schema import is_sqlite
 from oko.storage.database import expect_row
+from oko.storage.reading import reading_snapshot
 from copy import deepcopy
 from datetime import datetime, timezone
 from oko.storage import processing_input as publication_input
@@ -407,16 +408,20 @@ class Publications:
             self.store.db.execute('UPDATE items SET filtered_content=? WHERE id=?',(json.dumps(filtered,ensure_ascii=False),item))
 
     def status(self, item: str) -> None:
-        row = self.store.db.execute('SELECT * FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone()
-        if not row or row['content']=='{}':
-            return
+        status = self._status_change(item)
+        if status is not None:
+            self.store.db.execute('UPDATE items SET status=? WHERE id=?', (status, item))
+
+    @reading_snapshot()
+    def _status_change(self, item: str) -> str | None:
+        row = material_read.item(self.store.db,item)
+        if not row or row['platform'] is None or row['content']=='{}':
+            return None
         if row['feed_id'] is None:
-            self.store.db.execute("UPDATE items SET status='ready' WHERE id=?",(item,))
-            return
+            return 'ready' if row['status'] != 'ready' else None
         selected=publication_input.content(self.store,item)
         if publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
-            self.store.db.execute("UPDATE items SET status='pending_collection' WHERE id=?",(item,))
-            return
+            return 'pending_collection' if row['status'] != 'pending_collection' else None
         filtered = self.store.filters.read(item)
         jobs={r['kind']:r['status'] for r in self.store.db.execute("SELECT kind,status FROM jobs WHERE item=? AND kind IN ('filter','theses')",(item,))}
         if filtered['status'] not in ('off', 'done') or self.store.filters.signature(item) and jobs.get('filter') in ('pending','running'):
@@ -427,22 +432,23 @@ class Publications:
             status = 'pending_summary'
         else:
             status = 'ready'
-        self.store.db.execute('UPDATE items SET status=? WHERE id=?', (status, item))
+        return status if row['status'] != status else None
 
     def reconcile(self, item: str) -> bool:
-        row = self.store.db.execute('SELECT processing_metadata,feed_id,viewed FROM items WHERE id=? AND platform IS NOT NULL', (item,)).fetchone()
-        if row is None:
-            return False
+        # Reuse input facts only while computing; writes occur outside snapshots.
+        with reading_snapshot():
+            row = material_read.item(self.store.db,item)
+            if row is None or row['platform'] is None:
+                return False
+            signatures = (('filter', 'filter', 'filtered_content', self.store.filters.signature(item)),
+                          ('theses', 'summary', 'summarized_content', self.store.processing.theses.signature(item)))
+            current = publication_input.input_hash(self.store,item) if row['feed_id'] is not None and not row['viewed'] else None
         metadata = json.loads(row['processing_metadata'])
-        for kind, operation, column, signature in (
-            ('filter', 'filter', 'filtered_content', self.store.filters.signature(item)),
-            ('theses', 'summary', 'summarized_content', self.store.processing.theses.signature(item)),
-        ):
+        for kind, operation, column, signature in signatures:
             if operation in metadata and metadata[operation].get('signature',metadata[operation].get('input_hash')) != signature:
                 metadata.pop(operation)
-                self.store.db.execute(f"UPDATE items SET {column}='{{}}' WHERE id=?", (item,))
+                self.store.db.execute(f"UPDATE items SET {column}='{{}}' WHERE id=? AND {column} IS NOT '{{}}'", (item,))
         if row['feed_id'] is not None and not row['viewed']:
-            current=publication_input.input_hash(self.store,item)
             if metadata.get('_revision_input')!=current:
                 metadata['_revision_input']=current
                 metadata['_revision']=str(uuid4())
@@ -450,9 +456,15 @@ class Publications:
             metadata.pop('_revision',None)
             metadata.pop('_revision_input',None)
             metadata.pop('_pass',None)
-        self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?', (json.dumps(metadata, ensure_ascii=False), item))
-        self.store.read_versions.sync_filter(item,bool(self.store.filters.read(item)['hidden']))
-        self.status(item)
+        encoded = json.dumps(metadata, ensure_ascii=False)
+        if encoded != row['processing_metadata']:
+            self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?', (encoded, item))
+        with reading_snapshot():
+            hidden = bool(self.store.filters.read(item)['hidden'])
+            status = self._status_change(item)
+        self.store.read_versions.sync_filter(item,hidden)
+        if status is not None:
+            self.store.db.execute('UPDATE items SET status=? WHERE id=?', (status, item))
         return True
 
     def prune(self, item: str) -> None:

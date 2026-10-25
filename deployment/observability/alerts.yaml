@@ -66,3 +66,12 @@ groups:
         expr: oko_backup_last_attempt_result{result="error"} == 1
         labels: {severity: critical}
         annotations: {summary: 'The latest backup attempt failed'}
+      - alert: OkoLogDeliveryFailed
+        expr: sum(increase({__name__=~"otelcol_exporter_(send|enqueue)_failed_log_records(_total)?"}[5m])) > 0
+        labels: {severity: critical}
+        annotations: {summary: 'Log exporter permanently failed or could not enqueue records'}
+      - alert: OkoLogQueuePressure
+        expr: max(otelcol_exporter_queue_size{data_type="logs"} / otelcol_exporter_queue_capacity{data_type="logs"}) > 0.8
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Persistent log queue is more than 80 percent full'}

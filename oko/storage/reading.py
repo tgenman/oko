@@ -1,6 +1,6 @@
-"""Reuse saved facts only during one synchronous reader projection.
+"""Reuse saved facts only during one synchronous read-only calculation.
 
-No values survive a projection or an action. The caller must not mutate storage
+No values survive the calculation. The caller must not mutate storage
 or suspend while a snapshot is active; it is not a multi-request transaction.
 """
 from collections.abc import Callable, Iterator

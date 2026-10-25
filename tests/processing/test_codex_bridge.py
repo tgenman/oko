@@ -142,8 +142,12 @@ class SleepingCodex(SyntheticCodex):
 
 def wait_file(path):
     for _ in range(300):
-        if path.exists():
-            return int(path.read_text())
+        try:
+            value = path.read_text().strip()
+        except FileNotFoundError:
+            value = ''
+        if value:
+            return int(value)
         time.sleep(.01)
     raise AssertionError('synthetic subprocess did not start')
 
