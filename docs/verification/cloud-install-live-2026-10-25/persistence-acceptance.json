@@ -1,0 +1,46 @@
+{
+  "origin": "https://oko.observer",
+  "phases": [
+    {
+      "phase": "synthetic-before-recreate",
+      "materialId": "b8a43b1f-5744-462d-9ae2-03c818351f5f",
+      "mediaSha256": "a2f5d6c396543993cbbbe38571336bf4aa10bff1f56dba98cd6820b0fafec4ae",
+      "runtime": "disabled"
+    },
+    {
+      "phase": "helper-offline-after-recreate",
+      "materialId": "b8a43b1f-5744-462d-9ae2-03c818351f5f",
+      "mediaSha256": "a2f5d6c396543993cbbbe38571336bf4aa10bff1f56dba98cd6820b0fafec4ae",
+      "runtime": "disabled"
+    },
+    {
+      "phase": "after-vm-reboot",
+      "materialId": "b8a43b1f-5744-462d-9ae2-03c818351f5f",
+      "mediaSha256": "a2f5d6c396543993cbbbe38571336bf4aa10bff1f56dba98cd6820b0fafec4ae",
+      "runtime": "disabled"
+    },
+    {
+      "phase": "after-postgres-recreate",
+      "materialId": "b8a43b1f-5744-462d-9ae2-03c818351f5f",
+      "mediaSha256": "a2f5d6c396543993cbbbe38571336bf4aa10bff1f56dba98cd6820b0fafec4ae",
+      "attachments": 2,
+      "runtime": "disabled"
+    }
+  ],
+  "feedId": "6bb31aa2-fba9-4c2c-bb7a-9cd71899a219",
+  "folderId": "8f11bfa4484812f325c0fc51bb6b625b",
+  "baseline": {
+    "id": "b8a43b1f-5744-462d-9ae2-03c818351f5f",
+    "text": "Synthetic persistence body: PostgreSQL and media must survive restart.\n\n---\n\n# \n\nИсходник: https://raw.githubusercontent.com/tgenman/oko/main/tests/fixtures/cloud-acceptance/material.txt\n\nSynthetic persistence body: PostgreSQL and media must survive restart.\nThis publication contains no personal data and needs no AI processing.",
+    "mediaUrl": "/api/v3/materials/b8a43b1f-5744-462d-9ae2-03c818351f5f/media/cf63f19f-dc36-483e-b62d-8604596b284e",
+    "mediaSha256": "a2f5d6c396543993cbbbe38571336bf4aa10bff1f56dba98cd6820b0fafec4ae"
+  },
+  "helperAfterRestart": {
+    "protocol": 1,
+    "release": "6413e41ab004c9cf907b347e0949ad4f888d3da5"
+  },
+  "boot": {
+    "before": "19c34df1-3b97-4fb0-96bf-02111a23ceeb",
+    "after": "9884aee5-deb5-41a8-9c77-f5ff06001c01"
+  }
+}

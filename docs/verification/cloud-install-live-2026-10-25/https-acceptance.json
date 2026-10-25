@@ -1,0 +1,15 @@
+{
+  "origin": "https://oko.observer",
+  "httpsVerified": true,
+  "secureContext": true,
+  "cookie": {
+    "secure": true,
+    "httpOnly": true,
+    "sameSite": "Strict"
+  },
+  "runtimeState": "disabled",
+  "libraryEmpty": true,
+  "wrongOriginDenied": true,
+  "logoutRevokesBothTabs": true,
+  "pageErrors": []
+}
