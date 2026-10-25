@@ -41,6 +41,12 @@ Any rows in those tables refuse import rather than hiding live data in an archiv
 The legacy `feeds.telegram_topic` column is accepted only if every value is NULL;
 its schema is retained in the full SQLite archive and named in `archived_columns`.
 A non-NULL topic or any other unknown column refuses import.
+Only `reader_feed_counts` rows with a NULL `feed` are archived instead of loaded:
+these derived rows cannot join an authoritative feed ID or contribute to reader
+navigation/folder counts. The complete SQLite archive retains their original
+values; `archived_row_counts` and each table's `source_rows`/`rows` make the
+transformation explicit. Counts for actual feeds follow existing Store recovery.
+Other invalid rows or NULL constraints are not normalized or silently omitted.
 Unknown tables are refused. The source is unchanged. The report and archive may
 contain private metadata; do not publish them unredacted. After interruption,
 reconcile the prepared directory, transaction outcome and receipt before retrying;

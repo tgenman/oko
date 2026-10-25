@@ -108,6 +108,46 @@ def test_cli_accepts_legacy_topic_column_only_when_all_values_are_null(postgres_
         assert client.get(media_url).content == PNG
 
 
+def test_cli_archives_only_unreachable_null_feed_count_projections(postgres_url, tmp_path):
+    source = tmp_path/'sqlite'
+    feed, item, media_url, _ = source_library(source)
+    with sqlite3.connect(source/'state.sqlite') as db:
+        db.executemany('INSERT INTO reader_feed_counts(feed,unviewed,visible) VALUES (NULL,?,?)', [(11, 23), (41, 59)])
+    before = hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest()
+    target, report = tmp_path/'postgres', tmp_path/'report.json'
+    result = invoke(source, target, credential_file(tmp_path, postgres_url), report)
+    assert result.returncode == 0, result.stdout+result.stderr
+    receipt = json.loads(report.read_text())
+    assert receipt['archived_row_counts'] == {'reader_feed_counts': 2}
+    assert receipt['tables']['reader_feed_counts']['rows'] == 1
+    assert receipt['tables']['reader_feed_counts']['source_rows'] == 3
+    assert hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest() == before
+    with sqlite3.connect(target/'migration-archive/state.sqlite') as archive:
+        assert archive.execute('SELECT unviewed,visible FROM reader_feed_counts WHERE feed IS NULL ORDER BY unviewed').fetchall() == [(11, 23), (41, 59)]
+    with TestClient(create_app(target, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
+        assert [card['id'] for card in client.get('/api/v3/cards').json()] == [item]
+        assert client.get(media_url).content == PNG
+        frame = client.post('/api/v3/reading/check', json={'storage_id': None, 'resources': [{'kind': 'navigation', 'known_version': None}]}).json()
+        navigation = next(resource['data'] for resource in frame['resources'] if resource['kind'] == 'navigation')
+        assert navigation['count'] == 1
+        assert navigation['feeds'] == [{'id': feed['id'], 'count': 1, 'has_unviewed': True}]
+        assert navigation['folders'][0]['count'] == 1
+
+
+def test_cli_does_not_generalize_archival_to_other_null_projection_keys(postgres_url, tmp_path):
+    source = tmp_path/'sqlite'
+    source_library(source)
+    with sqlite3.connect(source/'state.sqlite') as db:
+        db.execute('INSERT INTO reader_folder_counts(folder,visible) VALUES (NULL,100)')
+    before = hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest()
+    target, report = tmp_path/'postgres', tmp_path/'report.json'
+    result = invoke(source, target, credential_file(tmp_path, postgres_url), report)
+    assert result.returncode != 0
+    assert not target.exists()
+    assert not report.exists()
+    assert hashlib.sha256((source/'state.sqlite').read_bytes()).hexdigest() == before
+
+
 @pytest.mark.parametrize('table', EMPTY_LEGACY_TABLES)
 def test_cli_refuses_nonempty_legacy_table_without_archiving_live_data(postgres_url, tmp_path, table):
     source = tmp_path/'sqlite'

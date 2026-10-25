@@ -129,6 +129,7 @@ def import_library(source: Path, target: Path, credential: Path, report: Path) -
                     db.execute(sql.SQL('TRUNCATE {} RESTART IDENTITY').format(sql.SQL(',').join(map(sql.Identifier, tables))))
                     receipts = {}
                     archived_columns: dict[str, list[str]] = {}
+                    archived_row_counts: dict[str, int] = {}
                     for table in sorted(source_tables & set(tables), key=lambda t: (t not in ('feeds', 'items'), t)):
                         source_columns = [r[1] for r in original.execute('PRAGMA table_info('+quote(table)+')')]
                         columns = [r[0] for r in db.execute('SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=%s ORDER BY ordinal_position', (table,))]
@@ -140,6 +141,12 @@ def import_library(source: Path, target: Path, credential: Path, report: Path) -
                         if set(source_columns) != set(columns) - ({'rowid'} if 'rowid' not in source_columns else set()):
                             raise MigrationRefused('Source/target columns differ for table '+table)
                         rows = [tuple(row) for row in original.execute('SELECT '+','.join(quote(c) for c in columns)+' FROM '+quote(table))]
+                        source_rows = len(rows)
+                        if table == 'reader_feed_counts':
+                            feed_column = columns.index('feed')
+                            rows = [row for row in rows if row[feed_column] is not None]
+                            if source_rows != len(rows):
+                                archived_row_counts[table] = source_rows-len(rows)
                         if table == 'state':
                             rows = [(key, 'false' if key == 'work-enabled' else value) for key, value in rows]
                             if not any(key == 'work-enabled' for key, _ in rows):
@@ -152,7 +159,7 @@ def import_library(source: Path, target: Path, credential: Path, report: Path) -
                         expected_digest = digest(rows)
                         if digest(imported) != expected_digest:
                             raise MigrationRefused('Imported table checksum mismatch for '+table)
-                        receipts[table] = {'rows': len(rows), 'sha256': expected_digest}
+                        receipts[table] = {'rows': len(rows), 'source_rows': source_rows, 'sha256': expected_digest}
                         for column in columns:
                             sequence = db.execute('SELECT pg_get_serial_sequence(%s,%s)', (table, column)).fetchone()
                             if sequence and sequence[0]:
@@ -166,6 +173,7 @@ def import_library(source: Path, target: Path, credential: Path, report: Path) -
                     receipt = {'version': 1, 'state': 'prepared', 'schema_version': len(MIGRATIONS), 'work_enabled': False,
                                'source_database_sha256': source_hash, 'tables': receipts,
                                'archived_columns': archived_columns,
+                               'archived_row_counts': archived_row_counts,
                                'files': inventory, 'archived_tables': {table: original.execute('SELECT count(*) FROM '+quote(table)).fetchone()[0] for table in sorted(source_tables-set(tables))},
                                'archive_database_sha256': file_hash(archive/'state.sqlite')}
                     (stage/'instance.lock').touch(mode=0o600)
