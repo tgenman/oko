@@ -4,6 +4,43 @@ Oko keeps the local SQLite backend and supports PostgreSQL for a cloud reader.
 The HTTP contract, reader versions, three workers and file lifetime are shared.
 There is no automatic SQLite-to-PostgreSQL import or fallback on database errors.
 
+## Explicit offline SQLite import
+
+Stop both readers, preserve consistent source and target backups, and prepare a
+new empty schema with the release migrations above. Use the schema owner's
+private DSN, not the runtime reader's restricted credential:
+
+```sh
+python -m oko.storage.import_sqlite --source /private/stopped-source-snapshot \
+  --target-data /srv/oko/new-library --database-url-file /run/secrets/migrator-dsn \
+  --report /private/import-report.json
+```
+
+The source must have its existing unlocked `instance.lock` and current publication
+schema. The importer refuses live readers, populated target schemas, existing
+target directories/reports, symlinks, special files and incompatible table/column
+sets. It never switches a running installation. It imports the complete logical
+tables and reader projections under the schema lease and a single transaction,
+preserves insertion identities and sequence allocation, and disables work before
+startup. Source and copied media hashes and per-table counts/checksums are checked.
+
+Regular source files are copied privately, except the SQLite database/sidecars,
+instance lock and runtime address/token metadata. Browser/reader account files are
+included: explicitly retain the destination's separately backed-up access files
+before activation when preserving server login is required. Codex host auth is
+outside this library and is not copied. Check absolute paths and portability of
+Telegram/client settings before enabling work.
+
+A private `migration-archive/state.sqlite` preserves the complete source database,
+including historical `migration_retired_rows`; those historical rows are reported
+as archived rather than silently discarded or loaded into the live schema.
+Unknown tables are refused. The source is unchanged. The report and archive may
+contain private metadata; do not publish them unredacted. After interruption,
+reconcile the prepared directory, transaction outcome and receipt before retrying;
+there is no cross-filesystem/database atomic commit or automatic replacement of a
+partially attempted target. Keep the original installation and backups until HTTP
+and browser acceptance and the explicit operator switch have passed.
+
 ## Data ownership
 
 Publication text, structured content, processing results, subscriptions, reader
