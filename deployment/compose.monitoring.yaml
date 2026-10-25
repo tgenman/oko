@@ -67,6 +67,7 @@
         "--disable-reporting",
         "--storage.path=/var/lib/alloy",
         "--server.http.listen-addr=0.0.0.0:12345",
+        "--stability.level=public-preview",
         "/etc/alloy/config.alloy"
       ],
       "volumes": [
@@ -79,7 +80,8 @@
       ],
       "environment": {
         "GOMEMLIMIT": "150MiB"
-      }
+      },
+      "stop_grace_period": "30s"
     },
     "prometheus": {
       "restart": "unless-stopped",

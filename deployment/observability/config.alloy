@@ -32,10 +32,9 @@ loki.process "metadata" {
       expression = "(?P<pg_level>LOG|INFO|NOTICE|WARNING|ERROR|FATAL|PANIC):\\s+(?P<pg_message>.*)"
     }
     stage.template {
-      source = "pg_level"
-      template = "{{ ToLower .Value }}"
+      source = "level"
+      template = "{{ if .pg_level }}{{ ToLower .pg_level }}{{ else }}info{{ end }}"
     }
-    stage.labels { values = { level = "pg_level" } }
     // PostgreSQL exception messages can interpolate stored values. Central logs
     // retain severity, never the SQL statement, parameters, DETAIL or message.
     stage.template {
@@ -53,10 +52,39 @@ loki.process "metadata" {
   // IDs and file paths are fields for queries, never stream labels.
   stage.label_drop { values = ["filename", "container_id", "job_id", "operation_id"] }
   stage.label_keep { values = ["deployment", "service", "level"] }
-  forward_to = [loki.write.local.receiver]
+  forward_to = [otelcol.receiver.loki.logs.receiver]
 }
 
-loki.write "local" {
-  endpoint { url = "http://loki:3100/loki/api/v1/push" }
-  wal {}
+// Persist each request before batching; no volatile processor.batch before disk.
+otelcol.receiver.loki "logs" {
+  output { logs = [otelcol.processor.groupbyattrs.labels.input] }
+}
+otelcol.processor.groupbyattrs "labels" {
+  keys = ["deployment", "service", "level"]
+  output { logs = [otelcol.exporter.otlphttp.logs.input] }
+}
+otelcol.storage.file "queue" {
+  directory = "/var/lib/alloy/otel-queue"
+  fsync = true
+}
+otelcol.exporter.otlphttp "logs" {
+  client { endpoint = "http://loki:3100/otlp" }
+  retry_on_failure {
+    initial_interval = "500ms"
+    max_interval = "5s"
+    max_elapsed_time = "0s"
+  }
+  sending_queue {
+    enabled = true
+    num_consumers = 1
+    queue_size = 200000
+    sizer = "items"
+    block_on_overflow = true
+    storage = otelcol.storage.file.queue.handler
+    batch {
+      min_size = 200
+      max_size = 500
+      flush_timeout = "200ms"
+    }
+  }
 }

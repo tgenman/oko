@@ -41,7 +41,7 @@ port. Loki also binds only loopback. Exporters and Alloy have no published port.
 | Component | Persistent host path | Retention / memory limit |
 | --- | --- | --- |
 | Loki chunks, TSDB index, WAL, compactor | `/srv/oko/loki` | 7 days; asynchronous compactor deletion after 2-hour delay; 384 MiB |
-| Alloy positions and outgoing WAL | `/srv/oko/alloy` | durable delivery state; 192 MiB |
+| Alloy positions and outgoing disk queue | `/srv/oko/alloy` | durable delivery state, 200,000 queued records; 192 MiB |
 | Prometheus TSDB, head and WAL | `/srv/oko/prometheus` | 15 days or 2 GB, whichever removes old blocks sooner; 256 MiB |
 | Grafana users, settings, dashboards | `/srv/oko/grafana` | 768 MiB |
 | Docker stdout/stderr | `/var/lib/docker/containers` | json-file, 3 × 10 MB per service |
@@ -53,6 +53,20 @@ and filesystems as nonroot; PostgreSQL exporter (64 MiB) has no library table
 permissions and never enables SQL text collectors. Individual memory limits are
 ceilings; the actual combined load must be measured on the 4 GB VM before final
 commissioning.
+
+Alloy converts the already-sanitized Loki entries to OTLP, groups only the three
+bounded labels into resource attributes, and sends through a file-backed queue
+with `fsync=true`. Batching is after disk persistence; retry has no elapsed-time
+expiry. The queue holds 200,000 records, blocks on overflow, and resumes persisted
+requests after restart. Loki's OTLP mapping indexes only deployment/service/level;
+query-time metadata (for example observed_timestamp) is not an index label.
+
+Pinned Alloy 1.21.2 requires `--stability.level=public-preview` for the file storage
+wrapper. Repeat native runtime and outage acceptance before changing the pin.
+The experimental loki.write WAL was rejected after a controlled outage/restart
+trial resumed after an unacknowledged segment; retaining files alone was not
+proof of delivery. Delivery is at least once: replay may repeat entries, so the
+acceptance test checks every unique synthetic ID, not only raw row counts.
 
 Alloy reads supported Docker **json-file** logs and the systemd journal. It has
 no Docker socket. A root-owned timer generates targets for fixed Oko Compose
