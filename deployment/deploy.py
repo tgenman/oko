@@ -31,7 +31,7 @@ def validate(value):
                  and value['helper'] == dict(release=sha, protocol=1)
                  and type(schema['minimum']) is int and type(schema['maximum']) is int
                  and 1 <= schema['minimum'] <= schema['maximum']
-                 and re.fullmatch('[0-9]+\.[0-9]+\.[0-9]+', codex['version'])
+                 and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', codex['version'])
                  and codex['target'] == 'x86_64-unknown-linux-musl'
                  and all(re.fullmatch('[0-9a-f]{64}', codex[k]) for k in
                          ('archive_sha256', 'binary_sha256', 'code_mode_host_sha256')))
@@ -126,7 +126,16 @@ def immutable_containers():
     return {name: command('docker', 'inspect', '--format', '{{.Id}}', name) for name in names}
 
 
+def helper_identity():
+    # systemd sets Group=oko-ipc. An existing account may legitimately keep a
+    # different primary group; validate the named service group instead.
+    group = command('getent', 'group', 'oko-ipc').split(':')
+    if command('id', '-u', 'okocodex') != '20002' or len(group) < 3 or group[0] != 'oko-ipc' or group[2] != '20001':
+        raise ValueError('Unexpected helper account identity')
+
+
 def prepare(root, release, token, *, cached=False):
+    helper_identity()
     source = root / 'releases' / release['sha']
     source.parent.mkdir(exist_ok=True, mode=0o755)
     if not source.exists():
@@ -182,8 +191,7 @@ def stop(root, release):
 
 
 def activate(root, release, helper_config, unit, history):
-    if command('id', '-u', 'okocodex') != '20002' or command('id', '-g', 'okocodex') != '20001':
-        raise ValueError('Unexpected helper account identity')
+    helper_identity()
     config = dict(helper_config, release=release['sha'])
     staged = history / ('activate-' + release['sha'] + '.json')
     atomic(staged, config)
