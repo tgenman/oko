@@ -565,6 +565,7 @@ class ReaderApplication:
             raise ActionError('conflict', 'Проверка Codex прервана', expected=True) from None
         async with check.accept():
             self._codex_status = result
+            if self.jobs.metrics:self.jobs.metrics.observe_codex(bool(result.get('available')))
         return result
 
 

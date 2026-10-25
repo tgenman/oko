@@ -1,0 +1,32 @@
+{
+  "alloy": {
+    "tag": "grafana/alloy:v1.21.2",
+    "image": "grafana/alloy@sha256:89a5a320168387336b9ac3c850609c3ba7757eadd4ae5f1d819deb35e9854b18",
+    "platform": "linux/amd64"
+  },
+  "loki": {
+    "tag": "grafana/loki:3.7.9",
+    "image": "grafana/loki@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28",
+    "platform": "linux/amd64"
+  },
+  "prometheus": {
+    "tag": "prom/prometheus:v3.15.1",
+    "image": "prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2",
+    "platform": "linux/amd64"
+  },
+  "grafana": {
+    "tag": "grafana/grafana:13.2.4",
+    "image": "grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+    "platform": "linux/amd64"
+  },
+  "node_exporter": {
+    "tag": "prom/node-exporter:v1.12.1",
+    "image": "prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0",
+    "platform": "linux/amd64"
+  },
+  "postgres_exporter": {
+    "tag": "quay.io/prometheuscommunity/postgres-exporter:v0.20.1",
+    "image": "quay.io/prometheuscommunity/postgres-exporter@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e",
+    "platform": "linux/amd64"
+  }
+}

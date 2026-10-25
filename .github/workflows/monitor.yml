@@ -1,0 +1,34 @@
+name: Monitor Oko
+on:
+  schedule:
+    - cron: '7,17,27,37,47,57 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: oko-external-monitor
+  cancel-in-progress: false
+jobs:
+  monitor:
+    if: vars.OKO_MONITOR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load the dedicated read-only host identity
+        env:
+          MONITOR_KEY: ${{ secrets.OKO_MONITOR_SSH_KEY }}
+          HOST_KEY: ${{ secrets.OKO_SSH_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/oko-monitor"
+          printf '%s\n' "$MONITOR_KEY" > "$RUNNER_TEMP/oko-monitor/key"
+          printf '%s\n' "$HOST_KEY" > "$RUNNER_TEMP/oko-monitor/known_hosts"
+      - name: Check HTTPS, VM and backup heartbeat and synchronize alert issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 deployment/observability/github-notify.py --ssh-key "$RUNNER_TEMP/oko-monitor/key" --known-hosts "$RUNNER_TEMP/oko-monitor/known_hosts"
+      - name: Remove the temporary SSH identity
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/oko-monitor"

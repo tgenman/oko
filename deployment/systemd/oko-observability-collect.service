@@ -1,0 +1,14 @@
+[Unit]
+Description=Collect bounded Oko host metrics and Docker log targets
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/oko/config/observability/collect.py
+User=root
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/oko/observability
+TimeoutStartSec=45

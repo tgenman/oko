@@ -3,7 +3,7 @@ from oko.collection.request_observation import Capture
 import asyncio
 from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 from oko.collection.contracts import Source
 from oko.storage.store import Store
 from oko.storage.job_types import Job
@@ -13,6 +13,8 @@ from oko.execution import Execution
 from oko.services.queries import ReadingQueries
 from oko.storage.job_repository import JobRepository
 from oko.services.processing import ProcessingService
+if TYPE_CHECKING:
+    from oko.observability import Metrics
 
 @dataclass
 class _CollectionAttempt:
@@ -36,6 +38,7 @@ class JobControl:
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()
         self._detached_ai: set[asyncio.Task[None]] = set()
+        self.metrics: 'Metrics | None' = None
 
     @property
     def _store(self) -> Store | None:
@@ -67,6 +70,11 @@ class JobControl:
                 self.invalidate(feeds)
             for identity, attempt in list(self._collection_active.items()):
                 if feeds is None or attempt.feed in feeds:
+                    if self.metrics:
+                        from oko.observability import event
+                        elapsed = max(0., self._clock()-attempt.started)
+                        self.metrics.attempt(attempt.job.kind, 'cancelled', elapsed)
+                        event('job_cancelled', job_id=attempt.job.id, kind=attempt.job.kind, elapsed=elapsed)
                     del self._collection_active[identity]
             ai_task = self._ai
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]

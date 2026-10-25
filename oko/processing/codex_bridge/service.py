@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from oko.processing.codex import CodexClient, LocalCodex
+from oko.observability import event
 from .protocol import (BridgeConfig, JobRequest, VERSION, LEASE_SECONDS, JOB_SECONDS,
                        MAX_REQUEST_BYTES, MAX_RECORDS, TOMBSTONE_SECONDS)
 from .supervisor import supervise
@@ -36,6 +37,8 @@ class Job:
     result: Any = None
     error: str = ''
     finished: float = 0
+    operation: str = ''
+    started: float = 0
 
     def view(self) -> dict[str, Any]:
         value: dict[str, Any] = {'state': self.state}
@@ -92,7 +95,8 @@ class Bridge:
 
     def update(self) -> None:
         now, mono = time.time(), time.monotonic()
-        for job in self.jobs.values():
+        for job_id, job in self.jobs.items():
+            previous = job.state
             if job.state == 'running' and job.control is not None:
                 try:
                     if job.control.poll():
@@ -124,6 +128,9 @@ class Bridge:
                 self.cancel(job)
             if job.process is not None and not job.process.is_alive():
                 job.process.join(timeout=0)
+            if previous == 'running' and job.state != 'running':
+                event('codex_job_'+job.state, service='codex', level='error' if job.state == 'error' else 'info',
+                      job_id=job_id, kind=job.operation, elapsed=mono-job.started if job.started else None)
         self.jobs = {key: job for key, job in self.jobs.items()
                      if not job.finished or now - job.finished < TOMBSTONE_SECONDS}
 
@@ -186,7 +193,11 @@ def create_app(config: BridgeConfig, *, adapter_factory: Callable[[], CodexClien
         bridge.update()
         if bridge.supervisor_lost and bridge.on_fatal is not None:
             return JSONResponse({'detail': 'helper generation requires restart'}, status_code=503)
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        except Exception as error:
+            event('helper_request_failed', service='codex', level='error', error=error)
+            return JSONResponse({'detail': 'helper request failed'}, status_code=500)
 
     def identity(request: Request) -> None:
         if request.headers.get('x-oko-boot') != bridge.boot_id:
@@ -243,8 +254,10 @@ def create_app(config: BridgeConfig, *, adapter_factory: Callable[[], CodexClien
         process.start()
         child.close()
         job = Job(body.session_id, digest, parent, process, now + LEASE_SECONDS,
-                  time.monotonic() + LEASE_SECONDS, body.deadline)
+                  time.monotonic() + LEASE_SECONDS, body.deadline,
+                  operation=body.operation, started=time.monotonic())
         bridge.jobs[job_id] = job
+        event('codex_job_started', service='codex', job_id=job_id, kind=body.operation)
         return job.view()
 
     @app.get('/v1/jobs/{job_id}')

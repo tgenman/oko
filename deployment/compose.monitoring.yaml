@@ -1,0 +1,267 @@
+{
+  "name": "oko-monitoring",
+  "services": {
+    "loki": {
+      "restart": "unless-stopped",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 96,
+      "cpus": 0.5,
+      "networks": [
+        "backend"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "grafana/loki@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28",
+      "platform": "linux/amd64",
+      "user": "10001:10001",
+      "mem_limit": "384m",
+      "command": [
+        "-config.file=/etc/loki/loki.yaml"
+      ],
+      "volumes": [
+        "/srv/oko/config/observability/loki.yaml:/etc/loki/loki.yaml:ro",
+        "/srv/oko/loki:/var/loki"
+      ],
+      "ports": [
+        "127.0.0.1:3100:3100"
+      ]
+    },
+    "alloy": {
+      "restart": "unless-stopped",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 96,
+      "cpus": 0.5,
+      "networks": [
+        "backend"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "grafana/alloy@sha256:89a5a320168387336b9ac3c850609c3ba7757eadd4ae5f1d819deb35e9854b18",
+      "platform": "linux/amd64",
+      "user": "0:0",
+      "mem_limit": "192m",
+      "command": [
+        "run",
+        "--disable-reporting",
+        "--storage.path=/var/lib/alloy",
+        "--server.http.listen-addr=0.0.0.0:12345",
+        "/etc/alloy/config.alloy"
+      ],
+      "volumes": [
+        "/srv/oko/config/observability/config.alloy:/etc/alloy/config.alloy:ro",
+        "/srv/oko/observability/targets:/etc/alloy-targets:ro",
+        "/srv/oko/alloy:/var/lib/alloy",
+        "/var/lib/docker/containers:/var/lib/docker/containers:ro",
+        "/var/log/journal:/var/log/journal:ro",
+        "/etc/machine-id:/etc/machine-id:ro"
+      ],
+      "environment": {
+        "GOMEMLIMIT": "150MiB"
+      }
+    },
+    "prometheus": {
+      "restart": "unless-stopped",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 96,
+      "cpus": 0.5,
+      "networks": [
+        "backend"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2",
+      "platform": "linux/amd64",
+      "user": "65534:65534",
+      "mem_limit": "256m",
+      "command": [
+        "--config.file=/etc/prometheus/prometheus.yaml",
+        "--storage.tsdb.path=/prometheus",
+        "--storage.tsdb.retention.time=15d",
+        "--storage.tsdb.retention.size=2GB",
+        "--query.max-concurrency=2",
+        "--query.max-samples=1000000"
+      ],
+      "volumes": [
+        "/srv/oko/config/observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro",
+        "/srv/oko/config/observability/alerts.yaml:/etc/prometheus/alerts.yaml:ro",
+        "/srv/oko/prometheus:/prometheus",
+        "/srv/oko/secrets/prometheus-reader-metrics:/run/secrets/reader-metrics:ro"
+      ],
+      "ports": [
+        "127.0.0.1:9090:9090"
+      ],
+      "environment": {
+        "GOMEMLIMIT": "200MiB"
+      }
+    },
+    "grafana": {
+      "restart": "unless-stopped",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 96,
+      "cpus": 0.5,
+      "networks": [
+        "backend"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+      "platform": "linux/amd64",
+      "user": "472:472",
+      "mem_limit": "256m",
+      "command": [],
+      "volumes": [
+        "/srv/oko/grafana:/var/lib/grafana",
+        "/srv/oko/config/observability/grafana:/etc/grafana/provisioning:ro",
+        "/srv/oko/config/observability/dashboards:/etc/grafana/dashboards:ro",
+        "/srv/oko/secrets/grafana-admin:/run/secrets/grafana-admin:ro"
+      ],
+      "ports": [
+        "127.0.0.1:3000:3000"
+      ],
+      "tmpfs": [
+        "/tmp:mode=1777,size=32m"
+      ],
+      "environment": {
+        "GF_SECURITY_ADMIN_USER": "oko-admin",
+        "GF_SECURITY_ADMIN_PASSWORD__FILE": "/run/secrets/grafana-admin",
+        "GF_USERS_ALLOW_SIGN_UP": "false",
+        "GF_AUTH_ANONYMOUS_ENABLED": "false",
+        "GF_ANALYTICS_REPORTING_ENABLED": "false",
+        "GF_ANALYTICS_CHECK_FOR_UPDATES": "false",
+        "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES": "false",
+        "GF_NEWS_NEWS_FEED_ENABLED": "false",
+        "GF_PLUGINS_PREINSTALL_DISABLED": "true",
+        "GF_LOG_LEVEL": "warn"
+      }
+    },
+    "node-exporter": {
+      "restart": "unless-stopped",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 96,
+      "cpus": 0.5,
+      "networks": [
+        "backend"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0",
+      "platform": "linux/amd64",
+      "user": "65534:65534",
+      "mem_limit": "48m",
+      "command": [
+        "--path.rootfs=/host/root",
+        "--path.procfs=/host/proc",
+        "--path.sysfs=/host/sys",
+        "--collector.textfile.directory=/textfile",
+        "--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+)($|/)"
+      ],
+      "volumes": [
+        "/:/host/root:ro,rslave",
+        "/proc:/host/proc:ro",
+        "/sys:/host/sys:ro",
+        "/srv/oko/observability/textfile:/textfile:ro"
+      ]
+    },
+    "postgres-exporter": {
+      "restart": "unless-stopped",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 96,
+      "cpus": 0.5,
+      "networks": [
+        "backend"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "quay.io/prometheuscommunity/postgres-exporter@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e",
+      "platform": "linux/amd64",
+      "user": "65534:65534",
+      "mem_limit": "64m",
+      "command": [
+        "--no-collector.stat_statements",
+        "--log.level=warn",
+        "--log.format=json",
+        "--collection-timeout=5s"
+      ],
+      "volumes": [
+        "/srv/oko/secrets/postgres-monitor:/run/secrets/postgres-monitor:ro"
+      ],
+      "environment": {
+        "DATA_SOURCE_URI": "postgres:5432/oko?sslmode=disable",
+        "DATA_SOURCE_USER": "oko_monitor",
+        "DATA_SOURCE_PASS_FILE": "/run/secrets/postgres-monitor"
+      }
+    }
+  },
+  "networks": {
+    "backend": {
+      "external": true,
+      "name": "oko-backend"
+    }
+  }
+}

@@ -87,6 +87,8 @@ def initialize_files():
     names = ['postgres-admin','database-migrator','database-reader','postgres-init.sql']
     if any((ROOT/'postgres').rglob('PG_VERSION')) and any(not (credentials/name).is_file() for name in names):
         raise RuntimeError('Existing PostgreSQL needs its original credentials; refusing regeneration')
+    if not (credentials/'reader-metrics').exists():
+        atomic(credentials/'reader-metrics', secrets.token_urlsafe(48)+'\n', uid=10001, gid=10001)
     if not (credentials/'postgres-admin').exists():
         atomic(credentials/'postgres-admin', secrets.token_hex(32)+'\n', uid=999, gid=999)
     for role in ('migrator','reader'):

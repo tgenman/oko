@@ -520,14 +520,20 @@ class Store:
     def cards(self, show_hidden: bool = False) -> list[dict[str, Any]]:
         return self.reading.cards(show_hidden)
 
-    def work_summary(self) -> list[WorkSummary]:
-        rows = self.db.execute("""SELECT jobs.kind,jobs.status,jobs.problem_code,count(*) AS count,
+    def work_summary(self, *, include_problems: bool = False) -> list[WorkSummary]:
+        condition = "jobs.status IN ('pending','running')"
+        if include_problems:
+            # Match each existing partial index separately; a combined OR scans
+            # the completed archive on SQLite even when it has no problems.
+            condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running') OR error IS NOT NULL
+                UNION SELECT id FROM jobs WHERE problem_code IS NOT NULL OR error IS NOT NULL)"""
+        rows = self.db.execute(f"""SELECT jobs.kind,jobs.status,jobs.problem_code,count(*) AS count,
             CASE WHEN jobs.kind IN ('discover','read','feed-delete') THEN NULLIF(jobs.item,'')
                 WHEN jobs.kind='download_media' THEN (SELECT i.feed_id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE m.id=jobs.item)
                 ELSE items.feed_id END AS feed,
             min(jobs.next) AS next,sum(CASE WHEN jobs.error IS NOT NULL THEN 1 ELSE 0 END) AS errors
             FROM jobs LEFT JOIN items ON items.id=jobs.item
-            WHERE jobs.status IN ('pending','running')
+            WHERE {condition}
             GROUP BY jobs.kind,jobs.status,jobs.problem_code,feed ORDER BY min(jobs.id)""").fetchall()
         now, wall = self.clock(), self.wall_clock()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
