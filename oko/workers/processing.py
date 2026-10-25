@@ -1,5 +1,6 @@
 """Independent filtering and summary crons sharing the existing model capacity."""
 import asyncio
+import time
 from collections.abc import Callable
 import httpx
 from oko.execution import Execution
@@ -81,6 +82,11 @@ class ProcessingWorker:
 
     async def execute_attempt(self, store: Store, job: Job, work: ProcessingInput, origin: dict[str, object] | None) -> None:
         jobs=JobRepository(store)
+        started, outcome = time.monotonic(), 'stale'
+        observed_error: BaseException | None = None
+        if self.tasks.metrics:
+            from oko.observability import event
+            event('job_started', job_id=job.id, kind=self.kind)
         try:
             diagnostic_materials.set(tuple(source.id for source in work.request.sources))
             diagnostic_source.set('Обработка · '+self.kind+' · '+job.item)
@@ -97,7 +103,12 @@ class ProcessingWorker:
                 else:
                     raise ProcessingError('Ожидание выбранного обработчика; llama.cpp не настроен или не выбран',code='processor-config')
                 self.tasks.stage='Проверка обработчика'
-                checked=await adapter.check()
+                try:
+                    checked=await adapter.check()
+                except Exception:
+                    if isinstance(adapter,Codex) and self.tasks.metrics:self.tasks.metrics.observe_codex(False)
+                    raise
+                if isinstance(adapter,Codex) and self.tasks.metrics:self.tasks.metrics.observe_codex(bool(checked.get('available')))
                 async with self.execution._actions:
                     if not self.current(store,jobs,job,work):
                         if self.execution._store is store and self.execution._live():
@@ -122,7 +133,9 @@ class ProcessingWorker:
                     self.service.refresh(job.item)
                     jobs.checkpoint('processing_after_finish')
                 jobs.checkpoint('processing_after_commit')
+                outcome = 'accepted'
         except asyncio.CancelledError:
+            outcome = 'cancelled'
             raise
         except (StaleInput,JobRejected):
             # Roll back the rejected result first, then cancel only this attempt.
@@ -131,6 +144,7 @@ class ProcessingWorker:
                     with jobs.transaction(self.execution._live):
                         if jobs.valid(job):jobs.cancel(job)
         except Exception as error:
+            outcome, observed_error = 'error', error
             record_caught('Воркер '+self.kind)
             async with self.execution._actions:
                 if self.execution._store is not store or not self.execution._live():
@@ -141,6 +155,12 @@ class ProcessingWorker:
                             code=error.code if isinstance(error,ProcessingError) else 'processing-failed')
                     elif jobs.valid(job):
                         jobs.cancel(job)
+        finally:
+            if self.tasks.metrics:
+                from oko.observability import event
+                elapsed = time.monotonic()-started
+                self.tasks.metrics.attempt(self.kind, outcome, elapsed)
+                event('job_finished', job_id=job.id, kind=self.kind, level='error' if outcome == 'error' else 'info', error=observed_error, elapsed=elapsed)
 
 
 class FilterWorker(ProcessingWorker):

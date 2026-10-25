@@ -16,6 +16,7 @@ dependencies = [
     "yt-dlp==2026.8.19",
     "beautifulsoup4 (==4.14.3)",
     "psycopg[binary]==3.3.6",
+    "prometheus-client==0.26.0",
 ]
 
 [dependency-groups]

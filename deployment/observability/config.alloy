@@ -1,0 +1,62 @@
+logging {
+  level = "warn"
+}
+
+discovery.file "docker" {
+  files = ["/etc/alloy-targets/docker.json"]
+  refresh_interval = "5s"
+}
+
+loki.source.file "docker" {
+  targets = discovery.file.docker.targets
+  forward_to = [loki.process.docker.receiver]
+}
+
+loki.process "docker" {
+  stage.docker {}
+  forward_to = [loki.process.metadata.receiver]
+}
+
+loki.source.journal "codex" {
+  path = "/var/log/journal"
+  matches = "_SYSTEMD_UNIT=oko-codex.service"
+  max_age = "168h"
+  labels = { deployment = "oko", service = "codex", level = "info" }
+  forward_to = [loki.process.metadata.receiver]
+}
+
+loki.process "metadata" {
+  stage.match {
+    selector = "{service=\"postgres\"}"
+    stage.regex {
+      expression = "(?P<pg_level>LOG|INFO|NOTICE|WARNING|ERROR|FATAL|PANIC):\\s+(?P<pg_message>.*)"
+    }
+    stage.template {
+      source = "pg_level"
+      template = "{{ ToLower .Value }}"
+    }
+    stage.labels { values = { level = "pg_level" } }
+    // PostgreSQL exception messages can interpolate stored values. Central logs
+    // retain severity, never the SQL statement, parameters, DETAIL or message.
+    stage.template {
+      source = "pg_safe"
+      template = "postgresql_event"
+    }
+    stage.output { source = "pg_safe" }
+  }
+  stage.json { expressions = { level = "level" } }
+  stage.labels { values = { level = "" } }
+  stage.match {
+    selector = "{level!~\"debug|info|warn|warning|error|fatal|panic|log|notice\"}"
+    stage.static_labels { values = { level = "info" } }
+  }
+  // IDs and file paths are fields for queries, never stream labels.
+  stage.label_drop { values = ["filename", "container_id", "job_id", "operation_id"] }
+  stage.label_keep { values = ["deployment", "service", "level"] }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint { url = "http://loki:3100/loki/api/v1/push" }
+  wal {}
+}

@@ -311,3 +311,20 @@ def test_bound_values_and_leading_comments_preserve_transaction_ownership(databa
         with pytest.raises(ValueError, match='One repository statement'):
             writer.execute("SELECT 1; DELETE FROM state")
         assert not writer.in_transaction
+
+
+def test_operational_summary_includes_terminal_problems_without_changing_reader_queue(postgres_url,tmp_path):
+    from oko.storage.store import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (?,?,?,?,?)",
+                             ('fetch','synthetic-failed','failed','private detail','source-failed'))
+            store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES (?,?,?,?)",
+                             ('download_media','synthetic-unavailable','unavailable','media-unavailable'))
+        assert store.work_summary()==[]
+        result=store.work_summary(include_problems=True)
+        assert {(j.kind,j.status,j.count,j.error_code) for j in result}=={
+            ('fetch','failed',1,'source-failed'),('download_media','unavailable',1,'media-unavailable')}
+    finally:
+        store.db.close()

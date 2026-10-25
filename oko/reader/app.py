@@ -41,7 +41,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                public_url: str | None = None, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
                telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
-               youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> FastAPI:
+               youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None,
+               metrics_token: str | None = None) -> FastAPI:
     if not api_only:
         from oko.reader.static import validate_frontend
         validate_frontend()
@@ -70,6 +71,17 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     runtime.collection.verify_telegram_profile=application._verify_telegram_profile
     runtime.clear_feed_checks=application._feed_checks.clear
     runtime.diagnostics = journal
+    metrics = None
+    if metrics_token:
+        from oko.observability import Metrics, RequestMetrics, Snapshot
+        def sample() -> Snapshot:
+            current = runtime.execution.require_store()
+            with current.db.access_lock:
+                jobs = current.work_summary(include_problems=True)
+                return Snapshot(current.work_enabled(), [(j.kind, j.status, j.count, j.error_code is not None and j.error_code != 'youtube-admission') for j in jobs],
+                                False, False)
+        metrics = Metrics(sample)
+        runtime.jobs.metrics = metrics
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -82,7 +94,10 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                 journal.capture(error, 'Фоновая задача asyncio')
             else:
                 journal.add('asyncio', str(context.get('message', 'Ошибка фоновой задачи')), '')
-            if previous_handler:
+            if metrics is not None:
+                from oko.observability import event
+                event('background_failed', level='error', error=error if isinstance(error, BaseException) else None)
+            elif previous_handler:
                 previous_handler(loop, context)
             else:
                 loop.default_exception_handler(context)
@@ -161,12 +176,22 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
         api = request.url.path == '/api' or request.url.path.startswith('/api/')
         v3 = request.url.path.startswith('/api/v3/')
         host = request.headers.get('host', '')
-        if host != public_host and not re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host):
+        metrics_request = request.url.path == '/metrics' and metrics is not None
+        internal_metrics_host = metrics_request and host == 'reader:8765'
+        if not internal_metrics_host and host != public_host and not re.fullmatch(r'(127\.0\.0\.1|localhost|testserver)(:[0-9]+)?', host):
             return api_v3.error_response(403, api_v3.security_error('host_not_allowed')) if api else JSONResponse({'detail': 'Недопустимый адрес'}, status_code=403)
         expected_origin = public_url.rstrip('/') if public_url and host == public_host else f'http://{host}'
         origin = request.headers.get('origin')
         if origin and origin != expected_origin:
             return api_v3.error_response(403, api_v3.security_error('origin_not_allowed')) if api else JSONResponse({'detail': 'Посторонняя страница'}, status_code=403)
+        if metrics_request:
+            if not secrets.compare_digest(request.headers.get('authorization', '').encode(), f'Bearer {metrics_token}'.encode()):
+                return Response(status_code=403, headers={'Cache-Control': 'no-store'})
+            if request.method != 'GET':
+                return Response(status_code=405, headers={'Allow': 'GET', 'Cache-Control': 'no-store'})
+            from prometheus_client import CONTENT_TYPE_LATEST
+            assert metrics is not None
+            return Response(metrics.render(), headers={'Content-Type': CONTENT_TYPE_LATEST, 'Cache-Control': 'no-store'})
         supplied = request.headers.get('authorization', '')
         bearer = secrets.compare_digest(supplied.encode(), f'Bearer {token}'.encode())
         # Service bearer remains usable only through local Host, never the external origin.
@@ -254,6 +279,8 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                 response.headers['X-Oko-Browser-Session'] = 'remembered'
         return response
 
+    if metrics is not None:
+        app.add_middleware(RequestMetrics, metrics=metrics)
     api_v3.register(app, application, lifetime, wall_clock, journal)
 
     @app.delete('/api/v3/browser-session', response_model=BrowserSessionRevoked)

@@ -32,6 +32,8 @@ services:
       - /run/oko-ipc/helper.sock
       - --codex-token-file
       - /run/secrets/codex
+      - --metrics-token-file
+      - /run/secrets/reader-metrics
       - --no-browser
       - --initially-disabled
     volumes:
@@ -40,6 +42,7 @@ services:
       - /srv/oko/ipc:/run/oko-ipc:ro
       - /srv/oko/secrets/database-reader:/run/secrets/database-url:ro
       - /srv/oko/secrets/codex-reader-token:/run/secrets/codex:ro
+      - /srv/oko/secrets/reader-metrics:/run/secrets/reader-metrics:ro
     tmpfs: ['/tmp:mode=1777,size=128m']
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']

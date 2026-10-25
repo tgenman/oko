@@ -58,6 +58,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--public-url', help='Внешний локальный origin читателя, например http://oko')
     parser.add_argument('--tls-cert', type=Path, help='PEM цепочка сертификатов для HTTPS в Uvicorn')
     parser.add_argument('--tls-key', type=Path, help='Закрытый PEM ключ для HTTPS в Uvicorn')
+    parser.add_argument('--metrics-token-file', type=Path, help='Закрытый ключ только для чтения метрик Prometheus')
     parser.add_argument('--codex-url', help='Адрес установленного процесса Codex на Mac')
     parser.add_argument('--codex-socket', type=Path, help='Приватный Unix socket host-helper (Linux)')
     parser.add_argument('--codex-token-file', type=Path)
@@ -85,6 +86,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     if not all(math.isfinite(value) and value > 0 for value in (args.lease, args.grace)):
         parser.error('Таймауты должны быть положительными')
     from oko.storage.credentials import private_database_url
+    from oko.observability import private_metrics_token
+    metrics_token = private_metrics_token(args.metrics_token_file) if args.metrics_token_file else None
     database_url = private_database_url(args.database_url_file) if args.database_url_file else None
     if database_url is not None:
         from oko.storage.readiness import wait_database
@@ -137,6 +140,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                              token=token, fault=fault, shutdown=shutdown,
                              lease=args.lease, grace=args.grace, api_only=args.api_only, persistent=args.persistent,
                              public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo, database_url=database_url,
+                             metrics_token=metrics_token,
                              telegram_client=LocalTelegram(telegram_env, root) if telegram_env and not args.demo else None)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2, proxy_headers=False,
                                     ssl_certfile=str(args.tls_cert) if args.tls_cert else None,

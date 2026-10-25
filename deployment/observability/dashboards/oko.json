@@ -1,0 +1,430 @@
+{
+  "uid": "oko-operations",
+  "title": "Oko operations",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "custom",
+        "query": "reader,postgres,codex,alloy,loki,prometheus,grafana,node-exporter,postgres-exporter",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "level",
+        "type": "custom",
+        "query": "debug,info,warn,warning,error,fatal,panic,log,notice",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "CPU busy",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Memory used",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "1 - node_memory_MemAvailable_bytes/node_memory_MemTotal_bytes",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Root disk free",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"rootfs\"}",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "PostgreSQL available",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "pg_up",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Current queue",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by(kind,state)(oko_jobs_current)",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Work duration p95",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95,sum by(le,kind)(rate(oko_work_attempt_duration_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "HTTP errors",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(oko_http_requests_total{status_class=\"5xx\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Codex availability (cached)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "oko_codex_available",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "Certificate remaining",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "oko_tls_expiry_timestamp_seconds-time()",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Last backup age",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "time()-oko_backup_last_success_timestamp_seconds",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "title": "Container restarts",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "oko_container_restarts_total",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "title": "OOM kills",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "node_vmstat_oom_kill",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "title": "Firing alerts",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "oko-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "refId": "A",
+          "legendFormat": "{{kind}} {{state}} {{service}} {{alertname}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "title": "Logs \u2014 service, level; search job_id with | json | job_id=\"42\"",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "oko-loki"
+      },
+      "targets": [
+        {
+          "expr": "{deployment=\"oko\", service=~\"$service\", level=~\"$level\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 24,
+        "h": 14
+      },
+      "options": {
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}

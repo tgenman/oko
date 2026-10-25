@@ -1,0 +1,68 @@
+groups:
+  - name: oko
+    rules:
+      - alert: OkoReaderUnavailable
+        expr: up{job="reader"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: 'Reader metrics/HTTPS unavailable'}
+      - alert: OkoStorageUnavailable
+        expr: oko_store_available == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'Reader cannot access its library store'}
+      - alert: OkoWorkErrors
+        expr: sum(oko_work_problem_groups_current) > 0
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Background work has unresolved errors'}
+      - alert: OkoHostCollectorFailed
+        expr: oko_host_collection_success == 0 or time() - oko_host_collection_timestamp_seconds > 120 or absent(oko_host_collection_success)
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'Host metadata is missing or stale'}
+      - alert: OkoComponentUnavailable
+        expr: up == 0 or oko_container_running == 0 or oko_helper_active == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: 'A required service is unavailable'}
+      - alert: OkoPostgresUnavailable
+        expr: pg_up == 0 or absent(pg_up)
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'PostgreSQL monitoring cannot connect'}
+      - alert: OkoDiskLow
+        expr: node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"} < 0.15
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: 'Less than 15 percent of root disk remains'}
+      - alert: OkoMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Less than 10 percent of RAM is available'}
+      - alert: OkoCpuHigh
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.9
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: 'CPU is busy for a sustained interval'}
+      - alert: OkoOomOrRestart
+        expr: increase(node_vmstat_oom_kill[15m]) > 0 or increase(oko_container_oom_total[15m]) > 0 or increase(oko_container_restarts_total[15m]) > 2
+        labels: {severity: warning}
+        annotations: {summary: 'OOM kill or repeated container restarts detected'}
+      - alert: OkoHttpErrors
+        expr: sum(increase(oko_http_requests_total{status_class="5xx"}[5m])) > 2
+        labels: {severity: warning}
+        annotations: {summary: 'Reader returned repeated server errors'}
+      - alert: OkoCertificateExpiring
+        expr: oko_tls_expiry_timestamp_seconds - time() < 1209600 or absent(oko_tls_expiry_timestamp_seconds)
+        labels: {severity: critical}
+        annotations: {summary: 'TLS certificate has less than 14 days remaining or expiry is unknown'}
+      - alert: OkoBackupMissingOrStale
+        expr: oko_backup_last_success_timestamp_seconds == 0 or time() - oko_backup_last_success_timestamp_seconds > 129600 or absent(oko_backup_last_success_timestamp_seconds)
+        labels: {severity: critical}
+        annotations: {summary: 'No verified backup completed within 36 hours'}
+      - alert: OkoBackupFailed
+        expr: oko_backup_last_attempt_result{result="error"} == 1
+        labels: {severity: critical}
+        annotations: {summary: 'The latest backup attempt failed'}

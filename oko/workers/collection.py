@@ -208,6 +208,11 @@ class CollectionWorker:
             details = dict(error_type=error.remote_type, message=error.remote_message, traceback=error.remote_traceback, origin='worker')
         observation = self.clean_collection(dict(error=details, requests=capture.requests, request_count=capture.request_count))
         current.jobs.collection_finish(job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started), observation)
+        if self.jobs.metrics:
+            from oko.observability import event
+            elapsed = max(0., self._clock()-attempt.started)
+            self.jobs.metrics.attempt(job.kind, 'error' if error else 'returned', elapsed)
+            event('job_finished', job_id=job.id, kind=job.kind, level='error' if error else 'info', error=error, elapsed=elapsed)
 
     async def _execute(self, job: Job) -> None:
         capture = Capture()
@@ -235,6 +240,9 @@ class CollectionWorker:
                 feed = (job.item or 'demo') if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
                     self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
+                    if self.jobs.metrics:
+                        from oko.observability import event
+                        event('job_started', job_id=job.id, kind=job.kind)
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 linked=job.kind=='fetch' and self.service.feedless(job.item)
                 source = self._sources.get(feed)
@@ -421,6 +429,9 @@ class CollectionWorker:
             diagnostic_source.set('Сбор · '+feed+' · download_media')
             capture_scope.set(secrets.token_hex(16))
             self.jobs._collection_active[job.id]=_CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
+            if self.jobs.metrics:
+                from oko.observability import event
+                event('job_started', job_id=job.id, kind=job.kind)
             caption_attempt=CaptionAttempt(self,current,job) if download.media.key=='youtube:subtitles' else None
             adapter = self._collection.article_source().adapter if self.service.feedless(download.publication_id) else self._collection.publication_adapter(feed,captions=caption_attempt)
         try:
