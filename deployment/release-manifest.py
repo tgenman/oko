@@ -21,8 +21,8 @@ def main():
     from oko.storage.postgres_schema import MIGRATIONS
     pin = json.loads(Path('oko/processing/codex_runtime.json').read_text())
     value = dict(version=1, sha=args.sha, platform='linux/amd64',
-                 image='ghcr.io/tgenman/oko@'+args.digest,
-                 image_tag='ghcr.io/tgenman/oko:'+args.sha,
+                 image='ghcr.io/tgenman/oko-runtime@'+args.digest,
+                 image_tag='ghcr.io/tgenman/oko-runtime:'+args.sha,
                  helper=dict(release=args.sha, protocol=VERSION), codex=pin,
                  schema=dict(minimum=len(MIGRATIONS), maximum=len(MIGRATIONS)))
     args.output.parent.mkdir(parents=True, exist_ok=True)

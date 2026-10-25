@@ -40,9 +40,14 @@ def test_existing_database_missing_credentials_cannot_regenerate(tmp_path,monkey
 def test_manifest_rejects_mutable_or_unrelated_images(tmp_path):
     path=tmp_path/'release.json'
     scope=operator(); sha='a'*40
-    for image in ('ghcr.io/tgenman/oko:latest','ghcr.io/other/oko@sha256:'+'b'*64):
+    for image in ('ghcr.io/tgenman/oko-runtime:latest','ghcr.io/other/oko@sha256:'+'b'*64,
+                  'ghcr.io/tgenman/oko@sha256:'+'b'*64):
         path.write_text(json.dumps(dict(sha=sha,image=image,platform='linux/amd64',helper=dict(release=sha))))
         with pytest.raises(ValueError,match='manifest'):scope['manifest'](path)
+    value=dict(sha=sha,image='ghcr.io/tgenman/oko-runtime@sha256:'+'b'*64,
+               platform='linux/amd64',helper=dict(release=sha))
+    path.write_text(json.dumps(value))
+    assert scope['manifest'](path)==value
 
 
 def test_renewal_failure_restores_both_files_as_one_version(tmp_path):
