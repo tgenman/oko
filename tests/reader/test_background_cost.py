@@ -118,6 +118,32 @@ def test_pending_dispatch_ignores_completed_archive_and_keeps_priorities(tmp_pat
     store.db.close()
 
 
+@pytest.mark.parametrize('saved_inputs', [0, 1])
+def test_processing_backfill_does_not_scan_unrelated_completed_archive(tmp_path, saved_inputs):
+    store = Store(tmp_path, lambda _: None)
+    try:
+        with store.db:
+            store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",
+                                [(f'old-{n}',) for n in range(20000)])
+            if saved_inputs:
+                store.db.execute("INSERT INTO filter_inputs VALUES ('synthetic-saved-input','synthetic-signature')")
+            store.db.execute('ANALYZE')
+            # Linux CI SQLite has no STAT4 histogram. Reproduce its planner
+            # information on builds that provide the optional extension.
+            if store.db.execute("SELECT 1 FROM sqlite_master WHERE name='sqlite_stat4'").fetchone():
+                store.db.execute('DELETE FROM sqlite_stat4')
+                store.db.execute('ANALYZE sqlite_schema')
+        steps = []
+        store.db.set_progress_handler(lambda: steps.append(1) or 0, 100)
+        try:
+            store.jobs.backfill_processing_inputs()
+        finally:
+            store.db.set_progress_handler(None, 0)
+        assert len(steps)*100 < 1000, 'Backfill scanned completed jobs without matching saved inputs'
+    finally:
+        store.db.close()
+
+
 
 
 def test_progress_writes_do_not_rebuild_source_configuration(tmp_path):

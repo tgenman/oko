@@ -633,7 +633,9 @@ class JobRepository:
     def backfill_processing_steps(self) -> Iterator[None]:
         from oko.storage import processing_input
         for kind,table in (('filter','filter_inputs'),('theses','thesis_inputs')):
-            identities = [row[0] for row in self.store.db.execute('SELECT j.id FROM jobs j JOIN '+table+" i ON i.item=j.item WHERE j.kind=? AND json_extract(j.payload,'$.input_revision') IS NULL",(kind,))]
+            # Sparse legacy inputs drive the lookup. SQLite without STAT4 can
+            # otherwise scan the entire completed-job archive for each kind.
+            identities = [row[0] for row in self.store.db.execute('SELECT j.id FROM '+table+" i CROSS JOIN jobs j WHERE j.item=i.item AND j.kind=? AND json_extract(j.payload,'$.input_revision') IS NULL",(kind,))]
             for identity in identities:
                 with self.store.db:
                     row = self.store.db.execute('SELECT j.id,j.item,i.signature FROM jobs j JOIN '+table+" i ON i.item=j.item WHERE j.id=? AND j.kind=? AND json_extract(j.payload,'$.input_revision') IS NULL",(identity,kind)).fetchone()

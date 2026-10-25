@@ -66,3 +66,21 @@ Use absolute paths for the output files because the script enters the checkout.
 Evidence: [baseline](baseline-store-open.json), [current](current-store-open.json),
 and the preserved first samples [before](baseline-first-sample.json) /
 [after](current-first-sample.json).
+
+## Linux planner regression found in CI
+
+The first published CI run exposed a completed-job archive scan during legacy
+input backfill. Linux SQLite lacked the optional STAT4 histograms available in
+the local build. With 20,000 unrelated completed fetch jobs, the filter and
+summary queries each executed about 60,000 SQLite VM instructions even when
+their saved-input tables were empty. This startup background work could overlap
+a metrics scrape; the metrics query itself was not the cause.
+
+Backfill now starts from the sparse saved-input table and performs an indexed
+kind/item lookup in jobs. The original matching and missing-revision predicates
+remain, including completed processing jobs needed for retry or provenance.
+The regression removes optional histogram data from a synthetic database, reloads
+the planner, and tests both zero and one saved inputs against the 20,000-job
+archive. Both stay below 1,000 VM instructions after previously requiring
+120,000 and 60,000 respectively. The targeted cost/metrics/processing suites
+passed 65 tests after the change.
