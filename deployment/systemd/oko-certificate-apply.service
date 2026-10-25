@@ -1,0 +1,8 @@
+[Unit]
+Description=Validate and apply the current Oko certificate under the maintenance lock
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/okoctl cert-apply --cert /etc/letsencrypt/live/oko.observer/fullchain.pem --key /etc/letsencrypt/live/oko.observer/privkey.pem
+TimeoutStartSec=180
+UMask=0077

@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 import secrets
 import socket
-import urllib.request
+import ssl
+from urllib.parse import urlsplit
 import webbrowser
 
 import uvicorn
@@ -23,23 +24,21 @@ def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: b
     for _ in range(100):
         try:
             data = json.loads((root / 'runtime.json').read_text())
-            request = urllib.request.Request(data.get('control_url', data['url']) + '/api/v3/status',
-                                            headers={'Authorization': 'Bearer ' + data['token']})
-            with urllib.request.urlopen(request, timeout=.2) as response:
-                if response.status == 200:
-                    expected = 'explicit' if api_only or persistent else 'client_presence'
-                    status = json.load(response)
-                    actual = status['lifetime']['kind']
-                    if actual != expected:
-                        raise SystemExit(f'Запущенный экземпляр использует {actual}; запрошен {expected}. Завершите его явно перед сменой профиля.')
-                    bundled = json.loads((Path(__file__).parent / 'reader/generated/openapi.json').read_text())
-                    version = status['api_version']
-                    if version.split('.')[0] != bundled['info']['version'].split('.')[0]:
-                        raise SystemExit(f'Запущенный экземпляр использует API {version}; требуется {bundled["info"]["version"]}. Завершите его перед обновлением.')
-                    if browser:
-                        webbrowser.open(data['url'] + ('/' if persistent else '/#token=' + data['token']))
-                    print(f'Открыт существующий экземпляр Око ({actual}, API {version}).')
-                    return
+            from oko.reader.control import status as control_status
+            status = control_status(data, timeout=.2)
+            if status:
+                expected = 'explicit' if api_only or persistent else 'client_presence'
+                actual = status['lifetime']['kind']
+                if actual != expected:
+                    raise SystemExit(f'Запущенный экземпляр использует {actual}; запрошен {expected}. Завершите его явно перед сменой профиля.')
+                bundled = json.loads((Path(__file__).parent / 'reader/generated/openapi.json').read_text())
+                version = status['api_version']
+                if version.split('.')[0] != bundled['info']['version'].split('.')[0]:
+                    raise SystemExit(f'Запущенный экземпляр использует API {version}; требуется {bundled["info"]["version"]}. Завершите его перед обновлением.')
+                if browser:
+                    webbrowser.open(data['url'] + ('/' if persistent else '/#token=' + data['token']))
+                print(f'Открыт существующий экземпляр Око ({actual}, API {version}).')
+                return
         except (OSError, ValueError):
             time.sleep(.05)
     raise SystemExit('Экземпляр Око занят или останавливается. Повторите запуск через несколько секунд.')
@@ -57,6 +56,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--persistent', action='store_true', help='Постоянный веб-экземпляр с запоминаемым входом')
     parser.add_argument('--host', choices=('127.0.0.1', '0.0.0.0'), default='127.0.0.1')
     parser.add_argument('--public-url', help='Внешний локальный origin читателя, например http://oko')
+    parser.add_argument('--tls-cert', type=Path, help='PEM цепочка сертификатов для HTTPS в Uvicorn')
+    parser.add_argument('--tls-key', type=Path, help='Закрытый PEM ключ для HTTPS в Uvicorn')
     parser.add_argument('--codex-url', help='Адрес установленного процесса Codex на Mac')
     parser.add_argument('--codex-socket', type=Path, help='Приватный Unix socket host-helper (Linux)')
     parser.add_argument('--codex-token-file', type=Path)
@@ -65,6 +66,15 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--lease', type=float, default=6, help='Срок клиентской сессии, секунд')
     parser.add_argument('--grace', type=float, default=15, help='Ожидание переподключения, секунд')
     args = parser.parse_args()
+    if bool(args.tls_cert) != bool(args.tls_key):
+        parser.error('--tls-cert and --tls-key must be supplied together')
+    if args.tls_cert:
+        if not args.public_url or urlsplit(args.public_url).scheme != 'https':
+            parser.error('Native TLS requires an HTTPS --public-url')
+        try:
+            ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(args.tls_cert, args.tls_key)
+        except (OSError, ssl.SSLError):
+            parser.error('TLS certificate and key could not be loaded')
     if args.codex_socket and args.codex_url:
         parser.error('--codex-url and --codex-socket are separate transports')
     codex_url = 'http://localhost' if args.codex_socket else args.codex_url
@@ -76,6 +86,9 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
         parser.error('Таймауты должны быть положительными')
     from oko.storage.credentials import private_database_url
     database_url = private_database_url(args.database_url_file) if args.database_url_file else None
+    if database_url is not None:
+        from oko.storage.readiness import wait_database
+        wait_database(database_url)
     telegram_env = args.telegram_env or (args.telegram_project / '.env' if args.telegram_project else None)
     root = args.data.resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -111,6 +124,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
             sock.listen(128)
             port = sock.getsockname()[1]
             control_url = f'http://127.0.0.1:{port}'
+            if args.tls_cert:
+                control_url = f'https://{urlsplit(args.public_url).hostname}:{port}'
             url = args.public_url.rstrip('/') if args.public_url else control_url
             server: uvicorn.Server | None = None
 
@@ -123,7 +138,9 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                              lease=args.lease, grace=args.grace, api_only=args.api_only, persistent=args.persistent,
                              public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo, database_url=database_url,
                              telegram_client=LocalTelegram(telegram_env, root) if telegram_env and not args.demo else None)
-            config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2, proxy_headers=False)
+            config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2, proxy_headers=False,
+                                    ssl_certfile=str(args.tls_cert) if args.tls_cert else None,
+                                    ssl_keyfile=str(args.tls_key) if args.tls_key else None)
             server = uvicorn.Server(config)
 
             async def serve() -> None:

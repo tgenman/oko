@@ -12,7 +12,7 @@ from oko.reader.password_auth import PasswordAccess
 def test_remembered_login_survives_restart_and_can_be_revoked(tmp_path: Path):
     PasswordAccess(tmp_path).set_user('reader', 'synthetic-password')
     options = dict(persistent=True, public_url='http://oko')
-    with TestClient(create_app(tmp_path, token='bootstrap', **options), base_url='http://oko') as client:
+    with TestClient(create_app(tmp_path, token='bootstrap', **options), base_url='http://oko', client=('127.0.0.1', 50000)) as client:
         assert client.get('/api/v3/status').status_code == 403
         # Health/readiness probes must not allocate browser credentials.
         for _ in range(3):
@@ -52,7 +52,7 @@ def test_persistent_web_stays_available_without_tabs_and_without_enabling_work(t
     clock = Clock()
     exits = []
     with TestClient(create_app(tmp_path, token='test', persistent=True, clock=clock,
-                               shutdown=lambda: exits.append(True)), headers={'Authorization': 'Bearer test'}) as client:
+                               shutdown=lambda: exits.append(True)), headers={'Authorization': 'Bearer test'}, client=('127.0.0.1', 50000)) as client:
         assert client.get('/').status_code == 200
         assert 'Логин' in client.get('/').text
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200

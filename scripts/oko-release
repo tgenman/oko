@@ -19,17 +19,16 @@ import subprocess
 import sys
 import tarfile
 import time
-import urllib.request
 from datetime import datetime, timezone
 
 DEFAULT_HOME = Path.home() / 'Library/Application Support/Oko'
 LABEL = 'local.oko.codex'
 
 
-def run(args, cwd=None, capture=False, env=None):
+def run(args, cwd=None, capture=False, env=None, timeout=None):
     return subprocess.run([str(v) for v in args], cwd=cwd, check=True,
                           stdout=subprocess.PIPE if capture else None,
-                          text=True, env=env).stdout
+                          text=True, env=env, timeout=timeout).stdout
 
 
 def save(path, value):
@@ -96,12 +95,12 @@ def prepare(args):
     print(commit)
 
 
-def compose(home, *args, name=None, capture=False):
+def compose(home, *args, name=None, capture=False, timeout=None):
     folder, manifest = release(home, name)
     env = os.environ.copy()
     env.update(OKO_IMAGE=manifest['image'], OKO_HOME=str(home), OKO_UID=str(os.getuid()), OKO_GID=str(os.getgid()))
     return run(['docker', '--context', 'desktop-linux', 'compose', '--project-name', 'oko-' + hashlib.sha256(str(home).encode()).hexdigest()[:12],
-                '--file', folder / 'source/compose.yaml', *args], capture=capture, env=env)
+                '--file', folder / 'source/compose.yaml', *args], capture=capture, env=env, timeout=timeout)
 
 
 def label(home):
@@ -188,16 +187,20 @@ def available(port, wait=0):
 
 def readiness(home, timeout=30):
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    # Stdlib probe also works with releases predating oko.reader.control, so a
+    # newer maintenance script can still start/roll back to those images.
+    probe = ("import json,urllib.request\n"
+             "d=json.load(open('/data/runtime.json'))\n"
+             "r=urllib.request.Request('http://127.0.0.1:8765/api/v3/status',headers={'Host':'localhost:8765','Authorization':'Bearer '+d['token']})\n"
+             "s=json.load(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(r,timeout=2))\n"
+             "assert s['runtime_state'] in ('running','disabled')")
+    while (remaining := deadline-time.monotonic()) > 0:
         try:
-            runtime = read(home / 'data/runtime.json')
-            request = urllib.request.Request('http://127.0.0.1:8765/api/v3/status',
-                        headers={'Host': 'localhost:8765', 'Authorization': 'Bearer ' + runtime['token']})
-            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=2) as response:
-                result = json.load(response)
-                if result.get('runtime_state') in ('running', 'disabled'):
-                    return
-        except (OSError, ValueError, KeyError):
+            # Docker Desktop port forwarding has a bridge peer, not a loopback
+            # peer inside the reader. Run service control inside the container.
+            compose(home, 'exec', '--no-TTY', 'reader', 'python', '-c', probe, timeout=min(5, remaining))
+            return
+        except (OSError, ValueError, KeyError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             time.sleep(.25)
     raise ValueError('Reader readiness failed; release remains selected for inspection, collection must stay disabled')
 

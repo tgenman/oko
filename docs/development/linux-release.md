@@ -16,6 +16,11 @@ A new image is built for AMD64 and tested in a running container with no network
 a read-only root, dropped capabilities and temporary synthetic data before push.
 A second privacy/digest readback produces the uploaded release manifest.
 
+The package must already be private and associated with this repository. A
+package metadata 404 is ambiguous for a repository-scoped token; it does not
+authorize bootstrap or replacing a possibly existing SHA tag. Publication stops
+until an administrator has provisioned/associated the private package.
+
 The manifest records the Git SHA, OCI digest, architecture, helper release and
 protocol, supported schema range and the exact public Codex package/components.
 There is no production deployment in this workflow; deployment is a separate
@@ -72,14 +77,16 @@ lease, deadline, response limits, ephemeral CLI mode and checked scratch cleanup
 
 ## Container-to-host transport
 
-Linux uses `/run/oko-codex/helper.sock`, not a public TCP listener. Bind-mount the
-socket's **directory** read-only so helper restarts replace the socket safely.
+Linux uses `/srv/oko/ipc/helper.sock` on the host, mounted as
+`/run/oko-ipc/helper.sock` in the reader, not a public TCP listener. Bind-mount the
+socket's **persistent directory** read-only so helper restarts replace the socket
+safely without replacing the mounted parent inode. Job scratch remains ephemeral.
 The directory belongs to `okocodex:oko-ipc` with mode 0750; the socket is 0660.
 The reader's supplementary `oko-ipc` GID permits connection. A separate private
 Bearer token authenticates requests and boot/session IDs own each attempt.
 
 ```sh
-python -m oko --codex-socket /run/oko-codex/helper.sock \
+python -m oko --codex-socket /run/oko-ipc/helper.sock \
   --codex-token-file /run/secrets/codex --persistent --no-browser --data /data
 ```
 

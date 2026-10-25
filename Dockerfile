@@ -25,6 +25,6 @@ RUN rm -rf /app/node_modules /app/.scratch /app/tests
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 10001:10001
 EXPOSE 8765
-HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 CMD ["python", "-c", "import json,urllib.request; d=json.load(open('/data/runtime.json')); r=urllib.request.Request('http://127.0.0.1:8765/api/v3/status',headers={'Authorization':'Bearer '+d['token']}); s=json.load(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(r,timeout=3)); assert s['runtime_state'] in ('running','disabled')"]
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 CMD ["python", "-m", "oko.reader.control"]
 ENTRYPOINT ["python", "-m", "oko"]
 CMD ["--persistent", "--host", "0.0.0.0", "--port", "8765", "--public-url", "http://localhost:8765", "--codex-url", "http://host.docker.internal:8767", "--codex-token-file", "/run/secrets/codex", "--data", "/data", "--no-browser", "--initially-disabled"]

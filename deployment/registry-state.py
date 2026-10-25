@@ -32,9 +32,12 @@ def probe(sha, token, actor):
     if not re.fullmatch('[0-9a-f]{40}', sha):raise ValueError('Invalid release SHA')
     status, package, _ = request(PACKAGE, {'Authorization':'Bearer '+token, 'Accept':'application/vnd.github+json'})
     if status == 404:
-        return dict(package='absent', present=False, digest=None)
+        # A repository token can receive 404 for an existing package before it
+        # is associated with that repository. Its tags may already exist.
+        raise RuntimeError('Package visibility is unknown: provision and associate the private package before publication')
     if status != 200:raise RuntimeError('Package visibility could not be verified: HTTP '+str(status))
-    if package.get('visibility') != 'private':raise RuntimeError('Refusing to publish or reuse a non-private package')
+    if package.get('visibility') != 'private':
+        raise RuntimeError('Refusing to publish or reuse a non-private package: visibility='+repr(package.get('visibility')))
     basic = base64.b64encode((actor+':'+token).encode()).decode()
     url = 'https://ghcr.io/token?'+urllib.parse.urlencode(dict(service='ghcr.io', scope='repository:tgenman/oko:pull'))
     status, authorization, _ = request(url, {'Authorization':'Basic '+basic})
