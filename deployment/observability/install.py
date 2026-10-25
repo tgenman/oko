@@ -74,7 +74,7 @@ GRANT pg_monitor TO oko_monitor;
         run('systemctl','daemon-reload')
         run('systemctl','start','oko-observability-collect.service')
         run('systemctl','enable','--now','oko-observability-collect.timer')
-        run('docker','compose','-f',ROOT/'config/compose.monitoring.yaml','up','-d')
+        run('docker','compose','-f',ROOT/'config/compose.monitoring.yaml','up','-d','--force-recreate')
     print('Monitoring installed; HTTPS metrics require the matching reader release. Validate service readiness separately.')
 
 
