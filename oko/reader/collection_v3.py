@@ -24,8 +24,8 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     from oko.reader.api_v3 import no_query
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
-    def snapshot() -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        value = runtime.collection_snapshot()
+    def snapshot(feed_id: str | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        value = runtime.collection_snapshot(feed_id)
         rows = value.pop('sources')
         value['observed_at'] = timestamp(value['observed_at'])
         return value, rows
@@ -41,7 +41,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @router.get('/api/v3/collection-status/{feed_id}', response_model=wire.CollectionDetails)
     @read_locked(runtime.execution)
     async def details(feed_id: str) -> wire.CollectionDetails:
-        meta, rows = snapshot()
+        meta, rows = snapshot(feed_id)
         row = next((r for r in rows if r['feed_id'] == feed_id), None)
         if row is None:
             from oko.reader.reading_v3 import missing

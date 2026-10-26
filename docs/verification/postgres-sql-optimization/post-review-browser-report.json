@@ -1,0 +1,134 @@
+{
+  "started_at": "20261026T125421Z",
+  "selected_files": {
+    "browser": [
+      "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/tests/browser/test_linked_publications_http.ts",
+      "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/tests/browser/test_youtube_publications.ts",
+      "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/tests/browser/test_telegraph_content_http.ts"
+    ],
+    "node-tests": [],
+    "python-tests": [],
+    "tool-tests": [],
+    "syntax": [],
+    "lint": []
+  },
+  "checkout": {
+    "status": "PASS",
+    "changed_files": []
+  },
+  "suites": {
+    "tooling-types": {
+      "status": "PASS (1.24s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/scripts/check-types.mts",
+            "tsconfig.tooling.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.2428
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 1.2429
+    },
+    "browser-types": {
+      "status": "PASS (1.64s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--import",
+            "tsx",
+            "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/scripts/check-types.mts",
+            "tsconfig.browser-tests.json"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.643
+        }
+      ],
+      "failures": [],
+      "duration_seconds": 1.643
+    },
+    "browser": {
+      "status": "PASS (14.79s)",
+      "commands": [
+        {
+          "command": [
+            "/Users/dabondarev/.local/bin/node",
+            "--require",
+            "tsx/cjs",
+            "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/scripts/run-browser-tests.cts",
+            "--require",
+            "tsx/cjs",
+            "--require",
+            "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/scripts/register-browser-typescript.cts",
+            "--enable-source-maps",
+            "--test",
+            "--test-reporter=tap",
+            "--test-reporter=/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/scripts/test-timing-reporter.mts",
+            "--test-reporter-destination=stdout",
+            "--test-reporter-destination=/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/.scratch/check-runs/20261026T125421Z-70b2a3eb/browser-2e946a5a05ab4bddb7c27a63a8ddde95.json",
+            "--test-concurrency=8",
+            "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/tests/browser/test_linked_publications_http.ts",
+            "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/tests/browser/test_youtube_publications.ts",
+            "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/tests/browser/test_telegraph_content_http.ts"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 14.4716
+        }
+      ],
+      "failures": [],
+      "counts": {
+        "total": 5,
+        "passed": 5,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "passed_scenarios": 5,
+      "file_durations": {
+        "tests/browser/test_linked_publications_http.ts": 11.642337041,
+        "tests/browser/test_telegraph_content_http.ts": 3.5980902500000003,
+        "tests/browser/test_youtube_publications.ts": 8.663851167
+      },
+      "duration_seconds": 14.7913,
+      "checkout_changes": []
+    }
+  },
+  "timing_history": {
+    "path": "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/.scratch/check-cache/test-timings/browser.json",
+    "context": {
+      "platform": "darwin",
+      "machine": "arm64",
+      "cpus": 12,
+      "browser_workers": 8
+    }
+  },
+  "browser_name_pattern": null,
+  "tool_selection": {
+    "required": false,
+    "inputs": [],
+    "base": null,
+    "tests": []
+  },
+  "test_groups": {
+    "Playwright": {
+      "status": "PASS",
+      "counts": {
+        "total": 5,
+        "passed": 5,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 0
+      },
+      "duration_seconds": 14.7913
+    }
+  },
+  "exit_code": 0,
+  "duration_seconds": 18.33,
+  "log": "/Users/dabondarev/.codex/worktrees/postgres-reading-optimization/oko/.scratch/check-runs/20261026T125421Z-70b2a3eb/output.log"
+}

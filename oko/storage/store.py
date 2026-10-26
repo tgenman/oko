@@ -474,23 +474,39 @@ class Store:
 
     def viewed_set(self, members: list[str]) -> bool:
         members = sorted(set(members))
-        affected = set(members)
         with self.db:
-            if any(not self.db.execute('SELECT 1 FROM items WHERE id=?', (member,)).fetchone() for member in members):
+            rows = {}
+            memberships: dict[str, list[str]] = {}
+            for start in range(0, len(members), 400):
+                batch = members[start:start+400]
+                marks = ','.join('?' for _ in batch)
+                rows.update({row['id']: row for row in self.db.execute(
+                    f'SELECT id,members FROM items WHERE id IN ({marks})', batch)})
+                for row in self.db.execute(f'''SELECT m.publication_id,m.feed_id FROM reading_memberships m
+                        JOIN items i ON i.id=m.publication_id WHERE i.viewed=0 AND m.publication_id IN ({marks})''', batch):
+                    memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
+            if len(rows) != len(members):
                 return False
-            memberships={member:[r[0] for r in self.db.execute('SELECT m.feed_id FROM reading_memberships m JOIN items i ON i.id=m.publication_id WHERE m.publication_id=? AND i.viewed=0',(member,))] for member in members}
-            changed_feeds = {feed for feeds in memberships.values() for feed in feeds}
-            for feed in changed_feeds:
+            eligibility: dict[str, set[int]] = {}
+            for member, feeds in memberships.items():
+                for feed in feeds:
+                    eligibility.setdefault(feed, set()).update(json.loads(rows[member]['members']))
+            for feed, messages in eligibility.items():
                 self.subscriptions.details.record(feed, 'marked_read')
-            self.problems.forget_materials(affected, self.wall_clock())
-            for member in members:
-                row = expect_row(self.db.execute('SELECT feed_id,members FROM items WHERE id=?', (member,)).fetchone())
-                for feed in memberships[member]:
-                    self.read_sync.eligible(feed,json.loads(row['members']),'viewed')
-                self.subscriptions.history.viewed(member)
-                self.db.execute('DELETE FROM feed_publications WHERE publication_id=?',(member,))
-                publication_links.prune(self,{member})
-                self.db.execute('UPDATE items SET feed_id=NULL WHERE id=? AND viewed=0',(member,))
+                self.read_sync.eligible(feed, sorted(messages), 'viewed')
+            self.problems.forget_materials(set(members), self.wall_clock())
+            # Capture all read-sync facts before removing any membership. A
+            # single reachability pass then sees the final remaining roots.
+            for start in range(0, len(members), 400):
+                batch = members[start:start+400]
+                marks = ','.join('?' for _ in batch)
+                self.db.execute(f"UPDATE history_members SET outcome='viewed' WHERE item IN ({marks}) AND outcome IN ('pending','retrying')", batch)
+                self.db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ({marks})', batch)
+            publication_links.prune(self, set(members))
+            for start in range(0, len(members), 400):
+                batch = members[start:start+400]
+                marks = ','.join('?' for _ in batch)
+                self.db.execute(f'UPDATE items SET feed_id=NULL WHERE id IN ({marks}) AND viewed=0', batch)
         self.processing.sync()
         self.db.after_commit(lambda: self.fault('after_viewed_commit'))
         return True
@@ -548,36 +564,60 @@ class Store:
             material['display_text'] = display
         return material
 
+    def reading_content(self, row: Row) -> tuple[dict[str, Any], str, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None] | None:
+        """Check the saved inputs shared by cards and completion counts.
+
+        This does not build a card, its snippet, media URLs or work status.
+        Broken stored content or active processing output stays in the captured
+        publication set, but cannot contribute a readable card.
+        """
+        item = row['id']
+        try:
+            header, text = self.original(item)
+            header['title']
+            for attachment in header.get('attachments', []):
+                attachment['name'], attachment['kind'], attachment['mime']
+            json.loads(row['media_ids'])
+            for child in publication_links.children(self, item):
+                if child['complete']:
+                    json.loads(child['media_ids'])
+            filtered = self.filters.read(item)
+            theses = self.processing.theses.read(item)
+            linked = saved_preview(header)
+            if row['platform'] == 'telegram':
+                linked = publication_links.reading(self, item, self.publications.original(item)[1]) or linked
+            return header, text, filtered, theses, linked
+        except (OSError, ValueError, KeyError):
+            record_caught('store.material')
+            return None
+
     def saved_publication(self, row: Row) -> dict[str, Any] | None:
         """Saved publication facts without reader-specific text projections."""
         item = row['id']
-        settings = self.subscriptions.effective('feed', row['feed_id'])
+        settings = self.subscriptions.effective('feed', row['feed_id'], details=False)
         base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'],
                     published_known=bool(row['published_known']), source_order=row['source_order'],
                     members=json.loads(row['members']), complete=bool(row['complete']),
                     originals=settings['effective']['originals']['value'])
+        fetch = material_read.jobs(self.db, item).get('fetch')
         if not row['complete']:
-            base.update(title='Материал загружается', loading=bool(self.db.execute(
-                "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND status IN ('pending','running')", (item,)).fetchone()))
+            base.update(title='Материал загружается', loading=bool(fetch and fetch['status'] in ('pending', 'running')))
             return dict(base, text='')
         try:
-            header, text = self.original(item)
-            filtered = self.filters.read(item)
+            content = self.reading_content(row)
+            if content is None:
+                return None
+            header, text, filtered, theses, linked = content
             base.update(changed=bool(header.get('changed')), source_deleted=self.publications.source_deleted(item),
-                filter=filtered, title=header['title'], theses=self.processing.theses.read(item),
+                filter=filtered, title=header['title'], theses=theses,
                 provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
-                version=self.content_version(item), loading=bool(self.db.execute(
-                    "SELECT 1 FROM jobs WHERE kind='fetch' AND item=? AND (status='running' OR (status='pending' AND next<=?))",
-                    (item, reader_now(self.clock()))).fetchone()),
+                version=self.content_version(item), loading=bool(fetch and (fetch['status']=='running' or fetch['status']=='pending' and fetch['next']<=reader_now(self.clock()))),
                 full=header.get('full', True) and (not header.get('members') or set(header['members']) == set(base['members'])),
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{item}/media/{a.get('media_id',a['name'])}"), kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[])
             base.update(saved_external(header, f'/api/v3/materials/{item}'))
             base['loading'] = base['loading'] or row['platform'] is not None and self.media.loading(item)
-            linked=saved_preview(header)
-            if row['platform']=='telegram':
-                linked=publication_links.reading(self,item,self.publications.original(item)[1]) or linked
             base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=linked)
             return base
         except (OSError, ValueError, KeyError):

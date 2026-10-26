@@ -122,9 +122,9 @@ class ReaderApplication:
         return identity in self._viewed_ids
 
 
-    def collection_snapshot(self) -> dict[str, Any]:
+    def collection_snapshot(self, feed_id: str | None = None) -> dict[str, Any]:
         current = self.require_store()
-        feeds = self.queries.feeds()
+        feeds = self.queries.feeds(feed_id)
         bindings=self.queries.bindings([feed['id'] for feed in feeds if feed['kind']=='telegram'])
         for feed in feeds:
             binding=bindings.get(feed['id'])
@@ -132,7 +132,7 @@ class ReaderApplication:
         sources = current.collection_status.snapshot(feeds, self._live(),
             'Око выключено' if not self.enabled else 'Ожидание присутствия читателя' if not self._admitted() else 'Работа приостановлена',
             {identity: dict(generation=attempt.job.generation, elapsed_seconds=max(0.,self._clock()-attempt.started),stage=attempt.capture.stage)
-             for identity, attempt in self.jobs._collection_active.items()})
+             for identity, attempt in self.jobs._collection_active.items()}, details=feed_id is not None)
         self._collection_revision += 1
         return dict(instance_id=self._collection_instance, revision=self._collection_revision,
                     observed_at=self._wall_clock(), work_allowed=self._live(), sources=self._clean_collection(sources))

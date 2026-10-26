@@ -204,6 +204,9 @@ class VersionedReading:
                         for feed in nav['feeds']:
                             requested.setdefault(('feed',feed['id']),dict(kind='feed',id=feed['id'],known_version=None))
                         versions.update(owner.batch({key for key in requested if key not in versions}))
+                    feed_resources = store.feed_resources({identity for (kind, identity), request in requested.items()
+                        if kind == 'feed' and (kind, identity) in versions and versions[kind, identity]['feed_exists'] is not None
+                        and request['known_version'] != str(versions[kind, identity]['version'])})
                     changed_items={identity for (kind,identity),request in requested.items()
                         if kind in ('card','material','filter','theses','media') and (kind,identity) in versions
                         and request['known_version']!=str(versions[kind,identity]['version'])
@@ -223,8 +226,8 @@ class VersionedReading:
                                 if kind=='status': data=status_data
                                 elif kind=='navigation': data=nav
                                 elif kind=='feed':
-                                    feeds=store.feeds(identity)
-                                    data=project.subscription(facts.SubscriptionFeed.model_validate(feeds[0]),store.binding(identity)).model_dump(mode='json') if feeds else None
+                                    feed, binding = feed_resources[identity]
+                                    data=project.subscription(facts.SubscriptionFeed.model_validate(feed),binding).model_dump(mode='json')
                                 elif kind=='card':data=self.compact(identity)
                                 elif kind=='media':data=self.media(identity)
                                 elif kind in ('filter','theses'):

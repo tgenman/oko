@@ -1,6 +1,6 @@
 """Bounded, request-local inputs shared by material parts and their admission rules.
 
-Only the synchronous versioned reader opens this scope. Nothing survives it;
+Synchronous reading calculations open this scope. Nothing survives it;
 write paths use the same accessors against current storage without a snapshot.
 """
 from oko.storage.database import Database, Row
@@ -9,6 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from collections.abc import Iterator
 from typing import Any
+import json
 
 from oko.storage.reading import reading_value
 
@@ -22,6 +23,10 @@ class Inputs:
     feeds: dict[str, Row] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
+    subtitles: dict[str, str | None] = field(default_factory=dict)
+    related_items: dict[str, Row] = field(default_factory=dict)
+    children: dict[str, list[Row]] = field(default_factory=dict)
+    owners: dict[str, set[str]] = field(default_factory=dict)
 
 
 _current: ContextVar[Inputs | None] = ContextVar('material_inputs', default=None)
@@ -39,7 +44,12 @@ _FEED = 'SELECT f.*,b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_
 @reading_value
 def item(db: Database, identity: str) -> Row | None:
     value = current(db)
-    return value.items.get(identity) if value and identity in value.items else db.execute('SELECT * FROM items WHERE id=?', (identity,)).fetchone()
+    if value is not None:
+        if identity in value.items:
+            return value.items[identity]
+        if identity in value.related_items:
+            return value.related_items[identity]
+    return db.execute('SELECT * FROM items WHERE id=?', (identity,)).fetchone()
 
 
 
@@ -80,7 +90,7 @@ def state(db: Database, key: str) -> str | None:
 
 @contextmanager
 def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
-    """Six indexed reads for up to one API batch; independent of foreign data."""
+    """Bounded inputs for requested materials; independent of foreign data."""
     value = Inputs(db)
     ids = sorted(identities)
     for start in range(0, len(ids), 400):
@@ -89,12 +99,29 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
         value.items.update({r['id']: r for r in db.execute(_ITEM+f' WHERE i.id IN ({marks})',batch)})
         for r in db.execute(f'''SELECT j.*,coalesce(m.publication_id,j.item) AS reader_item FROM jobs j
                 LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
-                WHERE j.item IN ({marks}) OR m.publication_id IN ({marks})''',batch+batch):
+                WHERE j.item IN ({marks})
+                UNION SELECT j.*,m.publication_id AS reader_item FROM media_files m
+                JOIN jobs j ON j.kind='download_media' AND m.id=j.item
+                WHERE m.publication_id IN ({marks})''',batch+batch):
             if r['kind']=='download_media':
                 value.media_jobs.setdefault(r['reader_item'],[]).append(r)
             else:
                 value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
-    feeds = sorted({r['feed_id'] for r in value.items.values()})
+        value.children.update({identity: [] for identity in batch})
+        for row in db.execute(f'''SELECT l.source_publication_id AS reader_source,i.*,j.error AS fetch_error
+                FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+                LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
+                WHERE l.source_publication_id IN ({marks}) AND i.viewed=0 ORDER BY l.rowid''', batch):
+            value.children[row['reader_source']].append(row)
+            value.related_items[row['id']] = row
+        value.owners.update({identity: set() for identity in batch})
+        for row in db.execute(f'''SELECT m.publication_id AS reader_source,m.feed_id FROM reading_memberships m
+                WHERE m.publication_id IN ({marks})
+                UNION SELECT l.source_publication_id AS reader_source,m.feed_id FROM publication_links l
+                JOIN reading_memberships m ON m.publication_id=l.target_publication_id
+                WHERE l.source_publication_id IN ({marks})''', batch+batch):
+            value.owners[row['reader_source']].add(row['feed_id'])
+    feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None})
     for start in range(0, len(feeds), 400):
         batch = feeds[start:start+400]
         marks = ','.join('?' for _ in batch)
@@ -104,6 +131,23 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
     for start in range(0,len(keys),400):
         batch = keys[start:start+400]
         value.state.update({r['key']:r['value'] for r in db.execute('SELECT key,value FROM state WHERE key IN ('+','.join('?' for _ in batch)+')',batch)})
+    from oko.storage.youtube_media import subtitle_id
+    for row in value.items.values():
+        try:
+            content = json.loads(row['content'])
+            identity = subtitle_id(content) if 'youtube' in content.get('extra', {}) else None
+            if identity is not None:
+                value.subtitles[identity] = None
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # A corrupt resource is reported by its own projection; it must not
+            # prevent other resources in the same batch from being read.
+            continue
+    subtitle_ids = sorted(value.subtitles)
+    for start in range(0, len(subtitle_ids), 400):
+        batch = subtitle_ids[start:start+400]
+        marks = ','.join('?' for _ in batch)
+        value.subtitles.update({row['id']: row['storage_key'] for row in db.execute(
+            f"SELECT id,storage_key FROM media_files WHERE status='ready' AND id IN ({marks})", batch)})
     token = _current.set(value)
     try:
         yield

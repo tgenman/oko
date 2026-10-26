@@ -15,8 +15,14 @@ def subtitle_id(content: dict[str,Any]) -> str | None:
 
 @reading_value
 def subtitle_path(store: 'Store', identity: str | None) -> Path | None:
-    row=store.db.execute("SELECT storage_key FROM media_files WHERE id=? AND status='ready'",(identity,)).fetchone()
-    path=store.root/row[0] if row and row[0] else None
+    from oko.storage.material_read import current
+    inputs = current(store.db)
+    if inputs is not None and identity is not None and identity in inputs.subtitles:
+        key = inputs.subtitles[identity]
+    else:
+        row=store.db.execute("SELECT storage_key FROM media_files WHERE id=? AND status='ready'",(identity,)).fetchone()
+        key = row[0] if row else None
+    path=store.root/key if key else None
     return path if path and path.is_file() else None
 
 

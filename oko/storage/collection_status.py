@@ -1,6 +1,6 @@
 """Durable, bounded collection attempts; independent of processing and read sync."""
 from oko.storage.sqlite_schema import is_sqlite
-from oko.storage.database import Database
+from oko.storage.database import Database, Row
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
@@ -125,15 +125,70 @@ class CollectionStatus:
         data.update(finished_at=self.wall(), elapsed_seconds=elapsed)
         self._write(job.id, feed, data)
 
-    def snapshot(self, feeds: list[dict[str, Any]], allowed: bool, reason: str, active: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    def _snapshot_inputs(self, feeds: list[str], details: bool) -> tuple[list[Row], dict[str, dict[str, Any]]]:
+        """Select only the requested feeds; summary never transfers diagnostic bodies."""
+        jobs: list[Row] = []
+        results: dict[str, dict[str, Any]] = {}
+        attempt_fields = "a.data AS attempt_data" if details else """
+            json_extract(a.data,'$.attempt_id') AS saved_attempt,
+            json_extract(a.data,'$.started_at') AS started_at,
+            json_extract(a.data,'$.finished_at') AS finished_at,
+            json_extract(a.data,'$.elapsed_seconds') AS elapsed_seconds,
+            json_extract(a.data,'$.last_error.resolved') AS error_resolved"""
+        result_fields = "r.data AS result_data" if details else """
+            json_extract(r.data,'$.success_at') AS success_at,
+            json_extract(r.data,'$.duration') AS duration,
+            json_extract(r.data,'$.last_error.resolved') AS error_resolved"""
+        fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.error,j.queued_wall,j.problem_code'
+        for start in range(0, len(feeds), 400):
+            batch = feeds[start:start + 400]
+            marks = ','.join('?' for _ in batch)
+            discoveries = batch + ([''] if 'demo' in batch else [])
+            discovery_marks = ','.join('?' for _ in discoveries)
+            # Job kinds are disjoint, so these branches cannot duplicate an operation.
+            selected = f"""SELECT {fields},CASE WHEN j.item='' THEN 'demo' ELSE j.item END AS feed
+                FROM jobs j WHERE j.kind='discover' AND j.item IN ({discovery_marks})
+                UNION ALL
+                SELECT {fields},i.feed_id AS feed FROM jobs j JOIN items i ON i.id=j.item
+                    WHERE j.kind='fetch' AND i.viewed=0 AND i.feed_id IN ({marks})
+                UNION ALL
+                SELECT {fields},i.feed_id AS feed FROM jobs j JOIN media_files m ON m.id=j.item
+                    JOIN items i ON i.id=m.publication_id
+                    WHERE j.kind='download_media' AND i.viewed=0 AND i.feed_id IN ({marks})"""
+            jobs.extend(self.db.execute(f"""SELECT j.*,{attempt_fields} FROM ({selected}) j
+                LEFT JOIN collection_attempts a ON a.job=j.id
+                WHERE (j.status IN ('pending','running','failed','unavailable') OR j.status='done' AND j.error IS NOT NULL)
+                    AND coalesce(j.problem_code,'')!='source-deleted'""", (discoveries + batch + batch)).fetchall())
+            for row in self.db.execute(f"""SELECT f.id,d.updated,{result_fields} FROM feeds f
+                LEFT JOIN collection_results r ON r.feed=f.id LEFT JOIN feed_details d ON d.feed=f.id
+                WHERE f.id IN ({marks})""", batch):
+                if details:
+                    result = json.loads(row['result_data']) if row['result_data'] else {}
+                else:
+                    result = dict(
+                        success_at=float(row['success_at']) if row['success_at'] is not None else None,
+                        duration=float(row['duration']) if row['duration'] is not None else None,
+                        last_error=dict(resolved=bool(int(row['error_resolved']))) if row['error_resolved'] is not None else None)
+                if not result.get('success_at') and row['updated'] is not None:
+                    result['success_at'] = row['updated']
+                results[row['id']] = result
+        return jobs, results
+
+    def snapshot(self, feeds: list[dict[str, Any]], allowed: bool, reason: str,
+                 active: dict[int, dict[str, Any]], *, details: bool = False) -> list[dict[str, Any]]:
         now, wall = self.clock(), self.wall()
-        jobs = self.db.execute("""SELECT j.*,CASE WHEN j.kind='discover' THEN CASE WHEN j.item='' THEN 'demo' ELSE j.item END ELSE i.feed_id END AS feed
-            FROM jobs j LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
-            LEFT JOIN items i ON (j.kind='fetch' AND i.id=j.item) OR (j.kind='download_media' AND i.id=m.publication_id)
-            WHERE j.kind IN ('discover','fetch','download_media') AND (i.viewed=0 OR j.kind='discover') AND (j.status IN ('pending','running','failed','unavailable') OR j.status='done' AND j.error IS NOT NULL) AND coalesce(j.problem_code,'')!='source-deleted'""").fetchall()
+        jobs, results = self._snapshot_inputs([feed['id'] for feed in feeds], details)
         groups: dict[str, list[dict[str, Any]]] = {}
         for job in jobs:
-            data = self.read(job['id'])
+            if details:
+                data = json.loads(job['attempt_data']) if job['attempt_data'] else {}
+            else:
+                data = dict(
+                    attempt_id=job['saved_attempt'],
+                    started_at=float(job['started_at']) if job['started_at'] is not None else None,
+                    finished_at=float(job['finished_at']) if job['finished_at'] is not None else None,
+                    elapsed_seconds=float(job['elapsed_seconds']) if job['elapsed_seconds'] is not None else None,
+                    last_error=dict(resolved=bool(int(job['error_resolved']))) if job['error_resolved'] is not None else None)
             running = active.get(job['id'])
             if job['status'] == 'done' and not job['error']:
                 continue
@@ -155,12 +210,7 @@ class CollectionStatus:
         for feed in feeds:
             operations = groups.get(feed['id'], [])
             operations.sort(key=lambda op:(ranks[op['state']], -(op['elapsed_seconds'] or 0) if op['state']=='collecting' else op['retry_at'] or '', op['operation_id']))
-            result_row = self.db.execute('SELECT data FROM collection_results WHERE feed=?', (feed['id'],)).fetchone()
-            result = json.loads(result_row[0]) if result_row else {}
-            if not result.get('success_at'):
-                details = self.db.execute('SELECT updated FROM feed_details WHERE feed=?', (feed['id'],)).fetchone()
-                if details and details[0] is not None:
-                    result['success_at'] = details[0]
+            result = results.get(feed['id'], {})
             primary = operations[0] if operations else None
             state = primary['state'] if primary else 'complete' if result.get('success_at') else 'never'
             if feed['connection'] == 'deleting':
