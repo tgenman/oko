@@ -15,8 +15,7 @@ def git(root, *arguments):
     return subprocess.check_output(['git', '-C', str(root), *arguments], text=True).strip()
 
 
-@pytest.mark.parametrize('prepare_fails', [False, True])
-def test_update_uses_remote_main_preserves_dirty_checkout_and_stops_on_prepare_failure(tmp_path, prepare_fails):
+def test_retired_local_update_preserves_checkout_without_fetch_or_build(tmp_path):
     upstream = tmp_path / 'upstream'
     upstream.mkdir()
     git(upstream, 'init', '-q', '-b', 'main')
@@ -47,16 +46,11 @@ if operation == 'prepare' and os.environ['FAIL_PREPARE'] == '1': sys.exit(17)
     expected = git(upstream, 'rev-parse', 'HEAD')
     log = tmp_path / 'updates.jsonl'
     result = subprocess.run([sys.executable, str(working / 'scripts/update-working-oko')],
-                            cwd=tmp_path, env=dict(os.environ, UPDATE_LOG=str(log), FAIL_PREPARE=str(int(prepare_fails))),
+                            cwd=tmp_path, env=dict(os.environ, UPDATE_LOG=str(log), FAIL_PREPARE='0'),
                             capture_output=True, text=True)
-    assert result.returncode == (17 if prepare_fails else 0), result.stdout + result.stderr
-    entries = [json.loads(line) for line in log.read_text().splitlines()]
-    assert [entry['operation'] for entry in entries] == (['prepare'] if prepare_fails else ['prepare', 'update'])
-    for entry in entries:
-        assert entry['source'] == 'published main'
-        assert entry['dirty'] == ''
-        assert expected in entry['args']
-        assert not Path(entry['root']).exists()  # The temporary clone was cleaned up.
+    assert result.returncode == 1 and 'retired' in result.stderr
+    assert not log.exists()
+    assert git(working, 'rev-parse', 'origin/main') == old_head
     assert git(working, 'rev-parse', 'HEAD') == old_head
     assert (working / 'source.txt').read_text() == 'unfinished local changes'
     assert (working / 'notes.txt').read_text() == 'untracked local file'

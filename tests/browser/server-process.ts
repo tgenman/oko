@@ -41,7 +41,9 @@ function createHost() {
       try {
         return await new Promise<HostReply>((resolve,reject)=>{
           pending.set(id,{resolve,reject});
-          timer=setTimeout(()=>{fail(new Error(`HTTP fixture ${op} timeout`));child.kill('SIGTERM');},15000);
+          // Building a synthetic PostgreSQL library performs real transactions; it is not part of the measured browser latency.
+          const timeout=op==='prepare'?60000:15000;
+          timer=setTimeout(()=>{fail(new Error(`HTTP fixture ${op} timeout`));child.kill('SIGTERM');},timeout);
           child.stdin.write(JSON.stringify({id,op,...values})+'\n');
         });
       } finally {clearTimeout(timer);pending.delete(id);}

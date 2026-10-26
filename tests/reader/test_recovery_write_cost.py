@@ -4,19 +4,45 @@ import psycopg
 import re
 from fastapi.testclient import TestClient
 
-from tests.support.sqlite_import import source_library, invoke, credential_file
+from tests.support.subscriptions import add_source
+from tests.support.filters import transport
+from tests.support.rss import wait_cards
 from tests.support.app import create_app
 from tests.support.reader import HEADERS, wait_for
 from tests.support.rss import rss
 from tests.support.youtube import PNG
 
 
+def source_library(root, database_url, *, processing=False):
+    def response(request):
+        if request.url.path == '/feed':
+            return httpx.Response(200, text=rss())
+        if request.url.path == '/image.png':
+            return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
+        return httpx.Response(200, text='<article><p>Imported synthetic text.</p><img src="https://source.test/image.png"></article>')
+
+    with TestClient(create_app(root, token='test', api_only=True, rss_enabled=True, database_url=database_url,
+                    rss_transport=httpx.MockTransport(response), ai_transport=transport([], theses=True)), headers=HEADERS) as client:
+        assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
+        assert client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''}).status_code == 200
+        if processing:
+            assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True}).status_code == 200
+            assert client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_filters': 'Keep useful text'}).status_code == 200
+        feed = add_source(client, 'https://source.test/feed', 'Imported feed', 'Imported folder')
+        assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
+        item = wait_cards(client)[0]['id']
+        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+        media_url = material['content']['attachments'][0]['url']
+        assert client.get(media_url).content == PNG
+        if processing:
+            material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/'+item).json())['theses']['result'] else None))
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+    return feed, item, media_url, material
+
+
 def test_restart_does_not_rewrite_identical_materials(postgres_url, tmp_path):
-    source = tmp_path/'source'
-    _, item, media, original = source_library(source, processing=True)
-    target = tmp_path/'target'
-    imported = invoke(source, target, credential_file(tmp_path, postgres_url), tmp_path/'report.json')
-    assert imported.returncode == 0, imported.stderr
+    target = tmp_path/'library'
+    _, item, media, original = source_library(target, postgres_url, processing=True)
     # A database-boundary guard makes write amplification fail visibly at the
     # real reader startup. It does not replace any application collaborator.
     with psycopg.connect(postgres_url, autocommit=True) as db:
@@ -49,11 +75,8 @@ def test_restart_does_not_rewrite_identical_materials(postgres_url, tmp_path):
 
 
 def test_recovery_reuses_material_reads_within_each_read_phase(postgres_url, tmp_path, monkeypatch):
-    source = tmp_path/'source'
-    _, item, _, _ = source_library(source, processing=True)
-    target = tmp_path/'target'
-    imported = invoke(source, target, credential_file(tmp_path, postgres_url), tmp_path/'report.json')
-    assert imported.returncode == 0, imported.stderr
+    target = tmp_path/'library'
+    _, item, _, _ = source_library(target, postgres_url, processing=True)
     original_execute = psycopg.Connection.execute
     reads = []
     def execute(connection, query, parameters=None, **kwargs):

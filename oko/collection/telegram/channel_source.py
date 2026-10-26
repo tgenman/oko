@@ -1,7 +1,7 @@
 """Telegram channel delivery and read metadata over the external adapter API.
 
 This module owns neither storage nor media downloads. Runtime accepts its
-transport packets; Publication and MediaFile in SQLite own the saved state.
+transport packets; Publication and MediaFile in PostgreSQL own the saved state.
 """
 import asyncio
 from dataclasses import replace

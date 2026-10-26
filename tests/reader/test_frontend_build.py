@@ -11,7 +11,7 @@ def test_missing_build_fails_before_creating_reader_storage(tmp_path: Path, monk
     monkeypatch.setattr('oko.reader.static.FRONTEND_ROOT', tmp_path / 'missing-build')
     data = tmp_path / 'reader'
     with pytest.raises(RuntimeError, match='npm run build'):
-        create_app(data, token='test')
+        create_app(data, token='test', database_url='postgresql://unused.invalid/test')
     assert not data.exists()
 
 
@@ -29,5 +29,5 @@ def test_stale_or_damaged_build_fails_before_creating_reader_storage(tmp_path: P
     monkeypatch.setattr('oko.reader.static.FRONTEND_ROOT', build)
     data = tmp_path / 'reader'
     with pytest.raises(RuntimeError, match='npm run build'):
-        create_app(data, token='test')
+        create_app(data, token='test', database_url='postgresql://unused.invalid/test')
     assert not data.exists()

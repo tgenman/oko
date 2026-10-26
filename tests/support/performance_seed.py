@@ -6,7 +6,7 @@ import json
 
 from oko.collection.contracts import Material
 from oko.processing.llamacpp import ProcessorConfig
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.subscriptions.subscriptions import Overrides
 from tests.support.reading_cost import build_library
 from tests.support.library_templates import templates

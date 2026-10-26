@@ -1,5 +1,6 @@
 """Closed synthetic stores are reused only as sources of independent file copies."""
 from copy import deepcopy
+from tests.support.storage import clone_database, retain_database, release_database
 from functools import cache
 from pathlib import Path
 import shutil
@@ -28,15 +29,19 @@ class LibraryTemplates:
                 source = Path(mkdtemp(dir=self.directory.name))
                 try:
                     result = build(source)  # Builder closes every Store before returning.
+                    retain_database(source)
                 except BaseException:
                     shutil.rmtree(source)
                     raise
                 self.entries[key] = source, deepcopy(result)
             source, result = self.entries[key]
             shutil.copytree(source, root, dirs_exist_ok=True)
+            clone_database(source, root)
             return deepcopy(result)
 
     def close(self):
+        for source, _ in self.entries.values():
+            release_database(source)
         self.entries.clear()
         self.directory.cleanup()
 
@@ -70,14 +75,13 @@ class RunLibraryTemplates:
             result = pickle.loads(metadata.read_bytes())
         # Sources are immutable after publication; copies can run concurrently.
         shutil.copytree(source, root, dirs_exist_ok=True)
+        clone_database(source, root)
         return result
 
 
 @cache
 def templates() -> LibraryTemplates | RunLibraryTemplates:
-    directory = os.environ.get('OKO_TEST_LIBRARY_DIR')
-    if directory:
-        return RunLibraryTemplates(Path(directory))
-    # Direct invocations retain process-owned temporary seeds. The runner owns
-    # its separate directory and removes it only after all child suites exit.
+    # PostgreSQL seed schemas belong to the creating process. Do not publish a
+    # file marker across workers whose creator could already have dropped it.
+    # Each process reuses its closed seeds and clones an independent schema.
     return LibraryTemplates()

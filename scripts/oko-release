@@ -13,7 +13,6 @@ import plistlib
 import secrets
 import shutil
 import socket
-import sqlite3
 import uuid
 import subprocess
 import sys
@@ -254,100 +253,12 @@ def tree_digest(root):
     return value.hexdigest()
 
 
-def backup(home):
-    confirm_helper_stopped(home)
-    # Caller must stop container before copying. Refuse if any owned container runs.
-    active = compose(home, 'ps', '--status', 'running', '--quiet', capture=True)
-    if active.strip():
-        raise ValueError('Stop the working instance before a consistent backup')
-    root = home / 'data'
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (root / 'instance.lock').open('a') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise ValueError('Data is still owned by a running instance') from exc
-        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-        target = home / 'backups' / stamp
-        target.mkdir(parents=True, mode=0o700)
-        digest = tree_digest(root)
-        shutil.copytree(root, target / 'data')
-        if tree_digest(target / 'data') != digest or tree_digest(root) != digest:
-            raise ValueError('Backup verification failed; incomplete copy retained for inspection')
-        save(target / 'backup.json', dict(release=read(home / 'current.json')['release'], digest=digest))
-        return target
 
 
-def migrate(args):
-    release(args.home)
-    confirm_helper_stopped(args.home)
-    source = args.source.resolve()
-    destination = args.home / 'data'
-    if destination.exists() and any(destination.iterdir()):
-        raise ValueError('Migration requires empty destination data; original data was preserved')
-    if not (source / 'state.sqlite').is_file():
-        raise ValueError('Source does not contain an Oko store')
-    if (source / 'instance.lock').is_symlink():
-        raise ValueError('Source lock must not be a symlink')
-    with (source / 'instance.lock').open('rb') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise ValueError('Stop the old instance before migration') from exc
-        digest = tree_digest(source)
-        if destination.exists():
-            destination.rmdir()
-        try:
-            shutil.copytree(source, destination)
-            if tree_digest(destination) != digest or tree_digest(source) != digest:
-                raise ValueError('Migration copy verification failed')
-            for name in ('runtime.json', 'runtime.tmp'):
-                (destination / name).unlink(missing_ok=True)
-            folder, _ = release(args.home)
-            run([folder / 'source/.venv/bin/python', '-c',
-                 'from pathlib import Path; from oko.storage.store import Store; import sys; '
-                 's=Store(Path(sys.argv[1]), lambda _: None); s.set_work_enabled(False); s.db.close()', destination],
-                 cwd=folder / 'source')
-        except BaseException:
-            # Destination was empty; never leave a partially imported installation.
-            if destination.exists():
-                shutil.rmtree(destination)
-            raise
-    print('Copied data with collection disabled. Original preserved. Validate Telegram paths before enabling.')
 
 
-def reset_reading_identity(data):
-    """A restored timeline must not reuse the versions known by existing tabs."""
-    database = data / 'state.sqlite'
-    if not database.is_file():
-        return
-    with sqlite3.connect(database) as db:
-        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reader_identity'").fetchone():
-            db.execute('UPDATE reader_identity SET value=? WHERE id=1', (str(uuid.uuid4()),))
 
 
-def restore(args):
-    if args.backup != args.acknowledge_data_loss or Path(args.backup).name != args.backup:
-        raise ValueError('Repeat the backup id in --acknowledge-data-loss to approve discarding later changes')
-    checkpoint = args.home / 'backups' / args.backup
-    info = read(checkpoint / 'backup.json')
-    release(args.home, info['release'])
-    if tree_digest(checkpoint / 'data') != info['digest']:
-        raise ValueError('Backup integrity failed')
-    stop(args.home)
-    preserved = backup(args.home)
-    stage = args.home / 'restore-data'
-    if stage.exists():
-        raise ValueError('Previous restore staging exists; inspect before retry')
-    shutil.copytree(checkpoint / 'data', stage)
-    reset_reading_identity(stage)
-    # Preserve the unsuccessful current state before switching the complete tree.
-    retired = args.home / ('retired-data-' + preserved.name)
-    (args.home / 'data').rename(retired)
-    stage.rename(args.home / 'data')
-    configure(args.home, info['release'])
-    start(args.home)
-    print('Restored backup; later data preserved at ' + str(retired))
 
 
 def main():
@@ -370,6 +281,8 @@ def main():
     migration = commands.add_parser('migrate')
     migration.add_argument('--source', type=Path, required=True)
     args = parser.parse_args()
+    if args.command in ('update', 'rollback', 'backup', 'restore', 'migrate'):
+        raise ValueError('File-only release operations are retired. Use the PostgreSQL deploy/backup procedures in docs/development/cloud-deploy.md and cloud-backup.md.')
     args.home = args.home.expanduser().resolve()
     args.repo = args.repo.resolve()
     if args.home == args.repo or args.repo in args.home.parents:
@@ -392,29 +305,11 @@ def main():
             raise ValueError('Already installed; use update')
         configure(args.home, args.release)
         save(args.home / 'installation.json', dict(launchagents=str(args.launchagents.expanduser().resolve())))
-        print('Prepared installation. Migrate if needed, then start explicitly at http://localhost:8765.')
-    elif args.command in ('update', 'rollback'):
-        release(args.home, args.release)
-        old = read(args.home / 'current.json')['release']
-        stop(args.home)
-        checkpoint = backup(args.home)
-        if args.command == 'rollback':
-            history = read(args.home / 'previous.json')
-            if history['release'] != args.release or tree_digest(args.home / 'data') != history['digest']:
-                raise ValueError('Rollback blocked: data changed or incompatible; preserve current data and plan restore explicitly')
-        save(args.home / 'previous.json', dict(release=old, digest=tree_digest(args.home / 'data'), backup=str(checkpoint)))
-        configure(args.home, args.release)
-        start(args.home, port_wait=5)
+        print('Prepared installation. Configure secrets/database-url, apply PostgreSQL migrations, then start explicitly at http://localhost:8765.')
     elif args.command == 'start':
         start(args.home)
     elif args.command == 'stop':
         stop(args.home)
-    elif args.command == 'backup':
-        print(backup(args.home))
-    elif args.command == 'migrate':
-        migrate(args)
-    elif args.command == 'restore':
-        restore(args)
     elif args.command == 'open':
         run(['open', 'http://localhost:8765/'])
     elif args.command == 'status':

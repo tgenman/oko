@@ -52,10 +52,10 @@ def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_pa
         assert store.jobs.valid(job)
         release.set()
         await task
-        row=store.db.execute('SELECT * FROM media_files WHERE id=?',(job.item,)).fetchone()
+        row=store.db.execute('SELECT * FROM media_files WHERE id = %s',(job.item,)).fetchone()
         assert row['source_locator']=='new-locator' and row['name']=='new-file.png'
         assert row['status']=='pending_download' and row['storage_key'] is None
-        replacement=store.db.execute('SELECT status,generation,error FROM jobs WHERE id=?',(job.id,)).fetchone()
+        replacement=store.db.execute('SELECT status , generation , error FROM jobs WHERE id = %s',(job.id,)).fetchone()
         assert replacement['status']=='pending' and replacement['generation']>job.generation and replacement['error'] is None
         assert not list((tmp_path/'staging'/'_media').iterdir())
         store.db.close()
@@ -119,7 +119,7 @@ def test_fetch_rejects_an_older_description_without_remaining_running(tmp_path,f
         release.set()
         await task
         assert 'Newer description' in json.dumps(saved(store,item)['content'])
-        row=store.db.execute('SELECT status,error FROM jobs WHERE id=?',(job.id,)).fetchone()
+        row=store.db.execute('SELECT status , error FROM jobs WHERE id = %s',(job.id,)).fetchone()
         assert tuple(row)==('cancelled',None)
         assert not store.db.in_transaction
         store.db.close()

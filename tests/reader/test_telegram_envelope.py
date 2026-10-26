@@ -25,7 +25,7 @@ def test_unknown_telegram_cursor_is_a_visible_compatibility_problem_without_rese
         material = settled(client)[0]['id']
     incompatible = json.dumps(dict(format_version=99,adapter='client',selection={},position={'after':123}))
     with database(tmp_path) as db:
-        db.execute('UPDATE feeds SET cursor=? WHERE id=?',(incompatible,feed))
+        db.execute('UPDATE feeds SET cursor = %s WHERE id = %s',(incompatible,feed))
         db.execute("UPDATE jobs SET status='pending',next=0 WHERE kind='discover'")
     with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=telegram),headers=headers) as client:
         deadline = time.monotonic()+2
@@ -38,4 +38,4 @@ def test_unknown_telegram_cursor_is_a_visible_compatibility_problem_without_rese
             raise AssertionError(state)
         assert client.get('/api/v3/materials/'+material).status_code == 200
     with database(tmp_path) as db:
-        assert db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()[0] == incompatible
+        assert db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()[0] == incompatible

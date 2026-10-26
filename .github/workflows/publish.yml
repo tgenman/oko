@@ -64,8 +64,18 @@ jobs:
           docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -m oko.processing.codex_bridge --help
       - name: Exercise a running locked-down container without external networking
         run: |
-          trap 'docker rm -f oko-release-smoke >/dev/null 2>&1 || true' EXIT
-          docker run -d --name oko-release-smoke --network none --read-only --cap-drop ALL --security-opt no-new-privileges --init --tmpfs /data:uid=10001,gid=10001,mode=0700 --tmpfs /tmp:mode=1777 "$IMAGE:$RELEASE_SHA" --api-only --demo --host 127.0.0.1 --port 8765 --data /data --no-browser --initially-disabled
+          trap 'docker rm -f oko-release-smoke oko-release-smoke-db >/dev/null 2>&1 || true; docker network rm oko-release-smoke-net >/dev/null 2>&1 || true; sudo rm -f "$RUNNER_TEMP/oko-smoke-dsn"' EXIT
+          docker network create --internal oko-release-smoke-net
+          docker run -d --name oko-release-smoke-db --network oko-release-smoke-net -e POSTGRES_PASSWORD=synthetic-ci-only -e POSTGRES_DB=oko postgres:18-bookworm
+          for attempt in $(seq 1 30); do
+            if docker exec oko-release-smoke-db pg_isready -U postgres -d oko; then break; fi
+            sleep 2
+          done
+          printf '%s\n' 'postgresql://postgres:synthetic-ci-only@oko-release-smoke-db:5432/oko' > "$RUNNER_TEMP/oko-smoke-dsn"
+          chmod 600 "$RUNNER_TEMP/oko-smoke-dsn"
+          sudo chown 10001:10001 "$RUNNER_TEMP/oko-smoke-dsn"
+          docker run --rm --network oko-release-smoke-net -v "$RUNNER_TEMP/oko-smoke-dsn:/run/secrets/database-url:ro" --entrypoint python "$IMAGE:$RELEASE_SHA" -m oko.storage.postgres_migrations --database-url-file /run/secrets/database-url
+          docker run -d --name oko-release-smoke --network oko-release-smoke-net --read-only --cap-drop ALL --security-opt no-new-privileges --init --tmpfs /data:uid=10001,gid=10001,mode=0700 --tmpfs /tmp:mode=1777 -v "$RUNNER_TEMP/oko-smoke-dsn:/run/secrets/database-url:ro" "$IMAGE:$RELEASE_SHA" --api-only --demo --host 127.0.0.1 --port 8765 --database-url-file /run/secrets/database-url --data /data --no-browser
           for attempt in $(seq 1 30); do
             state=$(docker inspect --format '{{.State.Health.Status}}' oko-release-smoke)
             if [ "$state" = healthy ]; then break; fi
@@ -73,6 +83,7 @@ jobs:
             sleep 2
           done
           test "$(docker inspect --format '{{.State.Health.Status}}' oko-release-smoke)" = healthy
+          docker exec oko-release-smoke python -c 'import json; from pathlib import Path; from oko.reader.control import status; assert status(json.loads(Path("/data/runtime.json").read_text()))["runtime_state"] == "disabled"'
       - name: Publish once after image verification
         if: steps.existing.outputs.present != 'true'
         run: docker push "$IMAGE:$RELEASE_SHA"

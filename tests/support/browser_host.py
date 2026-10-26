@@ -79,7 +79,7 @@ def main():
                     seed(Path(command['data']), command['per_feed'], bool(command['active']))
                     result = {}
                 elif command['op'] == 'prepare-publications':
-                    from oko.storage.store import Store
+                    from tests.support.storage import Store
                     store=Store(Path(command['data']),lambda _:None)
                     store.db.close()
                     result = {}
@@ -88,7 +88,10 @@ def main():
                     scenarios[key] = scenario
                     result = {'origin': scenario.origin}
                 elif command['op'] == 'stop':
-                    scenarios.pop(command['scenario']).close()
+                    finished = scenarios.pop(command['scenario'])
+                    finished.close()
+                    from tests.support.storage import release_database
+                    release_database(Path(finished.data))
                     result = {}
                 elif command['op'] == 'restart':
                     old = scenarios.pop(command['scenario'])

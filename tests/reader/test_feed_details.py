@@ -10,7 +10,7 @@ import pytest
 
 from oko.collection.demo import DemoSource
 from oko.collection.contracts import DiscoveryResult, Publication, SourceError, SourceObservation
-from oko.storage.store import Store
+from tests.support.storage import Store
 from tests.support.app import create_app
 from tests.support.filters import FilterSource, setup_filters, transport
 from tests.support.reader import HEADERS, wait_for

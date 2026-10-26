@@ -1,9 +1,8 @@
 """Durable Telegram bindings, verified profiles and source claim ownership.
 
-All mutations run on the existing Subscriptions SQLite connection under shared
+All mutations run on the existing Subscriptions PostgreSQL connection under shared
 admission. No network, credentials, SDK or file deletion belongs here.
 """
-from oko.storage.sqlite_schema import is_sqlite
 from oko.storage.database import expect_row, Database
 from oko.storage.reading import reading_value
 import json
@@ -56,22 +55,14 @@ class TelegramAccess:
         # No executescript here: migrations and their ownership rows are atomic.
         with db:
             begin_write(db)
-            if is_sqlite(db):
-                db.execute('CREATE TABLE IF NOT EXISTS telegram_avatars (feed TEXT PRIMARY KEY, image BLOB NOT NULL, mime TEXT NOT NULL, digest TEXT NOT NULL)')
-                db.execute('CREATE TABLE IF NOT EXISTS telegram_bindings (feed TEXT PRIMARY KEY, binding TEXT NOT NULL)')
-                db.execute('''CREATE TABLE IF NOT EXISTS telegram_profiles (
-                    role TEXT PRIMARY KEY, account TEXT, user_id INTEGER, generation INTEGER NOT NULL,
-                    state TEXT, checked REAL, message TEXT)''')
-                db.execute('CREATE TABLE IF NOT EXISTS telegram_source_claims (kind TEXT, value TEXT, PRIMARY KEY(kind,value))')
-                db.execute('''CREATE TABLE IF NOT EXISTS telegram_claim_owners (
-                    kind TEXT, value TEXT, feed TEXT, evidence TEXT, PRIMARY KEY(kind,value,feed))''')
-            db.execute("UPDATE telegram_profiles SET state='unavailable',message='Требуется проверка сессии после запуска'")
+            pass
+            db.execute("UPDATE telegram_profiles SET state = 'unavailable' , message = 'Требуется проверка сессии после запуска'")
 
     def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
-        query='SELECT feed,binding FROM telegram_bindings'
+        query='SELECT feed , binding FROM telegram_bindings'
         params: tuple[str,...]=()
         if feeds is not None:
-            query+=' WHERE feed IN (SELECT value FROM json_each(?))'
+            query+=' WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )'
             params=(json.dumps(feeds),)
         return {row['feed']:json.loads(row['binding']) for row in self.db.execute(query,params)}
 
@@ -80,19 +71,19 @@ class TelegramAccess:
 
     @reading_value
     def binding(self, feed: str) -> dict[str, Any] | None:
-        row = self.db.execute('SELECT binding FROM telegram_bindings WHERE feed=?', (feed,)).fetchone()
+        row = self.db.execute('SELECT binding FROM telegram_bindings WHERE feed = %s', (feed,)).fetchone()
         return json.loads(row[0]) if row else None
 
     def put_binding(self, feed: str, binding: dict[str, Any]) -> None:
-        self.db.execute('INSERT INTO telegram_bindings VALUES (?,?) ON CONFLICT(feed) DO UPDATE SET binding=excluded.binding', (feed, json.dumps(binding)))
+        self.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET binding = excluded . binding', (feed, json.dumps(binding)))
 
     @reading_value
     def profile(self, role: str) -> dict[str, Any] | None:
-        row = self.db.execute('SELECT * FROM telegram_profiles WHERE role=?', (role,)).fetchone()
+        row = self.db.execute('SELECT * FROM telegram_profiles WHERE role = %s', (role,)).fetchone()
         return dict(row) if row else None
 
     def dependents(self, role: str) -> list[str]:
-        return [r['feed'] for r in self.db.execute("SELECT feed FROM telegram_bindings WHERE json_extract(binding,'$.role')=?", (role,))]
+        return [r['feed'] for r in self.db.execute("SELECT feed FROM telegram_bindings WHERE oko_json_extract ( binding , '$.role' ) = %s", (role,))]
 
     def save_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> dict[str, Any]:
         with self.db:
@@ -102,11 +93,9 @@ class TelegramAccess:
                 raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Профиль изменился; повторите проверку', 503)
             if old and old['user_id'] != user_id and self.dependents(role):
                 raise TelegramConflict('profile_in_use', dict(role=role), 'Профиль используется фидами')
-            if self.db.execute('SELECT 1 FROM telegram_profiles WHERE role!=? AND user_id=?', (role, user_id)).fetchone():
+            if self.db.execute('SELECT 1 FROM telegram_profiles WHERE role != %s AND user_id = %s', (role, user_id)).fetchone():
                 raise TelegramConflict('profile_account_conflict', dict(role=role), 'Для двух ролей нужны разные аккаунты')
-            self.db.execute('''INSERT INTO telegram_profiles VALUES (?,?,?,?,?,?,?)
-                ON CONFLICT(role) DO UPDATE SET account=excluded.account,user_id=excluded.user_id,
-                generation=excluded.generation,state=excluded.state,checked=excluded.checked,message=NULL''',
+            self.db.execute('INSERT INTO telegram_profiles VALUES ( %s , %s , %s , %s , %s , %s , %s ) ON CONFLICT ( role ) DO UPDATE SET account = excluded . account , user_id = excluded . user_id , generation = excluded . generation , state = excluded . state , checked = excluded . checked , message = NULL',
                 (role, account, user_id, generation + 1, 'ready', checked, None))
         return self.profile(role) or {}
 
@@ -116,7 +105,7 @@ class TelegramAccess:
             return False
         state = 'ready' if user_id == row['user_id'] else 'unavailable' if user_id is None else 'identity_mismatch'
         with self.db:
-            self.db.execute('UPDATE telegram_profiles SET state=?,checked=?,message=? WHERE role=?',
+            self.db.execute('UPDATE telegram_profiles SET state = %s , checked = %s , message = %s WHERE role = %s',
                 (state, checked, None if state == 'ready' else 'Личность Telegram-аккаунта не подтверждена', role))
         return state == 'ready'
 
@@ -128,17 +117,17 @@ class TelegramAccess:
         return list(dict.fromkeys(result))
 
     def owners(self, claims: list[tuple[str, str]]) -> list[str]:
-        return sorted({row[0] for kind, value in claims for row in self.db.execute('SELECT feed FROM telegram_claim_owners WHERE kind=? AND value=?', (kind, value))})
+        return sorted({row[0] for kind, value in claims for row in self.db.execute('SELECT feed FROM telegram_claim_owners WHERE kind = %s AND value = %s', (kind, value))})
 
     def claim(self, feed: str, claim: tuple[str, str], evidence: str) -> None:
-        self.db.execute('INSERT OR IGNORE INTO telegram_source_claims VALUES (?,?)', claim)
-        self.db.execute('INSERT OR IGNORE INTO telegram_claim_owners VALUES (?,?,?,?)', (*claim, feed, evidence))
+        self.db.execute('INSERT INTO telegram_source_claims VALUES ( %s , %s ) ON CONFLICT DO NOTHING', claim)
+        self.db.execute('INSERT INTO telegram_claim_owners VALUES ( %s , %s , %s , %s ) ON CONFLICT DO NOTHING', (*claim, feed, evidence))
 
     def conflicts(self, claims: list[tuple[str, str]], peer: int | None = None) -> list[str]:
         owners = self.owners(claims)
         if peer is not None:
             for feed in owners:
-                row = self.db.execute('SELECT telegram_peer FROM feeds WHERE id=?', (feed,)).fetchone()
+                row = self.db.execute('SELECT telegram_peer FROM feeds WHERE id = %s', (feed,)).fetchone()
                 if row and row[0] and row[0] != peer:
                     raise TelegramConflict('source_identity_conflict', dict(feed_id=feed), 'Сохранённый username принадлежит другому peer')
         return owners
@@ -153,9 +142,7 @@ class TelegramAccess:
             identity = subscriptions.new_feed_id()
             folder_id = subscriptions.ensure_folder(folder)
             profile = self.profile(binding['role']) if binding['kind'] == 'client' else None
-            self.db.execute('''INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,
-                telegram_peer,telegram_account,telegram_username,auto_read)
-                VALUES (?,?,?,'telegram',?,?,'connected',?,?,?,?,?)''',
+            self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , telegram_account , telegram_username , auto_read ) VALUES ( %s , %s , %s , 'telegram' , %s , %s , 'connected' , %s , %s , %s , %s , %s )",
                 (identity, 'telegram-instance:' + identity, info['title'], folder_id, json.dumps([source]),
                  'telegram' if profile else None, info.get('peer'), profile['account'] if profile else None,
                  info.get('username'), auto_read if profile else None))
@@ -172,14 +159,14 @@ class TelegramAccess:
         return result
 
     def duplicates(self, feeds: list[str]) -> dict[str, Any]:
-        return dict(existing_feeds=[dict(feed_id=feed, title=expect_row(self.db.execute('SELECT title FROM feeds WHERE id=?', (feed,)).fetchone())[0], access=self.binding(feed)) for feed in feeds])
+        return dict(existing_feeds=[dict(feed_id=feed, title=expect_row(self.db.execute('SELECT title FROM feeds WHERE id = %s', (feed,)).fetchone())[0], access=self.binding(feed)) for feed in feeds])
 
 
     def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
                       auto_read: bool | None, subscriptions: Any) -> dict[str,Any]:
         """Apply verified channel access inside Runtime's acceptance transaction."""
         subscriptions.check_owner('feed',feed)
-        row=expect_row(self.db.execute('SELECT * FROM feeds WHERE id=?',(feed,)).fetchone())
+        row=expect_row(self.db.execute('SELECT * FROM feeds WHERE id = %s',(feed,)).fetchone())
         previous=self.binding(feed)
         if row['kind']!='telegram' or row['transport']=='rss' or row['connection']=='deleting' or not previous:
             raise TelegramConflict('access_immutable',dict(feed_id=feed),'Способ доступа этого фида изменить нельзя')
@@ -198,8 +185,7 @@ class TelegramAccess:
         account=profile['account'] if profile else row['telegram_account']
         automatic=(bool(row['auto_read']) if auto_read is None else auto_read) if profile else None
         self.put_binding(feed,binding)
-        self.db.execute('''UPDATE feeds SET telegram_peer=?,telegram_account=?,telegram_username=?,transport=?,
-            connection='connected',auto_read=?,config=?,cursor='' WHERE id=?''',
+        self.db.execute("UPDATE feeds SET telegram_peer = %s , telegram_account = %s , telegram_username = %s , transport = %s , connection = 'connected' , auto_read = %s , config = %s , cursor = '' WHERE id = %s",
             (info.get('peer',known_peer),account,info.get('username'), 'telegram' if profile else None,automatic,
              json.dumps(dict(source_kind=info.get('kind','channel'))),feed))
         subscriptions.settings.refresh_feed(feed)
@@ -226,15 +212,15 @@ class TelegramAccess:
         if info.get('kind') in ('group','supergroup') or info.get('forum',False):
             raise TelegramConflict('source_connection_invalid',dict(reason='unsupported_group'),'Группы Telegram пока не поддерживаются; подключите канал',400)
         if info.get('kind')=='channel':
-            row=self.db.execute('SELECT config FROM feeds WHERE id=?',(feed,)).fetchone()
+            row=self.db.execute('SELECT config FROM feeds WHERE id = %s',(feed,)).fetchone()
             if row:
                 config=json.loads(row[0])
                 config['source_kind']=info['kind']
-                self.db.execute('UPDATE feeds SET config=? WHERE id=?',(json.dumps(config),feed))
+                self.db.execute('UPDATE feeds SET config = %s WHERE id = %s',(json.dumps(config),feed))
         if 'avatar' not in info:
             return
         if info['avatar'] is None:
-            self.db.execute('DELETE FROM telegram_avatars WHERE feed=?', (feed,))
+            self.db.execute('DELETE FROM telegram_avatars WHERE feed = %s', (feed,))
             return
         try:
             encoded = info['avatar']
@@ -246,11 +232,11 @@ class TelegramAccess:
         mime = ('image/jpeg' if image.startswith(b'\xff\xd8\xff') else 'image/png' if image.startswith(b'\x89PNG\r\n\x1a\n') else 'image/webp' if image[:4] == b'RIFF' and image[8:12] == b'WEBP' else None)
         if not mime or len(image) > 128*1024:
             return
-        self.db.execute('INSERT INTO telegram_avatars VALUES (?,?,?,?) ON CONFLICT(feed) DO UPDATE SET image=excluded.image,mime=excluded.mime,digest=excluded.digest',
+        self.db.execute('INSERT INTO telegram_avatars VALUES ( %s , %s , %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET image = excluded . image , mime = excluded . mime , digest = excluded . digest',
                         (feed, image, mime, hashlib.sha256(image).hexdigest()))
 
     def release(self, feed: str) -> None:
-        self.db.execute('DELETE FROM telegram_avatars WHERE feed=?', (feed,))
-        self.db.execute('DELETE FROM telegram_claim_owners WHERE feed=?', (feed,))
-        self.db.execute('DELETE FROM telegram_source_claims WHERE NOT EXISTS (SELECT 1 FROM telegram_claim_owners o WHERE o.kind=telegram_source_claims.kind AND o.value=telegram_source_claims.value)')
-        self.db.execute('DELETE FROM telegram_bindings WHERE feed=?', (feed,))
+        self.db.execute('DELETE FROM telegram_avatars WHERE feed = %s', (feed,))
+        self.db.execute('DELETE FROM telegram_claim_owners WHERE feed = %s', (feed,))
+        self.db.execute('DELETE FROM telegram_source_claims WHERE NOT EXISTS ( SELECT 1 FROM telegram_claim_owners o WHERE o . kind = telegram_source_claims . kind AND o . value = telegram_source_claims . value )')
+        self.db.execute('DELETE FROM telegram_bindings WHERE feed = %s', (feed,))

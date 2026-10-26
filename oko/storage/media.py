@@ -91,8 +91,7 @@ class MediaFiles:
         return 'media-'+str(UUID(row['id']).int)+'.bin'
 
     def file(self, item: str, media: str) -> tuple[Path, str] | None:
-        row = self.store.db.execute('''SELECT m.* FROM media_files m JOIN items i ON i.id=m.publication_id
-            WHERE m.id=? AND m.publication_id=? AND i.viewed=0 AND m.status='ready' ''', (media,item)).fetchone()
+        row = self.store.db.execute("SELECT m . * FROM media_files m JOIN items i ON i . id = m . publication_id WHERE m . id = %s AND m . publication_id = %s AND i . viewed = 0 AND m . status = 'ready' ", (media,item)).fetchone()
         if row and row['storage_key']:
             path = self.store.root/row['storage_key']
             if path.is_file():
@@ -101,7 +100,7 @@ class MediaFiles:
 
 
     def owner(self, media: str) -> str | None:
-        row = self.store.db.execute('SELECT publication_id FROM media_files WHERE id=?', (media,)).fetchone()
+        row = self.store.db.execute('SELECT publication_id FROM media_files WHERE id = %s', (media,)).fetchone()
         return str(row[0]) if row else None
 
 
@@ -111,14 +110,12 @@ class MediaFiles:
         if snapshot and item in snapshot.items:
             now=self.store.clock()
             return any(row['status']=='running' or row['status']=='pending' and row['next']<=now for row in snapshot.media_jobs.get(item,[]))
-        return self.store.db.execute("""SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item
-            WHERE m.publication_id=? AND j.kind='download_media' AND (j.status='running' OR j.status='pending' AND j.next<=?) LIMIT 1""",
+        return self.store.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m . id = j . item WHERE m . publication_id = %s AND j . kind = 'download_media' AND ( j . status = 'running' OR j . status = 'pending' AND j . next <= %s ) LIMIT 1",
             (item, self.store.clock())).fetchone() is not None
 
     def begin(self, identity: str, attempt: str, revalidate: bool) -> MediaDownload | None:
         store = self.store
-        row = store.db.execute('''SELECT m.*,i.platform,i.external_id,i.url FROM media_files m JOIN items i ON i.id=m.publication_id
-            WHERE m.id=? AND i.viewed=0 AND (m.status='pending_download' OR m.status='ready' AND ?=1) ''', (identity,revalidate)).fetchone()
+        row = store.db.execute("SELECT m . * , i . platform , i . external_id , i . url FROM media_files m JOIN items i ON i . id = m . publication_id WHERE m . id = %s AND i . viewed = 0 AND ( m . status = 'pending_download' OR m . status = 'ready' AND %s = 1 ) ", (identity,revalidate)).fetchone()
         if row is None:
             return None
         temporary = store.root/'staging'/'_media'/(attempt+'-'+secrets.token_hex(8))
@@ -129,8 +126,7 @@ class MediaFiles:
             MediaReference(row['resource_key'], row['source_locator'], row['name'], row['mime_type'], row['size_bytes'], row['resource_identity']), temporary, final)
 
     def current(self, identity: str, download: MediaDownload) -> bool:
-        row=self.store.db.execute("""SELECT m.*,i.platform,i.external_id FROM media_files m
-            JOIN items i ON i.id=m.publication_id WHERE m.id=? AND i.viewed=0""",(identity,)).fetchone()
+        row=self.store.db.execute('SELECT m . * , i . platform , i . external_id FROM media_files m JOIN items i ON i . id = m . publication_id WHERE m . id = %s AND i . viewed = 0',(identity,)).fetchone()
         return bool(row and row['publication_id']==download.publication_id
             and row['platform']==download.publication.key.platform.value and row['external_id']==download.publication.key.external_id
             and (row['resource_key'],row['source_locator'],row['name'],row['mime_type'],row['size_bytes'],row['resource_identity'])==
@@ -145,7 +141,7 @@ class MediaFiles:
         size = download.temporary.stat().st_size
         if actual.size_bytes is not None and actual.size_bytes != size:
             raise ValueError('Media adapter returned a different size')
-        previous=store.db.execute('SELECT * FROM media_files WHERE id=?',(identity,)).fetchone()
+        previous=store.db.execute('SELECT * FROM media_files WHERE id = %s',(identity,)).fetchone()
         same=bool(download.final.name!=identity and previous and previous['storage_key']
             and (store.root/previous['storage_key']).is_file()
             and files.file_digest(download.temporary)==files.file_digest(store.root/previous['storage_key']))
@@ -166,14 +162,14 @@ class MediaFiles:
     def accept(self, media_id: str, download: MediaDownload, actual: MediaReference, staged: tuple[str, Path, int]) -> bool:
         store=self.store
         identity,saved,size=staged
-        previous=store.db.execute('SELECT * FROM media_files WHERE id=?',(media_id,)).fetchone()
+        previous=store.db.execute('SELECT * FROM media_files WHERE id = %s',(media_id,)).fetchone()
         if not self.current(media_id,download):
             raise ValueError('Media owner changed')
-        row = store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0', (download.publication_id,)).fetchone()
+        row = store.db.execute('SELECT content FROM items WHERE id = %s AND viewed = 0', (download.publication_id,)).fetchone()
         if row is None:
             raise ValueError('Media owner changed')
         content = deepcopy(json.loads(row['content']))
-        media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (download.publication_id,))]
+        media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s', (download.publication_id,))]
         for value in media:
             if value['id']==media_id:
                 value.update(id=identity,status='ready',reason='',name=actual.name,storage_key=str(saved.relative_to(store.root)),size_bytes=size,
@@ -193,15 +189,14 @@ class MediaFiles:
         with store.db:
             if not self.current(media_id,download):
                 raise ValueError('Media owner changed')
-            store.db.execute("""UPDATE media_files SET id=?,status='ready',reason='',storage_key=?,size_bytes=?,source_locator=?,mime_type=?,name=? WHERE id=?""",
+            store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , reason = '' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
                 (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,media_id))
-            store.db.execute('UPDATE items SET content=?,media_ids=? WHERE id=?', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
+            store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
-            store.db.execute('''INSERT OR IGNORE INTO telegram_read_dirty
-                SELECT feed_id FROM items WHERE id=? AND feed_id IS NOT NULL''',(download.publication_id,))
+            store.db.execute('INSERT INTO telegram_read_dirty SELECT feed_id FROM items WHERE id = %s AND feed_id IS NOT NULL ON CONFLICT DO NOTHING',(download.publication_id,))
             store.read_versions.media_changed(download.publication_id)
             if subtitles:
-                store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(download.publication_id,))
+                store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(download.publication_id,))
                 store.read_versions.linked_changed(download.publication_id)
             publication_links.notify_parents(store,download.publication_id)
             if subtitles:store.publications.reconcile(download.publication_id)
@@ -234,14 +229,14 @@ class MediaFiles:
 
     def _subtitles_absent(self, media_id: str, owner: str, issue: AdapterIssue) -> None:
         store=self.store
-        row=store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0',(owner,)).fetchone()
+        row=store.db.execute('SELECT content FROM items WHERE id = %s AND viewed = 0',(owner,)).fetchone()
         if row is None:
             return
         content=json.loads(row['content'])
         content['extra']['youtube']['captions']='unavailable'
         content['extra']['youtube'].pop('captions_digest',None)
         content['extra']['_reader']['captions']='unavailable'
-        media=[dict(row) for row in store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(owner,))]
+        media=[dict(row) for row in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(owner,))]
         previous=next(value for value in media if value['id']==media_id)
         identity=str(uuid4()) if previous['storage_key'] else media_id
         for value in media:
@@ -255,9 +250,9 @@ class MediaFiles:
                     block['media_id']=identity
         self.project_header(content,media)
         with store.db:
-            store.db.execute("UPDATE media_files SET id=?,status='unavailable',reason=?,storage_key=NULL,size_bytes=NULL WHERE id=?",(identity,issue.message,media_id))
-            store.db.execute('UPDATE items SET content=?,media_ids=? WHERE id=?',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
-            store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(owner,))
+            store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , reason = %s , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,issue.message,media_id))
+            store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
+            store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(owner,))
             store.read_versions.linked_changed(owner)
             publication_links.notify_parents(store,owner)
         store.processing.sync()
@@ -277,11 +272,11 @@ class MediaFiles:
         subtitles = False
         keep_file = False
         if owner:
-            publication = store.db.execute('SELECT content FROM items WHERE id=? AND viewed=0', (owner,)).fetchone()
+            publication = store.db.execute('SELECT content FROM items WHERE id = %s AND viewed = 0', (owner,)).fetchone()
             if publication:
                 content = json.loads(publication['content'])
                 subtitles=youtube_media.subtitle_id(content)==media_id
-                media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id=?', (owner,))]
+                media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s', (owner,))]
                 old=next((value for value in media if value['id']==media_id),None)
                 keep_file=bool(old and old['status']=='ready' and old['storage_key'] and (store.root/old['storage_key']).is_file())
                 if subtitles and not keep_file:
@@ -294,13 +289,13 @@ class MediaFiles:
         with store.db:
             if content is not None:
                 assert owner is not None
-                store.db.execute('UPDATE media_files SET reason=?,status=? WHERE id=?',
+                store.db.execute('UPDATE media_files SET reason = %s , status = %s WHERE id = %s',
                     (issue.message,'ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download',media_id))
-                store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content,ensure_ascii=False),owner))
+                store.db.execute('UPDATE items SET content = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),owner))
                 store.subscriptions.history.saved(owner,False)
                 store.read_versions.media_changed(owner)
                 if subtitles:
-                    store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(owner,))
+                    store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(owner,))
                     store.read_versions.linked_changed(owner)
                 publication_links.notify_parents(store,owner)
         if content is not None:

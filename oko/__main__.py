@@ -47,7 +47,7 @@ def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: b
 def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None = None) -> None:
     parser = argparse.ArgumentParser(description='Око — локальный читатель')
     parser.add_argument('--data', type=Path, default=Path('data'))
-    parser.add_argument('--database-url-file', type=Path, help='Закрытый файл подключения PostgreSQL; схема устанавливается отдельной командой миграции')
+    parser.add_argument('--database-url-file', type=Path, required=True, help='Закрытый файл подключения PostgreSQL; схема устанавливается отдельной командой миграции')
     parser.add_argument('--telegram-env', type=Path, help='Путь к существующей .env с авторизацией Telegram')
     parser.add_argument('--telegram-project', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
@@ -62,7 +62,6 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--codex-url', help='Адрес установленного процесса Codex на Mac')
     parser.add_argument('--codex-socket', type=Path, help='Приватный Unix socket host-helper (Linux)')
     parser.add_argument('--codex-token-file', type=Path)
-    parser.add_argument('--initially-disabled', action='store_true', help='Остановить работу при первом создании хранилища')
     parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--lease', type=float, default=6, help='Срок клиентской сессии, секунд')
     parser.add_argument('--grace', type=float, default=15, help='Ожидание переподключения, секунд')
@@ -102,20 +101,6 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
         except BlockingIOError:
             existing(root, not (args.no_browser or args.api_only), api_only=args.api_only, persistent=args.persistent)
             return
-        if database_url is None:
-            fresh=not (root/'state.sqlite').exists()
-            from oko.storage.bootstrap import prepare
-            try:
-                prepare(root)
-            except ValueError as error:
-                raise SystemExit(str(error)) from None
-            if args.initially_disabled and fresh:
-                from oko.storage.store import Store
-                store = Store(root, fault=fault)
-                try:
-                    store.set_work_enabled(False)
-                finally:
-                    store.db.close()
         codex_client = None
         if codex_url:
             from oko.processing.codex_bridge.client import RemoteCodex

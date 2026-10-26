@@ -79,7 +79,7 @@ def test_close_discards_uncommitted_work_and_raw_commit_cannot_escape_owner(data
 
 
 def test_empty_store_starts_disabled_without_sqlite_or_runtime_ddl(postgres_url, tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     store = Store(tmp_path, lambda _: None, database_url=postgres_url)
     try:
         assert store.work_enabled() is False
@@ -221,7 +221,7 @@ def test_reader_role_needs_no_schema_ownership_or_migration_credentials(postgres
     from psycopg.conninfo import make_conninfo
     from oko.storage.postgres_migrations import migrate, Migration
     from oko.storage.postgres_schema import MIGRATIONS
-    from oko.storage.store import Store
+    from tests.support.storage import Store
 
     role = 'reader_' + uuid4().hex
     with psycopg.connect(postgres_url, autocommit=True) as admin:
@@ -254,7 +254,7 @@ def test_reader_role_needs_no_schema_ownership_or_migration_credentials(postgres
 
 
 def test_one_store_owns_recovery_even_with_a_different_data_root(postgres_url, tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     owner = Store(tmp_path / 'owner', lambda _: None, database_url=postgres_url)
     try:
         with pytest.raises(ValueError, match='Another Oko reader'):
@@ -283,7 +283,7 @@ def test_incompatible_schema_is_an_explicit_http_storage_failure(postgres_url, t
 
 def test_migration_cannot_run_while_reader_owns_the_schema(postgres_url, tmp_path):
     import psycopg
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.storage.postgres_migrations import migrate
     from oko.storage.postgres_schema import MIGRATIONS
     reader = Store(tmp_path, lambda _: None, database_url=postgres_url)
@@ -301,26 +301,26 @@ def test_bound_values_and_leading_comments_preserve_transaction_ownership(databa
     value = "Текст ? :key % ' IS NOT; DELETE FROM state;"
     with database() as writer, database() as reader:
         with pytest.raises(RuntimeError, match='rollback'), transaction(writer):
-            writer.execute('-- owned write\nINSERT INTO state VALUES (?,?)', ('lexical', value))
+            writer.execute('INSERT INTO state VALUES ( %s , %s )', ('lexical', value))
             assert reader.execute("SELECT value FROM state WHERE key='lexical'").fetchone() is None
             raise RuntimeError('rollback')
         assert reader.execute("SELECT value FROM state WHERE key='lexical'").fetchone() is None
         with transaction(writer):
-            writer.execute('INSERT INTO state VALUES (:key,:value)', {'key': 'lexical', 'value': value})
-        assert reader.execute('SELECT value FROM state WHERE key=?', ('lexical',)).fetchone()[0] == value
+            writer.execute('-- native PostgreSQL parameters\nINSERT INTO state VALUES (%(key)s,%(value)s)', {'key': 'lexical', 'value': value})
+        assert reader.execute('SELECT value FROM state WHERE key = %s', ('lexical',)).fetchone()[0] == value
         with pytest.raises(ValueError, match='One repository statement'):
             writer.execute("SELECT 1; DELETE FROM state")
         assert not writer.in_transaction
 
 
 def test_operational_summary_includes_terminal_problems_without_changing_reader_queue(postgres_url,tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (?,?,?,?,?)",
+            store.db.execute('INSERT INTO jobs ( kind , item , status , error , problem_code ) VALUES ( %s , %s , %s , %s , %s )',
                              ('fetch','synthetic-failed','failed','private detail','source-failed'))
-            store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES (?,?,?,?)",
+            store.db.execute('INSERT INTO jobs ( kind , item , status , problem_code ) VALUES ( %s , %s , %s , %s )',
                              ('download_media','synthetic-unavailable','unavailable','media-unavailable'))
         assert store.work_summary()==[]
         result=store.work_summary(include_problems=True)
@@ -358,3 +358,21 @@ def test_telegram_opened_material_has_all_reading_parts_after_restart(postgres_u
             assert material['source']['access']['kind'] == 'client'
             assert material['content']['text'] == 'Текст канала'
             assert 'rowid' not in material
+
+
+def test_saved_source_statuses_survive_locale_aware_collation(postgres_url, tmp_path):
+    import psycopg
+    from psycopg import sql
+    from tests.support.storage import Store
+    with psycopg.connect(postgres_url, autocommit=True) as admin:
+        collation = admin.execute("SELECT collname FROM pg_collation WHERE collname IN ('en-US-x-icu','en_US.utf8') ORDER BY collname LIMIT 1").fetchone()
+        assert collation, 'The PostgreSQL test image must provide its locale-aware collation'
+        admin.execute(sql.SQL('ALTER TABLE state ALTER COLUMN key TYPE text COLLATE {}').format(sql.Identifier(collation[0])))
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        store.feed_status('demo', error='Synthetic saved failure')
+        with store.db:
+            store.db.execute("INSERT INTO state VALUES ('feed-status-other','{}')")
+        assert store.source_statuses() == [dict(feed_id='demo', error='Synthetic saved failure')]
+    finally:
+        store.db.close()

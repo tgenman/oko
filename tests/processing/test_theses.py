@@ -60,9 +60,8 @@ def test_http_success_without_finished_attributed_result_is_not_theses(tmp_path:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        m = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] else None))
+        m = wait_for(client, lambda: (m if 'неизвестный источник' in ((m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] or '') else None))
         assert m['theses']['result'] is None
-        assert 'неизвестный источник' in m['theses']['diagnostic_message']
         assert not list(tmp_path.glob('content/*/1/theses.md'))
 
 

@@ -2,7 +2,7 @@ from tests.support.presence import presence, close_presence
 from tests.support.sources import LateSource
 from tests.support.reader import Clock, wait_for
 import time
-import sqlite3
+from tests.support.storage import database
 from pathlib import Path
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -11,8 +11,8 @@ from oko.collection.demo import DemoSource
 HEADERS = {'Authorization': 'Bearer test-token'}
 
 def retained(root, identity):
-    with sqlite3.connect(root/'state.sqlite') as db:
-        return db.execute('SELECT 1 FROM items WHERE id=?',(identity,)).fetchone() is not None
+    with database(root) as db:
+        return db.execute('SELECT 1 FROM items WHERE id = %s',(identity,)).fetchone() is not None
 
 
 
@@ -62,13 +62,15 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         assert not retained(tmp_path,item)
 
 
-def test_corrupt_database_is_reported_and_never_replaced(tmp_path: Path):
-    original = b'not a sqlite database, keep this evidence'
-    (tmp_path / 'state.sqlite').write_bytes(original)
-    with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
+def test_corrupt_database_is_reported_and_never_replaced(tmp_path: Path, postgres_url):
+    import psycopg
+    with psycopg.connect(postgres_url, autocommit=True) as db:
+        db.execute("UPDATE oko_schema_migrations SET checksum='preserve-corruption-evidence' WHERE version=1")
+    with TestClient(create_app(tmp_path, token='test-token', database_url=postgres_url), headers=HEADERS) as client:
         assert client.get('/api/v3/cards').status_code == 503
         assert client.get('/api/v3/status').json()['runtime_state']=='unavailable'
-    assert (tmp_path / 'state.sqlite').read_bytes() == original
+    with psycopg.connect(postgres_url, autocommit=True) as db:
+        assert db.execute('SELECT checksum FROM oko_schema_migrations WHERE version=1').fetchone()[0] == 'preserve-corruption-evidence'
 
 
 def test_explicitly_repeated_discovery_can_recreate_viewed_identity(tmp_path: Path):

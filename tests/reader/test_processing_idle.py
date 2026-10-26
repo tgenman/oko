@@ -1,8 +1,9 @@
 """An idle model worker must not keep opening SQL transactions at its active rate."""
 import asyncio
+import re
 
 from oko.execution import Execution
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.workers.control import JobControl
 from oko.workers.processing import FilterWorker
 from tests.support.codex import CodexService
@@ -17,7 +18,7 @@ def test_idle_processing_worker_limits_database_claim_polling(tmp_path):
     worker = FilterWorker(execution, tasks, store.clock, CodexService(), transport([]))
     claims = []
     store.db.set_trace_callback(lambda query: claims.append(query)
-        if query.startswith("SELECT * FROM jobs WHERE status='pending'") else None)
+        if re.match(r"SELECT\s+\*\s+FROM\s+jobs\s+WHERE\s+status\s*=\s*'pending'", query) else None)
 
     async def observe():
         running = asyncio.create_task(worker.run())

@@ -26,7 +26,7 @@ flowchart TB
     T --> JOB
     CTL --> JOB
     SV --> REPO["Репозитории сущностей: SQL и файлы"]
-    REPO --> DB[("Одна SQLite, одна короткая SQL-блокировка")]
+    REPO --> DB[("Одна PostgreSQL, одна короткая SQL-блокировка")]
     JOB --> DB
     REPO --> FILES["Файлы: staging → защищённый final"]
     HOST["Host: запуск, recovery, остановка"] -.-> CRONS
@@ -42,7 +42,7 @@ sequenceDiagram
     participant J as JobRepository
     participant S as ProcessingService
     participant R as Репозитории сущностей
-    participant DB as SQLite
+    participant DB as PostgreSQL
     participant AI as Адаптер модели
     Cron->>W: собственный проход
     W->>J: блокировка, допуск, BEGIN
@@ -52,7 +52,7 @@ sequenceDiagram
     R->>DB: читать/сохранить _pass
     W->>J: COMMIT, освободить блокировку
     W->>AI: проверить обработчик, вызвать модель
-    Note over AI,DB: Сеть вне SQL; сбор, другой крон и HTTP могут пользоваться SQLite
+    Note over AI,DB: Сеть вне SQL; сбор, другой крон и HTTP могут пользоваться PostgreSQL
     AI-->>W: результат или ошибка
     W->>J: блокировка, допуск, BEGIN
     W->>J: проверить running и поколение
@@ -84,7 +84,7 @@ SummaryWorker согласует свои задания на собственн
 flowchart LR
     OLD["Прежний полный путь"] --> STOP["Остановить все записи, включая HTTP"]
     STOP --> GUARD["Повторная проверка групп и типов"]
-    GUARD --> BACKUP["Проверенный backup SQLite и файлов"]
+    GUARD --> BACKUP["Проверенный backup PostgreSQL и файлов"]
     BACKUP --> COPY["Отдельная копия: перенос и отчёт"]
     COPY --> CHECK{"Полная приёмка успешна?"}
     CHECK -- нет --> HOLD["Отказ: исходник и backup сохранены"]

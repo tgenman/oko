@@ -2,7 +2,6 @@
 from collections.abc import Callable
 from oko.collection.external_media import saved_external
 from oko.collection.telegram.reading import saved_preview
-import sqlite3
 import json
 from typing import Any
 

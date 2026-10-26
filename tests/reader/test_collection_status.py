@@ -121,7 +121,13 @@ def test_bare_session_secret_never_enters_collection_diagnostics(tmp_path):
         details = client.get('/api/v3/collection-status/demo')
         assert secret not in details.text
         assert '[session]' in details.text
-    assert secret.encode() not in (tmp_path/'state.sqlite').read_bytes()
+    from tests.support.storage import database
+    from psycopg import sql
+    with database(tmp_path) as db:
+        tables = [r[0] for r in db.execute('SELECT tablename FROM pg_tables WHERE schemaname=current_schema()')]
+        for table in tables:
+            rows = db._db.execute(sql.SQL('SELECT row_to_json(t)::text FROM {} t').format(sql.Identifier(table)))
+            assert all(secret not in row[0] for row in rows), table
 
 
 def test_confirmed_publication_unavailability_is_terminal_and_visible(tmp_path):
@@ -142,7 +148,7 @@ def test_confirmed_publication_unavailability_is_terminal_and_visible(tmp_path):
 
 def test_collection_summary_batches_attempts_and_details_ignore_other_feeds(tmp_path):
     import json
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from tests.support.reading_cost import library, traced_app
     from tests.support.reading_measurements import ReadingMeasurements
 
@@ -154,13 +160,13 @@ def test_collection_summary_batches_attempts_and_details_ignore_other_feeds(tmp_
         with store.db:
             jobs = store.db.execute("SELECT id,item,generation FROM jobs WHERE kind='fetch'").fetchall()
             for job in jobs:
-                feed = store.db.execute('SELECT feed_id FROM items WHERE id=?', (job['item'],)).fetchone()[0]
+                feed = store.db.execute('SELECT feed_id FROM items WHERE id = %s', (job['item'],)).fetchone()[0]
                 error = dict(attempt_id=f"{job['id']}:{job['generation']}", operation_id='fetch:'+job['item'],
                              occurred_at='2026-01-01T00:00:00Z', error_type='SourceError', message='Synthetic failure',
                              traceback='Synthetic traceback\n' * 1000, source='server', message_truncated=False,
                              traceback_truncated=False, resolved=False, requests=[], request_count=0)
-                store.db.execute("UPDATE jobs SET status='failed',error='Synthetic failure' WHERE id=?", (job['id'],))
-                store.db.execute('INSERT INTO collection_attempts(job,feed,data) VALUES (?,?,?)',
+                store.db.execute("UPDATE jobs SET status = 'failed' , error = 'Synthetic failure' WHERE id = %s", (job['id'],))
+                store.db.execute('INSERT INTO collection_attempts ( job , feed , data ) VALUES ( %s , %s , %s )',
                     (job['id'], feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
                         finished_at=1800000001., elapsed_seconds=1., last_error=error))))
         store.db.close()
@@ -186,7 +192,7 @@ def test_collection_summary_batches_attempts_and_details_ignore_other_feeds(tmp_
 def test_postgres_collection_details_are_bounded_and_keep_diagnostics(postgres_url, tmp_path, monkeypatch):
     import json
     import psycopg
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.subscriptions.subscriptions import AddFeed
     from tests.support.reading_cost import traced_app, request_sql
     from tests.support.reader import Clock
@@ -216,13 +222,13 @@ def test_postgres_collection_details_are_bounded_and_keep_diagnostics(postgres_u
                     title=f'Synthetic {index}', verification='synthetic'))['id']
                 feeds.append(feed)
                 store.jobs.enqueue_discovery(feed)
-                job = store.db.execute("SELECT id,generation FROM jobs WHERE item=? AND kind='discover'", (feed,)).fetchone()
+                job = store.db.execute("SELECT id , generation FROM jobs WHERE item = %s AND kind = 'discover'", (feed,)).fetchone()
                 error = dict(attempt_id=f"{job['id']}:{job['generation']}", operation_id='discover:'+feed,
                              occurred_at='2026-01-01T00:00:00Z', error_type='SourceError', message='Synthetic failure',
                              traceback='Synthetic traceback\n' * 1000, source='server', message_truncated=False,
                              traceback_truncated=False, resolved=False, requests=[], request_count=0)
-                store.db.execute("UPDATE jobs SET status='failed',error='Synthetic failure' WHERE id=?", (job['id'],))
-                store.db.execute('INSERT INTO collection_attempts(job,feed,data) VALUES (?,?,?)',
+                store.db.execute("UPDATE jobs SET status = 'failed' , error = 'Synthetic failure' WHERE id = %s", (job['id'],))
+                store.db.execute('INSERT INTO collection_attempts ( job , feed , data ) VALUES ( %s , %s , %s )',
                     (job['id'], feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
                         finished_at=1800000001., elapsed_seconds=1., last_error=error))))
         store.db.close()

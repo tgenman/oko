@@ -190,7 +190,7 @@ def test_late_diagnostic_for_viewed_material_is_forgotten(tmp_path):
 
 
 def test_unknown_persisted_command_context_is_not_executed(tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     store=Store(tmp_path, lambda _:None)
     store.problems.action_started('old-import', dict(identity='POST:/api/import:', title='Import', objects=[], action=None), 1.0)
     store.problems.action_finished('old-import', True, 2.0)

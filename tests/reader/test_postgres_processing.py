@@ -7,7 +7,7 @@ import pytest
 
 from oko.collection.contracts import Material
 from oko.services.collection import CollectionService
-from oko.storage.store import Store
+from tests.support.storage import Store
 from tests.support.filters import transport
 from tests.support.source import StructuredSource
 from tests.support.worker_library import worker_library, workers, pass_worker, saved
@@ -23,7 +23,7 @@ def test_processing_result_job_and_revision_commit_together(postgres_url, tmp_pa
         asyncio.run(pass_worker(workers(execution, tasks)[0], tasks))
         committed = phase == 'processing_after_commit'
         assert bool(saved(store, item)['filtered_content']) == committed
-        assert (store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=?", (item,)).fetchone()[0] == 'done') == committed
+        assert (store.db.execute("SELECT status FROM jobs WHERE kind = 'filter' AND item = %s", (item,)).fetchone()[0] == 'done') == committed
     finally:
         store.db.close()
     restarted = Store(tmp_path, lambda _: None, database_url=postgres_url)
@@ -34,7 +34,7 @@ def test_processing_result_job_and_revision_commit_together(postgres_url, tmp_pa
             asyncio.run(pass_worker(workers(execution, tasks)[1], tasks))
             result = saved(restarted, item)
             assert result['summarized_content']['points']
-            assert restarted.db.execute("SELECT status FROM jobs WHERE kind='theses' AND item=?", (item,)).fetchone()[0] == 'done'
+            assert restarted.db.execute("SELECT status FROM jobs WHERE kind = 'theses' AND item = %s", (item,)).fetchone()[0] == 'done'
     finally:
         restarted.db.close()
 
@@ -49,7 +49,7 @@ def test_restart_preserves_terminal_work_and_external_wait(postgres_url, tmp_pat
         job = store.jobs.claim_processing('filter', store.clock())
         assert job
         worker.service.prepare(item, 'filter')
-        store.db.execute("UPDATE jobs SET status=?,wait_scope=?,retry_at=?,next=?,error='saved failure' WHERE id=?",
+        store.db.execute("UPDATE jobs SET status = %s , wait_scope = %s , retry_at = %s , next = %s , error = 'saved failure' WHERE id = %s",
             ('pending' if state == 'source_wait' else state, 'source:synthetic' if state == 'source_wait' else None,
              store.wall_clock() + 120 if state == 'source_wait' else None, store.clock() + 120 if state == 'source_wait' else 0, job.id))
     store.db.close()
@@ -58,7 +58,7 @@ def test_restart_preserves_terminal_work_and_external_wait(postgres_url, tmp_pat
         execution._store = restarted
         calls = []
         asyncio.run(pass_worker(workers(execution, tasks, transport(calls, theses=True))[0], tasks))
-        row = restarted.db.execute('SELECT status,wait_scope,retry_at,error FROM jobs WHERE id=?', (job.id,)).fetchone()
+        row = restarted.db.execute('SELECT status , wait_scope , retry_at , error FROM jobs WHERE id = %s', (job.id,)).fetchone()
         assert row['status'] == ('pending' if state == 'source_wait' else state)
         assert row['error'] == 'saved failure' and not calls
         if state == 'source_wait':

@@ -1,3 +1,5 @@
+> Действующее хранилище — PostgreSQL. Описание прежних миграций ниже является историей #115; команды переноса старого формата сняты. Текущий порядок: [PostgreSQL](../development/postgresql.md).
+
 # Слои приложения и три воркера
 
 Целевой код #114 заменяет Runtime над пайплайном тремя независимыми кронами
@@ -21,7 +23,7 @@ flowchart TB
     T --> JR
     J --> JR
     S --> R["Репозитории сущностей"]
-    JR --> DB[("База Око: SQLite или PostgreSQL")]
+    JR --> DB[("База Око: PostgreSQL")]
     R --> DB
     R --> FS["Локальные файлы"]
     E["Execution: общий допуск и epoch"] -.-> C
@@ -58,7 +60,7 @@ flowchart TB
 ## Одна короткая SQL-транзакция
 
 У Store одно соединение через `storage/database.py` и одна общая SQL-блокировка access_lock (RLock).
-Порядок JobRepository.transaction: блокировка → проверка допуска → BEGIN IMMEDIATE (SQLite) / BEGIN (PostgreSQL) →
+Порядок JobRepository.transaction: блокировка → проверка допуска → BEGIN (PostgreSQL) →
 операции → COMMIT/ROLLBACK → освобождение. Сервисные чтения и HTTP-снимки используют
 ту же блокировку. Вложенные репозитории присоединяются к текущей транзакции;
 внутренний connection-контекст не выполняет второй BEGIN или commit.

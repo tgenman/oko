@@ -4,7 +4,6 @@ from contextlib import closing
 import os
 from pathlib import Path
 import subprocess
-import sqlite3
 import sys
 import threading
 import time
@@ -46,24 +45,6 @@ def test_http_stop_finishes_after_postgres_backend_termination(postgres_url, tmp
         assert time.monotonic()-started < 2
 
 
-def test_http_stop_finishes_after_failed_rollback_closes_database(tmp_path):
-    armed = False
-    shutdown = threading.Event()
-    def fault(point):
-        if armed and point == 'settings_after_values':
-            store = app.state.host.execution._store
-            store.db.set_authorizer(lambda action, first, *_: sqlite3.SQLITE_DENY
-                                    if action == sqlite3.SQLITE_TRANSACTION and first == 'ROLLBACK' else sqlite3.SQLITE_OK)
-            raise RuntimeError('synthetic interrupted settings write')
-    app = create_app(tmp_path, token='test', api_only=True, fault=fault, shutdown=shutdown.set)
-    with TestClient(app, headers=HEADERS, raise_server_exceptions=False) as client:
-        assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters':'Committed'}).status_code == 200
-        armed = True
-        assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters':'Pending'}).status_code == 500
-        started = time.monotonic()
-        assert client.post('/api/v3/stop').status_code == 200
-        assert shutdown.wait(2)
-        assert time.monotonic()-started < 2
 
 
 def library(root, dsn, count=32):

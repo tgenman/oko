@@ -1,5 +1,4 @@
 """Current reader obstacles; identity and recovery are independent of message text."""
-from oko.storage.sqlite_schema import is_sqlite
 from oko.storage.database import expect_row
 import json
 from oko.collection.contracts import SourceManifest
@@ -31,22 +30,8 @@ class Problems:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self.db = store.db
-        if is_sqlite(self.db):
-            self.db.executescript('''
-                CREATE TABLE IF NOT EXISTS reader_problems (
-                  id TEXT PRIMARY KEY, identity TEXT NOT NULL, origin TEXT NOT NULL,
-                  body TEXT NOT NULL, created REAL NOT NULL, finished REAL, outcome TEXT);
-                CREATE UNIQUE INDEX IF NOT EXISTS reader_problems_current
-                  ON reader_problems(identity) WHERE finished IS NULL;
-                CREATE TABLE IF NOT EXISTS reader_action_results (
-                  sequence INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, identity TEXT NOT NULL,
-                  body TEXT NOT NULL, started REAL NOT NULL, completed REAL, result TEXT NOT NULL);
-            ''')
-            self.db.execute('CREATE INDEX IF NOT EXISTS reader_action_identity_sequence ON reader_action_results(identity,sequence)')
-            problem_links.install(self.db)
-            self.db.execute("CREATE INDEX IF NOT EXISTS reader_action_unresolved ON reader_action_results(result,identity,sequence) WHERE result IN ('failed','unknown','pending')")
         # Recovery projection only: preserve the original service records for rollback.
-        self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result='pending'")}
+        self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result = 'pending'")}
 
     def snapshot(self, now: float) -> dict[str, Any]:
         with reading_snapshot():
@@ -90,16 +75,7 @@ class Problems:
             groups[identity]['objects'].append(dict(kind='feed',id=saved_feed['id']))
         youtube = self.store.youtube.status(now)
         read_states = {state['feed_id']: state for state in self.store.read_sync.statuses()}
-        jobs = self.db.execute("""SELECT jobs.*,coalesce(items.feed_id,media_owner.feed_id,linked_root.feed_id) AS feed_id,
-            coalesce(items.viewed,media_owner.viewed) AS viewed,m.resource_key AS resource_key,coalesce(linked_root.id,m.publication_id,jobs.item) AS affected_item
-            FROM jobs LEFT JOIN items ON items.id=jobs.item
-            LEFT JOIN media_files m ON jobs.kind='download_media' AND m.id=jobs.item
-            LEFT JOIN items media_owner ON media_owner.id=m.publication_id
-            LEFT JOIN publication_links link ON link.target_publication_id=coalesce(items.id,media_owner.id)
-            LEFT JOIN items linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
-            WHERE (jobs.status IN ('pending','running','failed','unavailable') OR
-                (jobs.status='done' AND jobs.kind='fetch' AND jobs.problem_code IS NOT NULL AND jobs.error IS NOT NULL))
-            AND (jobs.problem_code IS NOT NULL OR jobs.error IS NOT NULL)""").fetchall()
+        jobs = self.db.execute("SELECT jobs . * , coalesce ( items . feed_id , media_owner . feed_id , linked_root . feed_id ) AS feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM jobs LEFT JOIN items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN items media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN items linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL )").fetchall()
         for job in jobs:
             code = job['problem_code']
             if code in ('codex-choice', 'ai-permission'):
@@ -151,20 +127,8 @@ class Problems:
                 consequence=f'Ожидают субтитров: {len(objects)}.',next_step='Око повторит получение после паузы.',
                 objects=objects,action=None,created_at=now,state='retrying',finished_at=None,outcome=None,next_at=youtube['next_at'])
         affected = {obj['id'] for group in groups.values() for obj in group['objects'] if obj['kind'] == 'material'}
-        known_partial = {obj['id'] for record in self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND json_extract(body,'$.code')='material-incomplete'") for obj in json.loads(record['body'])['objects']}
-        saved = self.db.execute("""SELECT i.id,i.feed_id,json_extract(i.content,'$.extra._reader') AS header,
-            f.status AS fetch_status,f.problem_code AS fetch_code,
-            EXISTS (SELECT 1 FROM media_files m WHERE m.publication_id=i.id AND EXISTS (
-                SELECT 1 FROM jobs j WHERE j.item=m.id AND j.kind='download_media'
-                    AND j.status IN ('pending','running') AND j.error IS NULL AND j.problem_code IS NULL)) AS media_waiting,
-            CASE WHEN i.platform='youtube' THEN EXISTS (
-                SELECT 1 FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media'
-                WHERE m.publication_id=i.id AND m.resource_key='youtube:subtitles'
-                    AND j.status='pending' AND j.problem_code IS NULL) ELSE FALSE END AS caption_waiting
-            FROM items i LEFT JOIN source_deleted d ON d.item=i.id
-            LEFT JOIN jobs f ON f.item=i.id AND f.kind='fetch'
-            WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.complete=1 AND d.item IS NULL
-                AND CAST(json_extract(i.content,'$.extra._reader.full') AS INTEGER)=0""").fetchall()
+        known_partial = {obj['id'] for record in self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND oko_json_extract ( body , '$.code' ) = 'material-incomplete'") for obj in json.loads(record['body'])['objects']}
+        saved = self.db.execute("SELECT i . id , i . feed_id , oko_json_extract ( i . content , '$.extra._reader' ) AS header , f . status AS fetch_status , f . problem_code AS fetch_code , EXISTS ( SELECT 1 FROM media_files m WHERE m . publication_id = i . id AND EXISTS ( SELECT 1 FROM jobs j WHERE j . item = m . id AND j . kind = 'download_media' AND j . status IN ( 'pending' , 'running' ) AND j . error IS NULL AND j . problem_code IS NULL ) ) AS media_waiting , CASE WHEN i . platform = 'youtube' THEN EXISTS ( SELECT 1 FROM media_files m JOIN jobs j ON j . item = m . id AND j . kind = 'download_media' WHERE m . publication_id = i . id AND m . resource_key = 'youtube:subtitles' AND j . status = 'pending' AND j . problem_code IS NULL ) ELSE FALSE END AS caption_waiting FROM items i LEFT JOIN source_deleted d ON d . item = i . id LEFT JOIN jobs f ON f . item = i . id AND f . kind = 'fetch' WHERE i . viewed = 0 AND i . feed_id IS NOT NULL AND i . complete = 1 AND d . item IS NULL AND CAST ( oko_json_extract ( i . content , '$.extra._reader.full' ) AS INTEGER ) = 0").fetchall()
         for row in saved:
             if row['id'] in affected:
                 continue
@@ -192,9 +156,8 @@ class Problems:
             if active:
                 groups[identity]['state'] = 'retrying'
         current.extend(groups.values())
-        for receipt in self.db.execute('''SELECT * FROM reader_action_results r WHERE sequence=(
-            SELECT max(sequence) FROM reader_action_results WHERE identity=r.identity) AND result IN ('failed','unknown','pending') ''').fetchall():
-            if receipt['result'] == 'pending' and receipt['id'] not in self._startup_pending and not self.db.execute("SELECT 1 FROM reader_problems WHERE identity=? AND finished IS NULL", ('action:' + receipt['identity'],)).fetchone():
+        for receipt in self.db.execute("SELECT * FROM reader_action_results r WHERE sequence = ( SELECT max ( sequence ) FROM reader_action_results WHERE identity = r . identity ) AND result IN ( 'failed' , 'unknown' , 'pending' ) ").fetchall():
+            if receipt['result'] == 'pending' and receipt['id'] not in self._startup_pending and not self.db.execute('SELECT 1 FROM reader_problems WHERE identity = %s AND finished IS NULL', ('action:' + receipt['identity'],)).fetchone():
                 continue
             context = json.loads(receipt['body'])
             unknown = receipt['result'] == 'unknown' or receipt['result'] == 'pending' and receipt['id'] in self._startup_pending
@@ -217,7 +180,7 @@ class Problems:
         return current
 
     def command_record(self, identity: str) -> CommandRecord | None:
-        row = self.db.execute('SELECT * FROM reader_action_results WHERE id=?', (identity,)).fetchone()
+        row = self.db.execute('SELECT * FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
         if row is None:
             return None
         body = json.loads(row['body'])
@@ -225,54 +188,54 @@ class Problems:
                              body.get('command_error'), 'unknown' if row['result']=='pending' and identity in self._startup_pending else row['result'], row['completed'] or row['started'])
 
     def command_error(self, identity: str, error_json: str) -> None:
-        row = self.db.execute('SELECT body FROM reader_action_results WHERE id=?', (identity,)).fetchone()
+        row = self.db.execute('SELECT body FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
         if row:
             body = json.loads(row['body'])
             body['command_error'] = error_json
             with self.db:
-                self.db.execute('UPDATE reader_action_results SET body=? WHERE id=?', (json.dumps(body), identity))
+                self.db.execute('UPDATE reader_action_results SET body = %s WHERE id = %s', (json.dumps(body), identity))
 
     def action_started(self, identity: str, context: dict[str, Any], now: float, *, restart: bool = False, expected_identity: str | None = None) -> None:
         with self.db:
-            prior = self.db.execute('SELECT identity FROM reader_action_results WHERE id=?', (identity,)).fetchone()
+            prior = self.db.execute('SELECT identity FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
             if restart and prior and prior['identity'] != (expected_identity or context['identity']):
                 raise CommandContextMismatch('Контекст команды не совпадает')
             if restart:
                 self._startup_pending.discard(identity)
-            self.db.execute('INSERT OR IGNORE INTO reader_action_results(id,identity,body,started,result) VALUES (?,?,?,?,?)',
+            self.db.execute('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                             (identity, context['identity'], json.dumps(context), now, 'pending'))
             if restart:
-                self.db.execute("UPDATE reader_action_results SET body=?,started=?,completed=NULL,result='pending' WHERE id=?", (json.dumps(context), now, identity))
+                self.db.execute("UPDATE reader_action_results SET body = %s , started = %s , completed = NULL , result = 'pending' WHERE id = %s", (json.dumps(context), now, identity))
 
     def action_finished(self, identity: str, succeeded: bool, now: float) -> None:
         with self.db:
-            self.db.execute("UPDATE reader_action_results SET completed=?,result=? WHERE id=? AND result!='abandoned'",
+            self.db.execute("UPDATE reader_action_results SET completed = %s , result = %s WHERE id = %s AND result != 'abandoned'",
                             (now, 'succeeded' if succeeded else 'failed', identity))
 
     def report_action(self, identity: str, context: dict[str, Any], result: str, now: float) -> str:
         existed = self.command_record(identity)
         self.action_started(identity, context, now)
-        row = expect_row(self.db.execute('SELECT * FROM reader_action_results WHERE id=?', (identity,)).fetchone())
+        row = expect_row(self.db.execute('SELECT * FROM reader_action_results WHERE id = %s', (identity,)).fetchone())
         if row['identity'] != context['identity']:
             raise CommandContextMismatch('Контекст действия не совпадает')
         if existed and existed.result == 'pending' and existed.context_json:
             return 'pending'
         if row['result'] in ('pending', 'unknown'):
             with self.db:
-                self.db.execute('UPDATE reader_action_results SET result=? WHERE id=?', (result, identity))
+                self.db.execute('UPDATE reader_action_results SET result = %s WHERE id = %s', (result, identity))
             return result
         return str(row['result'])
 
     def abandon(self, identity: str, now: float) -> bool:
-        row = self.db.execute("SELECT * FROM reader_problems WHERE id=? AND origin='action' AND finished IS NULL", (identity,)).fetchone()
+        row = self.db.execute("SELECT * FROM reader_problems WHERE id = %s AND origin = 'action' AND finished IS NULL", (identity,)).fetchone()
         if not row:
             return False
-        receipt = self.db.execute('SELECT * FROM reader_action_results WHERE identity=? ORDER BY sequence DESC LIMIT 1', (row['identity'][7:],)).fetchone()
+        receipt = self.db.execute('SELECT * FROM reader_action_results WHERE identity = %s ORDER BY sequence DESC LIMIT 1', (row['identity'][7:],)).fetchone()
         if not receipt or receipt['result'] != 'failed' or not json.loads(receipt['body'])['discardable']:
             return False
         with self.db:
-            self.db.execute("UPDATE reader_action_results SET result='abandoned' WHERE id=?", (receipt['id'],))
-            self.db.execute("UPDATE reader_problems SET finished=?,outcome='irrelevant' WHERE id=?", (now, identity))
+            self.db.execute("UPDATE reader_action_results SET result = 'abandoned' WHERE id = %s", (receipt['id'],))
+            self.db.execute("UPDATE reader_problems SET finished = %s , outcome = 'irrelevant' WHERE id = %s", (now, identity))
         return True
 
     def forget_materials(self, members: set[str], now: float) -> None:
@@ -286,10 +249,10 @@ class Problems:
             body['action'] = None if (body.get('action') or {}).get('id') in members else body.get('action')
             if not body['objects']:
                 body['action'] = None
-                self.db.execute("UPDATE reader_problems SET body=?,finished=COALESCE(finished,?),outcome='irrelevant' WHERE id=?",
+                self.db.execute("UPDATE reader_problems SET body = %s , finished = COALESCE ( finished , %s ) , outcome = 'irrelevant' WHERE id = %s",
                                 (json.dumps(body), now, row['id']))
             else:
-                self.db.execute('UPDATE reader_problems SET body=? WHERE id=?', (json.dumps(body), row['id']))
+                self.db.execute('UPDATE reader_problems SET body = %s WHERE id = %s', (json.dumps(body), row['id']))
         for row in problem_links.material_records(self.db, 'action', members):
             body = json.loads(row['body'])
             before = body['objects']
@@ -299,7 +262,7 @@ class Problems:
                     body['action'] = None
                 # Typed receipts retain confirmed execution facts after content cleanup.
                 result = row['result'] if body.get('command_context') else 'abandoned'
-                self.db.execute("UPDATE reader_action_results SET body=?,result=? WHERE id=?", (json.dumps(body), result, row['id']))
+                self.db.execute('UPDATE reader_action_results SET body = %s , result = %s WHERE id = %s', (json.dumps(body), result, row['id']))
 
     def reconcile(self, candidates: list[dict[str, Any]], now: float, feeds: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""
@@ -314,7 +277,7 @@ class Problems:
                     irrelevant = body['code'] == 'codex-choice' and self.store.codex_config() is None
                     irrelevant = irrelevant or any(obj['kind'] == 'material' and self.store.publications.source_deleted(obj['id']) for obj in body['objects'])
                     irrelevant = irrelevant or any(obj['kind'] == 'feed' and feeds.get(obj['id'], {}).get('connection', 'deleting') == 'deleting' for obj in body['objects'])
-                    self.db.execute('UPDATE reader_problems SET finished=?,outcome=? WHERE id=?', (now, 'irrelevant' if irrelevant else 'resolved', row['id']))
+                    self.db.execute('UPDATE reader_problems SET finished = %s , outcome = %s WHERE id = %s', (now, 'irrelevant' if irrelevant else 'resolved', row['id']))
             for candidate in candidates:
                 if not candidate['id'].startswith('action:'):
                     candidate.setdefault('operation','producer:status')
@@ -326,11 +289,11 @@ class Problems:
                 prior_problem = existing.get(identity)
                 if prior_problem:
                     if prior_problem['body'] != encoded:
-                        self.db.execute('UPDATE reader_problems SET body=? WHERE id=?', (encoded, prior_problem['id']))
+                        self.db.execute('UPDATE reader_problems SET body = %s WHERE id = %s', (encoded, prior_problem['id']))
                 else:
-                    self.db.execute('INSERT INTO reader_problems VALUES (?,?,?,?,?,NULL,NULL)',
+                    self.db.execute('INSERT INTO reader_problems VALUES ( %s , %s , %s , %s , %s , NULL , NULL )',
                                     (uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', json.dumps(body), now))
-            self.db.execute('DELETE FROM reader_problems WHERE finished<=?', (now - 86400,))
+            self.db.execute('DELETE FROM reader_problems WHERE finished <= %s', (now - 86400,))
             problem_links.cleanup(self.db, now - 86400)
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []

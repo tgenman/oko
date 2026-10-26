@@ -11,7 +11,7 @@ import * as servers from './server-process.ts';
 import assert from 'node:assert/strict';
 
 export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>, options: {persistent?:boolean;hostname?:'oko';library?:{perFeed:26|100;active:boolean};collection?:boolean;processingDelay?:number;publicationPipeline?:boolean;databaseUrlFile?:string}={}) {
-  if(options.databaseUrlFile&&(options.library||options.publicationPipeline))throw new Error('PostgreSQL fixtures require their own migrated schema; SQLite seeding is not supported');
+  if(options.databaseUrlFile&&(options.library||options.publicationPipeline))throw new Error('A supplied PostgreSQL schema must be seeded by its owner, not by another fixture');
   const data=await fs.mkdtemp(path.join(os.tmpdir(),'oko-history-http-'));
   const token=randomBytes(24).toString('base64url');
   let context: BrowserContext | undefined, scenario: Awaited<ReturnType<typeof servers.start>> | undefined, cleanup: Promise<void> | undefined;
@@ -22,7 +22,14 @@ export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>
   const close=()=>cleanup ??= (async()=>{
     t?.signal.removeEventListener('abort',abort);
     await Promise.allSettled([started,contextStarted]);
-    try {await context?.close();} finally {
+    try {
+      if(context){
+        // A route can still be awaiting its synthetic response at teardown.
+        for(const page of context.pages())await page.unrouteAll({behavior:'ignoreErrors'});
+        await context.unrouteAll({behavior:'ignoreErrors'});
+        await context.close();
+      }
+    } finally {
       try {if(scenario) await servers.stop(scenario.id);}
       finally {await fs.rm(data,{recursive:true,force:true});}
     }

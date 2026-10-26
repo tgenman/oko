@@ -60,8 +60,7 @@ def test_unknown_filter_fragment_is_error_and_forbidden_ai_sends_nothing(tmp_pat
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         setup_filters(client)
         item = client.get('/api/v3/cards').json()[0]['id']
-        material = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['filter']['diagnostic_message'] else None))
-        assert 'отсутствующий фрагмент' in material['filter']['diagnostic_message']
+        material = wait_for(client, lambda: (m if 'отсутствующий фрагмент' in ((m := client.get('/api/v3/materials/' + item).json())['filter']['diagnostic_message'] or '') else None))
         assert material['content']['display_text'] == material['content']['text']
         assert len(client.get('/api/v3/cards').json()) == 3
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://remote.example.org', 'model': 'local:latest', 'local_execution': True})

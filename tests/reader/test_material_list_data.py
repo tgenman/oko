@@ -34,6 +34,8 @@ def test_youtube_description_survives_restart_without_requesting_captions(tmp_pa
 
     kwargs = dict(token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_captions=captions)
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
+        presence(client, 'reader')
+        assert client.patch('/api/v3/settings/oko/global', json={'theses': False}).status_code == 200
         feed = subscribe(client)
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.patch('/api/v3/settings/oko/global', json={})

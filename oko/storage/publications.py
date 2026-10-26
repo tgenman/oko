@@ -2,9 +2,8 @@
 
 All supported sources use the same current storage.
 """
-from oko.storage.sqlite_schema import is_sqlite
 from oko.storage.database import expect_row
-from oko.storage.reading import reading_snapshot
+from oko.storage.reading import reading_snapshot, saved_content
 from copy import deepcopy
 from datetime import datetime, timezone
 from oko.storage import processing_input as publication_input
@@ -27,22 +26,9 @@ if TYPE_CHECKING:
     from oko.storage.store import Store
 
 
-PUBLICATION_COLUMNS = {
-    'platform': 'TEXT', 'external_id': 'TEXT', 'title': "TEXT NOT NULL DEFAULT ''",
-    'published_at': 'REAL', 'discovered_at': 'REAL',
-    'content': "TEXT NOT NULL DEFAULT '{}'", 'media_ids': "TEXT NOT NULL DEFAULT '[]'",
-    'filtered_content': "TEXT NOT NULL DEFAULT '{}'", 'summarized_content': "TEXT NOT NULL DEFAULT '{}'",
-    'processing_metadata': "TEXT NOT NULL DEFAULT '{}'",
-    'status': "TEXT NOT NULL DEFAULT 'pending_collection'",
-}
-FEED_COLUMNS = {
-    'platform': 'TEXT', 'external_id': 'TEXT', 'url': "TEXT NOT NULL DEFAULT ''",
-    'description': "TEXT NOT NULL DEFAULT ''", 'created_at': 'REAL',
-    'enabled': 'INTEGER NOT NULL DEFAULT 1', 'adapter': "TEXT NOT NULL DEFAULT ''",
-    'config': "TEXT NOT NULL DEFAULT '{}'", 'cursor': "TEXT NOT NULL DEFAULT ''",
-    'interval_seconds': 'INTEGER NOT NULL DEFAULT 1200',
-    'filter_config': "TEXT NOT NULL DEFAULT '{}'", 'summary_config': "TEXT NOT NULL DEFAULT '{}'",
-}
+FEED_COLUMNS = frozenset(('platform', 'external_id', 'url', 'description',
+    'created_at', 'enabled', 'adapter', 'config', 'cursor', 'interval_seconds',
+    'filter_config', 'summary_config'))
 
 
 @dataclass
@@ -56,37 +42,6 @@ class DiscoveryProjection:
 class Publications:
     def __init__(self, store: 'Store') -> None:
         self.store = store
-        db = store.db
-        if is_sqlite(db):
-            with db:
-                for table, additions in (('items', PUBLICATION_COLUMNS), ('feeds', FEED_COLUMNS)):
-                    columns = {r['name'] for r in db.execute('PRAGMA table_info('+table+')')}
-                    for name, declaration in additions.items():
-                        if name not in columns:
-                            db.execute(f'ALTER TABLE {table} ADD COLUMN {name} {declaration}')
-            db.executescript('''
-            CREATE UNIQUE INDEX IF NOT EXISTS publication_external_key ON items(platform,external_id) WHERE platform IS NOT NULL;
-            CREATE UNIQUE INDEX IF NOT EXISTS feed_external_key ON feeds(platform,external_id) WHERE platform IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS publication_stage ON items(status,id) WHERE platform IS NOT NULL AND viewed=0;
-            CREATE TABLE IF NOT EXISTS feed_publications (
-              feed_id TEXT REFERENCES feeds(id), publication_id TEXT REFERENCES items(id),
-              PRIMARY KEY(feed_id,publication_id));
-            CREATE INDEX IF NOT EXISTS feed_publications_publication ON feed_publications(publication_id,feed_id);
-            DROP VIEW IF EXISTS reading_memberships;
-            CREATE VIEW reading_memberships AS SELECT publication_id,feed_id FROM feed_publications;
-            CREATE TABLE IF NOT EXISTS publication_links (
-              source_publication_id TEXT REFERENCES items(id), target_publication_id TEXT REFERENCES items(id),
-              PRIMARY KEY(source_publication_id,target_publication_id));
-            CREATE INDEX IF NOT EXISTS publication_links_target ON publication_links(target_publication_id,source_publication_id);
-            CREATE TABLE IF NOT EXISTS media_files (
-              id TEXT PRIMARY KEY, publication_id TEXT NOT NULL REFERENCES items(id), resource_key TEXT NOT NULL,
-              source_locator TEXT NOT NULL, name TEXT NOT NULL, mime_type TEXT, size_bytes INTEGER,
-              storage_key TEXT, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
-              UNIQUE(publication_id,resource_key));
-            ''')
-            if 'resource_identity' not in {r['name'] for r in db.execute('PRAGMA table_info(media_files)')}:
-                db.execute('ALTER TABLE media_files ADD COLUMN resource_identity TEXT')
-                db.commit()
         (store.root/'media').mkdir(exist_ok=True)
 
     def owns(self, item: str) -> bool:
@@ -98,20 +53,20 @@ class Publications:
         snapshot=material_read.current(self.store.db)
         if snapshot and item in snapshot.items:
             return bool(snapshot.items[item]['source_deleted'])
-        return self.store.db.execute('SELECT 1 FROM source_deleted WHERE item=?',(item,)).fetchone() is not None
+        return self.store.db.execute('SELECT 1 FROM source_deleted WHERE item = %s',(item,)).fetchone() is not None
 
     def feed(self, feed: str) -> bool:
-        return self.store.db.execute("SELECT 1 FROM feeds WHERE id=? AND adapter IN ('telegram_web_adapter','telegram_client_adapter','rss_adapter','youtube_adapter')", (feed,)).fetchone() is not None
+        return self.store.db.execute("SELECT 1 FROM feeds WHERE id = %s AND adapter IN ( 'telegram_web_adapter' , 'telegram_client_adapter' , 'rss_adapter' , 'youtube_adapter' )", (feed,)).fetchone() is not None
 
     def sync_feeds(self, feeds: list[str]) -> None:
-        if self.store.db.execute("SELECT 1 FROM state WHERE key='publication-pipeline'").fetchone():
+        if self.store.db.execute("SELECT 1 FROM state WHERE key = 'publication-pipeline'").fetchone():
             with self.store.db:
                 for feed in feeds:
                     self.configure_feed(feed)
 
     def configure_feed(self, feed: str) -> None:
         store = self.store
-        row = store.db.execute('SELECT * FROM feeds WHERE id=?', (feed,)).fetchone()
+        row = store.db.execute('SELECT * FROM feeds WHERE id = %s', (feed,)).fetchone()
         binding = store.subscriptions.telegram.binding(feed)
         transport=row['transport'] or row['kind'] if row else None
         if row and transport in ('rss','youtube'):
@@ -125,8 +80,7 @@ class Publications:
                 url=ref.url
             details=store.subscriptions.details.snapshot(feed)
             effective=store.subscriptions.effective('feed',feed)['effective']
-            store.db.execute('''UPDATE feeds SET platform=?,external_id=?,url=?,description=?,created_at=?,
-                adapter=?,config='{}',interval_seconds=?,filter_config=?,summary_config=?,enabled=? WHERE id=?''',
+            store.db.execute("UPDATE feeds SET platform = %s , external_id = %s , url = %s , description = %s , created_at = %s , adapter = %s , config = '{}' , interval_seconds = %s , filter_config = %s , summary_config = %s , enabled = %s WHERE id = %s",
                 (platform,external_id,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),adapter,
                  store.subscriptions.feed_refresh_minutes()*60,
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
@@ -137,8 +91,7 @@ class Publications:
             url='https://t.me/'+row['telegram_username'] if row['telegram_username'] else 'https://t.me/c/'+str(-row['telegram_peer']-1000000000000)
             details=store.subscriptions.details.snapshot(feed)
             effective=store.subscriptions.effective('feed',feed)['effective']
-            store.db.execute('''UPDATE feeds SET platform='telegram',external_id=?,url=?,description=?,created_at=?,
-                adapter='telegram_client_adapter',config=?,interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
+            store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_client_adapter' , config = %s , interval_seconds = %s , filter_config = %s , summary_config = %s WHERE id = %s",
                 (str(row['telegram_peer']),url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),json.dumps(config),
                  store.subscriptions.feed_refresh_minutes()*60,
                  json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
@@ -150,29 +103,27 @@ class Publications:
         details = store.subscriptions.details.snapshot(feed)
         effective = store.subscriptions.effective('feed', feed)['effective']
         external_id = str(row['telegram_peer']) if row['telegram_peer'] is not None else url
-        store.db.execute('''UPDATE feeds SET platform='telegram',external_id=?,url=?,description=?,created_at=?,
-            adapter='telegram_web_adapter',config=?,interval_seconds=?,filter_config=?,summary_config=? WHERE id=?''',
+        store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_web_adapter' , config = %s , interval_seconds = %s , filter_config = %s , summary_config = %s WHERE id = %s",
             (external_id, url, details['description'] or '', details['created'] or row['created_at'] or store.wall_clock(), json.dumps({**json.loads(row['config']),**binding}),
              store.subscriptions.feed_refresh_minutes()*60,
              json.dumps({k: v['value'] for k, v in effective.items() if k in ('prompt_filters', 'processor')}),
              json.dumps({k: v['value'] for k, v in effective.items() if k in ('theses', 'prompt_theses', 'processor')}), feed))
 
     def identify(self, item: str, ref: ExternalReference) -> None:
-        row = expect_row(self.store.db.execute('SELECT * FROM items WHERE id=?', (item,)).fetchone())
-        self.store.db.execute('''UPDATE items SET platform=?,external_id=?,url=?,published_at=?,discovered_at=COALESCE(discovered_at,?) WHERE id=?''',
+        row = expect_row(self.store.db.execute('SELECT * FROM items WHERE id = %s', (item,)).fetchone())
+        self.store.db.execute('UPDATE items SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
             (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))
-        self.store.db.execute('INSERT OR IGNORE INTO feed_publications VALUES (?,?)', (row['feed_id'], item))
+        self.store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s ) ON CONFLICT DO NOTHING', (row['feed_id'], item))
 
     def changed_adapter(self, feed: str) -> None:
         """Invalidate old opaque descriptions atomically with a binding change."""
         db=self.store.db
-        db.execute("UPDATE feeds SET cursor='' WHERE id=?",(feed,))
-        db.execute('''UPDATE media_files SET status='unavailable',reason='Обновляется описание вложения после смены доступа'
-            WHERE status!='ready' AND publication_id IN (SELECT id FROM items WHERE feed_id=? AND viewed=0)''',(feed,))
-        db.execute('DELETE FROM source_deleted WHERE item IN (SELECT id FROM items WHERE feed_id=?)',(feed,))
-        db.execute("UPDATE items SET status='pending_collection' WHERE feed_id=? AND viewed=0",(feed,))
-        db.execute('DELETE FROM telegram_read_state WHERE feed=?',(feed,))
+        db.execute("UPDATE feeds SET cursor = '' WHERE id = %s",(feed,))
+        db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT id FROM items WHERE feed_id = %s AND viewed = 0 )",(feed,))
+        db.execute('DELETE FROM source_deleted WHERE item IN ( SELECT id FROM items WHERE feed_id = %s )',(feed,))
+        db.execute("UPDATE items SET status = 'pending_collection' WHERE feed_id = %s AND viewed = 0",(feed,))
+        db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,))
 
     def plan(self, feed: str, publications: list[Publication]) -> dict[str, DiscoveryProjection]:
         """Prepare cache output before the short page acceptance transaction."""
@@ -184,19 +135,18 @@ class Publications:
             if publication.id in plans:
                 continue
             source_id = feed+':'+publication.id
-            existing = self.store.db.execute('SELECT id,source_id FROM items WHERE (platform=? AND external_id=?) OR source_id=?',
+            existing = self.store.db.execute('SELECT id , source_id FROM items WHERE ( platform = %s AND external_id = %s ) OR source_id = %s',
                 (ref.key.platform.value, ref.key.external_id, source_id)).fetchall()
             if not existing and publication.members:
-                placeholders = ','.join('?' for _ in publication.members)
-                existing = self.store.db.execute(f'''SELECT DISTINCT i.id,i.source_id FROM items i JOIN json_each(i.members) m
-                    WHERE i.feed_id=? AND CAST(m.value AS BIGINT) IN ({placeholders})''', (feed, *publication.members)).fetchall()
+                placeholders = ','.join('%s' for _ in publication.members)
+                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM items i CROSS JOIN oko_json_each ( i . members ) m WHERE i . feed_id = %s AND CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, *publication.members)).fetchall()
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:
                 continue
             item=existing[0]['id'] if existing else str(uuid4())
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
-            current=self.store.db.execute('SELECT viewed,members FROM items WHERE id=?',(item,)).fetchone() if existing else None
+            current=self.store.db.execute('SELECT viewed , members FROM items WHERE id = %s',(item,)).fetchone() if existing else None
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
@@ -216,7 +166,7 @@ class Publications:
         header=reading_header(material)
         if material.adapter_content and 'blocks' in material.adapter_content.content:
             return self._prepare_adapter(item,material,header)
-        row=self.store.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone()
+        row=self.store.db.execute('SELECT content FROM items WHERE id = %s',(item,)).fetchone()
         if row and row[0]!='{}':
             content=json.loads(row[0])
             content['extra'].update(_reader=header,_collection_reason=material.reason)
@@ -225,7 +175,7 @@ class Publications:
                     for row in publication_links.children(self.store,item)]
             if material.adapter_content:
                 content['extra']['_links']=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in material.adapter_content.linked_publications]
-            media=[dict(r) for r in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,))]
+            media=[dict(r) for r in self.store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))]
             self.store.media.project_header(content,media)
             return content,media
         raise ValueError('Publication adapter did not return structured content')
@@ -236,9 +186,9 @@ class Publications:
         content=deepcopy(value.content)
         media=[]
         identities={}
-        known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id=?',(item,))}
+        known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))}
         youtube=content.get('extra',{}).get('youtube')
-        old_content=self.store.db.execute('SELECT content FROM items WHERE id=?',(item,)).fetchone() if youtube is not None else None
+        old_content=self.store.db.execute('SELECT content FROM items WHERE id = %s',(item,)).fetchone() if youtube is not None else None
         old_youtube=json.loads(old_content[0]).get('extra',{}).get('youtube',{}) if old_content else {}
         for ref in value.media:
             previous=known.get(ref.key)
@@ -304,11 +254,11 @@ class Publications:
         """Called in the accepting transaction, after durable media preparation."""
         content, media = prepared
         store = self.store
-        store.db.execute('DELETE FROM source_deleted WHERE item=?',(item,))
+        store.db.execute('DELETE FROM source_deleted WHERE item = %s',(item,))
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
-        old = expect_row(store.db.execute('SELECT content,platform FROM items WHERE id=?', (item,)).fetchone())
+        old = expect_row(store.db.execute('SELECT content , platform FROM items WHERE id = %s', (item,)).fetchone())
         previous = json.loads(old['content'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         if 'youtube' in content.get('extra',{}):
@@ -333,11 +283,10 @@ class Publications:
             if previous.get('extra',{}).get('_input_hash')==fingerprint else None) or str(uuid4())
         content['extra']['_input_hash'] = fingerprint
         retained={row['id'] for row in media}
-        removed=[(row[0],) for row in store.db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)) if row[0] not in retained]
-        store.db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
+        removed=[(row[0],) for row in store.db.execute('SELECT id FROM media_files WHERE publication_id = %s',(item,)) if row[0] not in retained]
+        store.db.execute('DELETE FROM media_files WHERE publication_id = %s', (item,))
         for row in media:
-            store.db.execute('''INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,mime_type,size_bytes,storage_key,status,reason,resource_identity)
-                VALUES (:id,:publication_id,:resource_key,:source_locator,:name,:mime_type,:size_bytes,:storage_key,:status,:reason,:resource_identity)''', row)
+            store.db.execute('INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , mime_type , size_bytes , storage_key , status , reason , resource_identity ) VALUES ( %(id)s , %(publication_id)s , %(resource_key)s , %(source_locator)s , %(name)s , %(mime_type)s , %(size_bytes)s , %(storage_key)s , %(status)s , %(reason)s , %(resource_identity)s )', row)
         effects.media.add(item)
         if source_changed and old['platform'] in ('other_web','telegraph'):
             for row in media:
@@ -346,26 +295,26 @@ class Publications:
         for row in media:
             if row['resource_key']=='youtube:cover' and row['status']=='ready':
                 effects.revalidate[row['id']]=False
-        store.db.execute('UPDATE items SET content=?,media_ids=?,title=?,status=? WHERE id=?',
+        store.db.execute('UPDATE items SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if not same:
-            store.db.execute("UPDATE items SET filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id=?", (item,))
+            store.db.execute("UPDATE items SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' WHERE id = %s", (item,))
         elif previous:
-            filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone())
+            filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(filtered_row[0])
             if filtered:
                 result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
                 refreshed=publication_input.filtered(publication_input.content(store,item),item,result)
-                store.db.execute('UPDATE items SET filtered_content=? WHERE id=?',(json.dumps(refreshed,ensure_ascii=False),item))
-        store.db.execute('INSERT OR IGNORE INTO processing_dirty VALUES (?)',(item,))
+                store.db.execute('UPDATE items SET filtered_content = %s WHERE id = %s',(json.dumps(refreshed,ensure_ascii=False),item))
+        store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(item,))
         self.reconcile(item)
         publication_links.notify_parents(store,item)
 
     def original(self, item: str) -> tuple[dict[str,Any],str]:
         row=material_read.item(self.store.db,item)
         assert row is not None
-        content=json.loads(row['content'])
+        content=saved_content(row['content'])
         header=deepcopy(content['extra']['_reader'])
         text='\n\n'.join(b['text'] for b in content.get('blocks',[]) if b['type']=='text' and b['role']=='body')
         return header,text
@@ -378,7 +327,7 @@ class Publications:
 
     def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
         """Publish a validated result and its provenance in the caller's transaction."""
-        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone())
+        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id = %s',(item,)).fetchone())
         content=publication_input.content(self.store,item)
         metadata=json.loads(row[0])
         operation='filter' if kind=='filter' else 'summary'
@@ -388,30 +337,30 @@ class Publications:
             completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**(origin or {}))
         if kind=='filter':
             filtered=publication_input.filtered(content,item,result)
-            self.store.db.execute('UPDATE items SET filtered_content=?,status=? WHERE id=?',
+            self.store.db.execute('UPDATE items SET filtered_content = %s , status = %s WHERE id = %s',
                 (json.dumps(filtered,ensure_ascii=False),'filter_out' if result['hidden'] else 'pending_summary',item))
         else:
             summarized=dict(points=[dict(text=p['text'],source_publication_ids=[r['id'] for r in p['sources']]) for p in result['points']],extra={})
-            self.store.db.execute("UPDATE items SET summarized_content=?,status='ready' WHERE id=?",(json.dumps(summarized,ensure_ascii=False),item))
-        self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
+            self.store.db.execute("UPDATE items SET summarized_content = %s , status = 'ready' WHERE id = %s",(json.dumps(summarized,ensure_ascii=False),item))
+        self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
 
     def complete_empty(self, item: str, kind: str, signature: str) -> None:
         result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
         self.accept_result(item,kind,signature,result,None)
-        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone())
+        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id = %s',(item,)).fetchone())
         metadata=json.loads(row[0])
         metadata['filter' if kind=='filter' else 'summary']['reason']='no_input'
-        self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
+        self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
         if kind=='filter':
-            row=expect_row(self.store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone())
+            row=expect_row(self.store.db.execute('SELECT filtered_content FROM items WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(row[0])
             filtered['blocks']=[]
-            self.store.db.execute('UPDATE items SET filtered_content=? WHERE id=?',(json.dumps(filtered,ensure_ascii=False),item))
+            self.store.db.execute('UPDATE items SET filtered_content = %s WHERE id = %s',(json.dumps(filtered,ensure_ascii=False),item))
 
     def status(self, item: str) -> None:
         status = self._status_change(item)
         if status is not None:
-            self.store.db.execute('UPDATE items SET status=? WHERE id=?', (status, item))
+            self.store.db.execute('UPDATE items SET status = %s WHERE id = %s', (status, item))
 
     @reading_snapshot()
     def _status_change(self, item: str) -> str | None:
@@ -424,7 +373,7 @@ class Publications:
         if publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
             return 'pending_collection' if row['status'] != 'pending_collection' else None
         filtered = self.store.filters.read(item)
-        jobs={r['kind']:r['status'] for r in self.store.db.execute("SELECT kind,status FROM jobs WHERE item=? AND kind IN ('filter','theses')",(item,))}
+        jobs={r['kind']:r['status'] for r in self.store.db.execute("SELECT kind , status FROM jobs WHERE item = %s AND kind IN ( 'filter' , 'theses' )",(item,))}
         if filtered['status'] not in ('off', 'done') or self.store.filters.signature(item) and jobs.get('filter') in ('pending','running'):
             status = 'pending_filtering'
         elif filtered['hidden']:
@@ -448,7 +397,7 @@ class Publications:
         for kind, operation, column, signature in signatures:
             if operation in metadata and metadata[operation].get('signature',metadata[operation].get('input_hash')) != signature:
                 metadata.pop(operation)
-                self.store.db.execute(f"UPDATE items SET {column}='{{}}' WHERE id=? AND {column} IS NOT '{{}}'", (item,))
+                self.store.db.execute(f"UPDATE items SET {column} = '{{}}' WHERE id = %s AND {column} IS DISTINCT FROM '{{}}'", (item,))
         if row['feed_id'] is not None and not row['viewed']:
             if metadata.get('_revision_input')!=current:
                 metadata['_revision_input']=current
@@ -459,26 +408,26 @@ class Publications:
             metadata.pop('_pass',None)
         encoded = json.dumps(metadata, ensure_ascii=False)
         if encoded != row['processing_metadata']:
-            self.store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?', (encoded, item))
+            self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s', (encoded, item))
         with reading_snapshot():
             hidden = bool(self.store.filters.read(item)['hidden'])
             status = self._status_change(item)
         self.store.read_versions.sync_filter(item,hidden)
         if status is not None:
-            self.store.db.execute('UPDATE items SET status=? WHERE id=?', (status, item))
+            self.store.db.execute('UPDATE items SET status = %s WHERE id = %s', (status, item))
         return True
 
     def prune(self, item: str) -> None:
         media_directory = self.store.root/'media'/item
         if media_directory.is_dir():
-            referenced = {r[0] for r in self.store.db.execute('SELECT storage_key FROM media_files WHERE publication_id=?', (item,))}
+            referenced = {r[0] for r in self.store.db.execute('SELECT storage_key FROM media_files WHERE publication_id = %s', (item,))}
             for path in media_directory.iterdir():
                 if str(path.relative_to(self.store.root)) not in referenced and path not in self.store.media.active_paths:
                     path.unlink()
 
     def forget(self, item: str, *, prune: bool = True) -> None:
         db = self.store.db
-        linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,))}
+        linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
         self.forget_many([item])
         if prune:
             publication_links.prune(self.store,linked)
@@ -488,8 +437,8 @@ class Publications:
         db = self.store.db
         for start in range(0, len(items), 400):
             batch = items[start:start+400]
-            marks = ','.join('?' for _ in batch)
-            db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ({marks})', batch)
-            db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ({marks}) OR target_publication_id IN ({marks})', batch+batch)
-            db.execute(f'DELETE FROM media_files WHERE publication_id IN ({marks})', batch)
-            db.execute("UPDATE items SET content='{}',media_ids='[]',filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id IN ("+marks+")", batch)
+            marks = ','.join('%s' for _ in batch)
+            db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ( {marks} )', batch)
+            db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ( {marks} ) OR target_publication_id IN ( {marks} )', batch+batch)
+            db.execute(f'DELETE FROM media_files WHERE publication_id IN ( {marks} )', batch)
+            db.execute(f"UPDATE items SET content = '{{}}' , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)

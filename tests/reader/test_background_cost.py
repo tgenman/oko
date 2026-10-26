@@ -1,3 +1,5 @@
+from tests.support.storage import analyze
+from tests.support.postgres_work import measure_reads
 from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
 """Cost and freshness observed through HTTP while the real reader loop runs."""
@@ -6,7 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from oko.collection.contracts import Material, Publication
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed
 from tests.support.app import create_app
 from tests.support.reader import HEADERS
@@ -32,6 +34,10 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
     app = create_app(tmp_path, token='test', api_only=True)
     with TestClient(app, headers=HEADERS) as client:
         assert client.get('/api/v3/reading-composition').json()['count'] == 4 * count
+        deadline = time.monotonic() + 60
+        while app.state.host.require_store().processing.recovering:
+            assert time.monotonic() < deadline, 'Initial PostgreSQL recovery did not finish'
+            time.sleep(.02)
         queries = []
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
         # HTTP is ready before the initial reconciliation finishes. Observe its
@@ -40,16 +46,16 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
         for _ in range(10):
             queries.clear()
             time.sleep(.65)
-            if len(queries) < 1000 and not any('SELECT id FROM items WHERE viewed=0' in q for q in queries):
+            if len(queries) < 1000 and not any('SELECT id FROM items WHERE viewed=0' in q and 'feed_id=ANY(' not in q for q in queries):
                 break
         else:
-            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries')
+            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries; {[q for q in queries if "SELECT id FROM items WHERE viewed=0" in q]}')
         queries.clear()
         time.sleep(.65)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
         # Include background dispatch/presence work, independently of content size.
         assert len(queries) < 1000, len(queries)
-        assert not any('SELECT id FROM items WHERE viewed=0' in q for q in queries)
+        assert not any('SELECT id FROM items WHERE viewed=0' in q and 'feed_id=ANY(' not in q for q in queries)
 
 
 def test_feed_settings_preserve_other_accepted_filters(tmp_path):
@@ -85,9 +91,9 @@ def test_telegram_reconciliation_scales_linearly(tmp_path, count):
         store.db.execute("INSERT INTO folders VALUES ('folder','Synthetic',0)")
         for i in range(count):
             feed = f'{i:032x}'
-            store.db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,telegram_peer,auto_read) VALUES (?,?,?,'telegram','folder','[]','connected','telegram',?,0)", (feed, feed, feed, -1000000-i))
-            store.db.execute('INSERT INTO telegram_bindings VALUES (?,?)', (feed, json.dumps(dict(kind='client', role='personal', peer_id=str(-1000000-i)))))
-            store.db.execute('INSERT INTO telegram_read_state(feed,since) VALUES (?,0)', (feed,))
+            store.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , '[]' , 'connected' , 'telegram' , %s , 0 )", (feed, feed, feed, -1000000-i))
+            store.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )', (feed, json.dumps(dict(kind='client', role='personal', peer_id=str(-1000000-i)))))
+            store.db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , 0 )', (feed,))
     queries = []
     store.db.set_trace_callback(queries.append)
     store.jobs.sync_reads()
@@ -99,22 +105,20 @@ def test_telegram_reconciliation_scales_linearly(tmp_path, count):
 def test_pending_dispatch_ignores_completed_archive_and_keeps_priorities(tmp_path):
     store = Store(tmp_path, lambda _: None)
     with store.db:
-        store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('filter',?,'done')", [(f'old-{i}',) for i in range(20000)])
+        store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'filter' , %s , 'done' )", [(f'old-{i}',) for i in range(20000)])
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('discover','')")
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','processing')")
         store.db.execute("INSERT INTO jobs(kind,item) VALUES ('delete','removed')")
         store.db.execute("INSERT INTO jobs(kind,item,next) VALUES ('filter','later',10000)")
-        store.db.execute('ANALYZE')
-    steps = []
-    store.db.set_progress_handler(lambda: steps.append(1) or 0, 1)
-    ai = store.jobs.next_job(0, ai_only=True)
-    deletion = store.jobs.next_job(0)
-    discovery = store.jobs.next_job(0)
-    assert store.jobs.next_job(0, ai_only=True) is None
-    store.db.set_progress_handler(None, 0)
+        analyze(store.db)
+    with measure_reads(store.db) as work:
+        ai = store.jobs.next_job(0, ai_only=True)
+        deletion = store.jobs.next_job(0)
+        discovery = store.jobs.next_job(0)
+        assert store.jobs.next_job(0, ai_only=True) is None
     assert ai.kind == 'filter' and ai.item == 'processing'
     assert deletion.kind == 'delete' and discovery.kind == 'discover'
-    assert len(steps) < 3000, len(steps)
+    assert work.rows < 3000, work
     store.db.close()
 
 
@@ -123,23 +127,14 @@ def test_processing_backfill_does_not_scan_unrelated_completed_archive(tmp_path,
     store = Store(tmp_path, lambda _: None)
     try:
         with store.db:
-            store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",
+            store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",
                                 [(f'old-{n}',) for n in range(20000)])
             if saved_inputs:
                 store.db.execute("INSERT INTO filter_inputs VALUES ('synthetic-saved-input','synthetic-signature')")
-            store.db.execute('ANALYZE')
-            # Linux CI SQLite has no STAT4 histogram. Reproduce its planner
-            # information on builds that provide the optional extension.
-            if store.db.execute("SELECT 1 FROM sqlite_master WHERE name='sqlite_stat4'").fetchone():
-                store.db.execute('DELETE FROM sqlite_stat4')
-                store.db.execute('ANALYZE sqlite_schema')
-        steps = []
-        store.db.set_progress_handler(lambda: steps.append(1) or 0, 100)
-        try:
+            analyze(store.db)
+        with measure_reads(store.db) as work:
             store.jobs.backfill_processing_inputs()
-        finally:
-            store.db.set_progress_handler(None, 0)
-        assert len(steps)*100 < 1000, 'Backfill scanned completed jobs without matching saved inputs'
+        assert work.rows < 1000, 'Backfill scanned completed jobs without matching saved inputs'
     finally:
         store.db.close()
 
@@ -152,12 +147,12 @@ def test_progress_writes_do_not_rebuild_source_configuration(tmp_path):
     feed = store.subscriptions.feeds()[0]['id']
     with store.db:
         store.db.execute("INSERT INTO telegram_profiles VALUES ('personal','synthetic',101,1,'ready',0,NULL)")
-        store.db.execute("INSERT OR REPLACE INTO initial_history(feed,selection) VALUES (?,?)", (feed, '{"mode":"count","count":20,"since":null,"date":null,"timezone":"UTC"}'))
+        store.db.execute("INSERT INTO initial_history(feed,selection) VALUES (%s,%s) ON CONFLICT(feed) DO UPDATE SET selection=excluded.selection,frozen=excluded.frozen,paused=excluded.paused,scan_complete=excluded.scan_complete", (feed, '{"mode":"count","count":20,"since":null,"date":null,"timezone":"UTC"}'))
     store.jobs.sync_reads()
     with store.db:
         store.db.execute("UPDATE feeds SET title=title")
         store.db.execute("UPDATE telegram_profiles SET checked=10,message='checked'")
-        store.db.execute("UPDATE initial_history SET selection=json_set(selection,'$.warnings',json('[\"progress\"]'))")
+        store.db.execute("UPDATE initial_history SET selection=jsonb_set(selection::jsonb,'{warnings}','[\"progress\"]'::jsonb)::text")
     queries = []
     store.db.set_trace_callback(queries.append)
     store.jobs.sync_reads()

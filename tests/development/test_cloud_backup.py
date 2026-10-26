@@ -139,7 +139,7 @@ def test_restore_refuses_existing_target_before_remote_access(tmp_path):
     assert not (root / 'events').exists()
 
 
-def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disabled(tmp_path):
+def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disabled(tmp_path, postgres_url):
     root, env = installation(tmp_path)
     assert run_backup(root, env, 'backup').returncode == 0
     target = tmp_path / 'recovered'
@@ -151,6 +151,30 @@ def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disa
     assert 'work-enabled' in (root / 'restore-work-disabled.sql').read_text()
     assert "'false'" in (root / 'restore-work-disabled.sql').read_text()
     assert (root / 'data/media/image.bin').read_bytes() == b'synthetic-media'
+    # Restore operates on a dedicated database, not merely an isolated schema:
+    # the emitted SQL intentionally updates every restored library in that DB.
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+    from uuid import uuid4
+    name = 'test_restore_' + uuid4().hex
+    with psycopg.connect(postgres_url, autocommit=True) as admin:
+        admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
+        try:
+            dsn = make_conninfo(postgres_url, dbname=name, options='')
+            with psycopg.connect(dsn, autocommit=True) as restored:
+                restored.execute('CREATE TABLE state(key text PRIMARY KEY,value text)')
+                restored.execute('CREATE TABLE reader_identity(id integer PRIMARY KEY,value text)')
+                restored.execute('CREATE TABLE reader_entities(kind text,identity text,version bigint)')
+                restored.execute("INSERT INTO state VALUES ('work-enabled','true')")
+                restored.execute("INSERT INTO reader_identity VALUES (1,'previous-timeline')")
+                restored.execute("INSERT INTO reader_entities VALUES ('card','saved',42)")
+                restored.execute((root / 'restore-work-disabled.sql').read_text())
+                assert restored.execute('SELECT value FROM reader_identity').fetchone()[0] != 'previous-timeline'
+                assert restored.execute('SELECT version FROM reader_entities').fetchone()[0] == 42
+                assert restored.execute('SELECT value FROM state').fetchone()[0] == 'false'
+        finally:
+            admin.execute(sql.SQL('DROP DATABASE {}').format(sql.Identifier(name)))
 
 
 def test_corrupt_download_is_not_successful_or_pruned(tmp_path):

@@ -102,7 +102,8 @@ def test_shared_publication_respects_all_source_permissions_and_uses_one_result(
 
 
 def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_path):
-    import time,sqlite3,asyncio,threading
+    import time,asyncio,threading
+    from tests.support.storage import database
     from tests.support.telegram import Telegram,connect_request
     root=publication_root(tmp_path)
     tick=[100.]
@@ -127,8 +128,8 @@ def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_pa
         assert connected.status_code==200,connected.text
         feed=connected.json()['feed_id']
         def cursor_saved():
-            with sqlite3.connect(root/'state.sqlite') as db:
-                return bool(db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()[0])
+            with database(root) as db:
+                return bool(db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()[0])
         wait_for(client,cursor_saved)
         tick[0]+=1
         assert locating.wait(2)
@@ -137,8 +138,8 @@ def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_pa
         tick[0]+=1
         def cancelled_cursor_saved():
             from oko.collection.telegram.contracts import HistoryEnvelope
-            with sqlite3.connect(root/'state.sqlite') as db:
-                token=db.execute('SELECT cursor FROM feeds WHERE id=?',(feed,)).fetchone()[0]
+            with database(root) as db:
+                token=db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()[0]
             return HistoryEnvelope.decode(token,adapter='client').position.get('initial_complete')
         wait_for(client,cancelled_cursor_saved)
         numbers.append(4)
@@ -207,7 +208,7 @@ def test_shared_card_owner_and_importance_order_match_full_and_selective_http(sh
 
 
 def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from tests.support.telegram import Telegram,connect_request
     root=publication_root(tmp_path)
     options=dict(token='test',api_only=True,telegram_client=Telegram())
@@ -222,8 +223,8 @@ def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(
     try:
         with store.db:
             for identity in ('cycle-a','cycle-b'):
-                store.db.execute("INSERT INTO items(id,source_id,url,feed_id,platform,external_id) VALUES (?,?,?,NULL,'other_web',?)",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
-            store.db.executemany('INSERT INTO publication_links VALUES (?,?)',[(item,'cycle-a'),('cycle-a','cycle-b'),('cycle-b','cycle-a')])
+                store.db.execute("INSERT INTO items ( id , source_id , url , feed_id , platform , external_id ) VALUES ( %s , %s , %s , NULL , 'other_web' , %s )",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
+            store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s )',[(item,'cycle-a'),('cycle-a','cycle-b'),('cycle-b','cycle-a')])
     finally:
         store.db.close()
     cached=root/'media'/'cycle-a'/'file';cached.parent.mkdir(parents=True);cached.write_bytes(b'Unneeded cycle data')

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from tests.support.source import SyntheticMaterial,Image
 from oko.processing.llamacpp import ProcessorConfig
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.storage.job_types import Job
 from oko.subscriptions.subscriptions import Overrides
 from tests.support.reader import HEADERS
@@ -25,9 +25,9 @@ def prepared(root, count, processed):
         store.subscriptions.update_settings('oko','global',Overrides(theses=True,prompt_filters='Remove ads',processor='llamacpp'))
         store.settings_changed()
         def claim(kind):
-            row=store.db.execute('SELECT id,generation FROM jobs WHERE kind=? AND item=?',(kind,items[0])).fetchone()
+            row=store.db.execute('SELECT id , generation FROM jobs WHERE kind = %s AND item = %s',(kind,items[0])).fetchone()
             assert row is not None
-            with store.db:store.db.execute("UPDATE jobs SET status='running' WHERE id=?",(row['id'],))
+            with store.db:store.db.execute("UPDATE jobs SET status = 'running' WHERE id = %s",(row['id'],))
             return Job(row['id'],kind,items[0],row['generation'])
         for index in range(2):
             if index: assert store.jobs.retry_material(items[0])
@@ -89,13 +89,13 @@ def source_library(root, kind, complete):
     store=Store(root,lambda _:None)
     telegram=kind.startswith('telegram')
     with store.db:
-        store.db.execute('UPDATE feeds SET kind=?,transport=?,telegram_account=?,telegram_peer=? WHERE id=?',
+        store.db.execute('UPDATE feeds SET kind = %s , transport = %s , telegram_account = %s , telegram_peer = %s WHERE id = %s',
             ('telegram' if telegram else kind,'telegram' if telegram else kind,
              'synthetic-account' if kind=='telegram-legacy' else None,123 if kind=='telegram-legacy' else None,feeds[0]))
-        store.db.execute("UPDATE feeds SET connection='connected' WHERE id=?",(feeds[0],))
-        store.db.execute('UPDATE items SET complete=? WHERE id=?',(int(complete),items[0]))
+        store.db.execute("UPDATE feeds SET connection = 'connected' WHERE id = %s",(feeds[0],))
+        store.db.execute('UPDATE items SET complete = %s WHERE id = %s',(int(complete),items[0]))
         binding={'kind':'web','username':'synthetic_channel','preview_url':'https://t.me/s/synthetic_channel'} if kind=='telegram-web' else {'kind':'client','role':'personal','account_user_id':'123','peer_id':'456'} if kind=='telegram-client' else None
-        if binding:store.db.execute('INSERT INTO telegram_bindings VALUES (?,?)',(feeds[0],json.dumps(binding)))
+        if binding:store.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )',(feeds[0],json.dumps(binding)))
     store.db.close()
     return items[0]
 
@@ -122,7 +122,7 @@ def test_split_text_http_parity(tmp_path,kind,complete):
 @pytest.mark.parametrize('kind',['demo','rss','youtube','telegram-web','telegram-client'])
 @pytest.mark.parametrize('complete',[False,True])
 def test_split_text_projection_parity_for_source_kinds(tmp_path,kind,complete):
-    # Both real projection paths, with independent SQLite/files per case.
+    # Both real projection paths, with independent PostgreSQL schemas and files per case.
     # No scheduler, HTTP/lifespan or external adapters are needed for this matrix.
     from types import SimpleNamespace
     from oko.execution import Execution

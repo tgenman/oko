@@ -27,4 +27,4 @@ USER 10001:10001
 EXPOSE 8765
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 CMD ["python", "-m", "oko.reader.control"]
 ENTRYPOINT ["python", "-m", "oko"]
-CMD ["--persistent", "--host", "0.0.0.0", "--port", "8765", "--public-url", "http://localhost:8765", "--codex-url", "http://host.docker.internal:8767", "--codex-token-file", "/run/secrets/codex", "--data", "/data", "--no-browser", "--initially-disabled"]
+CMD ["--persistent", "--host", "0.0.0.0", "--port", "8765", "--public-url", "http://localhost:8765", "--codex-url", "http://host.docker.internal:8767", "--codex-token-file", "/run/secrets/codex", "--database-url-file", "/run/secrets/database-url", "--data", "/data", "--no-browser"]

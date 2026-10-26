@@ -44,7 +44,7 @@ def test_navigation_and_status_batch_feed_metadata_settings_and_bindings(tmp_pat
 
 
 def test_status_does_not_read_unused_titles_for_affected_publications(tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     costs=[]
     for count in (26,100):
         root=tmp_path/str(count)

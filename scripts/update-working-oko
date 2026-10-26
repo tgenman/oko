@@ -1,37 +1,13 @@
 #!/usr/bin/env python3
-"""Build fetched origin/main in a clean temporary clone, then update working Oko."""
+"""The old file-only local updater is retired; releases include PostgreSQL state."""
 import argparse
-from pathlib import Path
-import subprocess
 import sys
-import tempfile
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
-    try:
-        subprocess.run(['git', '-C', str(ROOT), 'fetch', 'origin',
-                        'refs/heads/main:refs/remotes/origin/main'], check=True)
-        revision = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse',
-                                            '--verify', 'origin/main^{commit}'], text=True).strip()
-        print('Updating working Oko from origin/main:', revision, flush=True)
-        with tempfile.TemporaryDirectory(prefix='oko-working-update-') as temporary:
-            source = Path(temporary) / 'source'
-            subprocess.run(['git', 'clone', '--quiet', '--shared', '--no-checkout', str(ROOT), str(source)], check=True)
-            subprocess.run(['git', '-C', str(source), 'checkout', '--quiet', '--detach', revision], check=True)
-            controller = [sys.executable, str(source / 'scripts/oko-release'), '--repo', str(source)]
-            subprocess.run([*controller, 'prepare', '--ref', revision], cwd=source, check=True)
-            subprocess.run([*controller, 'update', '--release', revision], cwd=source, check=True)
-        print('Working Oko updated: http://localhost:8765')
-        return 0
-    except subprocess.CalledProcessError as error:
-        print('Working Oko update stopped:', ' '.join(str(part) for part in error.cmd), file=sys.stderr)
-        return error.returncode if error.returncode > 0 else 1
-    except OSError as error:
-        print('Working Oko update stopped:', error, file=sys.stderr)
-        return 1
+    print('Local file-only updates are retired. Use the verified PostgreSQL release procedure in docs/development/cloud-deploy.md.', file=sys.stderr)
+    return 1
 
 
 if __name__ == '__main__':

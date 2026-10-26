@@ -1,3 +1,5 @@
+from tests.support.storage import analyze
+from tests.support.postgres_work import measure_reads
 """Scoped actions and status keep bounded work through the reader HTTP interface."""
 from fastapi.testclient import TestClient
 import pytest
@@ -39,7 +41,7 @@ def test_status_and_viewed_work_budgets(tmp_path, count):
         assert int(second.headers['X-Test-SQL']) < 100
         response = client.post('/api/v3/materials/' + items[0] + '/viewed')
         assert response.status_code == 200
-        # SQLite trace also reports trigger invocations for the durable entity versions.
+        # PostgreSQL tracing counts statements issued by the application.
         assert int(response.headers['X-Test-SQL']) < 240
         assert client.get('/api/v3/materials/' + items[0]).status_code == 404
         assert len(client.get('/api/v3/cards').json()) == count * 4 - 1
@@ -51,12 +53,12 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
     from tests.support.reading_cost import request_sql
 
     _, items = library(tmp_path, [26] * 4)
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     seed = Store(tmp_path, lambda _: None)
     with seed.db:
-        seed.db.execute("UPDATE items SET content=json_set(content,'$.extra._reader.full',json('false'),'$.extra._reader.reason','Fixture incomplete') WHERE id=?",(items[0],))
+        seed.db.execute("UPDATE items SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','false'::jsonb),'{extra,_reader,reason}',to_jsonb('Fixture incomplete'::text))::text WHERE id = %s",(items[0],))
     with seed.db:
-        seed.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch' AND item=?", (items[0],))
+        seed.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
     seed.db.close()
     app = traced_app(tmp_path)
     opened = []
@@ -84,8 +86,8 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
         def change_fixture():
             store = app.state.host.require_store()
             with store.db:
-                store.db.execute("UPDATE items SET content=json_set(content,'$.extra._reader.full',json('true'),'$.extra._reader.reason','') WHERE id=?",(items[0],))
-                store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch' AND item=?", (items[0],))
+                store.db.execute("UPDATE items SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','true'::jsonb),'{extra,_reader,reason}',to_jsonb(''::text))::text WHERE id = %s",(items[0],))
+                store.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
         client.portal.call(change_fixture)
         response = client.get('/api/v3/status')
         assert response.status_code == 200
@@ -96,7 +98,7 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
 
 def test_latest_outcomes_scale_and_survive_restart(tmp_path):
     import json
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from tests.support.reading_cost import request_sql
 
     store = Store(tmp_path, lambda _: None)
@@ -106,81 +108,63 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
         rows.append((f'old-{n:032x}', f'fixture-{n}', context, store.wall_clock(), 'failed'))
         rows.append((f'new-{n:032x}', f'fixture-{n}', context, store.wall_clock(), {0: 'succeeded', 1: 'unknown', 2: 'pending'}.get(n, 'failed')))
     with store.db:
-        store.db.executemany('INSERT INTO reader_action_results(id,identity,body,started,result) VALUES (?,?,?,?,?)', rows)
-        store.db.execute('DROP INDEX reader_action_identity_sequence')
+        store.db.executemany('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s )', rows)
+        assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='reader_action_identity_sequence'").fetchone()
     store.set_work_enabled(False)
     store.db.close()
     for _ in range(2):
         app = traced_app(tmp_path)
         with TestClient(app, headers=HEADERS) as client:
             tracing(client, app)
-            steps = []
-            def tick():
-                if request_sql.get() is not None:
-                    steps.append(1)
-                return 0
-            client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(tick, 100))
-            response = client.get('/api/v3/status')
-            client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(None, 0))
+            with measure_reads(app.state.host.require_store().db, enabled=lambda: request_sql.get() is not None) as work:
+                response = client.get('/api/v3/status')
             assert response.status_code == 200
             problems = response.json()['problems']['current']
             assert len(problems) == 2999
             assert all(p['command_id'].startswith('new-') for p in problems)
             assert sum(p['title'] == 'Результат действия пока неизвестен' for p in problems) == 2
-            assert len(steps) * 100 < 1500000, len(steps) * 100
+            assert work.rows < 60000, work
             again = client.get('/api/v3/status')
             assert len(again.json()['problems']['current']) == 2999
             assert not any(q.startswith('UPDATE reader_problems') for q in app.state.last_sql)
 
 
 def test_viewed_uses_point_updates_in_large_service_archive(tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from tests.support.reading_cost import request_sql
 
     feeds, items = library(tmp_path, [1])
     store = Store(tmp_path, lambda _: None)
     with store.db:
-        store.db.executemany("INSERT INTO history_members(feed,item) VALUES (?,?)", [(feeds[0], f'old-{n}') for n in range(20000)] + [(feeds[0], items[0])])
-        store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')", [(f'old-{n}',) for n in range(20000)])
-        store.db.execute('DROP INDEX history_members_item')
-        store.db.execute('DROP INDEX jobs_item')
+        store.db.executemany('INSERT INTO history_members ( feed , item ) VALUES ( %s , %s )', [(feeds[0], f'old-{n}') for n in range(20000)] + [(feeds[0], items[0])])
+        store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )", [(f'old-{n}',) for n in range(20000)])
+        assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='history_members_item'").fetchone()
+        assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='jobs_item'").fetchone()
     store.db.close()
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
         tracing(client, app)
-        steps = []
-        def tick():
-            if request_sql.get() is not None:
-                steps.append(1)
-            return 0
-        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(tick, 100))
-        response = client.post('/api/v3/materials/' + items[0] + '/viewed')
-        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(None, 0))
+        with measure_reads(app.state.host.require_store().db, enabled=lambda: request_sql.get() is not None) as work:
+            response = client.post('/api/v3/materials/' + items[0] + '/viewed')
         assert response.status_code == 200
         assert client.get('/api/v3/materials/' + items[0]).status_code == 404
-        assert len(steps) * 100 < 5000, len(steps) * 100
+        assert work.rows < 5000, work
 
 
 def test_status_does_not_scan_completed_job_archive(tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from tests.support.reading_cost import request_sql
 
     library(tmp_path, [1])
     store = Store(tmp_path, lambda _: None)
     with store.db:
-        store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')", [(f'old-{n}',) for n in range(20000)])
-        store.db.execute('ANALYZE')
+        store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )", [(f'old-{n}',) for n in range(20000)])
+        analyze(store.db)
     store.db.close()
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
         tracing(client, app)
-        steps = []
-        def tick():
-            if request_sql.get() is not None:
-                steps.append(1)
-            return 0
-        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(tick, 100))
-        response = client.get('/api/v3/status')
-        client.portal.call(lambda: app.state.host.require_store().db.set_progress_handler(None, 0))
+        with measure_reads(app.state.host.require_store().db, enabled=lambda: request_sql.get() is not None) as work:
+            response = client.get('/api/v3/status')
         assert response.status_code == 200
-        assert len(steps) * 100 < 10000, len(steps) * 100
+        assert work.rows < 10000, work

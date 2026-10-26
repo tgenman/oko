@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Any, TYPE_CHECKING
 from oko.storage import material_read, youtube_media, publication_links
-from oko.storage.reading import reading_value
+from oko.storage.reading import reading_value, saved_content
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -22,14 +22,14 @@ def blocks(content: dict[str, Any]) -> list[dict[str, Any]]:
 
 def content(store: 'Store', item: str) -> dict[str, Any]:
     row=material_read.item(store.db,item)
-    own=youtube_media.add_input(store,json.loads(row['content'])) if row else {}
+    own=youtube_media.add_input(store,saved_content(row['content'],mutable=True)) if row else {}
     linked=[row for row in publication_links.children(store,item) if row['complete']]
     if not linked:
         return own
     for block in own.get('blocks',[]):
         block.setdefault('source_publication_id',item)
     for row in linked:
-        for index,block in enumerate(json.loads(row['content']).get('blocks',[])):
+        for index,block in enumerate(saved_content(row['content'],mutable=True).get('blocks',[])):
             block.update(source_publication_id=row['id'],source_block_index=index)
             own.setdefault('blocks',[]).append(block)
     return own
@@ -37,7 +37,7 @@ def content(store: 'Store', item: str) -> dict[str, Any]:
 
 def selected_content(store: 'Store', item: str, kind: str) -> dict[str, Any]:
     selected=content(store,item)
-    row=store.db.execute('SELECT filtered_content FROM items WHERE id=?',(item,)).fetchone()
+    row=store.db.execute('SELECT filtered_content FROM items WHERE id = %s',(item,)).fetchone()
     if kind=='theses' and row and row[0]!='{}' and 'youtube' not in selected.get('extra',{}):
         selected=json.loads(row[0])
     return selected
@@ -52,7 +52,7 @@ def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
         groups.setdefault(block.get('source_publication_id',item),[]).append(block)
     result=[]
     for identity,parts in groups.items():
-        record=expect_row(store.db.execute('SELECT title,url,published FROM items WHERE id=?',(identity,)).fetchone())
+        record=expect_row(store.db.execute('SELECT title , url , published FROM items WHERE id = %s',(identity,)).fetchone())
         text='\n\n'.join(part['text'] for part in parts if part['type']=='text')
         quotes=[part for part in parts if part['type']=='quote']
         quote=ReplyPreview(text='\n\n'.join(part['text'] for part in quotes),
@@ -82,8 +82,7 @@ def live_settings(store: 'Store', item: str) -> dict[str, Any]:
     current=store.subscriptions.effective('feed',feed,details=False)
     allowed=current['feed']['public_ai']
     inputs = material_read.current(store.db)
-    owners = inputs.owners[item] if inputs is not None and item in inputs.owners else {row[0] for row in store.db.execute('''SELECT DISTINCT m.feed_id FROM reading_memberships m WHERE m.publication_id=? OR m.publication_id IN
-            (SELECT target_publication_id FROM publication_links WHERE source_publication_id=?)''',(item,item))}
+    owners = inputs.owners[item] if inputs is not None and item in inputs.owners else {row[0] for row in store.db.execute('SELECT DISTINCT m . feed_id FROM reading_memberships m WHERE m . publication_id = %s OR m . publication_id IN ( SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s )',(item,item))}
     for owner in owners:
         allowed=allowed and store.subscriptions.effective('feed',owner,details=False)['feed']['public_ai']
     rules=dict(feed_id=feed,public_ai=allowed,importance=current['feed']['importance'],values={key:value['value'] for key,value in current['effective'].items() if key in ('prompt_filters','theses','prompt_theses','processor')})
@@ -107,7 +106,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not summary:
         return None
     rules=live_settings(store,item)
-    selected_content=json.loads(row['content']) if youtube else content(store,item)
+    selected_content=saved_content(row['content']) if youtube else content(store,item)
     if youtube and selected_content.get('extra',{}).get('youtube',{}).get('captions')=='available' and not youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content)):
         return None
     if awaiting_input(selected_content) or awaiting_linked_input(store,item,selected_content):
@@ -128,14 +127,14 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
 
 
 def snapshot(store: 'Store', item: str) -> None:
-    row=expect_row(store.db.execute('SELECT processing_metadata FROM items WHERE id=?',(item,)).fetchone())
+    row=expect_row(store.db.execute('SELECT processing_metadata FROM items WHERE id = %s',(item,)).fetchone())
     metadata=json.loads(row[0])
     rules=live_settings(store,item)
     current_revision=revision(store,item)
     if metadata.get('_pass',{}).get('settings')!=rules or metadata.get('_pass',{}).get('revision')!=current_revision:
         metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),settings_version=store.settings_version(rules['feed_id']),revision=current_revision)
         with store.db:
-            store.db.execute('UPDATE items SET processing_metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),item))
+            store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
 
 
 def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool, int]:

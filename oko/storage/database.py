@@ -1,5 +1,4 @@
-"""Repository database boundary; adapters own cursors and transaction mechanics."""
-import sqlite3
+"""PostgreSQL repository contracts and owned transaction mechanics."""
 import psycopg
 from oko.storage.postgres_migrations import SchemaMismatch
 
@@ -25,7 +24,7 @@ class Cursor(Protocol):
 class Database(Protocol):
     def execute(self, query: str, parameters: Any = (), /) -> Cursor: ...
     def executemany(self, query: str, parameters: Any, /) -> Any: ...
-    def executescript(self, query: str, /) -> Any: ...
+    def begin(self) -> None: ...
     @property
     def in_transaction(self) -> bool: ...
     def commit(self) -> None: ...
@@ -55,5 +54,5 @@ def expect_row(row: Row | None) -> Row:
     return row
 
 
-DATABASE_ERRORS = (sqlite3.DatabaseError, psycopg.DatabaseError, SchemaMismatch)
-INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError)
+DATABASE_ERRORS = (psycopg.DatabaseError, SchemaMismatch)
+INTEGRITY_ERRORS = (psycopg.IntegrityError,)

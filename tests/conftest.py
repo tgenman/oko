@@ -1,4 +1,4 @@
-"""Real database fixtures are opt-in and always use an isolated synthetic schema."""
+"""PostgreSQL fixtures use only explicitly supplied disposable databases."""
 import os
 import psycopg
 import pytest
@@ -8,11 +8,21 @@ from oko.storage.postgres_migrations import migrate
 from oko.storage.postgres_schema import MIGRATIONS
 
 
+@pytest.fixture(autouse=True)
+def release_scenario_schemas():
+    import gc
+    from tests.support.storage import cleanup, owned_schemas
+    previous = owned_schemas()
+    yield
+    gc.collect()
+    cleanup(created_after=previous)
+
+
 @pytest.fixture
 def postgres_database_url():
     dsn = os.environ.get('OKO_TEST_POSTGRES_URL')
     if not dsn:
-        pytest.skip('Set OKO_TEST_POSTGRES_URL to an isolated PostgreSQL for integration checks')
+        pytest.fail('Set OKO_TEST_POSTGRES_URL to disposable PostgreSQL; storage tests cannot be skipped')
     with isolated_database(dsn) as private_dsn:
         yield private_dsn
 

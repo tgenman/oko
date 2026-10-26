@@ -1,5 +1,4 @@
 """Durable initial-history selection, independent from processing and reading."""
-from oko.storage.sqlite_schema import is_sqlite
 from oko.storage.database import expect_row, Database, Row
 from datetime import date, datetime, time
 import json
@@ -40,37 +39,32 @@ class InitialHistory(BaseModel):
 class History:
     def __init__(self, db: Database) -> None:
         self.db = db
-        if is_sqlite(db):
-            db.executescript('''
-            CREATE TABLE IF NOT EXISTS initial_history (feed TEXT PRIMARY KEY, selection TEXT, frozen INTEGER DEFAULT 0, paused INTEGER DEFAULT 0,scan_complete INTEGER DEFAULT 1);
-            CREATE TABLE IF NOT EXISTS history_members (feed TEXT, item TEXT, outcome TEXT DEFAULT 'pending', PRIMARY KEY(feed,item));
-            ''')
-            db.execute('CREATE INDEX IF NOT EXISTS history_members_item ON history_members(item)')
+        pass
 
     def member(self, item: str) -> bool:
-        return self.db.execute('SELECT 1 FROM history_members WHERE item=?', (item,)).fetchone() is not None
+        return self.db.execute('SELECT 1 FROM history_members WHERE item = %s', (item,)).fetchone() is not None
 
     def failed(self, item: str, unavailable: bool = False) -> None:
-        self.db.execute("UPDATE history_members SET outcome=? WHERE item=? AND outcome NOT IN ('loaded','incomplete','viewed','unavailable')", ('unavailable' if unavailable else 'retrying', item))
+        self.db.execute("UPDATE history_members SET outcome = %s WHERE item = %s AND outcome NOT IN ( 'loaded' , 'incomplete' , 'viewed' , 'unavailable' )", ('unavailable' if unavailable else 'retrying', item))
 
     def warnings(self, feed: str, warnings: list[str]) -> None:
-        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        row = self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone()
         if row:
             selection = json.loads(row['selection'])
             selection['warnings'] = warnings
-            self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
+            self.db.execute('UPDATE initial_history SET selection = %s WHERE feed = %s', (json.dumps(selection), feed))
 
     def telegram_state(self, feed: str, progress: HistorySelection) -> None:
-        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        row = self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone()
         if not row:
             return
         selection = json.loads(row['selection'])
         selection.update(warnings=list(progress.warnings), discovery_error=progress.error,
                          discovery_retry_at=progress.retry_at)
-        self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
+        self.db.execute('UPDATE initial_history SET selection = %s WHERE feed = %s', (json.dumps(selection), feed))
 
     def discovery_state(self, feed: str, cursor: dict[str, Any]) -> None:
-        row = self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        row = self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone()
         if not row:
             return
         selection = json.loads(row['selection'])
@@ -80,19 +74,18 @@ class History:
         selection['discovery_retry_at'] = cursor.get('history_retry_at')
         selection['waiting'] = cursor.get('history_waiting', False)
         selection['requests'] = cursor.get('history_requests', selection.get('requests',0))
-        self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
+        self.db.execute('UPDATE initial_history SET selection = %s WHERE feed = %s', (json.dumps(selection), feed))
 
     def configure(self, feed: str, selection: InitialHistory) -> None:
-        self.db.execute('INSERT INTO initial_history(feed,selection) VALUES (?,?)', (feed, json.dumps(dict(selection.selection(),run=secrets.token_hex(16)))))
+        self.db.execute('INSERT INTO initial_history ( feed , selection ) VALUES ( %s , %s )', (feed, json.dumps(dict(selection.selection(),run=secrets.token_hex(16)))))
 
     def start(self, feed: str, selection: InitialHistory) -> dict[str, Any]:
         current = self.status(feed)
         if current and current['state'] not in ('done', 'cancelled'):
             raise ValueError('Сначала остановите текущую загрузку истории')
-        self.db.execute('DELETE FROM history_members WHERE feed=?', (feed,))
+        self.db.execute('DELETE FROM history_members WHERE feed = %s', (feed,))
         value = dict(**selection.selection(), run=secrets.token_hex(16), resume=0)
-        self.db.execute('''INSERT INTO initial_history(feed,selection) VALUES (?,?)
-            ON CONFLICT(feed) DO UPDATE SET selection=excluded.selection,frozen=0,paused=0,scan_complete=0''',
+        self.db.execute('INSERT INTO initial_history ( feed , selection ) VALUES ( %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET selection = excluded . selection , frozen = 0 , paused = 0 , scan_complete = 0',
             (feed, json.dumps(value)))
         result = self.status(feed)
         assert result is not None
@@ -102,24 +95,24 @@ class History:
         current = self.status(feed)
         if current is None:
             raise ValueError('История не настроена')
-        row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone())
+        row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone())
         value = json.loads(row['selection'])
         value.update(cancelled=True, waiting=False, stop_reason='cancelled')
-        self.db.execute('UPDATE initial_history SET selection=?,paused=1 WHERE feed=?', (json.dumps(value), feed))
+        self.db.execute('UPDATE initial_history SET selection = %s , paused = 1 WHERE feed = %s', (json.dumps(value), feed))
         result = self.status(feed)
         assert result is not None
         return result
 
     def freeze(self, feed: str, items: list[str]) -> None:
-        row = self.db.execute('SELECT frozen FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        row = self.db.execute('SELECT frozen FROM initial_history WHERE feed = %s', (feed,)).fetchone()
         if not row or row['frozen']:
             return
-        self.db.executemany('INSERT OR IGNORE INTO history_members(feed,item) VALUES (?,?)', ((feed, item) for item in items))
-        self.db.execute('UPDATE initial_history SET frozen=1 WHERE feed=?', (feed,))
+        self.db.executemany('INSERT INTO history_members ( feed , item ) VALUES ( %s , %s ) ON CONFLICT DO NOTHING', ((feed, item) for item in items))
+        self.db.execute('UPDATE initial_history SET frozen = 1 WHERE feed = %s', (feed,))
 
     def enroll(self, feed: str, items: list[str], complete: bool) -> None:
-        self.db.executemany('INSERT OR IGNORE INTO history_members(feed,item) VALUES (?,?)', ((feed, item) for item in items))
-        self.db.execute('UPDATE initial_history SET frozen=1,scan_complete=? WHERE feed=?', (complete, feed))
+        self.db.executemany('INSERT INTO history_members ( feed , item ) VALUES ( %s , %s ) ON CONFLICT DO NOTHING', ((feed, item) for item in items))
+        self.db.execute('UPDATE initial_history SET frozen = 1 , scan_complete = %s WHERE feed = %s', (complete, feed))
 
     def pause(self, feed: str, paused: bool) -> dict[str, Any]:
         status = self.status(feed)
@@ -128,41 +121,40 @@ class History:
         if status.get('cancelled'):
             raise ValueError('История остановлена; начните новый подбор')
         if not paused and not status.get('stop_reason'):
-            row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed=?', (feed,)).fetchone())
+            row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone())
             selection = json.loads(row['selection'])
             selection.update(resume=selection.get('resume', 0) + 1, waiting=False, discovery_error=None)
-            self.db.execute('UPDATE initial_history SET selection=? WHERE feed=?', (json.dumps(selection), feed))
+            self.db.execute('UPDATE initial_history SET selection = %s WHERE feed = %s', (json.dumps(selection), feed))
         if status['state'] != 'done':
-            self.db.execute('UPDATE initial_history SET paused=? WHERE feed=?', (paused, feed))
+            self.db.execute('UPDATE initial_history SET paused = %s WHERE feed = %s', (paused, feed))
         result = self.status(feed)
         assert result is not None
         return result
 
     def saved(self, item: str, full: bool) -> None:
-        self.db.execute("UPDATE history_members SET outcome=? WHERE item=?", ('loaded' if full else 'incomplete', item))
+        self.db.execute('UPDATE history_members SET outcome = %s WHERE item = %s', ('loaded' if full else 'incomplete', item))
 
     def viewed(self, item: str) -> None:
-        self.db.execute("UPDATE history_members SET outcome='viewed' WHERE item=? AND outcome IN ('pending','retrying')", (item,))
+        self.db.execute("UPDATE history_members SET outcome = 'viewed' WHERE item = %s AND outcome IN ( 'pending' , 'retrying' )", (item,))
 
     def status(self, feed: str) -> dict[str, Any] | None:
-        row = self.db.execute('SELECT * FROM initial_history WHERE feed=?', (feed,)).fetchone()
+        row = self.db.execute('SELECT * FROM initial_history WHERE feed = %s', (feed,)).fetchone()
         if not row:
             return None
-        counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome,count(*) n FROM history_members WHERE feed=? GROUP BY outcome', (feed,))}
-        errors = [dict(item=r['item'],message=r['error']) for r in self.db.execute("SELECT h.item,(SELECT j.error FROM jobs j WHERE j.item=h.item AND j.kind='fetch') AS error FROM history_members h WHERE h.feed=? AND h.outcome IN ('retrying','unavailable')",(feed,)) if r['error'] is not None]
+        counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome , count ( * ) n FROM history_members WHERE feed = %s GROUP BY outcome', (feed,))}
+        errors = [dict(item=r['item'],message=r['error']) for r in self.db.execute("SELECT h . item , ( SELECT j . error FROM jobs j WHERE j . item = h . item AND j . kind = 'fetch' ) AS error FROM history_members h WHERE h . feed = %s AND h . outcome IN ( 'retrying' , 'unavailable' )",(feed,)) if r['error'] is not None]
         return self._status(row,counts,errors)
 
     def statuses(self, feeds: list[str]) -> dict[str,dict[str,Any]]:
         if not feeds:
             return {}
         selected=json.dumps(feeds)
-        rows=self.db.execute('SELECT * FROM initial_history WHERE feed IN (SELECT value FROM json_each(?))',(selected,)).fetchall()
+        rows=self.db.execute('SELECT * FROM initial_history WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )',(selected,)).fetchall()
         counts: dict[str,dict[str,int]]={}
-        for row in self.db.execute('SELECT feed,outcome,count(*) n FROM history_members WHERE feed IN (SELECT value FROM json_each(?)) GROUP BY feed,outcome',(selected,)):
+        for row in self.db.execute('SELECT feed , outcome , count ( * ) n FROM history_members WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) ) GROUP BY feed , outcome',(selected,)):
             counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
         errors: dict[str,list[dict[str,Any]]]={}
-        for row in self.db.execute("""SELECT h.feed,h.item,j.error FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch'
-                WHERE h.feed IN (SELECT value FROM json_each(?)) AND h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL""",(selected,)):
+        for row in self.db.execute("SELECT h . feed , h . item , j . error FROM history_members h JOIN jobs j ON j . item = h . item AND j . kind = 'fetch' WHERE h . feed IN ( SELECT value FROM oko_json_each ( %s ) ) AND h . outcome IN ( 'retrying' , 'unavailable' ) AND j . error IS NOT NULL",(selected,)):
             errors.setdefault(row['feed'],[]).append(dict(item=row['item'],message=row['error']))
         return {row['feed']:self._status(row,counts.get(row['feed'],{}),errors.get(row['feed'],[])) for row in rows}
 

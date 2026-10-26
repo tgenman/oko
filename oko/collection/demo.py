@@ -17,7 +17,7 @@ class DemoAdapter:
         titles={'1':'Око: первый материал','2':'Чтение без отвлечений','3':'Локальное хранение'}
         text=('Это тестовая публикация. Открытие и копирование ссылки сохраняют её.\n\n'
               'Кнопка «Просмотрено» удаляет текст из Око. Это демонстрационный источник, '
-              'прошедший настоящую очередь и сохранённый в SQLite.')
+              'прошедший настоящую очередь и сохранённый в PostgreSQL.')
         return PublicationContent(PublicationMetadata(publication,titles[identity],datetime.fromtimestamp(1800000000-int(identity),timezone.utc)),
             dict(blocks=[dict(type='text',role='body',text=text)],extra={}))
 

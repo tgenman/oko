@@ -35,9 +35,8 @@ def test_discovery_transaction_survives_process_death(tmp_path: Path, monkeypatc
             except (httpx.RemoteProtocolError, httpx.ReadError):
                 pass  # The injected exit may precede the registration response body.
         assert process.wait(timeout=5) == 79
-        import sqlite3
-        from contextlib import closing
-        with closing(sqlite3.connect((tmp_path/'state.sqlite').as_uri()+'?mode=ro',uri=True)) as db:
+        from tests.support.storage import database
+        with database(tmp_path) as db:
             assert db.execute('SELECT count(*) FROM items').fetchone()[0] == 0
         monkeypatch.delenv('OKO_TEST_HOLD_PRESENCE_BODY', raising=False)
         process = launch(tmp_path)
@@ -73,7 +72,7 @@ def test_pending_deletion_survives_process_death(tmp_path: Path):
             assert not (tmp_path / 'content' / item).exists()
             client.post('/api/v3/stop')
         assert process.wait(timeout=5)==0
-        # Scan stable files after SQLite closes its transient rollback journal.
+        # Scan stable files after the process exits.
         assert all('Око: первый материал'.encode() not in p.read_bytes()
                        for p in tmp_path.rglob('*') if p.is_file())
     finally:

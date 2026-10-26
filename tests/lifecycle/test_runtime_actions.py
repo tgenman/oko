@@ -127,9 +127,9 @@ def test_reload_restores_missing_local_media_without_stopping_reader(tmp_path: P
         card = settled(client)[0]
         # External loss of a stored file must not turn a preparation failure into
         # an unhandled task exception which closes the whole reader.
-        import sqlite3
-        with sqlite3.connect(tmp_path/'state.sqlite') as db:
-            storage_key=db.execute("SELECT storage_key FROM media_files WHERE publication_id=? AND status='ready'",(card['id'],)).fetchone()[0]
+        from tests.support.storage import database
+        with database(tmp_path) as db:
+            storage_key=db.execute("SELECT storage_key FROM media_files WHERE publication_id = %s AND status = 'ready'",(card['id'],)).fetchone()[0]
         (tmp_path/storage_key).unlink()
         source.rows = source.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=None)]
         client.post('/api/v3/materials/' + card['id'] + '/retry')

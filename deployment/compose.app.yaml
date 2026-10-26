@@ -35,7 +35,6 @@ services:
       - --metrics-token-file
       - /run/secrets/reader-metrics
       - --no-browser
-      - --initially-disabled
     volumes:
       - /srv/oko/data:/data
       - /srv/oko/tls:/tls:ro

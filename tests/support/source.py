@@ -8,7 +8,7 @@ import json
 from typing import Any, BinaryIO
 from pydantic import JsonValue
 from oko.collection.contracts import Material, Publication, DiscoveryResult, FetchResult
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.storage.job_types import Job
 from oko.collection.adapters import ExternalKey,ExternalReference,Platform,PublicationContent,PublicationMetadata,MediaReference,AdapterException,AdapterIssue,AdapterErrorKind
 from oko.collection.contracts import SourceError
@@ -129,7 +129,7 @@ def save_material(store: Store,job: Job,material: Material) -> None:
     publication=store.publication(job.item)
     assert publication is not None
     save(store,job,owner.describe(publication,material))
-    while store.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE m.publication_id=? AND j.status='pending'",(job.item,)).fetchone():
+    while store.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE m.publication_id=%s AND j.status='pending'",(job.item,)).fetchone():
         media_job=store.jobs.next_job(store.clock(),feeds=[store.item_feed(job.item)],media_only=True)
         assert media_job is not None
         download=store.media.begin(media_job.item,str(media_job.id)+'-'+str(media_job.generation),store.jobs.manual(media_job))

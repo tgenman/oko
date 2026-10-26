@@ -20,7 +20,7 @@ def subtitle_path(store: 'Store', identity: str | None) -> Path | None:
     if inputs is not None and identity is not None and identity in inputs.subtitles:
         key = inputs.subtitles[identity]
     else:
-        row=store.db.execute("SELECT storage_key FROM media_files WHERE id=? AND status='ready'",(identity,)).fetchone()
+        row=store.db.execute("SELECT storage_key FROM media_files WHERE id = %s AND status = 'ready'",(identity,)).fetchone()
         key = row[0] if row else None
     path=store.root/key if key else None
     return path if path and path.is_file() else None
