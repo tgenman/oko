@@ -22,7 +22,14 @@ export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>
   const close=()=>cleanup ??= (async()=>{
     t?.signal.removeEventListener('abort',abort);
     await Promise.allSettled([started,contextStarted]);
-    try {await context?.close();} finally {
+    try {
+      if(context){
+        // A route can still be awaiting its synthetic response at teardown.
+        for(const page of context.pages())await page.unrouteAll({behavior:'ignoreErrors'});
+        await context.unrouteAll({behavior:'ignoreErrors'});
+        await context.close();
+      }
+    } finally {
       try {if(scenario) await servers.stop(scenario.id);}
       finally {await fs.rm(data,{recursive:true,force:true});}
     }
