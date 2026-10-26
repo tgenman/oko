@@ -1,0 +1,1063 @@
+{
+  "repo": "/Users/dabondarev/repo_personal/oko",
+  "head": "0a89ae4bb3fa4a6ff7e63e5016c7c50c35f01f8e",
+  "note": "Working source tree; read-only HTTP requests. SQL timings include instrumentation. Decoded value bytes are UTF-8 lengths, not PostgreSQL protocol bytes. execute excludes trigger statements; executemany rows are counted separately.",
+  "cases": [
+    {
+      "axis": "feeds",
+      "size": 10,
+      "feeds": 10,
+      "materials": 1,
+      "requests": [
+        {
+          "name": "subscriptions",
+          "method": "GET",
+          "path": "/api/v3/subscriptions",
+          "response_bytes": 2923,
+          "ms": 10.245,
+          "request": {
+            "execute": 17,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 11,
+            "decoded_rows": 11,
+            "decoded_value_bytes": 1180,
+            "sql_ms": 6.549456913489848
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "navigation",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 4746,
+          "ms": 36.462,
+          "request": {
+            "execute": 77,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 35,
+            "decoded_rows": 35,
+            "decoded_value_bytes": 2369,
+            "sql_ms": 30.41050216415897
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "compact",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 864,
+          "ms": 11.919,
+          "request": {
+            "execute": 17,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 10,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1127,
+            "sql_ms": 8.02000192925334
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "unchanged",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 268,
+          "ms": 5.262,
+          "request": {
+            "execute": 2,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 2,
+            "decoded_rows": 2,
+            "decoded_value_bytes": 89,
+            "sql_ms": 2.5715420488268137
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "scoped_cards",
+          "method": "GET",
+          "path": "/api/v3/cards",
+          "response_bytes": 880,
+          "ms": 16.174,
+          "request": {
+            "execute": 22,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 16,
+            "decoded_rows": 16,
+            "decoded_value_bytes": 2763,
+            "sql_ms": 12.130418152082711
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "opened",
+          "method": "GET",
+          "path": "/api/v3/reading/materials/b60622bd-d699-40c1-a3b4-a22103fb9cc8",
+          "response_bytes": 1622,
+          "ms": 7.15,
+          "request": {
+            "execute": 7,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 9,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1329,
+            "sql_ms": 3.9222079212777317
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        }
+      ],
+      "startup_and_recovery": {
+        "execute": 186,
+        "executemany": 1,
+        "batch_rows": 2,
+        "returned_rows": 294,
+        "decoded_rows": 280,
+        "decoded_value_bytes": 8890,
+        "sql_ms": 98.55129703646526
+      },
+      "idle_background_150ms": {
+        "execute": 3,
+        "executemany": 0,
+        "batch_rows": 0,
+        "returned_rows": 1,
+        "decoded_rows": 1,
+        "decoded_value_bytes": 2,
+        "sql_ms": 1.2084179907105863
+      }
+    },
+    {
+      "axis": "feeds",
+      "size": 100,
+      "feeds": 100,
+      "materials": 1,
+      "requests": [
+        {
+          "name": "subscriptions",
+          "method": "GET",
+          "path": "/api/v3/subscriptions",
+          "response_bytes": 28752,
+          "ms": 62.553,
+          "request": {
+            "execute": 107,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 101,
+            "decoded_rows": 101,
+            "decoded_value_bytes": 11890,
+            "sql_ms": 53.374965966213495
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "navigation",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 45696,
+          "ms": 355.439,
+          "request": {
+            "execute": 707,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 305,
+            "decoded_rows": 305,
+            "decoded_value_bytes": 23880,
+            "sql_ms": 315.5639733886346
+          },
+          "concurrent_background": {
+            "execute": 3,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1,
+            "decoded_rows": 1,
+            "decoded_value_bytes": 3,
+            "sql_ms": 2.4271660367958248
+          }
+        },
+        {
+          "name": "compact",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 864,
+          "ms": 16.991,
+          "request": {
+            "execute": 17,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 10,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1127,
+            "sql_ms": 12.025830976199359
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "unchanged",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 268,
+          "ms": 3.852,
+          "request": {
+            "execute": 2,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 2,
+            "decoded_rows": 2,
+            "decoded_value_bytes": 89,
+            "sql_ms": 1.4026660355739295
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "scoped_cards",
+          "method": "GET",
+          "path": "/api/v3/cards",
+          "response_bytes": 880,
+          "ms": 19.466,
+          "request": {
+            "execute": 22,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 106,
+            "decoded_rows": 106,
+            "decoded_value_bytes": 13473,
+            "sql_ms": 14.198918943293393
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "opened",
+          "method": "GET",
+          "path": "/api/v3/reading/materials/bc69a493-ccdc-4162-8e18-b17f437e2e51",
+          "response_bytes": 1622,
+          "ms": 8.49,
+          "request": {
+            "execute": 7,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 9,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1331,
+            "sql_ms": 4.911292984616011
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        }
+      ],
+      "startup_and_recovery": {
+        "execute": 456,
+        "executemany": 1,
+        "batch_rows": 2,
+        "returned_rows": 564,
+        "decoded_rows": 550,
+        "decoded_value_bytes": 16541,
+        "sql_ms": 206.19212521705776
+      },
+      "idle_background_150ms": {
+        "execute": 0,
+        "executemany": 0,
+        "batch_rows": 0,
+        "returned_rows": 0,
+        "decoded_rows": 0,
+        "decoded_value_bytes": 0,
+        "sql_ms": 0.0
+      }
+    },
+    {
+      "axis": "feeds",
+      "size": 1000,
+      "feeds": 1000,
+      "materials": 1,
+      "requests": [
+        {
+          "name": "subscriptions",
+          "method": "GET",
+          "path": "/api/v3/subscriptions",
+          "response_bytes": 287951,
+          "ms": 607.388,
+          "request": {
+            "execute": 1007,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1001,
+            "decoded_rows": 1001,
+            "decoded_value_bytes": 120790,
+            "sql_ms": 524.871164758224
+          },
+          "concurrent_background": {
+            "execute": 3,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1,
+            "decoded_rows": 1,
+            "decoded_value_bytes": 4,
+            "sql_ms": 1.4714999706484377
+          }
+        },
+        {
+          "name": "navigation",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 456096,
+          "ms": 2586.153,
+          "request": {
+            "execute": 7009,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 3005,
+            "decoded_rows": 3005,
+            "decoded_value_bytes": 240778,
+            "sql_ms": 2301.0366811067797
+          },
+          "concurrent_background": {
+            "execute": 3,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1,
+            "decoded_rows": 1,
+            "decoded_value_bytes": 4,
+            "sql_ms": 1.779333979357034
+          }
+        },
+        {
+          "name": "compact",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 864,
+          "ms": 14.776,
+          "request": {
+            "execute": 17,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 10,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1126,
+            "sql_ms": 10.507709172088653
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "unchanged",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 268,
+          "ms": 3.681,
+          "request": {
+            "execute": 2,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 2,
+            "decoded_rows": 2,
+            "decoded_value_bytes": 89,
+            "sql_ms": 1.2541659525595605
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "scoped_cards",
+          "method": "GET",
+          "path": "/api/v3/cards",
+          "response_bytes": 880,
+          "ms": 31.593,
+          "request": {
+            "execute": 22,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1006,
+            "decoded_rows": 1006,
+            "decoded_value_bytes": 122371,
+            "sql_ms": 16.33470703382045
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "opened",
+          "method": "GET",
+          "path": "/api/v3/reading/materials/3991ba0a-1aa2-4d27-aba1-eaf18b25f0d6",
+          "response_bytes": 1622,
+          "ms": 9.749,
+          "request": {
+            "execute": 7,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 9,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1326,
+            "sql_ms": 5.569081869907677
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        }
+      ],
+      "startup_and_recovery": {
+        "execute": 3156,
+        "executemany": 1,
+        "batch_rows": 2,
+        "returned_rows": 3264,
+        "decoded_rows": 3250,
+        "decoded_value_bytes": 93040,
+        "sql_ms": 1239.7616304224357
+      },
+      "idle_background_150ms": {
+        "execute": 0,
+        "executemany": 0,
+        "batch_rows": 0,
+        "returned_rows": 0,
+        "decoded_rows": 0,
+        "decoded_value_bytes": 0,
+        "sql_ms": 0.0
+      }
+    },
+    {
+      "axis": "materials",
+      "size": 10,
+      "feeds": 1,
+      "materials": 10,
+      "requests": [
+        {
+          "name": "subscriptions",
+          "method": "GET",
+          "path": "/api/v3/subscriptions",
+          "response_bytes": 349,
+          "ms": 6.639,
+          "request": {
+            "execute": 8,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 2,
+            "decoded_rows": 2,
+            "decoded_value_bytes": 126,
+            "sql_ms": 4.476291011087596
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "navigation",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 664,
+          "ms": 9.507,
+          "request": {
+            "execute": 14,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 8,
+            "decoded_rows": 8,
+            "decoded_value_bytes": 240,
+            "sql_ms": 6.766500941012055
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "compact",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 6174,
+          "ms": 30.121,
+          "request": {
+            "execute": 35,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 64,
+            "decoded_rows": 63,
+            "decoded_value_bytes": 10317,
+            "sql_ms": 22.852294787298888
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "unchanged",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 1078,
+          "ms": 3.417,
+          "request": {
+            "execute": 2,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 11,
+            "decoded_rows": 11,
+            "decoded_value_bytes": 764,
+            "sql_ms": 1.4361669891513884
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "scoped_cards",
+          "method": "GET",
+          "path": "/api/v3/cards",
+          "response_bytes": 8755,
+          "ms": 48.245,
+          "request": {
+            "execute": 85,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 43,
+            "decoded_rows": 43,
+            "decoded_value_bytes": 15956,
+            "sql_ms": 41.56291903927922
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "opened",
+          "method": "GET",
+          "path": "/api/v3/reading/materials/7818a84b-31db-46d0-bacc-335f0dadc616",
+          "response_bytes": 1622,
+          "ms": 8.809,
+          "request": {
+            "execute": 7,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 9,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1331,
+            "sql_ms": 5.835541989654303
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        }
+      ],
+      "startup_and_recovery": {
+        "execute": 618,
+        "executemany": 10,
+        "batch_rows": 20,
+        "returned_rows": 411,
+        "decoded_rows": 361,
+        "decoded_value_bytes": 36317,
+        "sql_ms": 305.2559234783985
+      },
+      "idle_background_150ms": {
+        "execute": 3,
+        "executemany": 0,
+        "batch_rows": 0,
+        "returned_rows": 1,
+        "decoded_rows": 1,
+        "decoded_value_bytes": 1,
+        "sql_ms": 1.9347920315340161
+      }
+    },
+    {
+      "axis": "materials",
+      "size": 100,
+      "feeds": 1,
+      "materials": 100,
+      "requests": [
+        {
+          "name": "subscriptions",
+          "method": "GET",
+          "path": "/api/v3/subscriptions",
+          "response_bytes": 349,
+          "ms": 6.457,
+          "request": {
+            "execute": 8,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 2,
+            "decoded_rows": 2,
+            "decoded_value_bytes": 126,
+            "sql_ms": 4.259415902197361
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "navigation",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 669,
+          "ms": 13.921,
+          "request": {
+            "execute": 14,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 8,
+            "decoded_rows": 8,
+            "decoded_value_bytes": 248,
+            "sql_ms": 10.417209879960865
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "compact",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 59274,
+          "ms": 120.946,
+          "request": {
+            "execute": 215,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 604,
+            "decoded_rows": 603,
+            "decoded_value_bytes": 102299,
+            "sql_ms": 91.01382101653144
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "unchanged",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 9178,
+          "ms": 6.218,
+          "request": {
+            "execute": 2,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 101,
+            "decoded_rows": 101,
+            "decoded_value_bytes": 7514,
+            "sql_ms": 2.0719579770229757
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "scoped_cards",
+          "method": "GET",
+          "path": "/api/v3/cards",
+          "response_bytes": 87505,
+          "ms": 262.058,
+          "request": {
+            "execute": 715,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 403,
+            "decoded_rows": 403,
+            "decoded_value_bytes": 158518,
+            "sql_ms": 225.63779429765418
+          },
+          "concurrent_background": {
+            "execute": 3,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1,
+            "decoded_rows": 1,
+            "decoded_value_bytes": 1,
+            "sql_ms": 2.350960043258965
+          }
+        },
+        {
+          "name": "opened",
+          "method": "GET",
+          "path": "/api/v3/reading/materials/1dd6c5ea-37df-44bb-a145-3ff878204ce9",
+          "response_bytes": 1622,
+          "ms": 6.999,
+          "request": {
+            "execute": 7,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 9,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1334,
+            "sql_ms": 3.8195840315893292
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        }
+      ],
+      "startup_and_recovery": {
+        "execute": 5208,
+        "executemany": 100,
+        "batch_rows": 200,
+        "returned_rows": 1851,
+        "decoded_rows": 1441,
+        "decoded_value_bytes": 318379,
+        "sql_ms": 2170.1903222710826
+      },
+      "idle_background_150ms": {
+        "execute": 0,
+        "executemany": 0,
+        "batch_rows": 0,
+        "returned_rows": 0,
+        "decoded_rows": 0,
+        "decoded_value_bytes": 0,
+        "sql_ms": 0.0
+      }
+    },
+    {
+      "axis": "materials",
+      "size": 1000,
+      "feeds": 1,
+      "materials": 1000,
+      "requests": [
+        {
+          "name": "subscriptions",
+          "method": "GET",
+          "path": "/api/v3/subscriptions",
+          "response_bytes": 349,
+          "ms": 37.784,
+          "request": {
+            "execute": 8,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 2,
+            "decoded_rows": 2,
+            "decoded_value_bytes": 126,
+            "sql_ms": 16.40416798181832
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "navigation",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 674,
+          "ms": 71.531,
+          "request": {
+            "execute": 14,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 8,
+            "decoded_rows": 8,
+            "decoded_value_bytes": 255,
+            "sql_ms": 51.863414992112666
+          },
+          "concurrent_background": {
+            "execute": 3,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1,
+            "decoded_rows": 1,
+            "decoded_value_bytes": 1,
+            "sql_ms": 3.955917025450617
+          }
+        },
+        {
+          "name": "compact",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 590274,
+          "ms": 4127.281,
+          "request": {
+            "execute": 2021,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 6004,
+            "decoded_rows": 6003,
+            "decoded_value_bytes": 1022001,
+            "sql_ms": 3378.3790450543165
+          },
+          "concurrent_background": {
+            "execute": 3,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1,
+            "decoded_rows": 1,
+            "decoded_value_bytes": 1,
+            "sql_ms": 35.577500879298896
+          }
+        },
+        {
+          "name": "unchanged",
+          "method": "POST",
+          "path": "/api/v3/reading/check",
+          "response_bytes": 90178,
+          "ms": 78.961,
+          "request": {
+            "execute": 4,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1001,
+            "decoded_rows": 1001,
+            "decoded_value_bytes": 75014,
+            "sql_ms": 34.95883190771565
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        },
+        {
+          "name": "scoped_cards",
+          "method": "GET",
+          "path": "/api/v3/cards",
+          "response_bytes": 875005,
+          "ms": 11944.341,
+          "request": {
+            "execute": 7015,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 4003,
+            "decoded_rows": 4003,
+            "decoded_value_bytes": 1583020,
+            "sql_ms": 10749.364077404607
+          },
+          "concurrent_background": {
+            "execute": 3,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 1,
+            "decoded_rows": 1,
+            "decoded_value_bytes": 1,
+            "sql_ms": 6.733251037076116
+          }
+        },
+        {
+          "name": "opened",
+          "method": "GET",
+          "path": "/api/v3/reading/materials/f6b0aef7-1f8a-485f-8498-8f8edb1c0287",
+          "response_bytes": 1622,
+          "ms": 61.609,
+          "request": {
+            "execute": 7,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 9,
+            "decoded_rows": 9,
+            "decoded_value_bytes": 1332,
+            "sql_ms": 15.590415918268263
+          },
+          "concurrent_background": {
+            "execute": 0,
+            "executemany": 0,
+            "batch_rows": 0,
+            "returned_rows": 0,
+            "decoded_rows": 0,
+            "decoded_value_bytes": 0,
+            "sql_ms": 0.0
+          }
+        }
+      ],
+      "startup_and_recovery": {
+        "execute": 51108,
+        "executemany": 1000,
+        "batch_rows": 2000,
+        "returned_rows": 16251,
+        "decoded_rows": 12241,
+        "decoded_value_bytes": 3135881,
+        "sql_ms": 42903.98851293139
+      },
+      "idle_background_150ms": {
+        "execute": 0,
+        "executemany": 0,
+        "batch_rows": 0,
+        "returned_rows": 0,
+        "decoded_rows": 0,
+        "decoded_value_bytes": 0,
+        "sql_ms": 0.0
+      }
+    }
+  ]
+}

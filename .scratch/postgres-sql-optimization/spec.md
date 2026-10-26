@@ -1,6 +1,6 @@
 # Оптимизация PostgreSQL: чтение, состояние сбора и завершение состава чтения
 
-Status: in-progress
+Status: done
 Label: ready-for-agent
 GitHub: https://github.com/tgenman/oko/issues/158
 Date: 2026-10-26
