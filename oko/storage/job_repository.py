@@ -113,35 +113,57 @@ class JobRepository:
             self.store.db.execute("INSERT INTO jobs(kind,item,next) VALUES ('discover',?,?) ON CONFLICT(kind,item) DO UPDATE SET status='pending',next=excluded.next,error=NULL WHERE jobs.status='done'", ('' if feed == 'demo' else feed, next_at))
 
 
-    def refresh_feed(self, feed: str) -> None:
+    def refresh_feed(self, feed: str, *, resume_history: bool = True) -> None:
         """Admit one manual refresh without restarting work already in progress."""
         with self.store.db:
             for row in self.store.db.execute('''SELECT DISTINCT i.id FROM items i JOIN media_files m ON m.publication_id=i.id
-                WHERE i.feed_id=? AND i.viewed=0''', (feed,)).fetchall():
+                LEFT JOIN jobs j ON j.item=m.id AND j.kind='download_media'
+                WHERE i.feed_id=? AND i.viewed=0 AND m.status!='ready' AND (
+                    j.status IN ('failed','unavailable','pending') OR j.status='done' AND m.status='unavailable'
+                    OR i.platform='youtube' AND m.resource_key='youtube:subtitles' AND m.status='unavailable')''', (feed,)).fetchall():
                 self.retry_media(row['id'],revalidate_ready=False)
         discovery = '' if feed == 'demo' else feed
         active = self.store.db.execute("""SELECT 1 FROM jobs WHERE kind='discover' AND item=?
             AND (status='running' OR (status='pending' AND error IS NULL AND next<=?))""", (discovery,self.store.clock())).fetchone()
         with self.store.db:
-            history = self.store.subscriptions.history.status(feed)
-            if history and not history.get('cancelled'):
-                self.store.subscriptions.history.pause(feed, False)
+            if resume_history:
+                self.store.subscriptions.history.resume(feed)
             if not active:
                 self.enqueue_discovery(feed)
                 self.store.db.execute("""UPDATE jobs SET status='pending',next=CASE
                     WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' OR (wait_scope IS NOT NULL AND retry_at>?) THEN next ELSE 0 END,
                     retry_at=CASE WHEN wait_scope IS NOT NULL AND retry_at>? THEN retry_at ELSE NULL END,
                     generation=generation+1 WHERE kind='discover' AND item=? AND status!='running'""", (self.store.wall_clock(),self.store.wall_clock(),discovery))
-            for row in self.store.db.execute("""SELECT i.id,i.members,j.error,j.status FROM items i JOIN jobs j ON j.item=i.id AND j.kind='fetch'
+            for row in self.store.db.execute("""SELECT i.id,i.members,i.complete,i.content,i.platform,j.error,j.status,
+                    d.item AS source_deleted,EXISTS(SELECT 1 FROM publication_links l WHERE l.source_publication_id=i.id) AS linked
+                    FROM items i JOIN jobs j ON j.item=i.id AND j.kind='fetch'
+                    LEFT JOIN source_deleted d ON d.item=i.id
                     WHERE i.feed_id=? AND i.viewed=0 AND j.status!='running'""", (feed,)).fetchall():
-                material = self.store.material(row['id'])
-                unavailable = self.store.db.execute('SELECT 1 FROM source_deleted WHERE item=?', (row['id'],)).fetchone()
-                manifest=SourceManifest.model_validate_json(json.dumps(self.store.original(row['id'])[0]['source_manifest'])) if material and material.get('complete') and self.store.original(row['id'])[0].get('source_manifest') else None
-                if material and not row['error'] and not unavailable and (material.get('full',False) or expected_incomplete(manifest)) and not self.store._needs_collection(row['id']):
+                # Refresh admits collection, not a reading projection. A saved
+                # header already describes completeness; filters/theses, feed
+                # settings and loading indicators cannot change this decision.
+                header: dict[str, Any] = {}
+                full = False
+                manifest: SourceManifest | None = None
+                if row['complete']:
+                    try:
+                        header = (self.store.original(row['id'])[0] if row['linked'] or row['platform']=='youtube'
+                            else json.loads(row['content'])['extra']['_reader'])
+                        if 'title' not in header:
+                            raise ValueError('Saved collection header has no title')
+                        manifest = SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None
+                        full = header.get('full', True) and (not header.get('members')
+                            or set(header['members'])==set(json.loads(row['members'])))
+                    except (OSError, ValueError, KeyError, TypeError):
+                        record_caught('store.refresh')
+                        header = {}
+                        full = False
+                        manifest = None
+                if not row['error'] and not row['source_deleted'] and row['complete'] and (full or expected_incomplete(manifest)):
                     continue
-                if row['members'] != '[]' and material and material.get('full',False):
+                if row['members'] != '[]' and full:
                     continue
-                if row['error'] or unavailable or not material or not material.get('full',False):
+                if row['error'] or row['source_deleted'] or not full:
                     self.store.db.execute("""UPDATE jobs SET manual_once=CASE WHEN (status='done' AND error IS NOT NULL)
                         OR item IN (SELECT item FROM source_deleted) THEN 1 ELSE manual_once END, status='pending',next=CASE
                         WHEN problem_code LIKE '%FloodWaitError' OR problem_code='youtube-admission' OR (wait_scope IS NOT NULL AND retry_at>?) THEN next ELSE 0 END,

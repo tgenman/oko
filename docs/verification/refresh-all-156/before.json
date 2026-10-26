@@ -1,0 +1,24 @@
+[
+  {
+    "feeds": 4,
+    "items": 16,
+    "status": 200,
+    "elapsed_seconds": 0.4621994160115719,
+    "background_execute_calls": 47,
+    "max_execute_seconds": 0.004004625021480024,
+    "batch_calls": 2,
+    "batch_rows": 4,
+    "request_execute_calls": 966
+  },
+  {
+    "feeds": 4,
+    "items": 128,
+    "status": 200,
+    "elapsed_seconds": 3.188403832959011,
+    "background_execute_calls": 47,
+    "max_execute_seconds": 0.007727332995273173,
+    "batch_calls": 2,
+    "batch_rows": 4,
+    "request_execute_calls": 6342
+  }
+]

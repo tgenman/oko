@@ -235,7 +235,6 @@ class ReaderApplication:
         async with self._actions:
             self.require_work()
             current = self.require_store()
-            self._sync_sources()
             if feed is not None:
                 saved = next((entry for entry in self.queries.feeds() if entry['id']==feed),None)
                 if saved is None:
@@ -244,10 +243,24 @@ class ReaderApplication:
                     raise ActionError('conflict','Фид удаляется',code='deletion_in_progress')
             if folder is not None and not any(f['id']==folder for f in self.queries.folders()):
                 raise ActionError('missing','Папка недоступна')
-            selected = {f['id'] for f in self.queries.feeds() if f['connection']!='deleting' and (folder is None or f['folder_id']==folder)}
-            for source_feed in selected:
-                if feed is None or feed==source_feed:
-                    self.jobs.refresh_feed(source_feed)
+            selected = {f['id'] for f in self.queries.feeds() if f['connection']!='deleting' and (folder is None or f['folder_id']==folder) and (feed is None or f['id']==feed)}
+            # Resume the target in one committed batch. Source configuration
+            # observes one final revision, not a full rebuild after every feed.
+            with transaction(current.db):
+                current.subscriptions.history.resume_many(sorted(selected))
+        await asyncio.sleep(.001)
+        for source_feed in sorted(selected):
+            async with self._actions:
+                self.require_work()
+                if self._store is not current or not self._live():
+                    raise ActionError('conflict', 'Обновление источников прервано', expected=True)
+                state = current.db.execute('SELECT connection FROM feeds WHERE id=?', (source_feed,)).fetchone()
+                if state is None or state['connection']=='deleting':
+                    continue
+                self.jobs.refresh_feed(source_feed, resume_history=False)
+            # Every feed commits before yielding. Reading, settings and power
+            # remain available, and the next feed rechecks Store/work admission.
+            await asyncio.sleep(.001)
 
 
     async def retry_material(self, item: str) -> None:

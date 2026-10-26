@@ -32,6 +32,12 @@ test('PostgreSQL reader authenticates, collects through UI, renders media and su
   await expect.poll(()=>page.locator('#cards img').evaluateAll(images=>images.every(image=>(image as HTMLImageElement).naturalWidth>0))).toBe(true);
   await page.locator('#cards button').click();
   await expect(page.locator('#title')).toContainText('Статья');
+  const refreshed=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v3/collect'&&response.request().method()==='POST');
+  await page.getByRole('button',{name:'Refresh Sources',exact:true}).click();
+  expect((await refreshed).status()).toBe(200);
+  await expect(page.locator('#title')).toContainText('Статья');
+  await expect.poll(()=>page.locator('#images img').evaluateAll(images=>images.some(image=>image instanceof HTMLImageElement&&image.naturalWidth>0))).toBe(true);
+  await page.screenshot({path:artifactPath('postgres-native-refreshed.png'),fullPage:true});
   await setProcessingState('ready');
   await api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
   await api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'Keep useful text'});

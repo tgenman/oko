@@ -153,8 +153,8 @@ class JobControl:
     def retry_theses(self, identity: str) -> bool:
         return self._retry_processing(identity,'theses')
 
-    def refresh_feed(self, identity: str) -> None:
-        self.execution.require_store().jobs.refresh_feed(identity)
+    def refresh_feed(self, identity: str, *, resume_history: bool = True) -> None:
+        self.execution.require_store().jobs.refresh_feed(identity, resume_history=resume_history)
 
     def enqueue_discovery(self, identity: str) -> None:
         self.execution.require_store().jobs.enqueue_discovery(identity)

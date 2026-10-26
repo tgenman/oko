@@ -121,6 +121,28 @@ class History:
         self.db.executemany('INSERT OR IGNORE INTO history_members(feed,item) VALUES (?,?)', ((feed, item) for item in items))
         self.db.execute('UPDATE initial_history SET frozen=1,scan_complete=? WHERE feed=?', (complete, feed))
 
+    def resume(self, feed: str) -> None:
+        self.resume_many([feed])
+
+    def resume_many(self, feeds: list[str]) -> None:
+        """Resume one refresh target without rebuilding histories' reading status."""
+        selected = json.dumps(feeds)
+        updates = []
+        resumable = []
+        for row in self.db.execute('SELECT feed,selection FROM initial_history WHERE feed IN (SELECT value FROM json_each(?))', (selected,)):
+            selection = json.loads(row['selection'])
+            if selection.get('cancelled'):
+                continue
+            resumable.append(row['feed'])
+            if not selection.get('stop_reason'):
+                selection.update(resume=selection.get('resume', 0) + 1, waiting=False, discovery_error=None)
+                updates.append((json.dumps(selection), row['feed']))
+        if updates:
+            self.db.executemany('UPDATE initial_history SET selection=? WHERE feed=?', updates)
+        self.db.execute("""UPDATE initial_history SET paused=0 WHERE feed IN (SELECT value FROM json_each(?)) AND paused!=0
+            AND (frozen=0 OR scan_complete=0
+            OR EXISTS(SELECT 1 FROM history_members h WHERE h.feed=initial_history.feed AND h.outcome IN ('pending','retrying')))""", (json.dumps(resumable),))
+
     def pause(self, feed: str, paused: bool) -> dict[str, Any]:
         status = self.status(feed)
         if status is None:
