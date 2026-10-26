@@ -137,7 +137,7 @@ jobs:
       - name: Verify downloaded asset integrity and source freshness
         if: matrix.suite != 'tools' || steps.selection.outputs.required == 'true'
         run: npm run build:check
-      - if: matrix.suite == 'browser'
+      - if: matrix.suite == 'browser' || matrix.suite == 'python'
         name: Use launchable system Chrome or install Chromium
         run: |
           oko_ci_chrome=$(command -v google-chrome || true)
