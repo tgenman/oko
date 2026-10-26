@@ -1,6 +1,6 @@
 """Synchronous acceptance boundary for synthetic storage fixtures."""
 from typing import Any
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.storage.job_types import Job
 from oko.collection.contracts import Publication,Material
 from oko.storage.transaction import transaction

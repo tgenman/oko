@@ -9,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[2]
 class ServerProcess(subprocess.Popen):
     log_path: Path
 
+    def __init__(self, arguments, *args, **kwargs):
+        if 'tests.process_server' in arguments and '--database-url-file' not in arguments:
+            from tests.support.storage import database_url
+            root = Path(arguments[arguments.index('--data')+1])
+            database_url(root)
+            arguments = [*arguments, '--database-url-file', str(root / '.test-database-url')]
+        super().__init__(arguments, *args, **kwargs)
+
 
 class ProcessClock:
     """Atomic test-owned clock shared with one subprocess; real waits stay bounded."""
@@ -26,6 +34,10 @@ class ProcessClock:
 
 
 def launch(root: Path, fault: str = '', lease: str = '6', grace: str = '15', *, model_origin: str = '', clock: ProcessClock | None = None, api_only: bool = False, web_media: bool = False, database_url_file: Path | None = None):
+    if database_url_file is None:
+        from tests.support.storage import database_url
+        database_url(root)
+        database_url_file = root / '.test-database-url'
     env = dict(os.environ, PYTHONPATH=str(ROOT), OKO_TEST_FAULT=fault, OKO_TEST_MODEL_ORIGIN=model_origin,
                OKO_TEST_CLOCK=str(clock.path) if clock else '', OKO_TEST_WEB_MEDIA='1' if web_media else '')
     if database_url_file is not None:

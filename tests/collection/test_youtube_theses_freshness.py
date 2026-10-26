@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.subscriptions import configured_sources
 from oko.collection.contracts import Material, Publication
-from oko.storage.store import Store
+from tests.support.storage import Store
 from tests.support.reader import HEADERS, wait_for
 from tests.support.models import model_transport
 from tests.support.youtube import PNG, VIDEO, feed_xml, subscribe

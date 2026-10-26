@@ -27,5 +27,12 @@ class Record:
     def __len__(self) -> int:
         return len(self._values)
 
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Record):
+            return self._columns == other._columns and self._values == other._values
+        if isinstance(other, tuple):
+            return self._values == other
+        return NotImplemented
+
     def keys(self) -> tuple[str, ...]:
         return self._columns

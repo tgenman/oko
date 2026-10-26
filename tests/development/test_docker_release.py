@@ -49,10 +49,11 @@ def test_update_waits_for_port_only_after_stopping_owned_release(tmp_path, monke
     monkeypatch.setitem(scope, 'start', lambda home, port_wait=0: events.append(('start', port_wait)))
     previous_mask = os.umask(0o077)
     try:
-        release['main']()
+        with pytest.raises(ValueError, match='retired'):
+            release['main']()
     finally:
         os.umask(previous_mask)
-    assert events == ['release', 'stop', 'configure', ('start', 5)]
+    assert events == []
 
 
 def invoke(repo, home, *args, env=None):
@@ -153,20 +154,21 @@ def test_backup_refuses_running_container_and_preserves_data(tmp_path):
     env['RUNNING_CONTAINER'] = 'running-container'
     result = invoke(repo, home, 'backup', env=env)
     assert result.returncode != 0
-    assert 'stop' in result.stderr.lower()
+    assert 'retired' in result.stderr
     assert not (home / 'backups').exists()
     assert (home / 'data/material').read_text() == 'saved material'
 
 
-def test_backup_succeeds_only_stopped_and_preserves_material_and_release(tmp_path):
+def test_retired_backup_refuses_even_when_stopped(tmp_path):
     repo, home, env, log, commit = prepared(tmp_path)
     assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
     (home / 'data/material').write_text('saved material')
+    before = log.read_text()
     result = invoke(repo, home, 'backup', env=env)
-    assert result.returncode == 0, result.stderr
-    target = Path(result.stdout.strip())
-    assert (target / 'data/material').read_text() == 'saved material'
-    assert json.loads((target / 'backup.json').read_text())['release'] == commit
+    assert result.returncode != 0 and 'retired' in result.stderr
+    assert (home / 'data/material').read_text() == 'saved material'
+    assert not (home / 'backups').exists()
+    assert log.read_text() == before
 
 
 def test_migrate_refuses_an_owned_old_store_without_copying(tmp_path):
@@ -180,7 +182,7 @@ def test_migrate_refuses_an_owned_old_store_without_copying(tmp_path):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = invoke(repo, home, 'migrate', '--source', str(source), env=env)
     assert result.returncode != 0
-    assert 'stop the old instance' in result.stderr.lower()
+    assert 'retired' in result.stderr
     assert not (home / 'data/state.sqlite').exists()
     assert (source / 'state.sqlite').read_text() == 'synthetic store'
 
@@ -191,7 +193,7 @@ def test_restore_requires_explicit_data_loss_acknowledgement_before_stopping(tmp
     before = log.read_text()
     result = invoke(repo, home, 'restore', '--backup', 'old-backup', '--acknowledge-data-loss', 'different', env=env)
     assert result.returncode != 0
-    assert 'approve discarding later changes' in result.stderr
+    assert 'retired' in result.stderr
     assert log.read_text() == before
 
 
@@ -223,9 +225,9 @@ def test_rollback_preserves_modified_data_and_does_not_start_old_version(tmp_pat
     (home / 'data/material').write_text('new user content')
     result = invoke(repo, home, 'rollback', '--release', commit, env=env)
     assert result.returncode != 0
-    assert 'Rollback blocked' in result.stderr
+    assert 'retired' in result.stderr
     assert (home / 'data/material').read_text() == 'new user content'
-    assert any((home / 'backups').glob('*/data/material'))
+    assert not (home / 'backups').exists()
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert not any('bootstrap' in call or 'up' in call for call in calls)
 
@@ -257,7 +259,7 @@ def test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch(tmp_path,
         args += ['--source', str(source)]
     result = invoke(repo, home, *args, env=env)
     assert result.returncode != 0
-    assert 'cleanup is unconfirmed' in result.stderr
+    assert 'retired' in result.stderr
     assert not (home / 'backups').exists()
     assert not (home / 'data/state.sqlite').exists()
     assert json.loads((home / 'current.json').read_text())['release'] == commit
@@ -271,7 +273,7 @@ def test_owned_execution_lock_blocks_backup_even_without_marker(tmp_path):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = invoke(repo, home, 'backup', env=env)
     assert result.returncode != 0
-    assert 'execution lock is still owned' in result.stderr
+    assert 'retired' in result.stderr
     assert not (home / 'backups').exists()
 
 
@@ -286,82 +288,10 @@ def test_open_launches_localhost_8765_without_logging_reader_credential(tmp_path
     assert calls[-1] == ['open', 'http://localhost:8765/']
 
 
-def test_restored_reader_timeline_gets_new_identity_and_retains_entity_versions(tmp_path):
-    import runpy
-    import shutil
-    import sqlite3
-    import uuid
-    maintenance=runpy.run_path(str(SCRIPT))
-    original=tmp_path/'backup'
-    original.mkdir()
-    identity=str(uuid.uuid4())
-    with sqlite3.connect(original/'state.sqlite') as db:
-        db.executescript('CREATE TABLE reader_identity(id INTEGER PRIMARY KEY,value TEXT); CREATE TABLE reader_entities(kind TEXT,identity TEXT,version INTEGER);')
-        db.execute('INSERT INTO reader_identity VALUES (1,?)',(identity,))
-        db.execute("INSERT INTO reader_entities VALUES ('material','same-id',7)")
-    restored=tmp_path/'stage'
-    shutil.copytree(original,restored)
-    maintenance['reset_reading_identity'](restored)
-    with sqlite3.connect(restored/'state.sqlite') as db:
-        current=db.execute('SELECT value FROM reader_identity').fetchone()[0]
-        assert current!=identity and str(uuid.UUID(current))==current
-        assert db.execute('SELECT version FROM reader_entities').fetchone()[0]==7
-    with sqlite3.connect(original/'state.sqlite') as db:
-        assert db.execute('SELECT value FROM reader_identity').fetchone()[0]==identity
 
 
-def test_backup_verifies_copied_bytes_before_publishing_manifest(tmp_path,monkeypatch):
-    import runpy
-    maintenance=runpy.run_path(str(SCRIPT))
-    scope=maintenance['backup'].__globals__
-    home=tmp_path/'synthetic-installation'
-    data=home/'data'
-    data.mkdir(parents=True)
-    (data/'material').write_bytes(b'original')
-    (home/'current.json').write_text(json.dumps(dict(release='synthetic-release')))
-    monkeypatch.setitem(scope,'confirm_helper_stopped',lambda home:None)
-    monkeypatch.setitem(scope,'compose',lambda *args,**kwargs:'')
-    copy=scope['shutil'].copytree
-    def corrupt(source,target):
-        copy(source,target)
-        (target/'material').write_bytes(b'corrupted copy')
-    monkeypatch.setattr(scope['shutil'],'copytree',corrupt)
-    with pytest.raises(ValueError,match='Backup verification failed'):
-        maintenance['backup'](home)
-    assert (data/'material').read_bytes()==b'original'
-    assert len(list((home/'backups').glob('*/data/material')))==1
-    assert not list((home/'backups').glob('*/backup.json'))
 
 
-@pytest.mark.parametrize('failure',['copy','initialize'])
-def test_migrate_rejects_partial_destination_and_retains_source(tmp_path,monkeypatch,failure):
-    import runpy
-    from types import SimpleNamespace
-    maintenance=runpy.run_path(str(SCRIPT))
-    scope=maintenance['migrate'].__globals__
-    home=tmp_path/'synthetic-installation'
-    (home/'data').mkdir(parents=True)
-    source=tmp_path/'synthetic-candidate'
-    source.mkdir()
-    (source/'instance.lock').touch()
-    (source/'state.sqlite').write_bytes(b'synthetic database')
-    (source/'media').write_bytes(b'synthetic file')
-    before=maintenance['tree_digest'](source)
-    monkeypatch.setitem(scope,'release',lambda home:(tmp_path,{}))
-    monkeypatch.setitem(scope,'confirm_helper_stopped',lambda home:None)
-    if failure=='copy':
-        copy=scope['shutil'].copytree
-        def corrupt(source,target):
-            copy(source,target)
-            (target/'media').write_bytes(b'corrupted')
-        monkeypatch.setattr(scope['shutil'],'copytree',corrupt)
-    else:
-        def fail(*args,**kwargs):raise ValueError('synthetic initialization failure')
-        monkeypatch.setitem(scope,'run',fail)
-    with pytest.raises(ValueError,match='verification failed|initialization failure'):
-        maintenance['migrate'](SimpleNamespace(home=home,source=source))
-    assert not (home/'data').exists()
-    assert maintenance['tree_digest'](source)==before
 
 
 @pytest.mark.parametrize('reply',['ready','wrong_release','wrong_protocol','unauthorized'])

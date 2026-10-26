@@ -15,6 +15,7 @@ services:
         target: /data
     secrets:
       - codex
+      - database-url
     tmpfs:
       - /tmp:mode=1777
     cap_drop:
@@ -25,3 +26,5 @@ services:
 secrets:
   codex:
     file: ${OKO_HOME:?}/secrets/codex
+  database-url:
+    file: ${OKO_HOME:?}/secrets/database-url

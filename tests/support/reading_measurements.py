@@ -1,4 +1,4 @@
-"""Request-scoped SQL/VM/content/JSON measurements, excluding Runtime background."""
+"""Request-scoped SQL/PostgreSQL-plan/content/JSON measurements."""
 from contextlib import ExitStack
 from collections import Counter
 import json
@@ -7,6 +7,7 @@ import time
 from unittest.mock import patch
 
 from tests.support.reading_cost import request_sql,tracing
+from tests.support.postgres_work import measure_reads
 
 
 class CountedFile:
@@ -71,19 +72,18 @@ class ReadingMeasurements:
         self.stack.enter_context(patch.object(Path,'stat',stat))
         self.stack.enter_context(patch.object(json,'loads',load))
         self.stack.enter_context(patch.object(json,'dumps',dump))
-        def tick():
-            if request_sql.get() is not None:self.counts['vm']+=100
-            return 0
-        self.client.portal.call(lambda:self.app.state.host.require_store().db.set_progress_handler(tick,100))
+        self.work=self.stack.enter_context(measure_reads(self.app.state.host.require_store().db,
+            enabled=lambda:request_sql.get() is not None))
         return self
 
     def request(self,name,method,url,**options):
         self.counts.clear();self.files.clear()
+        self.work.rows=self.work.buffers=self.work.reads=self.work.writes=0
         start=time.perf_counter()
         response=self.client.request(method,url,**options)
         elapsed=time.perf_counter()-start
         assert response.status_code==200,response.text
-        result=dict(name=name,sql=int(response.headers['X-Test-SQL']),vm=self.counts['vm'],
+        result=dict(name=name,sql=int(response.headers['X-Test-SQL']),rows_scanned=self.work.rows,buffers=self.work.buffers,
             content_opens=self.counts['content_opens'],content_stats=self.counts['content_stats'],read_bytes=self.counts['read_bytes'],
             json_loads=self.counts['json_loads'],json_input_bytes=self.counts['json_input_bytes'],
             json_dumps=self.counts['json_dumps'],json_output_bytes=self.counts['json_output_bytes'],
@@ -91,5 +91,4 @@ class ReadingMeasurements:
         return response,result
 
     def __exit__(self,*args):
-        self.client.portal.call(lambda:self.app.state.host.require_store().db.set_progress_handler(None,0))
         self.stack.close()

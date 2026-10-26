@@ -1,6 +1,7 @@
+from tests.support.storage import analyze
 from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
-"""Reproduce synthetic background/scaling and archived SQLite plan evidence."""
+"""Reproduce synthetic background/scaling and PostgreSQL plan evidence."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import argparse
@@ -8,30 +9,30 @@ import json
 from fastapi.testclient import TestClient
 from tests.support.reading_cost import library,traced_app,tracing
 from tests.support.reader import HEADERS
-from oko.storage.store import Store
+from tests.support.storage import Store
+from tests.support.postgres_work import scan_rows
 from oko.collection.contracts import Material,Publication
 
 
 def archive_evidence():
     output={}
     def run(db,sql,args=()):
-     step=100 if 'reader_action_results r ' in sql else 1
-     ticks=[];db.set_progress_handler(lambda:ticks.append(1) or 0,step)
-     rows=db.execute(sql,args).fetchall();db.set_progress_handler(None,0)
-     return dict(rows=len(rows),vm=len(ticks)*step,vm_precision=step,plan=[r[3] for r in db.execute('EXPLAIN QUERY PLAN '+sql+' -- evidence '+str(len(output)),args)])
+     rows=db.execute(sql,args).fetchall()
+     plan=db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+sql,args or None).fetchone()[0][0]['Plan']
+     return dict(rows=len(rows),rows_scanned=scan_rows(plan),buffers=plan.get('Shared Hit Blocks',0)+plan.get('Shared Read Blocks',0),plan=plan)
     with TemporaryDirectory() as d:
      s=Store(Path(d),lambda _:None);s.subscriptions.ensure_demo()
      with s.db:
-      s.db.executemany('INSERT INTO items(id,feed_id,published,viewed) VALUES (?,?,?,?)',[(f'archive-{n}','demo',n,int(n>=100)) for n in range(20000)])
-      s.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",[(f'archive-{n}',) for n in range(20000)])
-      s.db.executemany("INSERT INTO history_members(feed,item) VALUES ('demo',?)",[(f'archive-{n}',) for n in range(20000)])
+      s.db.executemany('INSERT INTO items ( id , feed_id , published , viewed ) VALUES ( %s , %s , %s , %s )',[(f'archive-{n}','demo',n,int(n>=100)) for n in range(20000)])
+      s.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",[(f'archive-{n}',) for n in range(20000)])
+      s.db.executemany("INSERT INTO history_members ( feed , item ) VALUES ( 'demo' , %s )",[(f'archive-{n}',) for n in range(20000)])
       s.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','pending')")
-      s.db.execute('ANALYZE')
+      analyze(s.db)
      operations={
       'unviewed':('SELECT id,feed_id FROM items WHERE viewed=0 ORDER BY published DESC',()),
-      'history_point':('SELECT * FROM history_members WHERE item=?',('archive-100',)),
-      'job_point':('SELECT * FROM jobs WHERE item=?',('archive-100',)),
-      'pending':("SELECT id FROM jobs WHERE status='pending' AND next<=? ORDER BY next,id LIMIT 1",(0,))}
+      'history_point':('SELECT * FROM history_members WHERE item=%s',('archive-100',)),
+      'job_point':('SELECT * FROM jobs WHERE item=%s',('archive-100',)),
+      'pending':("SELECT id FROM jobs WHERE status='pending' AND next<=%s ORDER BY next,id LIMIT 1",(0,))}
      for name,(sql,args) in operations.items():output[name]=run(s.db,sql,args)
      s.db.close()
     with TemporaryDirectory() as d:
@@ -40,10 +41,10 @@ def archive_evidence():
      for n in range(1500):
       body=json.dumps(dict(identity=f'fixture-{n}',title='Synthetic',objects=[],action=None))
       rows.extend([(f'old-{n}',f'fixture-{n}',body,0,'failed'),(f'new-{n}',f'fixture-{n}',body,1,'failed')])
-     with s.db:s.db.executemany('INSERT INTO reader_action_results(id,identity,body,started,result) VALUES (?,?,?,?,?)',rows)
+     with s.db:s.db.executemany('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s )',rows)
      sql="SELECT * FROM reader_action_results r WHERE sequence=(SELECT max(sequence) FROM reader_action_results WHERE identity=r.identity) AND result IN ('failed','unknown','pending')"
      output['receipts_indexed']=run(s.db,sql)
-     with s.db:s.db.execute('DROP INDEX reader_action_identity_sequence')
+     with s.db:s.db._db.execute('DROP INDEX reader_action_identity_sequence')
      output['receipts_without_index']=run(s.db,sql)
      s.db.close()
     return output
@@ -59,7 +60,7 @@ def background_evidence():
       idle=cost(s.processing.sync)
       viewed=cost(lambda:s.viewed(items[0]))
 
-      with s.db:s.db.execute("UPDATE jobs SET status='pending',next=0 WHERE kind='discover' AND item=?",(feeds[0],))
+      with s.db:s.db.execute("UPDATE jobs SET status = 'pending' , next = 0 WHERE kind = 'discover' AND item = %s",(feeds[0],))
       job=s.jobs.next_job(s.clock(),feeds=[feeds[0]],include_deletions=False)
       assert job and job.kind=='discover'
       changed=cost(lambda:discovered(s,[publication_packet(Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested')))],'{}',job,feeds[0]))
@@ -79,9 +80,9 @@ def background_evidence():
        s.db.execute("INSERT INTO folders VALUES ('folder','Synthetic',0)")
        for i in range(count):
         feed=f'{i:032x}'
-        s.db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport,telegram_peer,auto_read) VALUES (?,?,?,'telegram','folder','[]','connected','telegram',?,0)",(feed,feed,feed,-1000000-i))
-        s.db.execute('INSERT INTO telegram_bindings VALUES (?,?)',(feed,json.dumps(dict(kind='client',role='personal',peer_id=str(-1000000-i)))))
-        s.db.execute('INSERT INTO telegram_read_state(feed,since) VALUES (?,0)',(feed,))
+        s.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , '[]' , 'connected' , 'telegram' , %s , 0 )",(feed,feed,feed,-1000000-i))
+        s.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )',(feed,json.dumps(dict(kind='client',role='personal',peer_id=str(-1000000-i)))))
+        s.db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , 0 )',(feed,))
       q=[];s.db.set_trace_callback(q.append);s.jobs.sync_reads();s.db.set_trace_callback(None)
       output['telegram'].append(dict(feeds=count,sql=len(q)));s.db.close()
     return output

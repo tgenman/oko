@@ -57,7 +57,7 @@ def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path,high
 
 
 def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tmp_path):
-    import sqlite3
+    from tests.support.storage import database
     from oko.collection.contracts import SourceError
     for name,missing in [('missing',True),('error',False)]:
         root=publication_root(tmp_path/name)
@@ -84,8 +84,8 @@ def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tm
                 wait_for(client,lambda:'Temporary caption error' in client.get('/api/v3/materials/'+card['id']).json()['content']['completeness'].get('message',''))
                 assert client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] is None
             assert not any(request.url.path=='/v1/chat/completions' for request in models)
-            with sqlite3.connect(root/'state.sqlite') as db:
-                row=db.execute('SELECT status,processing_metadata FROM items WHERE id=?',(card['id'],)).fetchone()
+            with database(root) as db:
+                row=db.execute('SELECT status , processing_metadata FROM items WHERE id = %s',(card['id'],)).fetchone()
                 if missing:
                     assert row[0]=='ready' and json.loads(row[1])['summary']['reason']=='no_input'
                 else:
@@ -121,10 +121,10 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         assert any(call['operation']=='filter' for call in calls)
         summary=next(call for call in calls if call['operation']=='theses')
         assert summary['sources'][0]['text']=='Useful words. Ad text.'
-        import sqlite3
+        from tests.support.storage import database
         from oko.storage.processing_input import digest
-        with sqlite3.connect(root/'state.sqlite') as db:
-            saved=db.execute('SELECT processing_metadata,content FROM items WHERE id=?',(card['id'],)).fetchone()
+        with database(root) as db:
+            saved=db.execute('SELECT processing_metadata , content FROM items WHERE id = %s',(card['id'],)).fetchone()
             metadata=json.loads(saved[0])
             blocks=json.loads(saved[1])['blocks']
             index=next(i for i,b in enumerate(blocks) if b.get('role')=='subtitles')
@@ -210,9 +210,9 @@ def test_manual_caption_revalidation_rotates_only_changed_file_and_results(tmp_p
         assert sum(request.url.path=='/v1/chat/completions' for request in models)==count
         # Losing the local input must not turn an unknown transcript into a
         # confirmed empty input or keep presenting its old result as current.
-        import sqlite3
-        with sqlite3.connect(root/'state.sqlite') as db:
-            key=db.execute('SELECT storage_key FROM media_files WHERE id=?',(current_file.rsplit('/',1)[-1],)).fetchone()[0]
+        from tests.support.storage import database
+        with database(root) as db:
+            key=db.execute('SELECT storage_key FROM media_files WHERE id = %s',(current_file.rsplit('/',1)[-1],)).fetchone()[0]
         (root/key).unlink()
         missing=client.get('/api/v3/materials/'+card['id']).json()
         assert missing['theses']['result'] is None
@@ -279,9 +279,9 @@ def test_caption_absence_then_reappearance_never_reuses_a_previous_file_url(tmp_
         client.post('/api/v3/materials/'+card['id']+'/retry')
         absent=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['text']=='' and m['theses']['result'] is not None else None))
         assert absent['theses']['result']['points']==[] and client.get(old_file).status_code==404
-        import sqlite3
-        with sqlite3.connect(root/'state.sqlite') as db:
-            ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id=?',(card['id'],)).fetchone()[0])
+        from tests.support.storage import database
+        with database(root) as db:
+            ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id = %s',(card['id'],)).fetchone()[0])
             assert old_file.rsplit('/',1)[-1] not in ids
         text[0]='Reappeared captions.'
         wall[0]+=11

@@ -40,6 +40,8 @@ def smoke(image, evidence, reader_port=8765, bridge_port=8767):
     (evidence / 'report.json').write_text(json.dumps(report, indent=2))
     work = Path(tempfile.mkdtemp(prefix='oko-docker-synthetic-'))
     name = 'oko-synthetic-' + uuid.uuid4().hex[:12]
+    database_name = name + '-db'
+    network = name + '-net'
     server = None
     thread = None
     try:
@@ -48,6 +50,22 @@ def smoke(image, evidence, reader_port=8765, bridge_port=8767):
         secret = work / 'codex'
         secret.write_text(secrets.token_urlsafe(48))
         secret.chmod(0o600)
+        password = secrets.token_urlsafe(24)
+        database_secret = work / 'database-url'
+        database_secret.write_text(f'postgresql://postgres:{password}@{database_name}:5432/oko')
+        database_secret.chmod(0o600)
+        docker('network', 'create', network)
+        docker('run', '-d', '--name', database_name, '--network', network,
+               '-e', 'POSTGRES_PASSWORD='+password, '-e', 'POSTGRES_DB=oko', 'postgres:18-bookworm')
+        for _ in range(60):
+            try:
+                docker('exec', database_name, 'pg_isready', '-U', 'postgres', '-d', 'oko')
+                break
+            except subprocess.CalledProcessError:
+                time.sleep(.5)
+        docker('run', '--rm', '--network', network, '--user', f'{os.getuid()}:{os.getgid()}',
+               '--volume', str(database_secret)+':/run/secrets/database-url:ro', '--entrypoint', 'python', image,
+               '-m', 'oko.storage.postgres_migrations', '--database-url-file', '/run/secrets/database-url')
         sock = socket.socket()
         sock.bind(('127.0.0.1', bridge_port))
         bridge_port = sock.getsockname()[1]
@@ -67,14 +85,17 @@ def smoke(image, evidence, reader_port=8765, bridge_port=8767):
         report['host_ports'] = {'reader': reader_port, 'bridge_loopback': bridge_port}
         arguments = ['--persistent', '--host', '0.0.0.0', '--port', '8765', '--public-url', 'http://localhost:8765',
                      '--codex-url', f'http://host.docker.internal:{bridge_port}',
-                     '--codex-token-file', '/run/secrets/codex', '--data', '/data', '--no-browser', '--initially-disabled']
+                     '--codex-token-file', '/run/secrets/codex', '--database-url-file', '/run/secrets/database-url',
+                     '--data', '/data', '--no-browser']
 
         def launch():
             return docker('run', '--detach', '--name', name, '--platform', 'linux/arm64',
+                          '--network', network,
                           '--user', f'{os.getuid()}:{os.getgid()}', '--read-only', '--cap-drop', 'ALL',
                           '--security-opt', 'no-new-privileges', '--tmpfs', '/tmp:mode=1777',
                           '--publish', f'127.0.0.1:{reader_port}:8765', '--volume', str(data) + ':/data',
-                          '--volume', str(secret) + ':/run/secrets/codex:ro', image, *arguments)
+                          '--volume', str(secret) + ':/run/secrets/codex:ro',
+                          '--volume', str(database_secret) + ':/run/secrets/database-url:ro', image, *arguments)
 
         def wait_status(client):
             for _ in range(240):
@@ -158,7 +179,9 @@ def smoke(image, evidence, reader_port=8765, bridge_port=8767):
             pass
         raise
     finally:
-        subprocess.run(['docker', '--context', 'desktop-linux', 'rm', '--force', name],
+        subprocess.run(['docker', '--context', 'desktop-linux', 'rm', '--force', name, database_name],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['docker', '--context', 'desktop-linux', 'network', 'rm', network],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if server:
             server.should_exit = True

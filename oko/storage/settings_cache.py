@@ -11,12 +11,12 @@ class SettingsCache:
     def __init__(self, db: Connection) -> None:
         self.db = db
         self._values: dict[tuple[str, str], dict[str, Any]] = {}
-        for row in db.execute('SELECT scope,owner,field,value FROM settings'):
+        for row in db.execute('SELECT scope , owner , field , value FROM settings'):
             self._values.setdefault((row['scope'], row['owner']), {})[row['field']] = json.loads(row['value'])
         self._state = {str(row['key']): str(row['value']) for row in db.execute(
-            "SELECT key,value FROM state WHERE key IN ('processor:codex','processor:llamacpp')")}
+            "SELECT key , value FROM state WHERE key IN ( 'processor:codex' , 'processor:llamacpp' )")}
         self._feeds = {str(row['id']): dict(row) for row in db.execute(
-            'SELECT id,kind,folder_id,importance,public_ai,transport FROM feeds')}
+            'SELECT id , kind , folder_id , importance , public_ai , transport FROM feeds')}
 
     def feed_values(self, identity: str) -> dict[str, Any]:
         with self.db.access_lock:
@@ -28,7 +28,7 @@ class SettingsCache:
 
     def refresh_feed(self, identity: str) -> None:
         """A configuration writer publishes its row inside the same transaction."""
-        row = self.db.execute('SELECT id,kind,folder_id,importance,public_ai,transport FROM feeds WHERE id=?', (identity,)).fetchone()
+        row = self.db.execute('SELECT id , kind , folder_id , importance , public_ai , transport FROM feeds WHERE id = %s', (identity,)).fetchone()
         value = dict(row) if row is not None else None
         previous = self._feeds.get(identity)
         if previous == value:
@@ -54,7 +54,7 @@ class SettingsCache:
 
     def set_state(self, key: str, value: str) -> None:
         previous = self.state_value(key)
-        self.db.execute('INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+        self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', (key, value))
         if previous == value:
             return
 
@@ -92,14 +92,14 @@ class SettingsCache:
         values = self.values(scope, owner)
         for field, value in patch.items():
             if value is None:
-                self.db.execute('DELETE FROM settings WHERE scope=? AND owner=? AND field=?', (scope, owner, field))
+                self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s AND field = %s', (scope, owner, field))
                 values.pop(field, None)
             else:
-                self.db.execute('INSERT INTO settings VALUES (?,?,?,?) ON CONFLICT(scope,owner,field) DO UPDATE SET value=excluded.value',
+                self.db.execute('INSERT INTO settings VALUES ( %s , %s , %s , %s ) ON CONFLICT ( scope , owner , field ) DO UPDATE SET value = excluded . value',
                                 (scope, owner, field, json.dumps(value)))
                 values[field] = value
         self._publish((scope, owner), values)
 
     def clear(self, scope: str, owner: str) -> None:
-        self.db.execute('DELETE FROM settings WHERE scope=? AND owner=?', (scope, owner))
+        self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s', (scope, owner))
         self._publish((scope, owner), {})

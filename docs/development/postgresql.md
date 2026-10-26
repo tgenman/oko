@@ -1,64 +1,12 @@
-# PostgreSQL storage
+# PostgreSQL storage and development
 
-Oko keeps the local SQLite backend and supports PostgreSQL for a cloud reader.
-The HTTP contract, reader versions, three workers and file lifetime are shared.
-There is no automatic SQLite-to-PostgreSQL import or fallback on database errors.
-
-## Explicit offline SQLite import
-
-Stop both readers, preserve consistent source and target backups, and prepare a
-new empty schema with the release migrations above. Use the schema owner's
-private DSN, not the runtime reader's restricted credential:
-
-```sh
-python -m oko.storage.import_sqlite --source /private/stopped-source-snapshot \
-  --target-data /srv/oko/new-library --database-url-file /run/secrets/migrator-dsn \
-  --report /private/import-report.json
-```
-
-The source must have its existing unlocked `instance.lock` and current publication
-schema. The importer refuses live readers, populated target schemas, existing
-target directories/reports, symlinks, special files and incompatible table/column
-sets. It never switches a running installation. It imports the complete logical
-tables and reader projections under the schema lease and a single transaction,
-preserves insertion identities and sequence allocation, and disables work before
-startup. Source and copied media hashes and per-table counts/checksums are checked.
-
-Regular source files are copied privately, except the SQLite database/sidecars,
-instance lock and runtime address/token metadata. Browser/reader account files are
-included: explicitly retain the destination's separately backed-up access files
-before activation when preserving server login is required. Codex host auth is
-outside this library and is not copied. Check absolute paths and portability of
-Telegram/client settings before enabling work.
-
-A private `migration-archive/state.sqlite` preserves the complete source database,
-including historical `migration_retired_rows`; those historical rows are reported
-as archived rather than silently discarded or loaded into the live schema.
-The known legacy tables `content_current`, `content_versions`, `filter_restores`,
-`retained_theses`, `telegram_read_topics` and `youtube_attempts` are accepted only
-when empty; their schemas remain in that archive and zero counts in the report.
-Any rows in those tables refuse import rather than hiding live data in an archive.
-The legacy `feeds.telegram_topic` column is accepted only if every value is NULL;
-its schema is retained in the full SQLite archive and named in `archived_columns`.
-A non-NULL topic or any other unknown column refuses import.
-Only `reader_feed_counts` rows with a NULL `feed` are archived instead of loaded:
-these derived rows cannot join an authoritative feed ID or contribute to reader
-navigation/folder counts. The complete SQLite archive retains their original
-values; `archived_row_counts` and each table's `source_rows`/`rows` make the
-transformation explicit. Counts for actual feeds follow existing Store recovery.
-Other invalid rows or NULL constraints are not normalized or silently omitted.
-Unknown tables are refused. The source is unchanged. The report and archive may
-contain private metadata; do not publish them unredacted. After interruption,
-reconcile the prepared directory, transaction outcome and receipt before retrying;
-there is no cross-filesystem/database atomic commit or automatic replacement of a
-partially attempted target. Keep the original installation and backups until HTTP
-and browser acceptance and the explicit operator switch have passed.
+PostgreSQL is the only Oko database in deployment, local development and tests.
+Legacy application storage and import commands have been removed.
 
 ## Data ownership
 
 Publication text, structured content, processing results, subscriptions, reader
-versions and durable jobs live in the database, as they do in the current SQLite
-backend. Publication media remain files under the reader data root. PostgreSQL
+versions and durable jobs live in PostgreSQL. Publication media remain files under the reader data root. PostgreSQL
 stores their descriptions, identities and storage keys. Small Telegram account
 avatars retain their existing database representation.
 
@@ -105,9 +53,8 @@ Connection close releases both leases. Independent test schemas do not block
 each other.
 
 The reader verifies the ledger and never installs PostgreSQL tables or triggers.
-A new PostgreSQL library starts with work disabled. `--initially-disabled` remains
-the local SQLite first-start option; restarting a PostgreSQL reader preserves
-its saved power state.
+A new library starts with work disabled. Restarting preserves its saved power state.
+The reader requires `--database-url-file` and does not create a local database.
 
 ## Transactions and SQL
 
@@ -133,11 +80,10 @@ writes to the caller's owned transaction. Nested repository contexts cannot
 commit or rescue a failed outer action. Reader projections flush before commit;
 callbacks run after durable commit and disappear on rollback.
 
-`postgres_sql.py` compiles the repository's bounded SQL dialect, not arbitrary
-user SQL. Values stay bound. It handles placeholders, null-safe comparisons,
-conflict policies and the existing JSON scalar contract. Native release DDL and
-145 native triggers implement the same reader, source, processing and journal
-projections. Unsupported statements fail; they never switch to SQLite.
+Repositories use native PostgreSQL statements and psycopg `%s` / `%(name)s`
+parameters. There is no runtime dialect translator. Bound values are not SQL.
+The connection validates transaction ownership and single-statement execution;
+schema changes belong to immutable release migrations.
 
 ## Verification
 
@@ -148,9 +94,30 @@ OKO_TEST_POSTGRES_URL='postgresql://test-user:test-password@127.0.0.1:5432/test-
   ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_browser.py tests/reader/test_postgres_cli.py
 ```
 
-Each test creates and drops only its own randomly named schema. The role test
-also creates and removes a synthetic reader role. Browser acceptance uses
-Playwright, a private temporary DSN file, synthetic sources/models and isolated
-contexts. The mandatory PostgreSQL CI job runs these checks against PostgreSQL
-18 and retains browser screenshots. Ordinary local checks skip these integration
-cases when the explicit database variable is absent.
+Storage checks require `OKO_TEST_POSTGRES_URL`; absence is an error, not a skip.
+Python and browser scenarios use isolated synthetic schemas. Closed seed schemas
+are cloned for each scenario; filesystem copies never share a mutable database.
+The seed owner keeps schemas alive across child restarts and drops them on exit.
+PostgreSQL plan checks use EXPLAIN ANALYZE/BUFFERS; latency measurements run without
+that extra work. CI provides PostgreSQL to every storage-dependent test job.
+
+## Local development
+
+Use a separate PostgreSQL database or schema and a private DSN file. Install
+migrations explicitly before starting the reader. A different media directory
+alone does not create a different library: the database owns its identity.
+
+For disposable checks only:
+
+```sh
+docker run --rm -d --name oko-test-postgres -p 127.0.0.1:55439:5432 \
+  -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=oko_test postgres:18-bookworm
+OKO_TEST_POSTGRES_URL='postgresql://postgres:synthetic@127.0.0.1:55439/oko_test' ./scripts/check all --compact
+```
+
+Production backup/restore and releases follow [cloud backup](cloud-backup.md) and
+[cloud deployment](cloud-deploy.md). A file-only backup is incomplete. Old local
+file-copy update, rollback, backup, restore and import commands refuse before
+changing an installation. Existing data and historical backups are not deleted.
+External Codex/Telethon formats remain owned by those applications; their security
+checks do not provide an alternative Oko storage backend.

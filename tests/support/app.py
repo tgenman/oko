@@ -88,4 +88,7 @@ def create_app(root: Path, **options: Any) -> FastAPI:
     if defaults.get('source') is not None:
         from tests.support.source import StructuredSource
         defaults['source']=StructuredSource(defaults['source'])
+    if not defaults.get('database_url'):
+        from tests.support.storage import database_url
+        defaults['database_url'] = database_url(root)
     return production_app(root, **defaults)

@@ -236,7 +236,7 @@ def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
 
 def test_media_urls_and_publication_media_ids_follow_source_order(tmp_path):
     import json
-    import sqlite3
+    from tests.support.storage import database
     root=publication_root(tmp_path)
     def response(request):
         if request.url.host=='cdn.example':
@@ -249,8 +249,8 @@ def test_media_urls_and_publication_media_ids_follow_source_order(tmp_path):
         item=settled(client)[0]['id']
         attachments=client.get('/api/v3/materials/'+item).json()['content']['attachments']
         assert [client.get(value['url']).content for value in attachments]==[b'one',b'two',b'three']
-        with sqlite3.connect(root/'state.sqlite') as db:
-            media_ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id=?',(item,)).fetchone()[0])
+        with database(root) as db:
+            media_ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id = %s',(item,)).fetchone()[0])
         assert [value['url'].rsplit('/',1)[1] for value in attachments]==media_ids
 
 
@@ -302,7 +302,7 @@ def test_refreshed_signature_keeps_the_media_id_and_existing_bytes(tmp_path):
 
 
 def test_a_real_empty_attachment_is_ready_with_size_zero(tmp_path):
-    import sqlite3
+    from tests.support.storage import database
     root=publication_root(tmp_path)
     def response(request):
         if request.url.host=='cdn.example':
@@ -315,8 +315,8 @@ def test_a_real_empty_attachment_is_ready_with_size_zero(tmp_path):
         item=wait_for(client,lambda:(cards[0]['id'] if (cards:=client.get('/api/v3/cards').json()) else None))
         ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
         assert client.get(ready['content']['attachments'][0]['url']).content==b''
-        with sqlite3.connect(root/'state.sqlite') as db:
-            assert db.execute('SELECT name,size_bytes,status FROM media_files WHERE publication_id=?',(item,)).fetchone()==('empty.txt',0,'ready')
+        with database(root) as db:
+            assert db.execute('SELECT name , size_bytes , status FROM media_files WHERE publication_id = %s',(item,)).fetchone()==('empty.txt',0,'ready')
 
 
 @pytest.mark.parametrize('refresh',['retry','collect'])
@@ -397,7 +397,7 @@ def test_periodic_cleanup_removes_orphans_but_keeps_an_active_download(tmp_path)
 def test_cleanup_between_move_and_commit_keeps_the_admitted_final_file(tmp_path):
     """Public Store file boundary: the critical interval is synchronous, not HTTP."""
     from dataclasses import replace
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     root=publication_root(tmp_path)
     started,release=threading.Event(),threading.Event()
     async def response(request):
@@ -437,7 +437,7 @@ def test_cleanup_between_move_and_commit_keeps_the_admitted_final_file(tmp_path)
 
 @pytest.mark.parametrize('point,committed',[('after_media_move',False),('before_media_commit',False),('after_media_commit',True)])
 def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_path,point,committed):
-    import sqlite3
+    from tests.support.storage import database
     from tests.support.processes import launch,connect,cleanup
     root=publication_root(tmp_path)
     started=threading.Event()
@@ -452,8 +452,8 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         assert started.wait(3)
         item=client.get('/api/v3/cards').json()[0]['id']
-    with sqlite3.connect(root/'state.sqlite') as db:
-        media_id=db.execute('SELECT id FROM media_files WHERE publication_id=?',(item,)).fetchone()[0]
+    with database(root) as db:
+        media_id=db.execute('SELECT id FROM media_files WHERE publication_id = %s',(item,)).fetchone()[0]
     url='/api/v3/materials/'+item+'/media/'+media_id
     process=launch(root,point,api_only=True,web_media=True)
     try:
@@ -569,7 +569,7 @@ def test_explicit_feed_refresh_rechecks_unavailable_media(tmp_path):
 
 
 def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
-    import sqlite3
+    from tests.support.storage import database
     root=publication_root(tmp_path)
     broken=[False]
     started,release=threading.Event(),threading.Event()
@@ -590,14 +590,14 @@ def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
             client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
             assert started.wait(3)
             item=client.get('/api/v3/cards').json()[0]['id']
-            with sqlite3.connect(root/'state.sqlite') as db:
-                article=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,)).fetchone()[0]
-                before=db.execute('SELECT id FROM media_files WHERE publication_id=?',(article,)).fetchone()[0]
+            with database(root) as db:
+                article=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,)).fetchone()[0]
+                before=db.execute('SELECT id FROM media_files WHERE publication_id = %s',(article,)).fetchone()[0]
             broken[0]=True
             client.post('/api/v3/materials/'+item+'/retry')
             wait_for(client,lambda:'New post' in client.get('/api/v3/materials/'+item).json()['content']['text'])
-            with sqlite3.connect(root/'state.sqlite') as db:
-                assert db.execute('SELECT id FROM media_files WHERE publication_id=?',(article,)).fetchone()[0]==before
+            with database(root) as db:
+                assert db.execute('SELECT id FROM media_files WHERE publication_id = %s',(article,)).fetchone()[0]==before
             broken[0]=False
             release.set()
             client.post('/api/v3/materials/'+item+'/retry')
@@ -641,7 +641,7 @@ def test_media_source_wait_survives_restart_and_does_not_pause_another_host(tmp_
 
 
 def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_path):
-    import sqlite3
+    from tests.support.storage import database
     root=publication_root(tmp_path)
     missing=[False]
     def response(request):
@@ -653,8 +653,8 @@ def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_
         missing[0]=True
         client.post('/api/v3/materials/'+item+'/retry')
         wait_for(client,lambda:client.get('/api/v3/status').json()['sources'][0]['state']=='unavailable')
-        with sqlite3.connect(root/'state.sqlite') as db:
-            assert db.execute("SELECT status FROM jobs WHERE kind='fetch' AND item=?",(item,)).fetchone()[0]=='unavailable'
+        with database(root) as db:
+            assert db.execute("SELECT status FROM jobs WHERE kind = 'fetch' AND item = %s",(item,)).fetchone()[0]=='unavailable'
         assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
         missing[0]=False
         client.post('/api/v3/materials/'+item+'/retry')
@@ -663,7 +663,7 @@ def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_
 
 @pytest.mark.parametrize('extra', ['', '<iframe src="https://unsupported.example/embed"></iframe>', '<a href="https://telegra.ph/Missing">missing</a>'])
 def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extra):
-    import sqlite3
+    from tests.support.storage import database
     import time
     root=publication_root(tmp_path)
     broken=[True]
@@ -682,24 +682,24 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
         wait_for(client,lambda:any(a.get('error') and a['source_url']=='https://telegra.ph/Fixture' for a in (client.get('/api/v3/materials/'+item).json()['content'].get('linked_content') or {}).get('articles',[])))
-        with sqlite3.connect(root/'state.sqlite') as db:
-            article=db.execute("SELECT i.id FROM publication_links l JOIN items i ON i.id=l.target_publication_id WHERE l.source_publication_id=? AND i.url='https://telegra.ph/Fixture'",(item,)).fetchone()[0]
-            job=db.execute("SELECT status,retry_at,error FROM jobs WHERE kind='fetch' AND item=?",(article,)).fetchone()
+        with database(root) as db:
+            article=db.execute("SELECT i . id FROM publication_links l JOIN items i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s AND i . url = 'https://telegra.ph/Fixture'",(item,)).fetchone()[0]
+            job=db.execute("SELECT status , retry_at , error FROM jobs WHERE kind = 'fetch' AND item = %s",(article,)).fetchone()
         assert job[0]=='pending' and job[1]>time.time() and job[2]
         assert 'Useful post' in client.get('/api/v3/materials/'+item).json()['content']['text']
     broken[0]=False
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         wait_for(client,lambda:'Recovered article' in client.get('/api/v3/materials/'+item).json()['content']['text'])
-        with sqlite3.connect(root/'state.sqlite') as db:
-            assert db.execute("SELECT status,retry_at FROM jobs WHERE kind='fetch' AND item=?",(article,)).fetchone()==('done',None)
+        with database(root) as db:
+            assert db.execute("SELECT status , retry_at FROM jobs WHERE kind = 'fetch' AND item = %s",(article,)).fetchone()==('done',None)
             if 'Missing' in extra:
                 assert db.execute("SELECT j.status FROM jobs j JOIN items i ON i.id=j.item WHERE j.kind='fetch' AND i.url='https://telegra.ph/Missing'").fetchone()==('unavailable',)
     assert len(calls)>=2
 
 
 def test_manual_fetch_retry_is_immediate_after_restart_without_resetting_backoff(tmp_path):
-    import sqlite3
-    from oko.storage.store import Store
+    from tests.support.storage import database
+    from tests.support.storage import Store
     root=publication_root(tmp_path)
     def response(request):
         if request.url.host=='api.telegra.ph':
@@ -710,8 +710,8 @@ def test_manual_fetch_retry_is_immediate_after_restart_without_resetting_backoff
         feed=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()['feed_id']
         item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
         def failed():
-            with sqlite3.connect(root/'state.sqlite') as db:
-                return db.execute("SELECT j.retry_delay,j.item FROM jobs j JOIN publication_links l ON l.target_publication_id=j.item WHERE j.kind='fetch' AND l.source_publication_id=? AND j.status='pending' AND j.error IS NOT NULL",(item,)).fetchone()
+            with database(root) as db:
+                return db.execute("SELECT j . retry_delay , j . item FROM jobs j JOIN publication_links l ON l . target_publication_id = j . item WHERE j . kind = 'fetch' AND l . source_publication_id = %s AND j . status = 'pending' AND j . error IS NOT NULL",(item,)).fetchone()
         delay,article=wait_for(client,failed)
     store=Store(root,lambda _:None)
     assert store.jobs.retry_material(item)
@@ -720,6 +720,6 @@ def test_manual_fetch_retry_is_immediate_after_restart_without_resetting_backoff
     try:
         job=store.jobs.next_job(store.clock(),feeds=[feed],include_deletions=False)
         assert job is not None and job.kind=='fetch' and job.item==article
-        assert store.db.execute('SELECT retry_delay FROM jobs WHERE id=?',(job.id,)).fetchone()[0]==delay
+        assert store.db.execute('SELECT retry_delay FROM jobs WHERE id = %s',(job.id,)).fetchone()[0]==delay
     finally:
         store.db.close()

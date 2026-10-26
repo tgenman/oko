@@ -75,7 +75,7 @@ def test_new_rss_folders_use_opaque_ids_and_resolve_renamed_titles(tmp_path):
 def test_nonempty_folder_blocks_deletion_even_without_visible_items(tmp_path, connection):
     configured_sources(tmp_path, [('https://source.test/feed', 'Alpha', 'Folder')])
     with database(tmp_path) as db:
-        db.execute('UPDATE feeds SET connection=?', (connection,))
+        db.execute('UPDATE feeds SET connection = %s', (connection,))
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         catalog = client.get('/api/v3/subscriptions').json()
         folder = catalog['folders'][0]['id']

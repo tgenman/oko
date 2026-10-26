@@ -1,5 +1,4 @@
 """Current filtered Publication content and its processing work."""
-from oko.storage.sqlite_schema import is_sqlite
 import json
 from typing import Any,TYPE_CHECKING
 from oko.storage import material_read
@@ -14,8 +13,6 @@ if TYPE_CHECKING:
 class FilterResults:
     def __init__(self,store: 'Store') -> None:
         self.store=store
-        if is_sqlite(store.db):
-            store.db.execute('CREATE TABLE IF NOT EXISTS filter_inputs (item TEXT PRIMARY KEY,signature TEXT)')
 
     @reading_value
     def signature(self,item: str) -> str | None:
@@ -39,7 +36,7 @@ class FilterResults:
 
     def request(self,item: str) -> tuple[ProcessingRequest,str,bool] | None:
         signature=self.signature(item)
-        row=self.store.db.execute('SELECT signature FROM filter_inputs WHERE item=?',(item,)).fetchone()
+        row=self.store.db.execute('SELECT signature FROM filter_inputs WHERE item = %s',(item,)).fetchone()
         if not signature or not row or row[0]!=signature:
             return None
         values,public_ai,version=publication_input.request_settings(self.store,item)
@@ -49,4 +46,4 @@ class FilterResults:
 
 
     def forget(self,item: str) -> None:
-        self.store.db.execute('DELETE FROM filter_inputs WHERE item=?',(item,))
+        self.store.db.execute('DELETE FROM filter_inputs WHERE item = %s',(item,))

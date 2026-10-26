@@ -38,6 +38,13 @@ class ResistantSource(DemoSource):
 
 
 if __name__ == '__main__':
+    import sys
+    if '--database-url-file' not in sys.argv and '--data' in sys.argv:
+        root = Path(sys.argv[sys.argv.index('--data')+1])
+        # Parent-owned scenario state persists across child process restarts.
+        credential = root / '.test-database-url'
+        if credential.is_file():
+            sys.argv.extend(['--database-url-file', str(credential)])
     origin = os.environ.get('OKO_TEST_MODEL_ORIGIN')
     def fixture_app(root, **options):
         if os.environ.get('OKO_TEST_WEB_MEDIA'):

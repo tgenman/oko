@@ -72,13 +72,12 @@ class ReadingComposition:
     def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
         where, parameters = ['i.viewed=0'], []
         if feed is not None:
-            where.append('EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id AND m.feed_id=?)')
+            where.append('EXISTS ( SELECT 1 FROM reading_memberships m WHERE m . publication_id = i . id AND m . feed_id = %s )')
             parameters.append(feed)
         if folder is not None:
-            where.append('EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner ON owner.id=m.feed_id WHERE m.publication_id=i.id AND owner.folder_id=?)')
+            where.append('EXISTS ( SELECT 1 FROM reading_memberships m JOIN feeds owner ON owner . id = m . feed_id WHERE m . publication_id = i . id AND owner . folder_id = %s )')
             parameters.append(folder)
-        rows = self._store.db.execute('SELECT i.* FROM items i JOIN feeds f ON f.id=i.feed_id WHERE '
-                                      + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters).fetchall()
+        rows = self._store.db.execute(f"SELECT i . * FROM items i JOIN feeds f ON f . id = i . feed_id WHERE {' AND '.join(where)} ORDER BY i . published DESC", parameters).fetchall()
         feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds_many({row['feed_id'] for row in rows})}
         cards = []
         from oko.storage.material_read import material_inputs
@@ -112,11 +111,9 @@ class ReadingComposition:
         """Count visible original publications in their current feeds and folders."""
         folders = self._store.subscriptions.folders()
         feeds = self._store.subscriptions.feeds()
-        folder_counts={row['folder']:row['visible'] for row in self._store.db.execute('SELECT folder,visible FROM reader_folder_counts')}
-        feed_counts={row['feed']:row for row in self._store.db.execute('SELECT feed,visible,unviewed FROM reader_feed_counts')}
-        visible=expect_row(self._store.db.execute("""SELECT count(*) FROM items i LEFT JOIN reader_visibility v ON v.item=i.id
-            WHERE i.viewed=0 AND coalesce(v.hidden,0)=0
-            AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)""").fetchone())[0]
+        folder_counts={row['folder']:row['visible'] for row in self._store.db.execute('SELECT folder , visible FROM reader_folder_counts')}
+        feed_counts={row['feed']:row for row in self._store.db.execute('SELECT feed , visible , unviewed FROM reader_feed_counts')}
+        visible=expect_row(self._store.db.execute('SELECT count ( * ) FROM items i LEFT JOIN reader_visibility v ON v . item = i . id WHERE i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 AND EXISTS ( SELECT 1 FROM reading_memberships m WHERE m . publication_id = i . id )').fetchone())[0]
         return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],
                     feeds=[dict(feed,count=feed_counts[feed['id']]['visible'],has_unviewed=bool(feed_counts[feed['id']]['unviewed'])) for feed in feeds],
                     count=visible)
@@ -125,10 +122,8 @@ class ReadingComposition:
         from oko.storage.material_read import material_inputs, item
 
         self._store.subscriptions.check_owner(scope, owner)
-        condition = 'm.feed_id=?' if scope == 'feed' else 'f.folder_id=?'
-        rows = list(self._store.db.execute("""SELECT DISTINCT i.id,i.members FROM items i
-            JOIN reading_memberships m ON m.publication_id=i.id JOIN feeds f ON f.id=m.feed_id
-            WHERE i.viewed=0 AND """ + condition + ' ORDER BY i.id', (owner,)))
+        condition = 'm . feed_id = %s' if scope == 'feed' else 'f . folder_id = %s'
+        rows = list(self._store.db.execute(f'SELECT DISTINCT i . id , i . members FROM items i JOIN reading_memberships m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0 AND {condition} ORDER BY i . id', (owner,)))
         cards = []
         # Keep the exact publication identities (including Telegram members)
         # even when a completed publication cannot currently be read.

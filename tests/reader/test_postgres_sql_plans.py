@@ -1,3 +1,4 @@
+from tests.support.storage import analyze
 """Plans of real reader HTTP queries on an isolated synthetic PostgreSQL archive."""
 from contextvars import ContextVar
 
@@ -27,7 +28,7 @@ def test_opened_material_does_not_scan_foreign_job_archive(postgres_url, tmp_pat
         seed.execute("INSERT INTO jobs(kind,item,status) SELECT 'fetch','archive-'||n,'done' FROM generate_series(1,20000) n")
         seed.execute("INSERT INTO jobs(kind,item,status) SELECT 'download_media','media-'||n,'done' FROM generate_series(1,10000) n")
         seed.execute('SET session_replication_role=origin')
-        seed.execute('ANALYZE')
+        analyze(seed)
     capture = ContextVar('material_plan_capture', default=None)
     execute = psycopg.Connection.execute
 

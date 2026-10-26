@@ -102,8 +102,8 @@ def test_feed_version_increments_once_and_sql_rollback_keeps_it(tmp_path):
         def rollback():
             store=app.state.host.require_store()
             with store.db:
-                store.db.execute('BEGIN IMMEDIATE')
-                store.db.execute("UPDATE feeds SET title='Uncommitted' WHERE id=?",(feeds[0],))
+                store.db.begin()
+                store.db.execute("UPDATE feeds SET title='Uncommitted' WHERE id=%s",(feeds[0],))
                 raise ValueError('rollback fixture')
         with pytest.raises(ValueError,match='rollback fixture'):
             client.portal.call(rollback)
@@ -121,7 +121,7 @@ def test_due_fetch_publishes_a_new_material_version_without_dispatch(tmp_path):
         def schedule():
             store=app.state.host.require_store()
             with store.db:
-                store.db.execute("UPDATE jobs SET next=10,error='Synthetic wait',problem_code='source-connection' WHERE kind='fetch' AND item=?",(items[0],))
+                store.db.execute("UPDATE jobs SET next=10,error='Synthetic wait',problem_code='source-connection' WHERE kind='fetch' AND item=%s",(items[0],))
         client.portal.call(schedule)
         resource={'kind':'material','id':items[0],'known_version':None}
         first=check(client,[resource]).json()
@@ -244,7 +244,7 @@ def test_linked_feed_move_updates_lists_without_retransmitting_cards(tmp_path):
 
 
 def test_registered_list_batches_work_and_versions_in_the_write_transaction(tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     import pytest
     for count in [100,200,400]:
         root=tmp_path/str(count)
@@ -252,13 +252,15 @@ def test_registered_list_batches_work_and_versions_in_the_write_transaction(tmp_
         store.subscriptions.ensure_demo()
         options={'target':{'scope':'all'},'sort':'newest','show_hidden':False}
         before=store.read_versions.list_version(options)['version']
-        steps=[]
-        store.db.set_progress_handler(lambda:steps.append(1) or 0,100)
+        statements=[]
+        store.db.set_trace_callback(statements.append)
         with store.db:
-            store.db.executemany("INSERT INTO items(id,feed_id,published,platform,external_id) VALUES (?,?,?,'other_web',?)",[(f'item-{n}','demo',n,f'item-{n}') for n in range(count)])
-            store.db.executemany("INSERT INTO feed_publications VALUES ('demo',?)",[(f'item-{n}',) for n in range(count)])
-        store.db.set_progress_handler(None,0)
-        assert len(steps)*100<count*1000,(count,len(steps)*100)
+            store.db.executemany("INSERT INTO items(id,feed_id,published,platform,external_id) VALUES (%s,%s,%s,'other_web',%s)",[(f'item-{n}','demo',n,f'item-{n}') for n in range(count)])
+            store.db.executemany("INSERT INTO feed_publications VALUES ('demo',%s)",[(f'item-{n}',) for n in range(count)])
+        store.db.set_trace_callback(None)
+        # PostgreSQL batches round trips and publishes one list version per
+        # transaction. SQL plan tests separately measure database scan work.
+        assert len(statements)<20, statements
         assert store.read_versions.list_version(options)['version']==before+1
         assert len(store.read_versions.ids(options))==count
         # Net-zero changes do not advance a list, and failed writes roll back
@@ -297,7 +299,7 @@ def test_filter_resource_keeps_saved_provenance_across_restart(tmp_path):
 
 
 def test_list_maintenance_failure_rolls_back_data_and_versions(tmp_path,monkeypatch):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     import pytest
     store=Store(tmp_path,lambda _:None)
     store.subscriptions.ensure_demo()

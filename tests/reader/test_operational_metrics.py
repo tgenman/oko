@@ -1,3 +1,4 @@
+from tests.support.storage import analyze
 """Operational credentials cannot become reader credentials or expose inputs."""
 import json
 from pathlib import Path
@@ -113,9 +114,9 @@ def test_terminal_problems_remain_visible_without_becoming_live_queue(tmp_path):
         store=app.state.host.execution.require_store()
         async def seed():
           with store.db.access_lock, store.db:
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (?,?,?,?,?)",
+            store.db.execute('INSERT INTO jobs ( kind , item , status , error , problem_code ) VALUES ( %s , %s , %s , %s , %s )',
                              ('fetch','synthetic-failed','failed','private error','source-failed'))
-            store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES (?,?,?,?)",
+            store.db.execute('INSERT INTO jobs ( kind , item , status , problem_code ) VALUES ( %s , %s , %s , %s )',
                              ('download_media','synthetic-unavailable','unavailable','media-unavailable'))
           return [j.status for j in store.work_summary()]
         statuses=client.portal.call(seed)
@@ -163,21 +164,21 @@ def test_cancellation_completes_with_closed_logging_sink(tmp_path,monkeypatch):
 
 
 def test_metrics_do_not_scan_completed_job_archive(tmp_path):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     seed=Store(tmp_path,lambda _:None)
     with seed.db:
-        seed.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",[(f'old-{n}',) for n in range(20000)])
-        seed.db.execute('ANALYZE')
+        seed.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",[(f'old-{n}',) for n in range(20000)])
+        analyze(seed.db)
     seed.set_work_enabled(False);seed.db.close()
     app=create_app(tmp_path,api_only=True,token='service',metrics_token=TOKEN)
     with TestClient(app) as client:
         store=app.state.host.execution.require_store()
-        steps=[]
-        client.portal.call(lambda:store.db.set_progress_handler(lambda:steps.append(1) or 0,100))
-        try:response=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN})
-        finally:client.portal.call(lambda:store.db.set_progress_handler(None,0))
+        from tests.support.postgres_work import measure_reads
+        with measure_reads(store.db) as work:
+            response=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN})
         assert response.status_code==200
-        assert len(steps)*100<10000
+        assert work.reads > 0
+        assert work.rows < 10000, work
 
 
 def test_youtube_admission_is_queue_wait_not_an_error(tmp_path):

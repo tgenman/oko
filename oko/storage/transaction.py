@@ -12,10 +12,7 @@ class TransactionAborted(RuntimeError):
 def begin_write(db: Database | PostgresConnection) -> None:
     """Existing repositories join a caller's transaction without a nested BEGIN."""
     if not db.in_transaction:
-        if isinstance(db, PostgresConnection):
-            db.begin()
-        else:
-            db.execute('BEGIN IMMEDIATE')
+        db.begin()
 
 
 @contextmanager

@@ -27,9 +27,9 @@ The interface follows a simple flow: **folders → cards → material**. Opening
 
 ## Quick start
 
-Oko currently runs from a source checkout. Use a Unix-like environment; the maintained desktop installation targets macOS. The UI is currently in Russian. This README and the introductory guides are in English.
+Oko currently runs from a source checkout. Use a Unix-like environment; the deployed reader uses PostgreSQL. The UI is currently in Russian. This README and the introductory guides are in English.
 
-**Requirements:** Python 3.11–3.14, uv **0.11.28**, and Node.js **26.12.0** (see [.node-version](.node-version)).
+**Requirements:** PostgreSQL 18, Python 3.11–3.14, uv **0.11.28**, and Node.js **26.12.0** (see [.node-version](.node-version)).
 
 ```sh
 git clone https://github.com/tgenman/oko.git
@@ -40,16 +40,18 @@ npm ci
 npm run api:generate
 npm run build
 
-# Explore with synthetic publications and a separate data directory.
-uv run --locked python -m oko --demo --data /tmp/oko-demo
+# Configure a private DSN selecting a separate demo PostgreSQL database/schema.
+# See docs/development/postgresql.md for database setup and credentials.
+uv run --locked python -m oko.storage.postgres_migrations --database-url-file /path/to/private-demo-dsn
+uv run --locked python -m oko --database-url-file /path/to/private-demo-dsn --demo --data /tmp/oko-demo
 ```
 
-The browser opens automatically. The demo uses a synthetic source; no personal subscriptions or Telegram account are needed. Use a fresh data directory to reset publications you have marked viewed.
+The browser opens automatically. The demo uses a synthetic source; no personal subscriptions or Telegram account are needed. Use a separate database/schema and data directory for a fresh demo.
 
 To start a new library:
 
 ```sh
-uv run --locked python -m oko --data ./data
+uv run --locked python -m oko --database-url-file /path/to/private-reader-dsn --data ./data
 ```
 
 Existing nonempty stores from the previous pipeline require the documented offline migration before launch; see the [migration runbook](docs/development/publication-migration.md).
@@ -71,7 +73,7 @@ flowchart LR
     Sources[RSS / Atom · Telegram · YouTube] --> Collection[Source adapters]
     Collection --> Workers[Collection · Filter · Summary workers]
     Browser[React reader] <-->|HTTP API v3| Workers
-    Workers <--> Store[Store · SQLite + files]
+    Workers <--> Store[Store · PostgreSQL + files]
     Workers <--> Models[Codex / llama.cpp]
 ```
 

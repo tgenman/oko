@@ -1,10 +1,10 @@
 """Real SQL failure boundaries for the three independent cron workers."""
 import asyncio
 import json
-import sqlite3
+from tests.support.storage import database
 import pytest
 import httpx
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.storage.transaction import transaction,TransactionAborted
 from oko.storage.job_repository import JobRejected
 from oko.services.collection import CollectionService
@@ -21,7 +21,7 @@ def test_result_and_done_survive_or_rollback_together(tmp_path,phase):
     store,item,execution,tasks=worker_library(tmp_path,fault=fail)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
     row=saved(store,item)
-    job=dict(store.db.execute("SELECT * FROM jobs WHERE kind='filter' AND item=?",(item,)).fetchone())
+    job=dict(store.db.execute("SELECT * FROM jobs WHERE kind = 'filter' AND item = %s",(item,)).fetchone())
     committed=phase=='processing_after_commit'
     assert bool(row['filtered_content'])==committed
     assert (job['status']=='done')==committed
@@ -29,7 +29,7 @@ def test_result_and_done_survive_or_rollback_together(tmp_path,phase):
     store.db.close()
     reopened=Store(tmp_path,lambda _:None)
     assert bool(saved(reopened,item)['filtered_content'])==committed
-    assert (reopened.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=?",(item,)).fetchone()[0]=='done')==committed
+    assert (reopened.db.execute("SELECT status FROM jobs WHERE kind = 'filter' AND item = %s",(item,)).fetchone()[0]=='done')==committed
     reopened.db.close()
 
 
@@ -152,7 +152,7 @@ def test_periodic_pass_keeps_stopped_work_and_source_wait_after_restart(tmp_path
         job=store.jobs.claim_processing('filter',store.clock())
         assert job
         worker.service.prepare(item,'filter')
-        store.db.execute("UPDATE jobs SET status=?,wait_scope=?,retry_at=?,next=?,error='saved failure' WHERE id=?",
+        store.db.execute("UPDATE jobs SET status = %s , wait_scope = %s , retry_at = %s , next = %s , error = 'saved failure' WHERE id = %s",
             ('pending' if state=='source_wait' else state,'source:synthetic' if state=='source_wait' else None,
              store.wall_clock()+120 if state=='source_wait' else None,store.clock()+120 if state=='source_wait' else 0,job.id))
     store.db.close()
@@ -160,7 +160,7 @@ def test_periodic_pass_keeps_stopped_work_and_source_wait_after_restart(tmp_path
     execution._store=reopened
     calls=[]
     asyncio.run(pass_worker(workers(execution,tasks,transport(calls,theses=True))[0],tasks))
-    row=reopened.db.execute('SELECT status,wait_scope,retry_at,error FROM jobs WHERE id=?',(job.id,)).fetchone()
+    row=reopened.db.execute('SELECT status , wait_scope , retry_at , error FROM jobs WHERE id = %s',(job.id,)).fetchone()
     assert row['status']==('pending' if state=='source_wait' else state)
     assert row['error']=='saved failure' and not calls
     if state=='source_wait':assert row['wait_scope']=='source:synthetic' and row['retry_at']>reopened.wall_clock()
@@ -172,7 +172,7 @@ def test_common_feed_context_survives_restart_without_second_feed_substitution(t
     store,item,execution,tasks=worker_library(tmp_path)
     second=store.subscriptions.add_feed(AddFeed(url='https://second.example/feed',title='Second',folder='Other',verification='synthetic'))['id']
     with store.db:
-        store.db.execute('INSERT INTO feed_publications VALUES (?,?)',(second,item))
+        store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )',(second,item))
     store.subscriptions.update_settings('feed',second,Overrides(prompt_filters='Second filter',prompt_theses='Second summary',theses=False))
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
     context=saved(store,item)['processing_metadata']['_pass']
@@ -233,10 +233,10 @@ def test_collection_failure_does_not_stop_filter_and_summary_crons(tmp_path):
     with TestClient(create_app(tmp_path,source=FailedSource(),token='test',api_only=True,ai_transport=transport([],theses=True)),headers=HEADERS) as client:
         wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['result'])
         def stopped_source():
-            with sqlite3.connect(tmp_path/'state.sqlite') as db:
+            with database(tmp_path) as db:
                 return db.execute("SELECT status FROM jobs WHERE kind='discover'").fetchone()[0]=='failed'
         wait_for(client,stopped_source)
-        with sqlite3.connect(tmp_path/'state.sqlite') as db:
+        with database(tmp_path) as db:
             assert db.execute("SELECT kind,status FROM jobs WHERE kind IN ('filter','theses') ORDER BY kind").fetchall()==[('filter','done'),('theses','done')]
         assert client.get('/api/v3/materials/'+item).status_code==200
 
@@ -245,7 +245,7 @@ def test_uncommitted_result_is_invisible_to_an_independent_reader(tmp_path):
     observed=[]
     def observe(point):
         if point=='processing_after_result':
-            with sqlite3.connect(tmp_path/'state.sqlite') as db:
+            with database(tmp_path) as db:
                 observed.append(db.execute("SELECT filtered_content,(SELECT status FROM jobs WHERE kind='filter') FROM items").fetchone())
     store,item,execution,tasks=worker_library(tmp_path,fault=observe)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
@@ -283,7 +283,7 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
         store.jobs.reconcile('filter',worker.service.candidates('filter'))
         deadline=store.wall_clock()+120
         next_at=store.clock()+120
-        store.db.execute("UPDATE jobs SET status='pending',wait_scope='source:synthetic',retry_at=?,next=?,error='source wait' WHERE kind='filter'",(deadline,next_at))
+        store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , error = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
         store.subscriptions.update_feed('demo',FeedPatch(importance='high'))
         store.settings_changed('feed','demo')
         worker.service.reconcile()
@@ -322,14 +322,14 @@ def test_input_changed_during_adapter_check_cancels_without_leaving_open_sql(tmp
 
 
 @pytest.mark.parametrize('status',['failed','unavailable','cancelled'])
-def test_previous_schema_terminal_job_is_not_reopened_by_payload_upgrade(tmp_path,status):
+def test_terminal_job_is_not_reopened_by_missing_payload_revision(tmp_path,status):
     store,item,execution,tasks=worker_library(tmp_path)
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
         worker.service.reconcile()
         store.jobs.reconcile('filter',worker.service.candidates('filter'))
-        store.db.execute("UPDATE jobs SET status=?,error='Permanent failure' WHERE kind='filter'",(status,))
-        store.db.execute('ALTER TABLE jobs DROP COLUMN payload')
+        store.db.execute("UPDATE jobs SET status = %s , error = 'Permanent failure' WHERE kind = 'filter'",(status,))
+        store.db.execute("UPDATE jobs SET payload='{}' WHERE kind='filter'")
     store.db.close()
     reopened=Store(tmp_path,lambda _:None)
     execution._store=reopened
@@ -346,7 +346,7 @@ def test_preparation_distinguishes_all_four_domain_outcomes(tmp_path,outcome):
     store,item,execution,tasks=worker_library(tmp_path,text='' if outcome=='no_input' else 'Useful text')
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
-        if outcome=='waiting':store.db.execute('UPDATE items SET complete=0 WHERE id=?',(item,))
+        if outcome=='waiting':store.db.execute('UPDATE items SET complete = 0 WHERE id = %s',(item,))
         if outcome=='disabled':
             store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=''))
             store.settings_changed()
@@ -414,6 +414,6 @@ def test_restart_after_new_input_before_the_processing_cron_keeps_the_work(tmp_p
     assert result['filtered_content']
     request=json.loads(json.loads(next(call.content for call in calls if call.url.path=='/v1/chat/completions'))['messages'][1]['content'])
     assert request['sources'][0]['text']=='Persisted newer input'
-    row=reopened.db.execute('SELECT status,generation FROM jobs WHERE id=?',(interrupted.id,)).fetchone()
+    row=reopened.db.execute('SELECT status , generation FROM jobs WHERE id = %s',(interrupted.id,)).fetchone()
     assert row['status']=='done' and row['generation']>interrupted.generation
     reopened.db.close()

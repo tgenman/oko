@@ -2,7 +2,7 @@
 import asyncio
 import pytest
 import json
-import sqlite3
+from tests.support.storage import database
 import threading
 import time
 
@@ -40,12 +40,12 @@ def test_channel_text_is_ready_before_independent_native_media(tmp_path):
             card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
             material=client.get('/api/v3/materials/'+card['id']).json()
             assert material['content']['text']=='Native own text'
-            with sqlite3.connect(root/'state.sqlite') as db:
-                assert db.execute('SELECT platform,external_id FROM items WHERE id=?',(card['id'],)).fetchone()==('telegram','https://t.me/fixture/11')
-                assert db.execute('SELECT adapter FROM feeds WHERE id=?',(card['feed_id'],)).fetchone()[0]=='telegram_client_adapter'
-                content=json.loads(db.execute('SELECT content FROM items WHERE id=?',(card['id'],)).fetchone()[0])
+            with database(root) as db:
+                assert db.execute('SELECT platform , external_id FROM items WHERE id = %s',(card['id'],)).fetchone()==('telegram','https://t.me/fixture/11')
+                assert db.execute('SELECT adapter FROM feeds WHERE id = %s',(card['feed_id'],)).fetchone()[0]=='telegram_client_adapter'
+                content=json.loads(db.execute('SELECT content FROM items WHERE id = %s',(card['id'],)).fetchone()[0])
                 media_id=next(b['media_id'] for b in content['blocks'] if b['type']=='media')
-                assert db.execute('SELECT status FROM media_files WHERE id=?',(media_id,)).fetchone()[0]=='pending_download'
+                assert db.execute('SELECT status FROM media_files WHERE id = %s',(media_id,)).fetchone()[0]=='pending_download'
             release.set()
             ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] else None))
             assert client.get(ready['content']['attachments'][0]['url']).content==b'native-image'
@@ -131,8 +131,8 @@ def test_explicit_web_to_client_switch_keeps_feed_and_publication(tmp_path):
         assert switched.json()['feed_id']==feed
         updated=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['text']=='New access text' else None))
         assert updated['id']==item and len(client.get('/api/v3/cards').json())==1
-        with sqlite3.connect(root/'state.sqlite') as db:
-            assert db.execute('SELECT external_id,adapter FROM feeds WHERE id=?',(feed,)).fetchone()==('-1001234567890','telegram_client_adapter')
+        with database(root) as db:
+            assert db.execute('SELECT external_id , adapter FROM feeds WHERE id = %s',(feed,)).fetchone()==('-1001234567890','telegram_client_adapter')
         catalog=client.get('/api/v3/subscriptions').json()
         assert next(f for f in catalog['folders'] if f['title']=='Original folder')
 
@@ -417,11 +417,11 @@ def test_native_media_change_refreshes_description_and_retries_same_file_after_b
             tick[0]+=1
             return False
         wait_for(client,attempted)
-        with sqlite3.connect(root/'state.sqlite') as db:
+        with database(root) as db:
             identity=db.execute('SELECT id FROM media_files').fetchone()[0]
         def refreshed():
-            with sqlite3.connect(root/'state.sqlite') as db:
-                row=db.execute("SELECT m.status,j.status,j.retry_delay FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media' WHERE m.id=?",(identity,)).fetchone()
+            with database(root) as db:
+                row=db.execute("SELECT m . status , j . status , j . retry_delay FROM media_files m JOIN jobs j ON j . item = m . id AND j . kind = 'download_media' WHERE m . id = %s",(identity,)).fetchone()
                 return row and row[0]=='pending_download' and row[1]=='pending' and row[2]>=60
         wait_for(client,refreshed)
         tick[0]+=60

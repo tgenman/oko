@@ -11,7 +11,7 @@ import * as servers from './server-process.ts';
 import assert from 'node:assert/strict';
 
 export async function productionReader(t?: Pick<TestContext, 'signal' | 'after'>, options: {persistent?:boolean;hostname?:'oko';library?:{perFeed:26|100;active:boolean};collection?:boolean;processingDelay?:number;publicationPipeline?:boolean;databaseUrlFile?:string}={}) {
-  if(options.databaseUrlFile&&(options.library||options.publicationPipeline))throw new Error('PostgreSQL fixtures require their own migrated schema; SQLite seeding is not supported');
+  if(options.databaseUrlFile&&(options.library||options.publicationPipeline))throw new Error('A supplied PostgreSQL schema must be seeded by its owner, not by another fixture');
   const data=await fs.mkdtemp(path.join(os.tmpdir(),'oko-history-http-'));
   const token=randomBytes(24).toString('base64url');
   let context: BrowserContext | undefined, scenario: Awaited<ReturnType<typeof servers.start>> | undefined, cleanup: Promise<void> | undefined;

@@ -25,12 +25,12 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         assert client.get('/api/v3/status').json()['diagnostic_count'] == 0
         assert all(w.get('retry_at') is None for w in client.get('/api/v3/status').json()['work'] if w.get('reason') == 'public_ai_not_allowed')
         assert not any(p['code'] == 'public_ai_not_allowed' for p in client.get('/api/v3/status').json()['problems']['current'])
-        import sqlite3
-        db = sqlite3.connect(tmp_path/'state.sqlite')
-        before = db.execute("SELECT sum(attempt) FROM jobs WHERE kind='theses'").fetchone()[0]
-        clock.now += 1000
-        time.sleep(.15)
-        assert db.execute("SELECT sum(attempt) FROM jobs WHERE kind='theses'").fetchone()[0] == before
+        from tests.support.storage import database
+        with database(tmp_path) as db:
+            before = db.execute("SELECT sum(attempt) FROM jobs WHERE kind='theses'").fetchone()[0]
+            clock.now += 1000
+            time.sleep(.15)
+            assert db.execute("SELECT sum(attempt) FROM jobs WHERE kind='theses'").fetchone()[0] == before
         assert not model.inputs
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
         clock.now+=1

@@ -29,7 +29,7 @@ def add_sources(client, rows):
 
 def configured_sources(root: Path,rows, *, history=True):
     """Closed current subscription fixtures; no network verification is performed."""
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.subscriptions.subscriptions import AddFeed
     from oko.subscriptions.history import InitialHistory
     store=Store(root,lambda _:None)

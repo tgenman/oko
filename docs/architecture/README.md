@@ -1,6 +1,6 @@
 # Architecture
 
-Oko is a local reading application with a React frontend and a Python backend. One backend serves the built interface, HTTP API, and saved media. SQLite stores publication content and durable state; media bytes live in files. Node.js is a build-time dependency.
+Oko is a local reading application with a React frontend and a Python backend. One backend serves the built interface, HTTP API, and saved media. PostgreSQL stores publication content and durable state; media bytes live in files. Node.js is a build-time dependency.
 
 This overview describes the current three-worker pipeline. Detailed documents retain explicitly labeled proposals and historical reports; those are not evidence that a proposal has shipped.
 
@@ -19,7 +19,7 @@ flowchart TB
     Adapters <--> External[RSS · Telegram · YouTube · Codex · llama.cpp]
     Services --> Store[Store · repositories · recovery]
     Workers --> Store
-    Store <--> DB[(SQLite · publications · jobs · settings)]
+    Store <--> DB[(PostgreSQL · publications · jobs · settings)]
     Store <--> Files[Media files]
 ```
 
@@ -38,7 +38,7 @@ The diagram shows responsibilities and collaborations rather than a sequence of 
 | `oko/workers/` | CollectionWorker, FilterWorker, SummaryWorker, and JobControl |
 | `oko/collection/` | Source contracts, discovery, fetching, media streams, adapters, and protocol clients |
 | `oko/processing/` | AI contracts, attribution, instructions, validation, and Codex/llama.cpp adapters |
-| `oko/storage/` | SQLite, entity repositories, JobRepository, processing results, media files, and recovery |
+| `oko/storage/` | PostgreSQL, entity repositories, JobRepository, processing results, media files, and recovery |
 | `oko/subscriptions/` | Feed models and settings inheritance |
 | `oko/execution.py` | Shared admission and user-action serialization |
 | `oko/host.py` | Technical startup and shutdown lifecycle |
@@ -51,7 +51,7 @@ See [package layout](package-layout.md) and [application layers](application-lay
 
 1. A feed records a source identity, adapter, opaque cursor, topic folder, and collection/processing settings.
 2. CollectionWorker discovers publication identities and commits an accepted batch together with its cursor. Adapters use external keys rather than database IDs.
-3. Publication content is saved in SQLite. Media descriptions become separately scheduled downloads; text can be readable before all attachments are ready.
+3. Publication content is saved in PostgreSQL. Media descriptions become separately scheduled downloads; text can be readable before all attachments are ready.
 4. FilterWorker and SummaryWorker claim eligible work through persisted jobs. Disabled stages are skipped; filtered-out publications are not summarized.
 5. Workers execute network/model calls outside SQL transactions and accept results only after checking current ownership and generation.
 6. Server queries and HTTP projections provide reading cards, effective settings, material, and status. The browser rejects late responses for superseded selections.
@@ -75,7 +75,7 @@ A publication is identified by `(platform, external_id)`. Feed/publication membe
 
 The browser does not recompute server reading membership or processing freshness. A successful server write remains committed when its form closes. Independent read requests do not promise one transactional snapshot.
 
-Execution's action mutex and SQLite's access lock have separate roles. Network waits and model execution run outside SQL transactions. Shutdown closes admission and invalidates job generations before waiting for cancellation; a cancellation-resistant adapter cannot restore deleted content or accept work into an old Store.
+Execution's action mutex and PostgreSQL's access lock have separate roles. Network waits and model execution run outside SQL transactions. Shutdown closes admission and invalidates job generations before waiting for cancellation; a cancellation-resistant adapter cannot restore deleted content or accept work into an old Store.
 
 There is one React root with named portals. Reading coordination connects the list, tree, opened material, and reader actions. See [reader work](reader-work.md), [frontend/backend](frontend-backend.md), and [UI state ownership](ui-settings.md).
 
@@ -131,7 +131,7 @@ New or empty stores use the current pipeline. Nonempty legacy stores require off
 
 ## Verification and detailed documents
 
-Behavioral tests use the existing reader HTTP interface, temporary SQLite/files, and synthetic sources/models. Playwright exercises the real browser. Worker startup, cancellation, late responses, deletion, and restart recovery require scenario checks. Live integrations provide separate, bounded evidence rather than guarantees of upstream availability.
+Behavioral tests use the existing reader HTTP interface, temporary PostgreSQL/files, and synthetic sources/models. Playwright exercises the real browser. Worker startup, cancellation, late responses, deletion, and restart recovery require scenario checks. Live integrations provide separate, bounded evidence rather than guarantees of upstream availability.
 
 The deeper documents are currently in Russian:
 

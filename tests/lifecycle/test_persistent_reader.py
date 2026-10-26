@@ -70,8 +70,12 @@ def test_persistent_process_starts_disabled_and_reuses_external_address(tmp_path
     import httpx
     from tests.support.processes import ServerProcess, cleanup, connect
 
+    from tests.support.storage import Store
+    seed = Store(tmp_path, lambda _: None)
+    seed.set_work_enabled(False)
+    seed.db.close()
     command = [sys.executable, '-m', 'tests.process_server', '--persistent', '--data', str(tmp_path),
-               '--demo', '--no-browser', '--initially-disabled', '--public-url', 'http://oko']
+               '--demo', '--no-browser', '--public-url', 'http://oko']
     log_path = tmp_path / 'server.log'
     with log_path.open('w') as log:
         process = ServerProcess(command, stdout=log, stderr=subprocess.STDOUT)

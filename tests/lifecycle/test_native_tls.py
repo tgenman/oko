@@ -33,10 +33,14 @@ def test_native_tls_login_control_and_certificate_validation(tmp_path):
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
     origin = f'https://localhost:{port}'
+    from tests.support.storage import Store
+    seed = Store(data, lambda _: None)
+    seed.set_work_enabled(False)
+    seed.db.close()
     log_path = tmp_path / 'server.log'
     with log_path.open('w') as log:
         process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--persistent', '--demo',
-            '--data', str(data), '--no-browser', '--initially-disabled', '--port', str(port),
+            '--data', str(data), '--no-browser', '--port', str(port),
             '--public-url', origin, '--tls-cert', str(cert), '--tls-key', str(key)], stdout=log, stderr=subprocess.STDOUT)
     try:
         for _ in range(500):

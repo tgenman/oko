@@ -1,0 +1,156 @@
+{
+  "materials": 1600,
+  "body_characters": 48000,
+  "linked_shared_by": 16,
+  "samples": [
+    {
+      "name": "initial",
+      "ms": 2367.408,
+      "bytes": 1728377,
+      "content_decodes": 1700,
+      "sql": 73,
+      "cards_digest": "bf3a788ed6486b11b180c2ffcff5428f2aa63610ca37b8a66fe112451b9162e2",
+      "card_count": 1600
+    },
+    {
+      "name": "small_feed",
+      "ms": 95.922,
+      "bytes": 4160,
+      "content_decodes": 3,
+      "sql": 59,
+      "cards_digest": "f64ae8299f03180fc45659a709fe4c4d3ba605b99124a62e9f56db4f1d07ec10",
+      "card_count": 2
+    },
+    {
+      "name": "opened",
+      "ms": 9.523,
+      "bytes": 87718,
+      "content_decodes": 2,
+      "sql": 7,
+      "cards_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "card_count": 0
+    },
+    {
+      "name": "initial",
+      "ms": 2218.019,
+      "bytes": 1728377,
+      "content_decodes": 1700,
+      "sql": 65,
+      "cards_digest": "bf3a788ed6486b11b180c2ffcff5428f2aa63610ca37b8a66fe112451b9162e2",
+      "card_count": 1600
+    },
+    {
+      "name": "small_feed",
+      "ms": 78.129,
+      "bytes": 4160,
+      "content_decodes": 3,
+      "sql": 51,
+      "cards_digest": "f64ae8299f03180fc45659a709fe4c4d3ba605b99124a62e9f56db4f1d07ec10",
+      "card_count": 2
+    },
+    {
+      "name": "opened",
+      "ms": 6.467,
+      "bytes": 87718,
+      "content_decodes": 2,
+      "sql": 7,
+      "cards_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "card_count": 0
+    },
+    {
+      "name": "initial",
+      "ms": 2137.152,
+      "bytes": 1728377,
+      "content_decodes": 1700,
+      "sql": 65,
+      "cards_digest": "bf3a788ed6486b11b180c2ffcff5428f2aa63610ca37b8a66fe112451b9162e2",
+      "card_count": 1600
+    },
+    {
+      "name": "small_feed",
+      "ms": 103.172,
+      "bytes": 4160,
+      "content_decodes": 3,
+      "sql": 51,
+      "cards_digest": "f64ae8299f03180fc45659a709fe4c4d3ba605b99124a62e9f56db4f1d07ec10",
+      "card_count": 2
+    },
+    {
+      "name": "opened",
+      "ms": 7.4,
+      "bytes": 87718,
+      "content_decodes": 2,
+      "sql": 7,
+      "cards_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "card_count": 0
+    },
+    {
+      "name": "initial",
+      "ms": 2135.78,
+      "bytes": 1728377,
+      "content_decodes": 1700,
+      "sql": 65,
+      "cards_digest": "bf3a788ed6486b11b180c2ffcff5428f2aa63610ca37b8a66fe112451b9162e2",
+      "card_count": 1600
+    },
+    {
+      "name": "small_feed",
+      "ms": 68.088,
+      "bytes": 4160,
+      "content_decodes": 3,
+      "sql": 51,
+      "cards_digest": "f64ae8299f03180fc45659a709fe4c4d3ba605b99124a62e9f56db4f1d07ec10",
+      "card_count": 2
+    },
+    {
+      "name": "opened",
+      "ms": 6.683,
+      "bytes": 87718,
+      "content_decodes": 2,
+      "sql": 7,
+      "cards_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "card_count": 0
+    },
+    {
+      "name": "initial",
+      "ms": 2083.889,
+      "bytes": 1728377,
+      "content_decodes": 1700,
+      "sql": 65,
+      "cards_digest": "bf3a788ed6486b11b180c2ffcff5428f2aa63610ca37b8a66fe112451b9162e2",
+      "card_count": 1600
+    },
+    {
+      "name": "small_feed",
+      "ms": 85.15,
+      "bytes": 4160,
+      "content_decodes": 3,
+      "sql": 51,
+      "cards_digest": "f64ae8299f03180fc45659a709fe4c4d3ba605b99124a62e9f56db4f1d07ec10",
+      "card_count": 2
+    },
+    {
+      "name": "opened",
+      "ms": 7.529,
+      "bytes": 87718,
+      "content_decodes": 2,
+      "sql": 7,
+      "cards_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "card_count": 0
+    },
+    {
+      "name": "unchanged",
+      "ms": 46.172,
+      "bytes": 144178,
+      "content_decodes": 0,
+      "sql": 5,
+      "cards_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "card_count": 0
+    }
+  ],
+  "medians": {
+    "initial": 2137.152,
+    "small_feed": 85.15,
+    "opened": 7.4
+  }
+}

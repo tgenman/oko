@@ -1,7 +1,6 @@
 """Latest-publication processing through real HTTP and synthetic source/model."""
 import json
-import sqlite3
-
+from tests.support.storage import database
 import httpx
 import pytest
 
@@ -38,9 +37,8 @@ def coordinated_transport(calls):
 
 
 def stored(root,item):
-    with sqlite3.connect(root/'state.sqlite') as db:
-        db.row_factory=sqlite3.Row
-        row=dict(db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone())
+    with database(root) as db:
+        row=dict(db.execute('SELECT * FROM items WHERE id = %s',(item,)).fetchone())
     for key in ('content','filtered_content','summarized_content','processing_metadata'):
         row[key]=json.loads(row[key])
     return row
@@ -445,8 +443,8 @@ def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
         row=wait_for(client,lambda:r if (r:=stored(root,item))['status']=='ready' and r['filtered_content']=={} and r['summarized_content']=={} else None)
         assert row['status']=='ready' and row['filtered_content']=={} and row['summarized_content']=={}
         def configs():
-            with sqlite3.connect(root/'state.sqlite') as db:
-                f,s=db.execute('SELECT filter_config,summary_config FROM feeds WHERE id=?',(feed,)).fetchone()
+            with database(root) as db:
+                f,s=db.execute('SELECT filter_config , summary_config FROM feeds WHERE id = %s',(feed,)).fetchone()
                 return json.loads(f),json.loads(s)
         wait_for(client,lambda:configs()[0]['prompt_filters']=='' and configs()[1]['theses'] is False)
         count=len(calls)
@@ -510,10 +508,10 @@ def test_persisted_empty_job_completes_without_a_model_after_restart(tmp_path):
         item=settled(client)[0]['id']
         wait_for(client,lambda:stored(root,item)['status']=='ready')
     with database(root) as db:
-        db.execute("UPDATE items SET filtered_content='{}',summarized_content='{}',processing_metadata='{}',status='pending_filtering' WHERE id=?",(item,))
-        db.execute("UPDATE jobs SET status='pending',generation=generation+1 WHERE kind='filter' AND item=?",(item,))
-        db.execute("DELETE FROM jobs WHERE kind='theses' AND item=?",(item,))
-        db.execute('DELETE FROM thesis_inputs WHERE item=?',(item,))
+        db.execute("UPDATE items SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' , status = 'pending_filtering' WHERE id = %s",(item,))
+        db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE kind = 'filter' AND item = %s",(item,))
+        db.execute("DELETE FROM jobs WHERE kind = 'theses' AND item = %s",(item,))
+        db.execute('DELETE FROM thesis_inputs WHERE item = %s',(item,))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         row=wait_for(client,lambda:row if (row:=stored(root,item))['status']=='ready' else None)
         assert row['processing_metadata']['filter']['reason']=='no_input'

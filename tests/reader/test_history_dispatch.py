@@ -1,9 +1,13 @@
+from tests.support.storage import analyze as analyze_schema
 """History admission preserves dispatch rules without traversing foreign archives."""
 import json
+from contextlib import nullcontext
+import psycopg
 
 import pytest
 
-from oko.storage.store import Store
+from tests.support.storage import Store
+from tests.support.postgres_work import measure_reads
 from tests.support.library_templates import templates
 
 
@@ -23,16 +27,16 @@ def test_history_admission_only_blocks_enrolled_fetches(tmp_path, transport, mod
     try:
         store.subscriptions.ensure_demo()
         with store.db:
-            store.db.execute('UPDATE feeds SET transport=? WHERE id=?', (transport, 'demo'))
-            store.db.executemany('INSERT INTO items(id,feed_id) VALUES (?,?)', [('enrolled', 'demo'), ('live', 'demo')])
-            store.db.execute('INSERT INTO initial_history(feed,selection,paused,scan_complete) VALUES (?,?,?,?)',
+            store.db.execute('UPDATE feeds SET transport = %s WHERE id = %s', (transport, 'demo'))
+            store.db.executemany('INSERT INTO items ( id , feed_id ) VALUES ( %s , %s )', [('enrolled', 'demo'), ('live', 'demo')])
+            store.db.execute('INSERT INTO initial_history ( feed , selection , paused , scan_complete ) VALUES ( %s , %s , %s , %s )',
                              ('demo', json.dumps(dict(mode=mode, cancelled=bool(paused))), paused, complete))
             store.db.execute("INSERT INTO history_members(feed,item) VALUES ('demo','enrolled')")
             # AI and cleanup keep their admission even for an enrolled publication.
             for kind, item, deadline in [('fetch', 'enrolled', 0), ('fetch', 'live', 0),
                                          ('filter', 'enrolled', 0), ('delete', 'enrolled', 0),
                                          ('fetch', 'later', 200)]:
-                store.db.execute('INSERT INTO jobs(kind,item,next) VALUES (?,?,?)', (kind, item, deadline))
+                store.db.execute('INSERT INTO jobs ( kind , item , next ) VALUES ( %s , %s , %s )', (kind, item, deadline))
         ai = store.jobs.next_job(100, ai_only=True)
         assert ai and (ai.kind, ai.item) == ('filter', 'enrolled')
         deletion = store.jobs.next_job(100)
@@ -54,16 +58,21 @@ def test_history_admission_only_blocks_enrolled_fetches(tmp_path, transport, mod
     (None, None, 1, False),
     (None, 'other', 0, False),
 ])
-def test_nullable_history_ids_keep_existing_dispatch_outcome(tmp_path, item, member, paused, expected):
+def test_postgres_rejects_null_memberships_and_preserves_dispatch(tmp_path, item, member, paused, expected):
     store = Store(tmp_path, lambda _: None)
     try:
         store.subscriptions.ensure_demo()
-        with store.db:
-            store.db.execute("INSERT INTO items(id,feed_id) VALUES (?,'demo')", (item,))
-            store.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch',?)", (item,))
-            store.db.execute('INSERT INTO initial_history(feed,selection,paused) VALUES (?,?,?)',
-                             ('demo', json.dumps(dict(cancelled=bool(paused))), paused))
-            store.db.execute("INSERT INTO history_members(feed,item) VALUES ('demo',?)", (member,))
+        invalid = item is None or member is None
+        with pytest.raises(psycopg.errors.NotNullViolation) if invalid else nullcontext():
+            with store.db:
+                store.db.execute("INSERT INTO items ( id , feed_id ) VALUES ( %s , 'demo' )", (item,))
+                store.db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'fetch' , %s )", (item,))
+                store.db.execute('INSERT INTO initial_history ( feed , selection , paused ) VALUES ( %s , %s , %s )',
+                                 ('demo', json.dumps(dict(cancelled=bool(paused))), paused))
+                store.db.execute("INSERT INTO history_members ( feed , item ) VALUES ( 'demo' , %s )", (member,))
+        if invalid:
+            assert store.db.execute('SELECT count(*) FROM items').fetchone()[0] == 0
+            return
         job = store.jobs.next_job(0)
         assert (job is not None) is expected
         if job:
@@ -81,25 +90,21 @@ def test_foreign_cancelled_history_does_not_add_linear_dispatch_work(tmp_path, a
         store = Store(root, lambda _: None)
         try:
             with store.db:
-                store.db.executemany("INSERT INTO history_members(feed,item,outcome) VALUES ('archive',?,'loaded')",
+                store.db.executemany("INSERT INTO history_members ( feed , item , outcome ) VALUES ( 'archive' , %s , 'loaded' )",
                                      [(f'old-{i}',) for i in range(count)])
                 store.db.execute("INSERT INTO items(id,feed_id) VALUES ('live','demo')")
                 store.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch','live')")
                 if analyze:
-                    store.db.execute('ANALYZE')
+                    analyze_schema(store.db)
             assert store.db.execute("SELECT count(*) FROM items WHERE feed_id='archive' AND viewed=1").fetchone()[0] == 10000
             assert store.db.execute("SELECT count(*) FROM jobs WHERE kind='fetch' AND status='done'").fetchone()[0] == 10000
             assert store.db.execute("SELECT count(*) FROM history_members WHERE feed='archive'").fetchone()[0] == count
-            steps = []
-            store.db.set_progress_handler(lambda: steps.append(1) or 0, 1)
-            try:
+            with measure_reads(store.db) as work:
                 job = store.jobs.next_job(0)
-            finally:
-                store.db.set_progress_handler(None, 0)
             assert job and (job.kind, job.item) == ('fetch', 'live')
-            # Measure real bound SQL plus reservation/generations/triggers. Hold
+            # Measure PostgreSQL read plans; writes still execute once. Hold
             # items/jobs fixed: their plans are outside history admission scope.
-            costs.append(len(steps))
+            costs.append(work.rows)
         finally:
             store.db.close()
     assert costs[1] <= costs[0] + 200, costs
@@ -113,9 +118,9 @@ def archive_seed(root):
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection) VALUES ('archive','archive','Archive','default','rss','rss','connected')")
             store.db.execute("INSERT INTO initial_history(feed,selection,paused,scan_complete) VALUES ('archive','{\"mode\":\"count\",\"cancelled\":true}',1,1)")
-            store.db.executemany("INSERT INTO items(id,feed_id,viewed,platform,external_id) VALUES (?,'archive',1,'other_web',?)",
+            store.db.executemany("INSERT INTO items ( id , feed_id , viewed , platform , external_id ) VALUES ( %s , 'archive' , 1 , 'other_web' , %s )",
                                  [(f'old-{i}',f'old-{i}') for i in range(10000)])
-            store.db.executemany("INSERT INTO jobs(kind,item,status) VALUES ('fetch',?,'done')",
+            store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",
                                  [(f'old-{i}',) for i in range(10000)])
     finally:
         store.db.close()

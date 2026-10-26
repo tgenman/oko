@@ -3,7 +3,7 @@ from tests.support.collection_acceptance import discovered
 import pytest
 from tests.support.source import publication_packet, save_material
 from oko.collection.contracts import Material, Publication
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed
 
 

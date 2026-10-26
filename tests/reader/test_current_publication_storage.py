@@ -118,13 +118,15 @@ def test_disabled_rss_does_not_retry_linked_article_after_restart(tmp_path):
 
 
 
-def test_unsupported_store_is_rejected_before_any_database_write(tmp_path):
-    import sqlite3,hashlib
-    from oko.storage.store import Store
-    with sqlite3.connect(tmp_path/'state.sqlite') as db:
+def test_unsupported_store_is_rejected_before_any_database_write(tmp_path, postgres_database_url):
+    import psycopg
+    from oko.storage.postgres_migrations import SchemaMismatch
+    from tests.support.storage import Store
+    with psycopg.connect(postgres_database_url, autocommit=True) as db:
         db.execute('CREATE TABLE feeds(id TEXT PRIMARY KEY)')
         db.execute("INSERT INTO feeds VALUES ('old-source')")
-    before=hashlib.sha256((tmp_path/'state.sqlite').read_bytes()).digest()
-    with pytest.raises(ValueError,match='9ae1b50'):
-        Store(tmp_path,lambda _:None)
-    assert hashlib.sha256((tmp_path/'state.sqlite').read_bytes()).digest()==before
+    with pytest.raises(SchemaMismatch):
+        Store(tmp_path,lambda _:None,database_url=postgres_database_url)
+    with psycopg.connect(postgres_database_url, autocommit=True) as db:
+        assert db.execute('SELECT * FROM feeds').fetchall() == [('old-source',)]
+        assert db.execute("SELECT tablename FROM pg_tables WHERE schemaname=current_schema()").fetchall() == [('feeds',)]

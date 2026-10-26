@@ -1,6 +1,6 @@
 """Real temporary storage for worker transaction and recovery scenarios."""
 import json
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.collection.contracts import Publication,Material
 from oko.subscriptions.subscriptions import Overrides
 from oko.processing.llamacpp import ProcessorConfig
@@ -44,7 +44,7 @@ async def pass_worker(worker,tasks):
 
 def saved(store,item):
     return {key:json.loads(value) if key in ('filtered_content','summarized_content','processing_metadata') else value
-        for key,value in dict(store.db.execute('SELECT * FROM items WHERE id=?',(item,)).fetchone()).items()}
+        for key,value in dict(store.db.execute('SELECT * FROM items WHERE id=%s',(item,)).fetchone()).items()}
 
 
 def collection_worker(root,store,source):

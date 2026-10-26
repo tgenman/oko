@@ -1,5 +1,4 @@
 """Durable, bounded collection attempts; independent of processing and read sync."""
-from oko.storage.sqlite_schema import is_sqlite
 from oko.storage.database import Database, Row
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -20,33 +19,9 @@ def clipped(value: str, limit: int) -> tuple[str, bool]:
 class CollectionStatus:
     def __init__(self, db: Database, clock: Callable[[], float], wall: Callable[[], float]) -> None:
         self.db, self.clock, self.wall = db, clock, wall
-        if is_sqlite(db):
-            if 'queued_wall' not in {r['name'] for r in db.execute('PRAGMA table_info(jobs)')}:
-                db.execute('ALTER TABLE jobs ADD COLUMN queued_wall REAL')
-            db.executescript('''
-              CREATE TABLE IF NOT EXISTS collection_attempts (job INTEGER PRIMARY KEY, feed TEXT, data TEXT NOT NULL);
-              CREATE TABLE IF NOT EXISTS collection_results (feed TEXT PRIMARY KEY, data TEXT NOT NULL);
-              DROP TRIGGER IF EXISTS collection_queued_insert;
-              DROP TRIGGER IF EXISTS collection_queued_update;
-              CREATE TRIGGER collection_queued_insert AFTER INSERT ON jobs
-              WHEN NEW.kind IN ('discover','fetch','download_media') BEGIN
-                UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
-              END;
-              CREATE TRIGGER collection_queued_update AFTER UPDATE OF status ON jobs
-              WHEN NEW.kind IN ('discover','fetch','download_media') AND NEW.status='pending' AND OLD.status!='pending' BEGIN
-                UPDATE jobs SET queued_wall=(julianday('now')-2440587.5)*86400.0 WHERE id=NEW.id;
-              END;
-              CREATE TRIGGER IF NOT EXISTS collection_job_deleted AFTER DELETE ON jobs BEGIN
-                DELETE FROM collection_attempts WHERE job=OLD.id;
-              END;
-              CREATE TRIGGER IF NOT EXISTS collection_feed_deleted AFTER DELETE ON feeds BEGIN
-                DELETE FROM collection_results WHERE feed=OLD.id;
-                DELETE FROM collection_attempts WHERE feed=OLD.id;
-              END;
-            ''')
 
     def read(self, job: int) -> dict[str, Any]:
-        row = self.db.execute('SELECT data FROM collection_attempts WHERE job=?', (job,)).fetchone()
+        row = self.db.execute('SELECT data FROM collection_attempts WHERE job = %s', (job,)).fetchone()
         return json.loads(row[0]) if row else {}
 
     def start(self, job: Any, feed: str) -> dict[str, Any]:
@@ -59,10 +34,10 @@ class CollectionStatus:
         return data
 
     def _write(self, job: int, feed: str, data: dict[str, Any]) -> None:
-        self.db.execute('INSERT INTO collection_attempts VALUES (?,?,?) ON CONFLICT(job) DO UPDATE SET feed=excluded.feed,data=excluded.data', (job, feed, json.dumps(data)))
+        self.db.execute('INSERT INTO collection_attempts VALUES ( %s , %s , %s ) ON CONFLICT ( job ) DO UPDATE SET feed = excluded . feed , data = excluded . data', (job, feed, json.dumps(data)))
 
     def finish(self, job: Any, feed: str, data: dict[str, Any], elapsed: float, observation: dict[str, Any]) -> None:
-        row = self.db.execute('SELECT * FROM jobs WHERE id=?', (job.id,)).fetchone()
+        row = self.db.execute('SELECT * FROM jobs WHERE id = %s', (job.id,)).fetchone()
         if row is None or row['generation'] != job.generation:
             return
         data.update(finished_at=self.wall(), elapsed_seconds=elapsed)
@@ -85,7 +60,7 @@ class CollectionStatus:
                 data['last_error']['resolved'] = True
         with self.db:
             self._write(job.id, feed, data)
-            result_row = self.db.execute('SELECT data FROM collection_results WHERE feed=?', (feed,)).fetchone()
+            result_row = self.db.execute('SELECT data FROM collection_results WHERE feed = %s', (feed,)).fetchone()
             result = json.loads(result_row[0]) if result_row else {}
             if completed:
                 result.update(success_at=self.wall(), duration=data['elapsed_seconds'])
@@ -95,15 +70,15 @@ class CollectionStatus:
                 # Only a retry of the same operation resolves its error.
                 if result['last_error']['operation_id'] == data['operation_id']:
                     result['last_error']['resolved'] = True
-            self.db.execute('INSERT INTO collection_results VALUES (?,?) ON CONFLICT(feed) DO UPDATE SET data=excluded.data', (feed, json.dumps(result)))
+            self.db.execute('INSERT INTO collection_results VALUES ( %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET data = excluded . data', (feed, json.dumps(result)))
             # Completed operations need only the single latest per-feed result.
-            self.db.execute("DELETE FROM collection_attempts WHERE job IN (SELECT id FROM jobs WHERE status='done' AND error IS NULL) AND feed=?", (feed,))
+            self.db.execute("DELETE FROM collection_attempts WHERE job IN ( SELECT id FROM jobs WHERE status = 'done' AND error IS NULL ) AND feed = %s", (feed,))
             self._bound(feed)
 
     def _bound(self, feed: str) -> None:
-        rows = self.db.execute('SELECT job,data FROM collection_attempts WHERE feed=?', (feed,)).fetchall()
+        rows = self.db.execute('SELECT job , data FROM collection_attempts WHERE feed = %s', (feed,)).fetchall()
         attempts = [(row['job'], json.loads(row['data'])) for row in rows]
-        result_row = self.db.execute('SELECT data FROM collection_results WHERE feed=?', (feed,)).fetchone()
+        result_row = self.db.execute('SELECT data FROM collection_results WHERE feed = %s', (feed,)).fetchone()
         result = json.loads(result_row[0]) if result_row else {}
         errors = [data['last_error'] for _, data in attempts if data.get('last_error')]
         if result.get('last_error'):
@@ -119,7 +94,7 @@ class CollectionStatus:
         for job, data in attempts:
             self._write(job, feed, data)
         if result:
-            self.db.execute('UPDATE collection_results SET data=? WHERE feed=?', (json.dumps(result), feed))
+            self.db.execute('UPDATE collection_results SET data = %s WHERE feed = %s', (json.dumps(result), feed))
 
     def interrupt(self, job: Any, feed: str, data: dict[str, Any], elapsed: float) -> None:
         data.update(finished_at=self.wall(), elapsed_seconds=elapsed)
@@ -129,39 +104,18 @@ class CollectionStatus:
         """Select only the requested feeds; summary never transfers diagnostic bodies."""
         jobs: list[Row] = []
         results: dict[str, dict[str, Any]] = {}
-        attempt_fields = "a.data AS attempt_data" if details else """
-            json_extract(a.data,'$.attempt_id') AS saved_attempt,
-            json_extract(a.data,'$.started_at') AS started_at,
-            json_extract(a.data,'$.finished_at') AS finished_at,
-            json_extract(a.data,'$.elapsed_seconds') AS elapsed_seconds,
-            json_extract(a.data,'$.last_error.resolved') AS error_resolved"""
-        result_fields = "r.data AS result_data" if details else """
-            json_extract(r.data,'$.success_at') AS success_at,
-            json_extract(r.data,'$.duration') AS duration,
-            json_extract(r.data,'$.last_error.resolved') AS error_resolved"""
+        attempt_fields = "a.data AS attempt_data" if details else " oko_json_extract ( a . data , '$.attempt_id' ) AS saved_attempt , oko_json_extract ( a . data , '$.started_at' ) AS started_at , oko_json_extract ( a . data , '$.finished_at' ) AS finished_at , oko_json_extract ( a . data , '$.elapsed_seconds' ) AS elapsed_seconds , oko_json_extract ( a . data , '$.last_error.resolved' ) AS error_resolved"
+        result_fields = "r.data AS result_data" if details else " oko_json_extract ( r . data , '$.success_at' ) AS success_at , oko_json_extract ( r . data , '$.duration' ) AS duration , oko_json_extract ( r . data , '$.last_error.resolved' ) AS error_resolved"
         fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.error,j.queued_wall,j.problem_code'
         for start in range(0, len(feeds), 400):
             batch = feeds[start:start + 400]
-            marks = ','.join('?' for _ in batch)
+            marks = ','.join('%s' for _ in batch)
             discoveries = batch + ([''] if 'demo' in batch else [])
-            discovery_marks = ','.join('?' for _ in discoveries)
+            discovery_marks = ','.join('%s' for _ in discoveries)
             # Job kinds are disjoint, so these branches cannot duplicate an operation.
-            selected = f"""SELECT {fields},CASE WHEN j.item='' THEN 'demo' ELSE j.item END AS feed
-                FROM jobs j WHERE j.kind='discover' AND j.item IN ({discovery_marks})
-                UNION ALL
-                SELECT {fields},i.feed_id AS feed FROM jobs j JOIN items i ON i.id=j.item
-                    WHERE j.kind='fetch' AND i.viewed=0 AND i.feed_id IN ({marks})
-                UNION ALL
-                SELECT {fields},i.feed_id AS feed FROM jobs j JOIN media_files m ON m.id=j.item
-                    JOIN items i ON i.id=m.publication_id
-                    WHERE j.kind='download_media' AND i.viewed=0 AND i.feed_id IN ({marks})"""
-            jobs.extend(self.db.execute(f"""SELECT j.*,{attempt_fields} FROM ({selected}) j
-                LEFT JOIN collection_attempts a ON a.job=j.id
-                WHERE (j.status IN ('pending','running','failed','unavailable') OR j.status='done' AND j.error IS NOT NULL)
-                    AND coalesce(j.problem_code,'')!='source-deleted'""", (discoveries + batch + batch)).fetchall())
-            for row in self.db.execute(f"""SELECT f.id,d.updated,{result_fields} FROM feeds f
-                LEFT JOIN collection_results r ON r.feed=f.id LEFT JOIN feed_details d ON d.feed=f.id
-                WHERE f.id IN ({marks})""", batch):
+            selected = f"SELECT {fields} , CASE WHEN j . item = '' THEN 'demo' ELSE j . item END AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , i . feed_id AS feed FROM jobs j JOIN items i ON i . id = j . item WHERE j . kind = 'fetch' AND i . viewed = 0 AND i . feed_id IN ( {marks} ) UNION ALL SELECT {fields} , i . feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN items i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i . viewed = 0 AND i . feed_id IN ( {marks} )"
+            jobs.extend(self.db.execute(f"SELECT j . * , {attempt_fields} FROM ( {selected} ) j LEFT JOIN collection_attempts a ON a . job = j . id WHERE ( j . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR j . status = 'done' AND j . error IS NOT NULL ) AND coalesce ( j . problem_code , '' ) != 'source-deleted'", (discoveries + batch + batch)).fetchall())
+            for row in self.db.execute(f'SELECT f . id , d . updated , {result_fields} FROM feeds f LEFT JOIN collection_results r ON r . feed = f . id LEFT JOIN feed_details d ON d . feed = f . id WHERE f . id IN ( {marks} )', batch):
                 if details:
                     result = json.loads(row['result_data']) if row['result_data'] else {}
                 else:

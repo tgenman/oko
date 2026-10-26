@@ -17,13 +17,13 @@ def library(root, database_url, count):
     store.set_work_enabled(False)
     store.processing.background = True
     with store.db:
-        template = dict(store.db.execute('SELECT * FROM items WHERE id=?', (original,)).fetchone())
+        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (original,)).fetchone())
         fields = list(template)
         for number in range(1, count):
             identity = f'{number:032x}'
             row = dict(template, id=identity, source_id='completion:'+identity, external_id='completion:'+identity)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('?' for _ in fields)+')', tuple(row[field] for field in fields))
-            store.db.execute('INSERT INTO feed_publications VALUES (?,?)', ('demo', identity))
+            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[field] for field in fields))
+            store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
     store.db.close()
 
 
@@ -113,14 +113,14 @@ def test_completion_preserves_unreadable_and_pending_members(tmp_path, corruptio
             with store.db:
                 identity = f'{1:032x}'
                 if corruption == 'attachment':
-                    content = json.loads(store.db.execute('SELECT content FROM items WHERE id=?', (identity,)).fetchone()[0])
+                    content = json.loads(store.db.execute('SELECT content FROM items WHERE id = %s', (identity,)).fetchone()[0])
                     content['extra']['_reader']['attachments'] = [{'name':'missing-mime', 'kind':'image'}]
-                    store.db.execute('UPDATE items SET content=? WHERE id=?', (json.dumps(content), identity))
+                    store.db.execute('UPDATE items SET content = %s WHERE id = %s', (json.dumps(content), identity))
                 elif corruption in ('media_ids', 'processing_metadata'):
-                    store.db.execute("UPDATE items SET " + corruption + "='invalid-json' WHERE id=?", (identity,))
+                    store.db.execute("UPDATE items SET " + corruption + "='invalid-json' WHERE id=%s", (identity,))
                 else:
-                    store.db.execute("UPDATE items SET content='{}' WHERE id=?", (identity,))
-                store.db.execute('UPDATE items SET complete=0 WHERE id=?', (f'{2:032x}',))
+                    store.db.execute("UPDATE items SET content = '{}' WHERE id = %s", (identity,))
+                store.db.execute('UPDATE items SET complete = 0 WHERE id = %s', (f'{2:032x}',))
         client.portal.call(damage_fixture)
         assert len(client.get('/api/v3/cards').json()) == 2
         preview = client.post('/api/v3/feeds/demo/completion/preview').json()

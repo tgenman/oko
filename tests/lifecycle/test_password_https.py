@@ -64,10 +64,14 @@ def test_password_reader_behind_https_proxy(tmp_path: Path):
     external = f'https://localhost:{proxy.server_port}'
     thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     thread.start()
+    from tests.support.storage import Store
+    seed = Store(tmp_path, lambda _: None)
+    seed.set_work_enabled(False)
+    seed.db.close()
     log_path = tmp_path / 'server.log'
     with log_path.open('w') as log:
         process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--persistent', '--data', str(tmp_path),
-                    '--demo', '--no-browser', '--initially-disabled', '--public-url', external], stdout=log, stderr=subprocess.STDOUT)
+                    '--demo', '--no-browser', '--public-url', external], stdout=log, stderr=subprocess.STDOUT)
     process.log_path = log_path
     try:
         for _ in range(500):

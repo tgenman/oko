@@ -8,10 +8,10 @@ For installation commands, start with the [README](../README.md#quick-start).
 
 ```sh
 # Synthetic publications for exploration.
-uv run --locked python -m oko --demo --data /tmp/oko-demo
+uv run --locked python -m oko --database-url-file /path/to/private-demo-dsn --demo --data /tmp/oko-demo
 
 # Your own sources and persistent local data.
-uv run --locked python -m oko --data ./data
+uv run --locked python -m oko --database-url-file /path/to/private-reader-dsn --data ./data
 ```
 
 The default data directory is `data/` relative to the working directory. Pass an explicit path when you want a stable location across launches. Repeating the launch command with the same directory opens the existing compatible instance.
@@ -104,7 +104,7 @@ In the managed Docker installation, a separate host process runs Codex. See [Cod
 
 ## Data, diagnostics, and backup
 
-Your data directory contains SQLite state, saved content and media, generated results, and integration settings. Keep it separate from disposable demo directories. Marking material viewed removes its local reading content; it does not erase historical copies in backups or upstream services.
+Your data directory contains media files and integration settings; publication content, results and durable state live in PostgreSQL. Keep it separate from disposable demo directories. Marking material viewed removes its local reading content; it does not erase historical copies in backups or upstream services.
 
 The **Diagnostics** (`Диагностика`) panel shows browser, API, collection, and processing failures. Repeated errors are grouped. Recent diagnostic groups persist in `debug.json` under the data directory. Diagnostics can include source context and tracebacks; inspect them before sharing. Credentials and session files should remain private.
 

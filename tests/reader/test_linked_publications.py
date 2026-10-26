@@ -22,10 +22,10 @@ def test_rss_ready_excerpt_without_article_url_is_saved_without_a_fetch(tmp_path
         material=client.get('/api/v3/materials/'+card['id']).json()
         assert material['content']['text']=='Own excerpt'
         assert 'previous_versions' not in material['content']
-        import sqlite3
-        with sqlite3.connect(root/'state.sqlite') as db:
-            assert db.execute('SELECT platform FROM items WHERE id=?',(card['id'],)).fetchone()==('rss',)
-            assert not db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND item=?",(card['id'],)).fetchone()
+        from tests.support.storage import database
+        with database(root) as db:
+            assert db.execute('SELECT platform FROM items WHERE id = %s',(card['id'],)).fetchone()==('rss',)
+            assert not db.execute("SELECT 1 FROM jobs WHERE kind = 'fetch' AND item = %s",(card['id'],)).fetchone()
 
 
 def test_two_rss_records_with_one_url_keep_distinct_guid_identities(tmp_path):
@@ -48,7 +48,7 @@ def test_two_rss_records_with_one_url_keep_distinct_guid_identities(tmp_path):
 def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_path):
     import asyncio
     import threading
-    import sqlite3
+    from tests.support.storage import database
     import json
     from tests.support.reader import wait_for
     root=publication_root(tmp_path)
@@ -82,12 +82,12 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             assert 'Own excerpt' in value['content']['text']
             assert value['content']['revision_id']!=card['revision_id']
             assert len(client.get('/api/v3/cards').json())==1
-            with sqlite3.connect(root/'state.sqlite') as db:
-                linked=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(card['id'],)).fetchone()[0]
-                row=db.execute('SELECT feed_id,platform,status,content FROM items WHERE id=?',(linked,)).fetchone()
+            with database(root) as db:
+                linked=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(card['id'],)).fetchone()[0]
+                row=db.execute('SELECT feed_id , platform , status , content FROM items WHERE id = %s',(linked,)).fetchone()
                 assert row[:3]==(None,'other_web','ready')
                 assert 'Article body' in json.loads(row[3])['blocks'][0]['text']
-                assert not db.execute('SELECT 1 FROM feed_publications WHERE publication_id=?',(linked,)).fetchone()
+                assert not db.execute('SELECT 1 FROM feed_publications WHERE publication_id = %s',(linked,)).fetchone()
                 assert db.execute('SELECT COUNT(*) FROM items').fetchone()[0]==2
             media_release.set()
             complete=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] else None))
@@ -144,7 +144,7 @@ def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp
 
 def test_filter_uses_article_with_context_but_only_changes_roots_derived_content(tmp_path):
     import json
-    import sqlite3
+    from tests.support.storage import database
     from tests.support.models import model_transport
     from tests.support.reader import wait_for
     root=publication_root(tmp_path)
@@ -177,16 +177,16 @@ def test_filter_uses_article_with_context_but_only_changes_roots_derived_content
         article=filters[-1]['sources'][1]['id']
         assert 'Реклама.' in filters[-1]['sources'][1]['text']
         assert all('Реклама.' not in source['text'] for task in calls if task['operation']=='theses' for source in task['sources'])
-        with sqlite3.connect(root/'state.sqlite') as db:
-            original=json.loads(db.execute('SELECT content FROM items WHERE id=?',(article,)).fetchone()[0])
-            filtered=json.loads(db.execute('SELECT filtered_content FROM items WHERE id=?',(card['id'],)).fetchone()[0])
+        with database(root) as db:
+            original=json.loads(db.execute('SELECT content FROM items WHERE id = %s',(article,)).fetchone()[0])
+            filtered=json.loads(db.execute('SELECT filtered_content FROM items WHERE id = %s',(card['id'],)).fetchone()[0])
             assert original['blocks'][0]['text']=='Article body Реклама.'
             assert filtered['removed']==[{'publication_id':article,'block_index':0,'text':'Реклама.'}]
-            assert db.execute('SELECT filtered_content,summarized_content FROM items WHERE id=?',(article,)).fetchone()==('{}','{}')
+            assert db.execute('SELECT filtered_content , summarized_content FROM items WHERE id = %s',(article,)).fetchone()==('{}','{}')
 
 
 def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tmp_path):
-    import sqlite3
+    from tests.support.storage import database
     from tests.support.reader import wait_for
     from tests.support.subscriptions import add_source
     root=publication_root(tmp_path)
@@ -201,22 +201,22 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
         presence(client,'rss')
         cards=wait_cards(client,2)
         wait_for(client,lambda:all('Shared article' in client.get('/api/v3/materials/'+card['id']).json()['content']['text'] for card in cards))
-        with sqlite3.connect(root/'state.sqlite') as db:
+        with database(root) as db:
             articles=db.execute("SELECT id FROM items WHERE platform='other_web'").fetchall()
             assert len(articles)==1
             article=articles[0][0]
         client.post('/api/v3/materials/'+cards[0]['id']+'/viewed')
         assert 'Shared article' in client.get('/api/v3/materials/'+cards[1]['id']).json()['content']['text']
         client.post('/api/v3/materials/'+cards[1]['id']+'/viewed')
-        with sqlite3.connect(root/'state.sqlite') as db:
-            row=db.execute('SELECT viewed,content FROM items WHERE id=?',(article,)).fetchone()
+        with database(root) as db:
+            row=db.execute('SELECT viewed , content FROM items WHERE id = %s',(article,)).fetchone()
             assert row is None or row==(1,'{}')
-            assert not db.execute('SELECT 1 FROM publication_links WHERE target_publication_id=?',(article,)).fetchone()
+            assert not db.execute('SELECT 1 FROM publication_links WHERE target_publication_id = %s',(article,)).fetchone()
 
 
 def test_rss_replayed_record_replaces_a_removed_link_and_its_context(tmp_path):
     from tests.support.reader import wait_for
-    import sqlite3
+    from tests.support.storage import database
     root=publication_root(tmp_path)
     linked=[True]
     def response(request):
@@ -233,8 +233,8 @@ def test_rss_replayed_record_replaces_a_removed_link_and_its_context(tmp_path):
         linked[0]=False
         client.post('/api/v3/collect')
         wait_for(client,lambda:client.get('/api/v3/materials/'+card['id']).json()['content']['text']=='Own excerpt')
-        with sqlite3.connect(root/'state.sqlite') as db:
-            assert not db.execute('SELECT 1 FROM publication_links WHERE source_publication_id=?',(card['id'],)).fetchone()
+        with database(root) as db:
+            assert not db.execute('SELECT 1 FROM publication_links WHERE source_publication_id = %s',(card['id'],)).fetchone()
 
 
 def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_path):
@@ -321,7 +321,7 @@ def test_explicit_rss_replay_can_collect_a_previously_read_record_again(tmp_path
 
 def test_restricted_telegram_retains_own_source_without_copying_article_into_it(tmp_path):
     import json
-    import sqlite3
+    from tests.support.storage import database
     from tests.support.telegram import configure_fast_web
     from tests.support.telegram_web import page,mark_post_unavailable
     from tests.support.reader import wait_for
@@ -340,8 +340,8 @@ def test_restricted_telegram_retains_own_source_without_copying_article_into_it(
         restricted[0]=True
         client.post('/api/v3/materials/'+card['id']+'/retry')
         wait_for(client,lambda:client.get('/api/v3/materials/'+card['id']).json()['content']['post_web_unavailable'])
-        with sqlite3.connect(root/'state.sqlite') as db:
-            own=json.loads(db.execute('SELECT content FROM items WHERE id=?',(card['id'],)).fetchone()[0])
+        with database(root) as db:
+            own=json.loads(db.execute('SELECT content FROM items WHERE id = %s',(card['id'],)).fetchone()[0])
             assert all('Separate article text' not in block.get('text','') for block in own['blocks'])
         assert 'Separate article text' in client.get('/api/v3/materials/'+card['id']).json()['content']['text']
 
@@ -349,7 +349,7 @@ def test_restricted_telegram_retains_own_source_without_copying_article_into_it(
 def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path):
     import asyncio
     import threading
-    import sqlite3
+    from tests.support.storage import database
     from tests.support.reader import wait_for
     root=publication_root(tmp_path)
     started,release,returned=threading.Event(),threading.Event(),threading.Event()
@@ -376,7 +376,7 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
             assert returned.wait(3)
             wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
             assert client.get('/api/v3/cards').json()==[]
-            with sqlite3.connect(root/'state.sqlite') as db:
+            with database(root) as db:
                 assert not db.execute('SELECT 1 FROM publication_links').fetchone()
                 assert not db.execute("SELECT 1 FROM items WHERE content LIKE '%Late article must not survive%'").fetchone()
                 assert not db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND status IN ('pending','running')").fetchone()

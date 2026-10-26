@@ -1,5 +1,4 @@
 """Durable YouTube caption admission state, owned by Store."""
-from oko.storage.sqlite_schema import is_sqlite
 from oko.storage.database import expect_row, Row
 import json
 from oko.storage.reading import reading_value, reader_wall
@@ -22,13 +21,6 @@ class YouTubeAccess:
         self.store = store
         self.db = store.db
         self.path = store.root / 'youtube-proxy.json'
-        if is_sqlite(self.db):
-            self.db.executescript('''
-                CREATE TABLE IF NOT EXISTS youtube_access (
-                  id INTEGER PRIMARY KEY CHECK(id=1), next_at REAL DEFAULT 0,
-                  blocked_until REAL DEFAULT 0, strikes INTEGER DEFAULT 0);
-                INSERT OR IGNORE INTO youtube_access(id) VALUES (1);
-            ''')
 
     @reading_value
     def config(self) -> dict[str, str]:
@@ -60,7 +52,7 @@ class YouTubeAccess:
 
     @reading_value
     def _limits(self) -> Row:
-        row = self.db.execute('SELECT * FROM youtube_access WHERE id=1').fetchone()
+        row = self.db.execute('SELECT * FROM youtube_access WHERE id = 1').fetchone()
         assert row is not None
         return row
 
@@ -70,14 +62,14 @@ class YouTubeAccess:
 
     def start(self, wall: float) -> None:
         with self.db:
-            self.db.execute('UPDATE youtube_access SET next_at=? WHERE id=1', (wall + self.interval,))
+            self.db.execute('UPDATE youtube_access SET next_at = %s WHERE id = 1', (wall + self.interval,))
 
     def blocked(self, wall: float, retry_after: float) -> None:
         with self.db:
-            strikes = min(6, expect_row(self.db.execute('SELECT strikes FROM youtube_access WHERE id=1').fetchone())[0] + 1)
+            strikes = min(6, expect_row(self.db.execute('SELECT strikes FROM youtube_access WHERE id = 1').fetchone())[0] + 1)
             until = wall + max(min(900 * 2 ** (strikes - 1), 21600), retry_after)
-            self.db.execute('UPDATE youtube_access SET strikes=?,blocked_until=? WHERE id=1', (strikes, until))
+            self.db.execute('UPDATE youtube_access SET strikes = %s , blocked_until = %s WHERE id = 1', (strikes, until))
 
     def completed(self) -> None:
         with self.db:
-            self.db.execute('UPDATE youtube_access SET strikes=0,blocked_until=0 WHERE id=1')
+            self.db.execute('UPDATE youtube_access SET strikes = 0 , blocked_until = 0 WHERE id = 1')

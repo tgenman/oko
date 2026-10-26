@@ -8,9 +8,9 @@ from tests.support.app import create_app
 from tests.support.reader import HEADERS
 
 
-@pytest.fixture(params=['sqlite', 'postgres'])
+@pytest.fixture
 def settings_database(request):
-    return request.getfixturevalue('postgres_url') if request.param == 'postgres' else None
+    return request.getfixturevalue('postgres_url')
 
 
 def test_repeated_settings_reads_do_not_requery_settings_storage(tmp_path):
@@ -109,7 +109,7 @@ def test_settings_edit_rollback_and_restart_keep_one_effective_value(tmp_path, s
 
 
 def test_settings_memory_obeys_nested_rollback_and_failed_commit(tmp_path, settings_database):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.storage.transaction import TransactionAborted, transaction
     from oko.subscriptions.subscriptions import Overrides
 
@@ -140,7 +140,7 @@ def test_settings_memory_obeys_nested_rollback_and_failed_commit(tmp_path, setti
 
 
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.storage.transaction import transaction
     from oko.subscriptions.subscriptions import Overrides
 
@@ -163,12 +163,9 @@ def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, setti
 
 
 def test_connection_close_runs_rollback_callbacks_once(settings_database):
-    from oko.storage.connection import ReadingConnection
     from oko.storage.postgres_connection import PostgresConnection
 
-    db = PostgresConnection(settings_database) if settings_database else ReadingConnection(':memory:')
-    if not settings_database:
-        db.execute('CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT)')
+    db = PostgresConnection(settings_database)
     called = []
     db.execute("INSERT INTO state VALUES ('memory-close-probe','uncommitted')")
     db.after_rollback(lambda: called.append('first'))
@@ -200,7 +197,7 @@ def test_processor_configuration_writes_are_visible_and_survive_restart(tmp_path
 def test_processor_configuration_memory_follows_transaction_rollback(tmp_path, settings_database):
     from oko.processing.execution import CodexSettings
     from oko.processing.llamacpp import ProcessorConfig
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.storage.transaction import transaction
     from tests.reader.test_codex_settings import configuration
 
@@ -229,7 +226,7 @@ def test_processor_configuration_memory_follows_transaction_rollback(tmp_path, s
 
 
 def test_feed_configuration_memory_follows_edits_and_rollback(tmp_path, settings_database):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.storage.transaction import transaction
     from oko.subscriptions.subscriptions import AddFeed, FeedPatch
 
@@ -284,7 +281,7 @@ def test_material_immediately_uses_moved_feed_settings_and_delete_removes_cache(
 
 def test_postgres_failed_rollback_discards_pending_memory_and_connection(tmp_path, postgres_url):
     import psycopg
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.storage.transaction import transaction
     from oko.subscriptions.subscriptions import Overrides
 
@@ -304,36 +301,6 @@ def test_postgres_failed_rollback_discards_pending_memory_and_connection(tmp_pat
     finally:
         store.db.close()
     reopened = Store(tmp_path, lambda _: None, database_url=postgres_url)
-    try:
-        assert reopened.subscriptions.effective('oko', 'global')['effective']['prompt_filters']['value'] == 'Committed'
-    finally:
-        reopened.db.close()
-
-
-def test_sqlite_failed_rollback_cannot_later_commit_pending_memory(tmp_path):
-    import sqlite3
-    from oko.storage.store import Store
-    from oko.storage.transaction import transaction
-    from oko.subscriptions.subscriptions import Overrides
-
-    store = Store(tmp_path, lambda _: None)
-    try:
-        store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters='Committed'))
-        with pytest.raises(sqlite3.DatabaseError), transaction(store.db):
-            store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters='Pending'))
-            store.db.set_authorizer(lambda action, first, *_: sqlite3.SQLITE_DENY
-                                    if action == sqlite3.SQLITE_TRANSACTION and first == 'ROLLBACK' else sqlite3.SQLITE_OK)
-            raise RuntimeError('abort owned synthetic transaction')
-        assert store.subscriptions.effective('oko', 'global')['effective']['prompt_filters']['value'] == 'Committed'
-        with pytest.raises(sqlite3.ProgrammingError):
-            store.db.commit()
-    finally:
-        try:
-            store.db.set_authorizer(None)
-        except sqlite3.ProgrammingError:
-            pass
-        store.db.close()
-    reopened = Store(tmp_path, lambda _: None)
     try:
         assert reopened.subscriptions.effective('oko', 'global')['effective']['prompt_filters']['value'] == 'Committed'
     finally:

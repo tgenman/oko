@@ -3,7 +3,7 @@ from tests.support.collection_acceptance import discovered
 from contextvars import ContextVar
 
 from oko.collection.contracts import Material, Publication
-from oko.storage.store import Store
+from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed
 from tests.support.app import create_app
 from tests.support.library_templates import templates
@@ -33,7 +33,7 @@ def build_library(root, counts):
             discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
-            items.append(store.db.execute('SELECT id FROM items WHERE feed_id=? ORDER BY id', (feed,)).fetchone()[0])
+            items.append(store.db.execute('SELECT id FROM items WHERE feed_id=%s ORDER BY id', (feed,)).fetchone()[0])
         store.set_work_enabled(False)
     finally:
         store.db.close()

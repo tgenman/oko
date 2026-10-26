@@ -66,7 +66,7 @@ def test_write_sets_trigger_clocks_once_per_transaction(postgres_url, tmp_path, 
 
 @pytest.mark.parametrize("count", [10, 100, 1000])
 def test_navigation_batches_requested_feed_facts(postgres_url, tmp_path, monkeypatch, count):
-    from oko.storage.store import Store
+    from tests.support.storage import Store
     from oko.subscriptions.subscriptions import AddFeed
     from tests.support.reading_cost import traced_app
 
@@ -102,13 +102,13 @@ def test_compact_cards_batch_links_and_processing_permissions(postgres_url, tmp_
     store.set_work_enabled(False)
     store.processing.background = True
     with store.db:
-        template = dict(store.db.execute('SELECT * FROM items WHERE id=?', (first,)).fetchone())
+        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (first,)).fetchone())
         fields = list(template)
         for n in range(1, count):
             identity = f'{n:032x}'
             row = dict(template, id=identity, source_id=identity, external_id=identity)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('?' for _ in fields)+')', tuple(row[f] for f in fields))
-            store.db.execute('INSERT INTO feed_publications VALUES (?,?)', ('demo', identity))
+            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[f] for f in fields))
+            store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
     store.db.close()
     queries = request_queries(monkeypatch)
     app = traced_app(tmp_path, database_url=postgres_url)
@@ -135,15 +135,15 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
     store.processing.background = True
     store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters=''))
     with store.db:
-        template = dict(store.db.execute('SELECT * FROM items WHERE id=?', (parent,)).fetchone())
+        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
         fields = list(template)
         children = []
         for n in range(linked_count):
             identity = f'{n+1:032x}'
             children.append(identity)
             row = dict(template, id=identity, source_id=identity, external_id=identity, feed_id=None)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('?' for _ in fields)+')', [row[f] for f in fields])
-            store.db.execute('INSERT INTO publication_links VALUES (?,?)', (parent, identity))
+            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
+            store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )', (parent, identity))
         signature = store.processing.theses.signature(parent)
         assert signature
         store.publications.accept_result(parent, 'theses', signature, dict(points=[dict(text='Saved summary', sources=[dict(id=i) for i in children])]), None)
@@ -182,7 +182,7 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
     store.processing.background = True
     store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters='', theses=False))
     with store.db:
-        template = dict(store.db.execute('SELECT * FROM items WHERE id=?', (parent,)).fetchone())
+        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
         fields = list(template)
         for n in range(count):
             identity = parent if n == 0 else f'{n+1:032x}'
@@ -192,12 +192,12 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
             content['blocks'].append(dict(type='media', role='subtitles', media_id=media))
             if n:
                 row = dict(template, id=identity, source_id=identity, external_id=identity, platform='youtube', content=json.dumps(content))
-                store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('?' for _ in fields)+')', [row[f] for f in fields])
-                store.db.execute('INSERT INTO feed_publications VALUES (?,?)', ('demo', identity))
+                store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
+                store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
             else:
-                store.db.execute('UPDATE items SET content=?,platform=? WHERE id=?', (json.dumps(content), 'youtube', identity))
+                store.db.execute('UPDATE items SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', identity))
             (tmp_path / 'media' / media).write_text('Synthetic captions')
-            store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,storage_key,status) VALUES (?,?,?,?,?,?,'ready')", (media, identity, 'captions', 'synthetic:'+media, 'captions.txt', 'media/'+media))
+            store.db.execute("INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , storage_key , status ) VALUES ( %s , %s , %s , %s , %s , %s , 'ready' )", (media, identity, 'captions', 'synthetic:'+media, 'captions.txt', 'media/'+media))
     store.db.close()
     queries = request_queries(monkeypatch)
     app = traced_app(tmp_path, database_url=postgres_url)
