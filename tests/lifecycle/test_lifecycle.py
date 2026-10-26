@@ -31,7 +31,9 @@ def test_two_tabs_last_close_and_resume_require_live_ui(tmp_path: Path):
         close_presence(client, 'b')
         time.sleep(.05)
         clock.now += 15
-        time.sleep(.05)
+        deadline = time.monotonic() + 3
+        while not exits and time.monotonic() < deadline:
+            time.sleep(.02)
         assert exits == [True]
         assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
 

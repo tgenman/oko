@@ -268,8 +268,7 @@ def test_codex_exhausted_quota_is_visible_without_source_transfer(tmp_path):
         item=setup_reader(client, theses=True)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True})
-        material=wait_for(client,lambda: (m if (m:=client.get('/api/v3/materials/'+item).json())['theses']['diagnostic_message'] else None))
-        assert 'Лимит Codex исчерпан' in material['theses']['diagnostic_message']
+        material=wait_for(client,lambda: (m if 'Лимит Codex исчерпан' in ((m:=client.get('/api/v3/materials/'+item).json())['theses']['diagnostic_message'] or '') else None))
         assert not service.inputs and material['theses']['result'] is None
 
 
