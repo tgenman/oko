@@ -9,6 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from collections.abc import Iterator
 from typing import Any
+import json
 
 from oko.storage.reading import reading_value
 
@@ -22,6 +23,8 @@ class Inputs:
     feeds: dict[str, Row] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
+    subtitles: dict[str, str | None] = field(default_factory=dict)
+    related_items: dict[str, Row] = field(default_factory=dict)
     children: dict[str, list[Row]] = field(default_factory=dict)
     owners: dict[str, set[str]] = field(default_factory=dict)
 
@@ -41,7 +44,12 @@ _FEED = 'SELECT f.*,b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_
 @reading_value
 def item(db: Database, identity: str) -> Row | None:
     value = current(db)
-    return value.items.get(identity) if value and identity in value.items else db.execute('SELECT * FROM items WHERE id=?', (identity,)).fetchone()
+    if value is not None:
+        if identity in value.items:
+            return value.items[identity]
+        if identity in value.related_items:
+            return value.related_items[identity]
+    return db.execute('SELECT * FROM items WHERE id=?', (identity,)).fetchone()
 
 
 
@@ -105,6 +113,7 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
                 LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
                 WHERE l.source_publication_id IN ({marks}) AND i.viewed=0 ORDER BY l.rowid''', batch):
             value.children[row['reader_source']].append(row)
+            value.related_items[row['id']] = row
         value.owners.update({identity: set() for identity in batch})
         for row in db.execute(f'''SELECT m.publication_id AS reader_source,m.feed_id FROM reading_memberships m
                 WHERE m.publication_id IN ({marks})
@@ -122,6 +131,23 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
     for start in range(0,len(keys),400):
         batch = keys[start:start+400]
         value.state.update({r['key']:r['value'] for r in db.execute('SELECT key,value FROM state WHERE key IN ('+','.join('?' for _ in batch)+')',batch)})
+    from oko.storage.youtube_media import subtitle_id
+    for row in value.items.values():
+        try:
+            content = json.loads(row['content'])
+            identity = subtitle_id(content) if 'youtube' in content.get('extra', {}) else None
+            if identity is not None:
+                value.subtitles[identity] = None
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # A corrupt resource is reported by its own projection; it must not
+            # prevent other resources in the same batch from being read.
+            continue
+    subtitle_ids = sorted(value.subtitles)
+    for start in range(0, len(subtitle_ids), 400):
+        batch = subtitle_ids[start:start+400]
+        marks = ','.join('?' for _ in batch)
+        value.subtitles.update({row['id']: row['storage_key'] for row in db.execute(
+            f"SELECT id,storage_key FROM media_files WHERE status='ready' AND id IN ({marks})", batch)})
     token = _current.set(value)
     try:
         yield
