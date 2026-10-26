@@ -1,8 +1,8 @@
 # Оптимизировать PostgreSQL-чтение и завершение состава одним PR
 
 Status: in-progress
+GitHub: https://github.com/tgenman/oko/issues/158
 Blocked by: Нет
-GitHub: не опубликовано
 
 [Согласованная спецификация](../spec.md).
 

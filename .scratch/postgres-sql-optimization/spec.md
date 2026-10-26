@@ -2,7 +2,7 @@
 
 Status: in-progress
 Label: ready-for-agent
-GitHub: публикация в одном PR разрешена последующим implement-spec
+GitHub: https://github.com/tgenman/oko/issues/158
 Date: 2026-10-26
 
 ## Problem Statement

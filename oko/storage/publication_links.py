@@ -14,6 +14,10 @@ if TYPE_CHECKING:
 
 @reading_value
 def children(store: 'Store',item: str) -> list[Row]:
+    from oko.storage.material_read import current
+    inputs = current(store.db)
+    if inputs is not None and item in inputs.children:
+        return inputs.children[item]
     return list(store.db.execute('''SELECT i.*,j.error AS fetch_error FROM publication_links l
         JOIN items i ON i.id=l.target_publication_id LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
         WHERE l.source_publication_id=? AND i.viewed=0 ORDER BY l.rowid''',(item,)).fetchall())
@@ -88,13 +92,15 @@ def prune(store: 'Store', candidates: set[str]) -> None:
         SELECT i.id FROM items i JOIN feed_publications f ON f.publication_id=i.id WHERE i.viewed=0
         UNION SELECT l.target_publication_id FROM publication_links l JOIN needed n ON n.id=l.source_publication_id)
         SELECT id FROM items WHERE platform IS NOT NULL AND viewed=0 AND id NOT IN (SELECT id FROM needed)""").fetchall()
-    for row in rows:
-        item=row['id']
-        store.publications.forget(item,prune=False)
-        store.db.execute('DELETE FROM source_deleted WHERE item=?',(item,))
-        store.filters.forget(item)
-        store.db.execute('DELETE FROM thesis_inputs WHERE item=?',(item,))
-        store.db.execute('UPDATE items SET viewed=1,complete=0 WHERE id=?',(item,))
+    items = [row['id'] for row in rows]
+    store.publications.forget_many(items)
+    for start in range(0, len(items), 400):
+        batch = items[start:start+400]
+        marks = ','.join('?' for _ in batch)
+        store.db.execute(f'DELETE FROM source_deleted WHERE item IN ({marks})', batch)
+        store.db.execute(f'DELETE FROM filter_inputs WHERE item IN ({marks})', batch)
+        store.db.execute(f'DELETE FROM thesis_inputs WHERE item IN ({marks})', batch)
+        store.db.execute(f'UPDATE items SET viewed=1,complete=0 WHERE id IN ({marks})', batch)
 
 
 def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str,Any]:

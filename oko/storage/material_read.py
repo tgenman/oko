@@ -1,6 +1,6 @@
 """Bounded, request-local inputs shared by material parts and their admission rules.
 
-Only the synchronous versioned reader opens this scope. Nothing survives it;
+Synchronous reading calculations open this scope. Nothing survives it;
 write paths use the same accessors against current storage without a snapshot.
 """
 from oko.storage.database import Database, Row
@@ -22,6 +22,8 @@ class Inputs:
     feeds: dict[str, Row] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
+    children: dict[str, list[Row]] = field(default_factory=dict)
+    owners: dict[str, set[str]] = field(default_factory=dict)
 
 
 _current: ContextVar[Inputs | None] = ContextVar('material_inputs', default=None)
@@ -80,7 +82,7 @@ def state(db: Database, key: str) -> str | None:
 
 @contextmanager
 def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
-    """Six indexed reads for up to one API batch; independent of foreign data."""
+    """Bounded inputs for requested materials; independent of foreign data."""
     value = Inputs(db)
     ids = sorted(identities)
     for start in range(0, len(ids), 400):
@@ -89,12 +91,28 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
         value.items.update({r['id']: r for r in db.execute(_ITEM+f' WHERE i.id IN ({marks})',batch)})
         for r in db.execute(f'''SELECT j.*,coalesce(m.publication_id,j.item) AS reader_item FROM jobs j
                 LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
-                WHERE j.item IN ({marks}) OR m.publication_id IN ({marks})''',batch+batch):
+                WHERE j.item IN ({marks})
+                UNION SELECT j.*,m.publication_id AS reader_item FROM media_files m
+                JOIN jobs j ON j.kind='download_media' AND m.id=j.item
+                WHERE m.publication_id IN ({marks})''',batch+batch):
             if r['kind']=='download_media':
                 value.media_jobs.setdefault(r['reader_item'],[]).append(r)
             else:
                 value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
-    feeds = sorted({r['feed_id'] for r in value.items.values()})
+        value.children.update({identity: [] for identity in batch})
+        for row in db.execute(f'''SELECT l.source_publication_id AS reader_source,i.*,j.error AS fetch_error
+                FROM publication_links l JOIN items i ON i.id=l.target_publication_id
+                LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
+                WHERE l.source_publication_id IN ({marks}) AND i.viewed=0 ORDER BY l.rowid''', batch):
+            value.children[row['reader_source']].append(row)
+        value.owners.update({identity: set() for identity in batch})
+        for row in db.execute(f'''SELECT m.publication_id AS reader_source,m.feed_id FROM reading_memberships m
+                WHERE m.publication_id IN ({marks})
+                UNION SELECT l.source_publication_id AS reader_source,m.feed_id FROM publication_links l
+                JOIN reading_memberships m ON m.publication_id=l.target_publication_id
+                WHERE l.source_publication_id IN ({marks})''', batch+batch):
+            value.owners[row['reader_source']].add(row['feed_id'])
+    feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None})
     for start in range(0, len(feeds), 400):
         batch = feeds[start:start+400]
         marks = ','.join('?' for _ in batch)

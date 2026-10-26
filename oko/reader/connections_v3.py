@@ -36,7 +36,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @read_locked(runtime.execution)
     async def subscriptions() -> wire.SubscriptionCatalog:
         saved = runtime.queries
-        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(v), saved.binding(v['id'])) for v in saved.feeds()])
+        return wire.SubscriptionCatalog(folders=[wire.SubscriptionFolder.model_validate(v) for v in saved.folders()], feeds=[project.subscription(facts.SubscriptionFeed.model_validate(feed), binding) for feed, binding in saved.feed_resources().values()])
 
     @router.get('/api/v3/feeds/{feed}/avatar/{revision}')
     @read_locked(runtime.execution)

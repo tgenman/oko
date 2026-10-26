@@ -70,7 +70,6 @@ class ReadingComposition:
 
     @reading_snapshot()
     def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
-        feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds()}
         where, parameters = ['i.viewed=0'], []
         if feed is not None:
             where.append('EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id AND m.feed_id=?)')
@@ -79,30 +78,33 @@ class ReadingComposition:
             where.append('EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner ON owner.id=m.feed_id WHERE m.publication_id=i.id AND owner.folder_id=?)')
             parameters.append(folder)
         rows = self._store.db.execute('SELECT i.* FROM items i JOIN feeds f ON f.id=i.feed_id WHERE '
-                                      + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters)
+                                      + ' AND '.join(where) + ' ORDER BY i.published DESC', parameters).fetchall()
+        feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds_many({row['feed_id'] for row in rows})}
         cards = []
-        for row in rows:
-            owner_id=row['feed_id']
-            material = self._store.saved_publication(row)
-            if material:
-                material = _reading_heading(material, feeds[owner_id], self._store.original(row['id'])[0] if material['complete'] else {})
-            if material and (show_hidden or not material.get('filter', {}).get('hidden')):
-                owner = feeds[owner_id]
-                text = material.pop('text')
-                description = material.pop('description', '')
-                material.pop('reply_preview', None)
-                material.pop('linked_content', None)
-                preview = description or text
-                filtered = material.get('filter', {})
-                if not description and filtered.get('status') == 'done':
-                    # Preserve the existing preview of display_text followed by
-                    # its final fragment pass, including joined boundaries.
-                    for fragment in filtered['removed']:
-                        preview = preview.replace(fragment, '')
-                if filtered.get('status') == 'done':
-                    for fragment in filtered['removed']:
-                        preview = preview.replace(fragment, '')
-                cards.append(dict(material, feed_id=owner_id, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
+        from oko.storage.material_read import material_inputs
+        with material_inputs(self._store.db, {row['id'] for row in rows}):
+            for row in rows:
+                owner_id=row['feed_id']
+                material = self._store.saved_publication(row)
+                if material:
+                    material = _reading_heading(material, feeds[owner_id], self._store.original(row['id'])[0] if material['complete'] else {})
+                if material and (show_hidden or not material.get('filter', {}).get('hidden')):
+                    owner = feeds[owner_id]
+                    text = material.pop('text')
+                    description = material.pop('description', '')
+                    material.pop('reply_preview', None)
+                    material.pop('linked_content', None)
+                    preview = description or text
+                    filtered = material.get('filter', {})
+                    if not description and filtered.get('status') == 'done':
+                        # Preserve the existing preview of display_text followed by
+                        # its final fragment pass, including joined boundaries.
+                        for fragment in filtered['removed']:
+                            preview = preview.replace(fragment, '')
+                    if filtered.get('status') == 'done':
+                        for fragment in filtered['removed']:
+                            preview = preview.replace(fragment, '')
+                    cards.append(dict(material, feed_id=owner_id, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
         return cards
 
     @reading_snapshot()
@@ -119,22 +121,34 @@ class ReadingComposition:
                     feeds=[dict(feed,count=feed_counts[feed['id']]['visible'],has_unviewed=bool(feed_counts[feed['id']]['unviewed'])) for feed in feeds],
                     count=visible)
 
+    def _contents(self, owner: str, scope: str) -> FolderContents:
+        from oko.storage.material_read import material_inputs, item
+
+        self._store.subscriptions.check_owner(scope, owner)
+        condition = 'm.feed_id=?' if scope == 'feed' else 'f.folder_id=?'
+        rows = list(self._store.db.execute("""SELECT DISTINCT i.id,i.members FROM items i
+            JOIN reading_memberships m ON m.publication_id=i.id JOIN feeds f ON f.id=m.feed_id
+            WHERE i.viewed=0 AND """ + condition + ' ORDER BY i.id', (owner,)))
+        cards = []
+        # Keep the exact publication identities (including Telegram members)
+        # even when a completed publication cannot currently be read.
+        ids = [row['id'] for row in rows]
+        for start in range(0, len(ids), 400):
+            with material_inputs(self._store.db, set(ids[start:start+400])):
+                for identity in ids[start:start+400]:
+                    row = item(self._store.db, identity)
+                    assert row is not None
+                    if row['feed_id'] is not None and (not row['complete'] or self._store.reading_content(row) is not None):
+                        cards.append(identity)
+        return FolderContents(tuple((row['id'], row['members']) for row in rows), tuple(cards))
+
     @reading_snapshot()
     def folder_contents(self, folder: str) -> FolderContents:
-        self._store.subscriptions.check_owner('folder', folder)
-        cards = self.cards(True, folder=folder)
-        rows = self._store.db.execute("""SELECT DISTINCT i.id,i.members FROM items i JOIN reading_memberships m ON m.publication_id=i.id JOIN feeds f ON f.id=m.feed_id
-            WHERE i.viewed=0 AND f.folder_id=? ORDER BY i.id""", (folder,))
-        # Completion includes hidden, unreadable and loading publications.
-        return FolderContents(tuple((row['id'], row['members']) for row in rows),
-                              tuple(sorted(card['id'] for card in cards)))
+        return self._contents(folder, 'folder')
 
     @reading_snapshot()
     def feed_contents(self, feed: str) -> FolderContents:
-        self._store.subscriptions.check_owner('feed', feed)
-        rows = self._store.db.execute('SELECT i.id,i.members FROM items i JOIN reading_memberships m ON m.publication_id=i.id WHERE i.viewed=0 AND m.feed_id=? ORDER BY i.id', (feed,)).fetchall()
-        return FolderContents(tuple((row['id'], row['members']) for row in rows),
-                              tuple(sorted(card['id'] for card in self.cards(True, feed=feed))))
+        return self._contents(feed, 'feed')
 
     @reading_snapshot()
     def material(self, identity: str) -> dict[str, Any] | None:

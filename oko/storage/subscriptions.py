@@ -134,7 +134,21 @@ class SubscriptionRepository:
             conditions.append('transport=?')
             parameters.append(transport)
         query = 'SELECT * FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
-        rows=list(self.db.execute(query,parameters))
+        return self._feeds(list(self.db.execute(query,parameters)))
+
+    def feeds_many(self, identities: set[str]) -> list[dict[str, Any]]:
+        rows: list[Row] = []
+        ids = sorted(identities)
+        for start in range(0, len(ids), 400):
+            batch = ids[start:start+400]
+            rows.extend(self.db.execute('SELECT * FROM feeds WHERE id IN (' + ','.join('?' for _ in batch) + ') ORDER BY rowid', batch))
+        return self._feeds(rows)
+
+    def _feeds(self, rows: list[Row]) -> list[dict[str, Any]]:
+        return [feed for start in range(0, len(rows), 400)
+                for feed in self._feed_values(rows[start:start+400])]
+
+    def _feed_values(self, rows: list[Row]) -> list[dict[str, Any]]:
         identities=[row['id'] for row in rows]
         if not identities:
             return []

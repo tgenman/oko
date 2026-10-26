@@ -245,7 +245,7 @@ def test_reader_role_needs_no_schema_ownership_or_migration_credentials(postgres
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     reader.execute('CREATE TABLE reader_cannot_install_schema(id integer)')
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                    migrate(reader, [*MIGRATIONS, Migration(4, 'forbidden', 'CREATE TABLE reader_cannot_migrate(id integer)')])
+                    migrate(reader, [*MIGRATIONS, Migration(len(MIGRATIONS) + 1, 'forbidden', 'CREATE TABLE reader_cannot_migrate(id integer)')])
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     reader.execute('DELETE FROM oko_schema_migrations')
         finally:

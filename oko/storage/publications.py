@@ -77,6 +77,7 @@ class Publications:
             CREATE TABLE IF NOT EXISTS publication_links (
               source_publication_id TEXT REFERENCES items(id), target_publication_id TEXT REFERENCES items(id),
               PRIMARY KEY(source_publication_id,target_publication_id));
+            CREATE INDEX IF NOT EXISTS publication_links_target ON publication_links(target_publication_id,source_publication_id);
             CREATE TABLE IF NOT EXISTS media_files (
               id TEXT PRIMARY KEY, publication_id TEXT NOT NULL REFERENCES items(id), resource_key TEXT NOT NULL,
               source_locator TEXT NOT NULL, name TEXT NOT NULL, mime_type TEXT, size_bytes INTEGER,
@@ -478,9 +479,17 @@ class Publications:
     def forget(self, item: str, *, prune: bool = True) -> None:
         db = self.store.db
         linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=?',(item,))}
-        db.execute('DELETE FROM feed_publications WHERE publication_id=?', (item,))
-        db.execute('DELETE FROM publication_links WHERE source_publication_id=? OR target_publication_id=?', (item, item))
-        db.execute('DELETE FROM media_files WHERE publication_id=?', (item,))
-        db.execute("UPDATE items SET content='{}',media_ids='[]',filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id=?", (item,))
+        self.forget_many([item])
         if prune:
             publication_links.prune(self.store,linked)
+
+    def forget_many(self, items: list[str]) -> None:
+        """Clear saved copies without re-evaluating graph reachability."""
+        db = self.store.db
+        for start in range(0, len(items), 400):
+            batch = items[start:start+400]
+            marks = ','.join('?' for _ in batch)
+            db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ({marks})', batch)
+            db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ({marks}) OR target_publication_id IN ({marks})', batch+batch)
+            db.execute(f'DELETE FROM media_files WHERE publication_id IN ({marks})', batch)
+            db.execute("UPDATE items SET content='{}',media_ids='[]',filtered_content='{}',summarized_content='{}',processing_metadata='{}' WHERE id IN ("+marks+")", batch)
