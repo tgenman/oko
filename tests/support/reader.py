@@ -16,7 +16,8 @@ HEADERS = {'Authorization': 'Bearer test'}
 
 
 def wait_for(client, predicate):
-    for _ in range(150):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
         value = predicate()
         if value:
             return value
