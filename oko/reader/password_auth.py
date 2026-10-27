@@ -23,7 +23,7 @@ MAX_AGE = 30 * 24 * 60 * 60
 ASSETS = Path(__file__).with_name('login')
 HEADERS = {'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin',
            'X-Content-Type-Options': 'nosniff',
-           'Content-Security-Policy': "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}
+           'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}
 
 
 def password_hash(password: str, salt: str) -> str:
@@ -196,6 +196,8 @@ async def access_response(access: PasswordAccess, request: Request,
                           call_next: Callable[[Request], Awaitable[Response]],
                           origin: str, service_bearer: bool) -> Response | None:
     path = request.url.path
+    if path == '/apple-touch-icon.png' and request.method in ('GET', 'HEAD'):
+        return await call_next(request)
     if path == '/login' or path == '/login/style.css' or path == '/login/session':
         if request.method not in ('GET', 'HEAD') and (request.headers.get('origin') != origin or request.headers.get('sec-fetch-site') == 'cross-site'):
             return JSONResponse({'detail': 'Посторонняя страница'}, status_code=403, headers=HEADERS)

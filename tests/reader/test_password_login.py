@@ -49,6 +49,23 @@ def test_all_routes_require_session_and_no_launcher_bootstrap(tmp_path, credenti
         assert 'reader-shell' not in page.text and 'token' not in page.text
 
 
+def test_site_icon_is_public_without_opening_reader_assets(tmp_path, credentials):
+    app = setup(tmp_path, credentials)
+    with TestClient(app) as client:
+        page = client.get('/login')
+        assert 'rel="apple-touch-icon"' in page.text
+        icon = client.get('/apple-touch-icon.png', follow_redirects=False)
+        assert icon.status_code == 200
+        assert icon.headers['content-type'] == 'image/png'
+        assert icon.content.startswith(b'\x89PNG\r\n\x1a\n')
+        assert client.head('/apple-touch-icon.png', follow_redirects=False).status_code == 200
+        assert client.post('/apple-touch-icon.png', follow_redirects=False).status_code == 403
+        assert client.get('/index.html', follow_redirects=False).status_code == 303
+        assert client.get('/api/v3/status', follow_redirects=False).status_code == 403
+        assert login(client).status_code == 303
+        assert 'rel="apple-touch-icon"' in client.get('/').text
+
+
 def test_public_peer_cannot_claim_local_bearer_by_host_or_forwarded_headers(tmp_path, credentials):
     app = setup(tmp_path, credentials, public_url='https://reader.example')
     with TestClient(app, base_url='https://reader.example', client=('198.51.100.9', 50000)) as client:

@@ -95,4 +95,8 @@ def install_frontend(app: FastAPI) -> None:
         mime = 'text/javascript' if file.suffix in ('.js', '.mjs') else mimetypes.guess_type(file.name)[0]
         return FileResponse(file, media_type=mime)
 
+    @router.head('/apple-touch-icon.png', include_in_schema=False)
+    async def icon_head() -> FileResponse:
+        return await frontend('apple-touch-icon.png')
+
     app.include_router(router)
