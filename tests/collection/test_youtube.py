@@ -209,37 +209,91 @@ def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
 def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
     import asyncio
     import threading
+    import psycopg
+    from tests.support.reader import Clock, wait_for
+    from tests.support.storage import database_url
+
+    late_text = 'Late captions must not return.'
     class Late(Captions):
-        started = threading.Event()
-        release = threading.Event()
+        def __init__(self):
+            super().__init__()
+            self.started = threading.Event()
+            self.cancelled = threading.Event()
+            self.release = threading.Event()
+            self.completed = threading.Event()
+
         async def fetch(self, video):
+            task = asyncio.current_task()
+            assert task is not None
+            task.add_done_callback(lambda _: self.completed.set())
             self.started.set()
             while not self.release.is_set():
                 try:
                     await asyncio.sleep(.01)
                 except asyncio.CancelledError:
-                    pass
-            return 'Late captions must not return.'
-    from tests.support.reader import Clock
+                    self.cancelled.set()
+            return late_text
+
+    def media_files():
+        return {path.relative_to(tmp_path): path.read_bytes()
+                for path in (tmp_path / 'media').rglob('*') if path.is_file()}
+
     clock = Clock()
     captions = Late()
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, lease=.1, grace=.5, **clock.options()), headers=HEADERS) as client:
-        feed = subscribe(client)
-        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
-        presence(client, 'reader')
-        assert captions.started.wait(2)
-        item = client.get('/api/v3/cards').json()[0]['id']
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, **clock.options()), headers=HEADERS) as client:
+        try:
+            # Keep setup's temporary session from cancelling the tested attempt.
+            assert presence(client, 'reader').status_code == 201
+            subscribe(client)
+            assert captions.started.wait(3)
+            item = client.get('/api/v3/cards').json()[0]['id']
+            material = wait_for(client, lambda: value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None)
+            assert client.get(material['content']['attachments'][0]['url']).content == PNG
+            before_files = media_files()
+            assert PNG in before_files.values()
+            with psycopg.connect(database_url(tmp_path), autocommit=True) as db:
+                assert db.execute("SELECT status,storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'", (item,)).fetchone() == ('pending_download', None)
+            assert not captions.cancelled.is_set()
+            if action == 'viewed':
+                assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
+            elif action == 'stop':
+                assert client.post('/api/v3/stop').status_code == 200
+            else:
+                assert close_presence(client, 'reader').status_code == 200
+                assert client.get('/api/v3/status').json()['work_allowed'] is False
+            assert captions.cancelled.wait(3)
+        finally:
+            captions.release.set()
+        # Wait for the whole collection attempt, including acceptance/cleanup,
+        # rather than just the synthetic provider returning or a fixed sleep.
+        assert captions.completed.wait(3)
+        with psycopg.connect(database_url(tmp_path), autocommit=True) as db:
+            if action == 'viewed':
+                # Deletion defers while the caption attempt owns a media path.
+                # Let its scheduled retry run after that attempt has released it.
+                clock.now += .2
+                wait_for(client, lambda: db.execute('SELECT id FROM items WHERE id=%s', (item,)).fetchone() is None)
+            rows = db.execute('SELECT content,filtered_content,summarized_content FROM items').fetchall()
+            assert all(late_text not in value for row in rows for value in row)
+            publication = db.execute('SELECT viewed FROM items WHERE id=%s', (item,)).fetchone()
+            subtitles = db.execute("SELECT status,storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'", (item,)).fetchall()
+            if action == 'viewed':
+                assert publication is None
+                assert db.execute('SELECT id FROM media_files WHERE publication_id=%s', (item,)).fetchall() == []
+            else:
+                assert publication == (0,)
+                assert len(subtitles) == 1
+                assert subtitles[0][0] != 'ready' and subtitles[0][1] is None
+        files = media_files()
+        assert all(late_text.encode() not in data for data in files.values())
+        assert files == ({} if action == 'viewed' else before_files)
         if action == 'viewed':
-            client.post('/api/v3/materials/' + item + '/viewed')
+            assert client.get('/api/v3/cards').json() == []
+            assert client.get('/api/v3/materials/' + item).status_code == 404
         elif action == 'stop':
-            client.post('/api/v3/stop')
+            assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
         else:
-            close_presence(client, 'reader')
-            clock.now += .15
-        captions.release.set()
-        time.sleep(.05)
-        assert not list((tmp_path / 'content').rglob('image-*'))
-        assert not any('Late captions' in p.read_text() for p in (tmp_path / 'content').rglob('*.md'))
+            assert late_text not in client.get('/api/v3/materials/' + item).text
 
 
 def test_owned_caption_worker_preserves_original_exception_in_debug(tmp_path, monkeypatch):
