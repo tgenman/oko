@@ -20,7 +20,7 @@ def test_card_and_opened_read_decode_each_saved_content_once(tmp_path, monkeypat
         row = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
         content = json.loads(row['content'])
         content['blocks'][0]['text'] = 'decoded-reading-linked'
-        linked = dict(row, id='linked', source_id='linked', external_id='linked', feed_id=None,
+        linked = dict(row, id='linked', source_id='linked', external_id='linked',
                       platform='other_web', content=json.dumps(content))
         fields = list(linked)
         store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [linked[f] for f in fields])
@@ -72,7 +72,7 @@ def test_derived_youtube_and_linked_content_does_not_mutate_saved_facts(tmp_path
             store.db.execute('UPDATE items SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', parent))
             (tmp_path/'media'/'captions').write_text('Subtitle body')
             store.db.execute("INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , storage_key , status ) VALUES ( 'captions' , %s , 'captions' , 'synthetic' , 'captions.txt' , 'media/captions' , 'ready' )", (parent,))
-            linked = dict(row, id='linked', source_id='linked', external_id='linked', feed_id=None, platform='other_web')
+            linked = dict(row, id='linked', source_id='linked', external_id='linked', platform='other_web')
             fields = list(linked)
             store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [linked[f] for f in fields])
             store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )', (parent, 'linked'))

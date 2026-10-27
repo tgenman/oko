@@ -255,7 +255,7 @@ def test_registered_list_batches_work_and_versions_in_the_write_transaction(tmp_
         statements=[]
         store.db.set_trace_callback(statements.append)
         with store.db:
-            store.db.executemany("INSERT INTO items(id,feed_id,published,platform,external_id) VALUES (%s,%s,%s,'other_web',%s)",[(f'item-{n}','demo',n,f'item-{n}') for n in range(count)])
+            store.db.executemany("INSERT INTO items(id,published,platform,external_id) VALUES (%s,%s,'other_web',%s)",[(f'item-{n}',n,f'item-{n}') for n in range(count)])
             store.db.executemany("INSERT INTO feed_publications VALUES ('demo',%s)",[(f'item-{n}',) for n in range(count)])
         store.db.set_trace_callback(None)
         # PostgreSQL batches round trips and publishes one list version per
@@ -312,14 +312,14 @@ def test_list_maintenance_failure_rolls_back_data_and_versions(tmp_path,monkeypa
             patch.setattr(store.db,'before_commit',fail)
             with pytest.raises(OSError,match='Synthetic commit failure'):
                 if explicit:
-                    store.db.execute("INSERT INTO items(id,feed_id,published) VALUES ('rejected','demo',1)")
+                    store.db.execute("INSERT INTO items(id,published) VALUES ('rejected',1)")
                     store.db.commit()
                 else:
                     with store.db:
-                        store.db.execute("INSERT INTO items(id,feed_id,published) VALUES ('rejected','demo',1)")
+                        store.db.execute("INSERT INTO items(id,published) VALUES ('rejected',1)")
         assert store.read_versions.ids(options)==[]
         assert store.read_versions.list_version(options)['version']==before
-    store.db.execute("INSERT INTO items(id,feed_id,published) VALUES ('uncommitted','demo',1)")
+    store.db.execute("INSERT INTO items(id,published) VALUES ('uncommitted',1)")
     store.db.close()
     reopened=Store(tmp_path,lambda _:None)
     assert reopened.read_versions.ids(options)==[]

@@ -96,19 +96,18 @@ class Publications:
              feed))
 
     def identify(self, item: str, ref: ExternalReference) -> None:
-        row = expect_row(self.store.db.execute('SELECT * FROM items WHERE id = %s', (item,)).fetchone())
+        row = expect_row(self.store.db.execute('SELECT * FROM items_read WHERE id = %s', (item,)).fetchone())
         self.store.db.execute('UPDATE items SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
             (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))
-        self.store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s ) ON CONFLICT DO NOTHING', (row['feed_id'], item))
 
     def changed_adapter(self, feed: str) -> None:
         """Invalidate old opaque descriptions atomically with a binding change."""
         db=self.store.db
         db.execute("UPDATE feeds SET cursor = '' WHERE id = %s",(feed,))
-        db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT id FROM items WHERE feed_id = %s AND viewed = 0 )",(feed,))
-        db.execute('DELETE FROM source_deleted WHERE item IN ( SELECT id FROM items WHERE feed_id = %s )',(feed,))
-        db.execute("UPDATE items SET status = 'pending_collection' WHERE feed_id = %s AND viewed = 0",(feed,))
+        db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT id FROM items_by_feed WHERE feed_id = %s AND viewed = 0 )",(feed,))
+        db.execute('DELETE FROM source_deleted WHERE item IN ( SELECT id FROM items_by_feed WHERE feed_id = %s )',(feed,))
+        db.execute("UPDATE items SET status = 'pending_collection' WHERE id IN (SELECT id FROM items_by_feed WHERE feed_id = %s AND viewed = 0)",(feed,))
         db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,))
 
     def plan(self, feed: str, publications: list[Publication]) -> dict[str, DiscoveryProjection]:
@@ -121,18 +120,18 @@ class Publications:
             if publication.id in plans:
                 continue
             source_id = feed+':'+publication.id
-            existing = self.store.db.execute('SELECT id , source_id FROM items WHERE ( platform = %s AND external_id = %s ) OR source_id = %s',
+            existing = self.store.db.execute('SELECT id , source_id FROM items_read WHERE ( platform = %s AND external_id = %s ) OR source_id = %s',
                 (ref.key.platform.value, ref.key.external_id, source_id)).fetchall()
             if not existing and publication.members:
                 placeholders = ','.join('%s' for _ in publication.members)
-                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM items i CROSS JOIN oko_json_each ( i . members ) m WHERE i . feed_id = %s AND CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, *publication.members)).fetchall()
+                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM items_by_feed i CROSS JOIN oko_json_each ( i . members ) m WHERE i . feed_id = %s AND CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, *publication.members)).fetchall()
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:
                 continue
             item=existing[0]['id'] if existing else str(uuid4())
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
-            current=self.store.db.execute('SELECT viewed , members FROM items WHERE id = %s',(item,)).fetchone() if existing else None
+            current=self.store.db.execute('SELECT viewed , members FROM items_read WHERE id = %s',(item,)).fetchone() if existing else None
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
@@ -152,7 +151,7 @@ class Publications:
         header=reading_header(material)
         if material.adapter_content and 'blocks' in material.adapter_content.content:
             return self._prepare_adapter(item,material,header)
-        row=self.store.db.execute('SELECT content FROM items WHERE id = %s',(item,)).fetchone()
+        row=self.store.db.execute('SELECT content FROM items_read WHERE id = %s',(item,)).fetchone()
         if row and row[0]!='{}':
             content=json.loads(row[0])
             content['extra'].update(_reader=header,_collection_reason=material.reason)
@@ -174,7 +173,7 @@ class Publications:
         identities={}
         known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))}
         youtube=content.get('extra',{}).get('youtube')
-        old_content=self.store.db.execute('SELECT content FROM items WHERE id = %s',(item,)).fetchone() if youtube is not None else None
+        old_content=self.store.db.execute('SELECT content FROM items_read WHERE id = %s',(item,)).fetchone() if youtube is not None else None
         old_youtube=json.loads(old_content[0]).get('extra',{}).get('youtube',{}) if old_content else {}
         for ref in value.media:
             previous=known.get(ref.key)
@@ -244,7 +243,7 @@ class Publications:
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
-        old = expect_row(store.db.execute('SELECT content , platform FROM items WHERE id = %s', (item,)).fetchone())
+        old = expect_row(store.db.execute('SELECT content , platform FROM items_read WHERE id = %s', (item,)).fetchone())
         previous = json.loads(old['content'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         if 'youtube' in content.get('extra',{}):
@@ -287,7 +286,7 @@ class Publications:
         if not same:
             store.db.execute("UPDATE items SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' WHERE id = %s", (item,))
         elif previous:
-            filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items WHERE id = %s',(item,)).fetchone())
+            filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(filtered_row[0])
             if filtered:
                 result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
@@ -313,7 +312,7 @@ class Publications:
 
     def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
         """Publish a validated result and its provenance in the caller's transaction."""
-        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id = %s',(item,)).fetchone())
+        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone())
         content=publication_input.content(self.store,item)
         metadata=json.loads(row[0])
         operation='filter' if kind=='filter' else 'summary'
@@ -333,12 +332,12 @@ class Publications:
     def complete_empty(self, item: str, kind: str, signature: str) -> None:
         result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
         self.accept_result(item,kind,signature,result,None)
-        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items WHERE id = %s',(item,)).fetchone())
+        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone())
         metadata=json.loads(row[0])
         metadata['filter' if kind=='filter' else 'summary']['reason']='no_input'
         self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
         if kind=='filter':
-            row=expect_row(self.store.db.execute('SELECT filtered_content FROM items WHERE id = %s',(item,)).fetchone())
+            row=expect_row(self.store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(row[0])
             filtered['blocks']=[]
             self.store.db.execute('UPDATE items SET filtered_content = %s WHERE id = %s',(json.dumps(filtered,ensure_ascii=False),item))

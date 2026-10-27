@@ -9,4 +9,6 @@ MIGRATIONS = (
     Migration(2, 'functions', (Path(__file__).parent / 'postgres' / '002-functions.sql').read_text()),
     Migration(3, 'projections', (Path(__file__).parent / 'postgres' / '003-projections.sql').read_text()),
     Migration(4, 'reading-indexes', (Path(__file__).parent / 'postgres' / '004-reading-indexes.sql').read_text()),
+    Migration(5, 'remove-telegram-source-claims', (Path(__file__).parent / 'postgres' / '005-remove-telegram-source-claims.sql').read_text()),
+    Migration(6, 'publication-memberships', (Path(__file__).parent / 'postgres' / '006-publication-memberships.sql').read_text()),
 )

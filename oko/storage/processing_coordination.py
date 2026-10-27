@@ -49,7 +49,7 @@ class ProcessingState:
         self.recovering = True
         if seed:
             with self.store.db:
-                self.store.db.execute('INSERT INTO processing_dirty SELECT id FROM items WHERE viewed = 0 ON CONFLICT DO NOTHING')
+                self.store.db.execute('INSERT INTO processing_dirty SELECT id FROM items_read WHERE viewed = 0 ON CONFLICT DO NOTHING')
             yield
         while True:
             self._queue_repairs()
@@ -59,10 +59,10 @@ class ProcessingState:
             self.reconcile_item(row[0])
             yield
         with self.store.db:
-            self.store.db.execute('DELETE FROM processing_stage_dirty WHERE NOT EXISTS ( SELECT 1 FROM items WHERE id = processing_stage_dirty . item AND viewed = 0 )')
+            self.store.db.execute('DELETE FROM processing_stage_dirty WHERE NOT EXISTS ( SELECT 1 FROM items_read WHERE id = processing_stage_dirty . item AND viewed = 0 )')
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
-        query = 'SELECT DISTINCT i . id FROM items i JOIN reading_memberships m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
+        query = 'SELECT DISTINCT i . id FROM items_read i JOIN reading_memberships m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
             query += ' AND ' + ('f . id = %s' if scope == 'feed' else 'f . folder_id = %s')
@@ -76,7 +76,7 @@ class ProcessingState:
     def pending(self, *, stages: bool = False) -> bool:
         query = 'SELECT 1 FROM processing_dirty'
         if stages:
-            query += ''' UNION ALL SELECT 1 FROM processing_stage_dirty d JOIN items i ON i.id=d.item
+            query += ''' UNION ALL SELECT 1 FROM processing_stage_dirty d JOIN items_read i ON i.id=d.item
                 WHERE d.kind IN ('filter','theses') AND i.viewed=0 AND i.platform IS NOT NULL
                 AND i.feed_id IS NOT NULL AND i.complete=1'''
         return bool(self._repairs or self.store.db.execute(query+' LIMIT 1').fetchone())
@@ -87,7 +87,7 @@ class ProcessingState:
         if self.recovering or self.background:
             return
         with self.store.db:
-            self.store.db.execute('DELETE FROM processing_stage_dirty WHERE NOT EXISTS ( SELECT 1 FROM items WHERE id = processing_stage_dirty . item AND viewed = 0 )')
+            self.store.db.execute('DELETE FROM processing_stage_dirty WHERE NOT EXISTS ( SELECT 1 FROM items_read WHERE id = processing_stage_dirty . item AND viewed = 0 )')
         items = [row[0] for row in self.store.db.execute('SELECT item FROM processing_dirty')]
         for item in items:
             self.reconcile_item(item)

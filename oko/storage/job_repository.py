@@ -103,7 +103,7 @@ class JobRepository:
     def refresh_feed(self, feed: str) -> None:
         """Admit one manual refresh without restarting work already in progress."""
         with self.store.db:
-            for row in self.store.db.execute('SELECT DISTINCT i . id FROM items i JOIN media_files m ON m . publication_id = i . id WHERE i . feed_id = %s AND i . viewed = 0', (feed,)).fetchall():
+            for row in self.store.db.execute('SELECT DISTINCT i . id FROM items_by_feed i JOIN media_files m ON m . publication_id = i . id WHERE i . feed_id = %s AND i . viewed = 0', (feed,)).fetchall():
                 self.retry_media(row['id'],revalidate_ready=False)
         discovery = '' if feed == 'demo' else feed
         active = self.store.db.execute("SELECT 1 FROM jobs WHERE kind = 'discover' AND item = %s AND ( status = 'running' OR ( status = 'pending' AND error IS NULL AND next <= %s ) )", (discovery,self.store.clock())).fetchone()
@@ -114,7 +114,7 @@ class JobRepository:
             if not active:
                 self.enqueue_discovery(feed)
                 self.store.db.execute("UPDATE jobs SET status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running'", (self.store.wall_clock(),self.store.wall_clock(),discovery))
-            for row in self.store.db.execute("SELECT i . id , i . members , j . error , j . status FROM items i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i . feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
+            for row in self.store.db.execute("SELECT i . id , i . members , j . error , j . status FROM items_by_feed i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i . feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
                 material = self.store.material(row['id'])
                 unavailable = self.store.db.execute('SELECT 1 FROM source_deleted WHERE item = %s', (row['id'],)).fetchone()
                 manifest=SourceManifest.model_validate_json(json.dumps(self.store.original(row['id'])[0]['source_manifest'])) if material and material.get('complete') and self.store.original(row['id'])[0].get('source_manifest') else None
@@ -125,7 +125,7 @@ class JobRepository:
                 if row['error'] or unavailable or not material or not material.get('full',False):
                     self.store.db.execute("UPDATE jobs SET manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR item IN ( SELECT item FROM source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
             for kind in ('filter','theses'):
-                for row in self.store.db.execute('SELECT j . item FROM jobs j JOIN items i ON i . id = j . item WHERE i . feed_id = %s AND j . kind = %s AND j . error IS NOT NULL',(feed,kind)).fetchall():
+                for row in self.store.db.execute('SELECT j . item FROM jobs j JOIN items_by_feed i ON i . id = j . item WHERE i . feed_id = %s AND j . kind = %s AND j . error IS NOT NULL',(feed,kind)).fetchall():
                     self.retry_processing(row[0],kind)
 
 
@@ -156,7 +156,7 @@ class JobRepository:
         if processing_kind is not None:
             query += " AND kind=" + ("'filter'" if processing_kind=='filter' else "'theses'")
         if ai_only:
-            query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items i WHERE i.id=jobs.item AND i.platform IS NOT NULL
+            query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items_read i WHERE i.id=jobs.item AND i.platform IS NOT NULL
                 AND i.status!=CASE jobs.kind WHEN 'filter' THEN 'pending_filtering' ELSE 'pending_summary' END)"""
             if self.store.processing.background:
                 query += """ AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=jobs.item)
@@ -170,10 +170,10 @@ class JobRepository:
             dependency_keys=','.join('%s' for _ in dependencies) or "''"
             # Follow only dependencies of the requested roots.
             query += f""" AND kind='download_media' AND item IN (
-                SELECT m.id FROM items i JOIN media_files m ON m.publication_id=i.id
+                SELECT m.id FROM items_by_feed i JOIN media_files m ON m.publication_id=i.id
                     WHERE i.viewed=0 AND i.feed_id IN ({placeholders})
-                UNION SELECT m.id FROM items root JOIN publication_links l ON l.source_publication_id=root.id
-                    JOIN items i ON i.id=l.target_publication_id JOIN media_files m ON m.publication_id=i.id
+                UNION SELECT m.id FROM items_by_feed root JOIN publication_links l ON l.source_publication_id=root.id
+                    JOIN items_by_feed i ON i.id=l.target_publication_id JOIN media_files m ON m.publication_id=i.id
                     WHERE root.viewed=0 AND root.feed_id IN ({dependency_keys}) AND i.viewed=0 AND i.feed_id IS NULL)"""
         else:
             available = feeds if feeds is not None else [source_feed]
@@ -184,12 +184,14 @@ class JobRepository:
                 SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('discover','read') AND item IN ({placeholders})
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind='fetch' AND item IN (
-                    SELECT own.id FROM items own WHERE own.viewed=0 AND own.feed_id IN ({placeholders})
-                    UNION SELECT i.id FROM items root JOIN publication_links l ON l.source_publication_id=root.id
-                        JOIN items i ON i.id=l.target_publication_id
-                        WHERE root.viewed=0 AND root.feed_id IN ({dependency_keys}) AND i.feed_id IS NULL AND i.viewed=0))"""
+                    SELECT own.id FROM feed_publications owner JOIN items own ON own.id=owner.publication_id
+                        WHERE owner.is_primary AND owner.feed_id IN ({placeholders}) AND own.viewed=0
+                    UNION SELECT i.id FROM feed_publications owner JOIN items root ON root.id=owner.publication_id
+                        JOIN publication_links l ON l.source_publication_id=root.id JOIN items i ON i.id=l.target_publication_id
+                        WHERE owner.is_primary AND owner.feed_id IN ({dependency_keys}) AND root.viewed=0 AND i.viewed=0
+                        AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary)))"""
         if media_only:
-            subtitles="SELECT 1 FROM media_files m JOIN items i ON i . id = m . publication_id JOIN oko_json_each ( i . content , '$.blocks' ) b ON oko_json_extract ( b . value , '$.media_id' ) = m . id WHERE m . id = jobs . item AND i . platform = 'youtube' AND oko_json_extract ( b . value , '$.role' ) = 'subtitles'"
+            subtitles="SELECT 1 FROM media_files m JOIN items_read i ON i . id = m . publication_id JOIN oko_json_each ( i . content , '$.blocks' ) b ON oko_json_extract ( b . value , '$.media_id' ) = m . id WHERE m . id = jobs . item AND i . platform = 'youtube' AND oko_json_extract ( b . value , '$.role' ) = 'subtitles'"
             query += ' AND '+('EXISTS' if captions_only else 'NOT EXISTS')+' ('+subtitles+')'
         if not include_deletions:
             query += " AND kind NOT IN ('delete','feed-delete')"
@@ -198,7 +200,7 @@ class JobRepository:
         # fetch without an item is never dispatchable; valid work uses the index.
         query += f""" AND NOT (kind='fetch' AND
             (jobs.item IS NULL OR EXISTS ({blocked_history} AND m.item=jobs.item OFFSET 0)))"""
-        query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.item IN (SELECT id FROM items WHERE feed_id=jobs.item)))"
+        query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.payload::jsonb->>'cleanup_feed'=jobs.item))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *available, *dependencies) if media_only else (now, *('' if f == 'demo' else f for f in available), *available, *dependencies)
         row = self.store.db.execute(query, params).fetchone()
@@ -213,12 +215,12 @@ class JobRepository:
             WHERE own.id=m.publication_id AND own.platform='youtube'
                 AND block->>'media_id'=m.id AND block->>'role'='subtitles')"""
         query = """WITH selected AS MATERIALIZED (
-            SELECT id FROM items WHERE viewed=0 AND feed_id=ANY(%s)
-            UNION SELECT article.id FROM items root
-            JOIN publication_links link ON link.source_publication_id=root.id
-            JOIN items article ON article.id=link.target_publication_id
-            WHERE root.viewed=0 AND root.feed_id=ANY(%s)
-                AND article.viewed=0 AND article.feed_id IS NULL)
+            SELECT i.id FROM feed_publications owner JOIN items i ON i.id=owner.publication_id
+            WHERE owner.is_primary AND owner.feed_id=ANY(%s) AND i.viewed=0
+            UNION SELECT article.id FROM feed_publications owner JOIN items root ON root.id=owner.publication_id
+            JOIN publication_links link ON link.source_publication_id=root.id JOIN items article ON article.id=link.target_publication_id
+            WHERE owner.is_primary AND owner.feed_id=ANY(%s) AND root.viewed=0 AND article.viewed=0
+                AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=article.id AND m.is_primary))
             SELECT candidate.* FROM selected
             CROSS JOIN LATERAL (
                 SELECT id,publication_id FROM media_files
@@ -261,7 +263,7 @@ class JobRepository:
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
         with self.store.db:
-            self.store.db.execute("UPDATE jobs SET next = %s WHERE status = 'pending' AND problem_code LIKE '%%:FloodWaitError' AND ( item = %s OR item IN ( SELECT id FROM items WHERE feed_id = %s ) )", (deadline, feed, feed))
+            self.store.db.execute("UPDATE jobs SET next = %s WHERE status = 'pending' AND problem_code LIKE '%%:FloodWaitError' AND ( item = %s OR item IN ( SELECT id FROM items_by_feed WHERE feed_id = %s ) )", (deadline, feed, feed))
 
 
     def interrupted(self, feeds: set[str] | None = None) -> None:
@@ -269,7 +271,7 @@ class JobRepository:
         params: tuple[str, ...] = ()
         if feeds is not None:
             placeholders = ','.join('%s' for _ in feeds) or "''"
-            selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items WHERE feed_id IN ({placeholders})) OR item IN (SELECT m.id FROM media_files m JOIN items i ON i.id=m.publication_id WHERE i.feed_id IN ({placeholders})))"
+            selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items_by_feed WHERE feed_id IN ({placeholders})) OR item IN (SELECT m.id FROM media_files m JOIN items_by_feed i ON i.id=m.publication_id WHERE i.feed_id IN ({placeholders})))"
             params = (*feeds, *feeds, *feeds)
         with self.store.db:
             # A configuration cancellation is not a failed discovery request.
@@ -303,16 +305,16 @@ class JobRepository:
 
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
         if not want_captions:
-            rows=self.store.db.execute("SELECT DISTINCT i . id , m . status FROM items i JOIN media_files m ON m . publication_id = i . id WHERE i . feed_id = %s AND i . viewed = 0 AND m . resource_key = 'youtube:subtitles'",(feed,)).fetchall()
+            rows=self.store.db.execute("SELECT DISTINCT i . id , m . status FROM items_by_feed i JOIN media_files m ON m . publication_id = i . id WHERE i . feed_id = %s AND i . viewed = 0 AND m . resource_key = 'youtube:subtitles'",(feed,)).fetchall()
             with self.store.db:
-                self.store.db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT m . id FROM media_files m JOIN items i ON i . id = m . publication_id WHERE i . feed_id = %s AND m . resource_key = 'youtube:subtitles' )",(feed,))
+                self.store.db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT m . id FROM media_files m JOIN items_by_feed i ON i . id = m . publication_id WHERE i . feed_id = %s AND m . resource_key = 'youtube:subtitles' )",(feed,))
                 for row in rows:
                     if row['status']=='pending_download':
                         self.enqueue_fetch(row['id'])
             return
         # This runs in the reader loop. Admission needs only the saved caption
         # state, not a reader material with filters, theses and provenance.
-        rows = self.store.db.execute("SELECT id , platform , content FROM items WHERE feed_id = %s AND viewed = 0 AND complete = 1 AND NOT EXISTS ( SELECT 1 FROM jobs WHERE kind = 'fetch' AND item = items . id AND status IN ( 'pending' , 'running' ) )", (feed,)).fetchall()
+        rows = self.store.db.execute("SELECT id , platform , content FROM items_by_feed items WHERE feed_id = %s AND viewed = 0 AND complete = 1 AND NOT EXISTS ( SELECT 1 FROM jobs WHERE kind = 'fetch' AND item = items . id AND status IN ( 'pending' , 'running' ) )", (feed,)).fetchall()
         for row in rows:
             try:
                 header=json.loads(row['content']).get('extra',{}).get('_reader',{})
@@ -359,14 +361,14 @@ class JobRepository:
                 with db:
                     db.execute('DELETE FROM telegram_read_dirty WHERE feed = %s', (feed,))
                 if config['auto_read']:
-                    identities = [row[0] for row in db.execute('SELECT id FROM items WHERE feed_id = %s AND complete = 1 AND viewed = 0', (feed,))]
+                    identities = [row[0] for row in db.execute('SELECT id FROM items_by_feed WHERE feed_id = %s AND complete = 1 AND viewed = 0', (feed,))]
                     size = 8 if self.store.processing.background else 256
                     for offset in range(0,len(identities),size):
                         if self.store.subscriptions.source_revision() != revision:
                             return
                         batch = identities[offset:offset+size]
                         marks = ','.join('%s' for _ in batch)
-                        rows = list(db.execute(f'SELECT id , members FROM items WHERE feed_id = %s AND complete = 1 AND viewed = 0 AND id IN ( {marks} )', (feed,*batch)))
+                        rows = list(db.execute(f'SELECT id , members FROM items_by_feed WHERE feed_id = %s AND complete = 1 AND viewed = 0 AND id IN ( {marks} )', (feed,*batch)))
                         members_by_item = {row['id']:json.loads(row['members']) for row in rows}
                         members = sorted({member for values in members_by_item.values() for member in values})
                         eligible: set[int] = set()
@@ -470,7 +472,7 @@ class JobRepository:
     def apply_collection(self, effects: CollectionEffects) -> None:
         db=self.store.db
         for item,changed in effects.fetch.items():
-            db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE kind = 'delete' AND item = %s",(item,))
+            db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , payload = (payload::jsonb - 'cleanup_feed')::text WHERE kind = 'delete' AND item = %s",(item,))
             if changed:
                 self.enqueue_fetch(item)
             else:
@@ -484,14 +486,14 @@ class JobRepository:
     def reconcile_cleanup(self) -> None:
         db=self.store.db
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) AND item NOT IN ( SELECT id FROM media_files )")
-        db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind != 'delete' AND status != 'cancelled' AND item IN ( SELECT id FROM items WHERE viewed = 1 )")
-        db.execute("INSERT INTO jobs ( kind , item ) SELECT 'delete' , id FROM items WHERE viewed = 1 ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = 0 WHERE jobs . status = 'cancelled'")
+        db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind != 'delete' AND status != 'cancelled' AND item IN ( SELECT id FROM items_read WHERE viewed = 1 )")
+        db.execute("INSERT INTO jobs ( kind , item ) SELECT 'delete' , id FROM items_read WHERE viewed = 1 ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = 0 WHERE jobs . status = 'cancelled'")
         db.execute("INSERT INTO jobs ( kind , item ) SELECT 'feed-delete' , id FROM feeds WHERE connection = 'deleting' ON CONFLICT DO NOTHING")
 
     def change_adapter(self, feed: str) -> None:
         db=self.store.db
-        db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m . id FROM media_files m JOIN items i ON i . id = m . publication_id WHERE i . feed_id = %s )",(feed,))
-        db.execute("INSERT INTO jobs ( kind , item ) SELECT 'fetch' , id FROM items WHERE feed_id = %s AND viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
+        db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m . id FROM media_files m JOIN items_by_feed i ON i . id = m . publication_id WHERE i . feed_id = %s )",(feed,))
+        db.execute("INSERT INTO jobs ( kind , item ) SELECT 'fetch' , id FROM items_by_feed WHERE feed_id = %s AND viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL WHERE kind = 'read' AND item = %s",(feed,))
         self.enqueue_discovery(feed)
 
@@ -502,6 +504,9 @@ class JobRepository:
             db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE kind = 'download_media' AND status = 'running' AND item IN ( SELECT id FROM media_files WHERE publication_id = %s )",(item,))
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE item = %s AND kind NOT IN ( 'delete' , 'feed-delete' )",(feed,))
         self.reconcile_cleanup()
+        # Retain cleanup ownership independently of reading membership. A
+        # publication can lose its last membership before its files are removed.
+        # The owner is recorded when the last membership is removed.
 
     def schedule_media(self, item: str) -> None:
         db = self.store.db
@@ -514,7 +519,7 @@ class JobRepository:
     def retry_media(self, item: str, *, revalidate_ready: bool = True) -> None:
         """Manual retry preserves source deadlines and the accumulated backoff."""
         store = self.store
-        owner=store.db.execute('SELECT platform , feed_id FROM items WHERE id = %s',(item,)).fetchone()
+        owner=store.db.execute('SELECT platform , feed_id FROM items_read WHERE id = %s',(item,)).fetchone()
         captions_allowed=not owner or owner['platform']!='youtube' or store.subscriptions.youtube_theses(owner['feed_id'])
         rows = store.db.execute("SELECT j . * , m . resource_key , m . status AS media_status FROM jobs j JOIN media_files m ON m . id = j . item WHERE m . publication_id = %s AND j . kind = 'download_media' AND ( j . status IN ( 'failed' , 'unavailable' , 'pending' ) OR j . status = 'done' AND m . status = 'unavailable' )", (item,)).fetchall()
         for row in rows:
@@ -526,7 +531,7 @@ class JobRepository:
             if not waiting:
                 store.db.execute("UPDATE media_files SET status = 'pending_download' , reason = '' WHERE id = %s AND status != 'ready'", (row['item'],))
 
-        youtube_row=store.db.execute("SELECT content FROM items WHERE id = %s AND platform = 'youtube'",(item,)).fetchone()
+        youtube_row=store.db.execute("SELECT content FROM items_read WHERE id = %s AND platform = 'youtube'",(item,)).fetchone()
         if youtube_row and captions_allowed:
             content=json.loads(youtube_row['content'])
             subtitles=youtube_media.subtitle_id(content)
@@ -546,7 +551,7 @@ class JobRepository:
 
     def revalidate_media(self, identity: str, *, manual: bool = True) -> None:
         store=self.store
-        row=store.db.execute("SELECT m . resource_key , i . platform , i . feed_id FROM media_files m JOIN items i ON i . id = m . publication_id WHERE m . id = %s AND m . status = 'ready' AND i . viewed = 0",(identity,)).fetchone()
+        row=store.db.execute("SELECT m . resource_key , i . platform , i . feed_id FROM media_files m JOIN items_read i ON i . id = m . publication_id WHERE m . id = %s AND m . status = 'ready' AND i . viewed = 0",(identity,)).fetchone()
         if row is None or row['resource_key']=='youtube:subtitles' and not store.subscriptions.youtube_theses(row['feed_id']):
             return
         store.db.execute("INSERT INTO jobs ( kind , item , manual_once ) VALUES ( 'download_media' , %s , 1 ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , manual_once = 1 , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status IN ( 'done' , 'cancelled' ) OR ( %s = 1 AND jobs . status IN ( 'failed' , 'unavailable' ) )",
@@ -555,14 +560,16 @@ class JobRepository:
 
     def finish_feed_deletion(self, job: Job) -> None:
         feed = job.item
-        if self.store.db.execute("SELECT 1 FROM jobs WHERE kind = 'delete' AND status != 'done' AND item IN ( SELECT id FROM items WHERE feed_id = %s )", (feed,)).fetchone():
+        if self.store.db.execute("SELECT 1 FROM jobs WHERE kind='delete' AND status!='done' AND payload::jsonb->>'cleanup_feed' = %s", (feed,)).fetchone():
             self.retry(job, 0, 'Ожидание очистки файлов', .1)
             return
         self.store.fault('before_feed_claim_release')
         with self.store.db:
-            self.store.db.execute('DELETE FROM execution_settings WHERE job IN ( SELECT id FROM jobs WHERE item = %s OR item IN ( SELECT id FROM items WHERE feed_id = %s ) )', (feed, feed))
-            self.store.db.execute('DELETE FROM jobs WHERE item = %s OR item IN ( SELECT id FROM items WHERE feed_id = %s )', (feed, feed))
-            self.store.db.execute('DELETE FROM items WHERE feed_id = %s', (feed,))
+            owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
+            self.store.db.execute(f'DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item = %s OR item IN ({owned}))', (feed, feed))
+            self.store.db.execute(f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
+            self.store.db.execute(f'DELETE FROM items WHERE id IN ({owned})', (feed,))
+            self.store.db.execute("DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
             for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
                 self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,))
             self.store.subscriptions.clear_settings('feed', feed)
@@ -618,7 +625,7 @@ class JobRepository:
         self.store.db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END WHERE id = %s AND generation = %s AND status = 'running'",(self.store.wall_clock(),self.store.wall_clock(),job.id,job.generation))
 
     def invalidate_processing(self) -> None:
-        self.store.db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND oko_json_extract ( payload , '$.input_revision' ) IS DISTINCT FROM ( SELECT oko_json_extract ( i . processing_metadata , '$._revision' ) FROM items i WHERE i . id = jobs . item )",
+        self.store.db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND oko_json_extract ( payload , '$.input_revision' ) IS DISTINCT FROM ( SELECT oko_json_extract ( i . processing_metadata , '$._revision' ) FROM items_read i WHERE i . id = jobs . item )",
             (self.store.wall_clock(),)*4)
 
     @contextmanager

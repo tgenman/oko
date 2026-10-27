@@ -75,20 +75,26 @@ def test_selected_scope_sql_does_not_grow_with_other_materials(tmp_path):
 
 def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     store = Store(tmp_path, lambda _: None)
+    store.subscriptions.ensure_demo()
     # Current archive fixture: only 100 records are still unviewed.
     with store.db:
-        store.db.executemany("INSERT INTO items ( id , published , viewed , feed_id , platform , external_id ) VALUES ( %s , %s , %s , %s , 'other_web' , %s )",
-            [(f'archive-{n:05}', n, int(n >= 100), 'demo',f'archive-{n:05}') for n in range(20000)])
+        store.db.executemany("INSERT INTO items ( id , published , viewed , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",
+            [(f'archive-{n:05}', n, int(n >= 100), f'archive-{n:05}') for n in range(20000)])
+        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('demo',%s)", [(f'archive-{n:05}',) for n in range(20000)])
         assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='items_unviewed_order'").fetchone()
         store.db._db.execute('ANALYZE items')
     store.db.close()
     for _ in range(2):
         store = Store(tmp_path, lambda _: None)
         with measure_reads(store.db) as work:
-            rows = store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall()
+            rows = store.db.execute('SELECT id,feed_id FROM items_read WHERE viewed=0 ORDER BY published DESC').fetchall()
         assert len(rows) == 100
         assert rows[0]['id'] == 'archive-00099'
         assert work.rows < 2000, work
+        with measure_reads(store.db) as feed_work:
+            feed_rows = store.db.execute("SELECT id FROM items_by_feed WHERE feed_id='demo' AND viewed=0 ORDER BY published DESC").fetchall()
+        assert len(feed_rows) == 100
+        assert feed_work.rows < 2000, feed_work
         # Include transactional entity versions and navigation counts, as well as
         # the index and processing markers; this fixed cost does not scan the archive.
         with store.db:

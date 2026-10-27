@@ -23,13 +23,14 @@ def archive_evidence():
     with TemporaryDirectory() as d:
      s=Store(Path(d),lambda _:None);s.subscriptions.ensure_demo()
      with s.db:
-      s.db.executemany('INSERT INTO items ( id , feed_id , published , viewed ) VALUES ( %s , %s , %s , %s )',[(f'archive-{n}','demo',n,int(n>=100)) for n in range(20000)])
+      s.db.executemany('INSERT INTO items ( id , published , viewed ) VALUES ( %s , %s , %s )',[(f'archive-{n}',n,int(n>=100)) for n in range(20000)])
+      s.db.executemany("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('demo',%s)", [(f'archive-{n}',) for n in range(20000)])
       s.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",[(f'archive-{n}',) for n in range(20000)])
       s.db.executemany("INSERT INTO history_members ( feed , item ) VALUES ( 'demo' , %s )",[(f'archive-{n}',) for n in range(20000)])
       s.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','pending')")
       analyze(s.db)
      operations={
-      'unviewed':('SELECT id,feed_id FROM items WHERE viewed=0 ORDER BY published DESC',()),
+      'unviewed':('SELECT id,feed_id FROM items_read WHERE viewed=0 ORDER BY published DESC',()),
       'history_point':('SELECT * FROM history_members WHERE item=%s',('archive-100',)),
       'job_point':('SELECT * FROM jobs WHERE item=%s',('archive-100',)),
       'pending':("SELECT id FROM jobs WHERE status='pending' AND next<=%s ORDER BY next,id LIMIT 1",(0,))}

@@ -141,7 +141,7 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
         for n in range(linked_count):
             identity = f'{n+1:032x}'
             children.append(identity)
-            row = dict(template, id=identity, source_id=identity, external_id=identity, feed_id=None)
+            row = dict(template, id=identity, source_id=identity, external_id=identity)
             store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
             store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )', (parent, identity))
         signature = store.processing.theses.signature(parent)
