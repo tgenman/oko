@@ -208,7 +208,9 @@ test('newest arrivals are detected when an unseen card disappears at the same ti
 });
 
 test('failed newest probe does not cache an unaccepted oldest page',{timeout:90000},async t=>{
- const r=await productionReader(t,{collection:false,library:{perFeed:26,active:false}});
+ const r=await productionReader(t);
+ await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ await addSources(r.api,[['https://a.test/feed','Synthetic','Folder']]);
  let failProbe=false;let failed=false;const oldestEtags:(string|undefined)[]=[];
  await r.page.route('**/api/v3/cards?*',async route=>{
   const query=new URL(route.request().url()).searchParams;
@@ -220,11 +222,11 @@ test('failed newest probe does not cache an unaccepted oldest page',{timeout:900
   await route.continue().catch(()=>{});
  });
  await r.page.goto(r.origin+'/#token='+r.token);
- await expect(r.page.locator('#cards [data-card]')).toHaveCount(40);
+ await expect(r.page.locator('#cards [data-card]')).toHaveCount(1);
  failProbe=true;
  await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('oldest');
  await expect.poll(()=>failed,{timeout:15000}).toBe(true);
  await expect.poll(()=>oldestEtags.length,{timeout:15000}).toBeGreaterThan(1);
  expect(oldestEtags[0]).toBeUndefined();expect(oldestEtags[1]).toBeUndefined();
- await expect(r.page.locator('#cards [data-card]')).toHaveCount(40);
+ await expect(r.page.locator('#cards [data-card]')).toHaveCount(1);
 });
