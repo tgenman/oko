@@ -154,7 +154,7 @@ def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
         assert (material['content']['completeness']['state']=='complete') is False
         assert 'Available text' in material['content']['text'] and 'http://127.0.0.1/private' in material['content']['text']
         assert '<iframe' not in material['content']['text']
-        assert 'Внешнее встраивание' in material['content']['completeness'].get('message','')
+        assert 'External embed not saved locally' in material['content']['completeness'].get('message','')
         assert '127.0.0.1' not in calls
 
 
