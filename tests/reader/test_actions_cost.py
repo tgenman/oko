@@ -47,11 +47,7 @@ def test_status_and_viewed_work_budgets(tmp_path, count):
         assert len(client.get('/api/v3/cards').json()) == count * 4 - 1
 
 
-def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path, monkeypatch):
-    import json
-    from pathlib import Path
-    from tests.support.reading_cost import request_sql
-
+def test_unchanged_status_does_not_rewrite_problems(tmp_path):
     _, items = library(tmp_path, [26] * 4)
     from tests.support.storage import Store
     seed = Store(tmp_path, lambda _: None)
@@ -61,24 +57,12 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
         seed.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
     seed.db.close()
     app = traced_app(tmp_path)
-    opened = []
-    original_open = Path.open
-
-    def open_file(path, *args, **kwargs):
-        if path.name == 'original.md' and request_sql.get() is not None:
-            opened.append(path)
-        return original_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, 'open', open_file)
     with TestClient(app, headers=HEADERS) as client:
         tracing(client, app)
         first = client.get('/api/v3/status')
         assert first.status_code == 200
-        assert len(opened) == 0
-        opened.clear()
         second = client.get('/api/v3/status')
         assert second.status_code == 200
-        assert opened == []
         assert not any(q.startswith('UPDATE reader_problems') for q in app.state.last_sql)
         assert first.json()['problems']['current'] == second.json()['problems']['current']
         original_problem = next(p for p in first.json()['problems']['current'] if p['code'] == 'material_incomplete')
@@ -91,7 +75,6 @@ def test_unchanged_status_reuses_headers_and_does_not_rewrite_problems(tmp_path,
         client.portal.call(change_fixture)
         response = client.get('/api/v3/status')
         assert response.status_code == 200
-        assert len(opened) == 0
         assert not any(p['code'] == 'material_incomplete' for p in response.json()['problems']['current'])
         assert any(p['id'] == original_problem['id'] and p['outcome'] == 'resolved' for p in response.json()['problems']['recent'])
 

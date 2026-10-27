@@ -16,11 +16,10 @@ def test_initial_history_retry_partial_and_terminal_outcomes_survive_restart(tmp
         return TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS)
     with reader() as client:
         feed = add(client, verify(client, 'https://source.test/feed')).json()
-        for _ in range(150):
+        def completed_history():
             history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress'].get('retrying') == 1 and history['progress'].get('unavailable') == 1:
-                break
-            time.sleep(.02)
+            return history if history['state'] == 'complete' else None
+        history = wait_for(client, completed_history)
         assert history['progress']['retrying'] == 0
         assert history['progress']['unavailable'] == 0
         assert history['progress']['loaded'] == 4

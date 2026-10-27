@@ -193,16 +193,6 @@ def scalar_boolean(request: Request, name: str, *, default: bool = False) -> boo
     return values[0] == 'true'
 
 
-def positive_version(value: str) -> int:
-    # Bound before int conversion, including Python's very-large-integer limit.
-    if not value.isascii() or not value.isdecimal() or value.startswith('0') or len(value) > 16:
-        raise ApiError(422, invalid('path', 'number'))
-    number = int(value)
-    if number > 9007199254740991:
-        raise ApiError(422, invalid('path', 'number'))
-    return number
-
-
 def no_query(request: Request) -> None:
     if request.query_params:
         raise ApiError(422, invalid('query', next(iter(request.query_params))))

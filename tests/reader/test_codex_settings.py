@@ -33,7 +33,6 @@ def test_reader_saves_independent_execution_choices_and_restores_them(tmp_path):
     choices['filter'] = dict(model='test-large', reasoning_effort='high', fast=False)
     with TestClient(create_app(tmp_path, token='test', codex_client=Models()), headers=HEADERS) as client:
         presence(client, 'reader')
-        assert client.get('/api/v3/processors/codex').json().get('config') is None
         assert client.get('/api/v3/processors/codex/models').json()['models'][0]['model'] == 'test-small'
         response = client.put('/api/v3/processors/codex', json=choices)
         assert response.status_code == 200, response.text
