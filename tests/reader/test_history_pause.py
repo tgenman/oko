@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.telegram import connected_feed
 from tests.support.presence import presence, close_presence
 from tests.support.telegram import connect_request
@@ -42,15 +43,15 @@ def test_removed_pause_preserves_history_snapshot_across_restart_and_fetches_new
     with reader() as client:
         presence(client, 'reader')
         for _ in range(200):
-            cards = client.get('/api/v3/cards').json()
-            if any(c['source_url'].endswith('/4') and (c['availability'] == 'available') for c in cards): break
+            cards = read_all_cards(client, '/api/v3/cards')
+            if any(c['source_url'].endswith('/4') and (client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards): break
             time.sleep(.01)
-        assert any(c['source_url'].endswith('/4') and (c['availability'] == 'available') for c in cards)
+        assert any(c['source_url'].endswith('/4') and (client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards)
         history = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':False}).status_code == 200
         history = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert history['progress']['loaded'] == history['progress']['available'] == 3
-        assert len(client.get('/api/v3/cards').json()) == 4
+        assert len(read_all_cards(client, '/api/v3/cards')) == 4
 
 
 def test_telegram_history_resumes_album_snapshot_after_restart_without_manual_pause(tmp_path):
@@ -74,15 +75,15 @@ def test_telegram_history_resumes_album_snapshot_after_restart_without_manual_pa
     with reader() as client:
         presence(client, 'reader')
         for _ in range(200):
-            cards = client.get('/api/v3/cards').json()
-            if any([int(identity) for identity in c['source']['message_ids']] == [7] and (c['availability'] == 'available') for c in cards): break
+            cards = read_all_cards(client, '/api/v3/cards')
+            if any([int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [7] and (client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards): break
             time.sleep(.01)
-        assert any([int(identity) for identity in c['source']['message_ids']] == [7] and (c['availability'] == 'available') for c in cards), cards
+        assert any([int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [7] and (client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards), cards
         assert wait_history(client, feed, lambda h: h['state']=='complete')['progress']['available'] == 4
         assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused':False}).status_code == 200
         history = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert history['progress']['available'] == history['progress']['loaded'] == 4
-        assert len(client.get('/api/v3/cards').json()) == 5
+        assert len(read_all_cards(client, '/api/v3/cards')) == 5
 
 
 
@@ -111,10 +112,10 @@ def test_youtube_history_continues_after_restart_without_changing_selection(tmp_
     with reader() as client:
         presence(client, 'reader')
         for _ in range(200):
-            cards=client.get('/api/v3/cards').json()
-            if any(c['source_url'].endswith('wxyzabcdefg') and (c['availability'] == 'available') and not c.get('loading') for c in cards):break
+            cards=read_all_cards(client, '/api/v3/cards')
+            if any(c['source_url'].endswith('wxyzabcdefg') and (client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') and not c.get('loading') for c in cards):break
             time.sleep(.01)
-        assert any(c['source_url'].endswith('wxyzabcdefg') and (c['availability'] == 'available') and not c.get('loading') for c in cards)
+        assert any(c['source_url'].endswith('wxyzabcdefg') and (client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') and not c.get('loading') for c in cards)
         clock[0] += 10
         assert client.patch('/api/v3/feeds/'+feed+'/history',json={'paused':False}).status_code==200
         assert wait_history(client,feed,lambda h:h['state']=='complete')['progress']['loaded']==2

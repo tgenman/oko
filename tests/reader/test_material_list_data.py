@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 import httpx
@@ -40,9 +41,9 @@ def test_youtube_description_survives_restart_without_requesting_captions(tmp_pa
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'reader')
-        card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c['source'].get('captions') == 'not_requested' and not c.get('loading')), None))
-        assert card['snippet'] == 'Описание из Atom & детали.'
-        assert card['feed_title'] == 'Канал'
+        card = wait_for(client, lambda: next((c for c in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+c['id']).json()['source'].get('captions') == 'not_requested' and not c.get('loading')), None))
+        assert 'snippet' not in card
+        assert next(f['feed']['title'] for f in client.get('/api/v3/reading-composition').json()['feeds'] if f['feed']['id']==card['feed_id']) == 'Канал'
         item = card['id']
         material = client.get('/api/v3/materials/' + item).json()
         assert material['content']['description'] == 'Описание из Atom & детали.'
@@ -58,8 +59,7 @@ def test_youtube_description_survives_restart_without_requesting_captions(tmp_pa
         assert client.get('/api/v3/materials/' + item).json()['content']['description'] == 'Описание из Atom & детали.'
         allow_source[0] = True
         client.post('/api/v3/collect')
-        card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c.get('snippet') == description[0]), None))
-        assert card['snippet'] == description[0]
+        wait_for(client, lambda: client.get('/api/v3/materials/' + item).json()['content']['description'] == description[0])
         material = client.get('/api/v3/materials/' + item).json()
         assert material['content']['text'] == 'Сохранённые субтитры.'
         assert material['source']['captions'] == 'available' and captions.calls == 1
@@ -83,18 +83,16 @@ def test_cards_have_plain_bounded_text_and_unknown_dates_are_last(tmp_path):
     with TestClient(create_app(tmp_path, source=Source(), token='test'), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'reader')
-        wait_for(client, lambda: len(c := client.get('/api/v3/cards').json()) == 3 and all((card['availability'] == 'available') for card in c))
-        newest = client.get('/api/v3/cards?sort=newest').json()
-        oldest = client.get('/api/v3/cards?sort=oldest').json()
+        wait_for(client, lambda: len(c := read_all_cards(client, '/api/v3/cards')) == 3 and all(not card['loading'] for card in c))
+        newest = read_all_cards(client, '/api/v3/cards?sort=newest')
+        oldest = read_all_cards(client, '/api/v3/cards?sort=oldest')
         assert [c['title'] for c in newest] == ['new', 'old', 'unknown']
         assert [c['title'] for c in oldest] == ['old', 'new', 'unknown']
         assert newest[-1]['published_at'] is None
         for card in newest:
-            assert card['snippet'].startswith('Краткий текст & подробности.')
-            assert len(card['snippet']) == 500
-            assert '<' not in card['snippet'] and 'secret' not in card['snippet']
-            assert card['feed_title']
-            assert 'text' not in card and 'display_text' not in card
+            assert 'snippet' not in card and 'text' not in card and 'display_text' not in card
+            assert card['feed_id']
+
 
 
 def test_old_video_uses_captions_until_atom_supplies_description(tmp_path):
@@ -112,11 +110,12 @@ def test_old_video_uses_captions_until_atom_supplies_description(tmp_path):
         client.patch('/api/v3/settings/oko/global', json={})
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
-        card = wait_for(client, lambda: next((c for c in client.get('/api/v3/cards').json() if c['source'].get('captions') == 'available' and not c.get('loading')), None))
-        assert card['snippet'] == 'Сохранённые субтитры.'
+        card = wait_for(client, lambda: next((c for c in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+c['id']).json()['source'].get('captions') == 'available' and not c.get('loading')), None))
+        assert 'snippet' not in card
+        assert client.get('/api/v3/materials/' + card['id']).json()['content']['text'] == 'Сохранённые субтитры.'
         description[0] = 'Добавленное описание.'
         client.post('/api/v3/collect')
-        wait_for(client, lambda: client.get('/api/v3/cards').json()[0]['snippet'] == description[0])
+        wait_for(client, lambda: client.get('/api/v3/materials/' + card['id']).json()['content']['description'] == description[0])
         material = client.get('/api/v3/materials/' + card['id']).json()
         assert material['content']['description'] == description[0] and material['content']['text'] == 'Сохранённые субтитры.'
         assert captions.calls == 1
@@ -129,10 +128,12 @@ def test_snippet_does_not_restore_filtered_fragments(tmp_path):
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Убери рекламу'})
         presence(client, 'reader')
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards').json()) == 2 and all(card['filter']['attempt']['state'] == 'ready' for card in c) else None))
+        cards = wait_for(client, lambda: (c if len(c := read_all_cards(client, '/api/v3/cards')) == 2 and all(client.get('/api/v3/materials/' + card['id']).json()['filter']['attempt']['state'] == 'ready' for card in c) else None))
         card = next(c for c in cards if c['title'] == 'Материал 1')
-        assert card['snippet'] == 'Открылась библиотека.'
-        assert 'Реклама' in client.get('/api/v3/materials/' + card['id']).json()['content']['text']
+        assert 'snippet' not in card
+        material=client.get('/api/v3/materials/' + card['id']).json()
+        assert material['content']['display_text'].strip() == 'Открылась библиотека.'
+        assert 'Реклама' in material['content']['text']
 
 
 def test_preview_does_not_restore_fragment_formed_at_a_removed_boundary(tmp_path):
@@ -160,8 +161,8 @@ def test_preview_does_not_restore_fragment_formed_at_a_removed_boundary(tmp_path
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Remove ab'})
         presence(client, 'reader')
-        cards = wait_for(client, lambda: (c if len(c := client.get('/api/v3/cards').json()) == 1 and c[0]['filter']['attempt']['state'] == 'ready' else None))
-        assert cards[0]['snippet'] == ''
+        cards = wait_for(client, lambda: (c if len(c := read_all_cards(client, '/api/v3/cards')) == 1 and client.get('/api/v3/materials/' + c[0]['id']).json()['filter']['attempt']['state'] == 'ready' else None))
+        assert 'snippet' not in cards[0]
         material = client.get('/api/v3/materials/' + cards[0]['id']).json()
         assert material['content']['text'] == 'aabb'
         assert material['content']['display_text'] == 'ab'

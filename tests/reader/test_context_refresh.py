@@ -1,4 +1,5 @@
 """Manual refresh through the reader HTTP boundary and synthetic sources."""
+from tests.support.cards import read_all_cards
 import httpx
 import pytest
 from tests.support.app import create_app
@@ -51,7 +52,7 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
     source=Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        cards=wait_for(client,lambda:(cards if len(cards:=client.get('/api/v3/cards').json())==2 and all(c['availability']=='available' for c in cards) else None))
+        cards=wait_for(client,lambda:(cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all(not c['loading'] for c in cards) else None))
         copies={c['id']:client.get('/api/v3/materials/'+c['id']).json()['content']['text'] for c in cards}
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:source.calls['1']==2 and source.calls['2']==2)
@@ -85,7 +86,7 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
         configure_codex(client)
         assert client.patch('/api/v3/feeds/demo',json={'public_ai':True}).status_code==200
         client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':''})
-        cards=wait_for(client,lambda:(c if len(c:=client.get('/api/v3/cards').json())==3 else None))
+        cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 else None))
         wait_for(client,lambda:len(set(model.calls))==3)
         wait_for(client,lambda:sum(client.get('/api/v3/materials/'+c['id']).json()['theses']['attempt']['state']=='ready' for c in cards)==2)
         old=list(model.calls)
@@ -126,7 +127,7 @@ def test_refresh_does_not_cancel_or_duplicate_running_collection(tmp_path):
             assert source.calls==1 and not source.cancelled
         finally:
             source.release.set()
-        wait_for(client,lambda:len(client.get('/api/v3/cards').json())==3)
+        wait_for(client,lambda:len(read_all_cards(client, '/api/v3/cards'))==3)
 
 
 def test_refresh_restores_previously_unavailable_publication(tmp_path):
@@ -141,7 +142,7 @@ def test_refresh_restores_previously_unavailable_publication(tmp_path):
     source=Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        cards=wait_for(client,lambda:(c if len(c:=client.get('/api/v3/cards').json())==3 and all(x['availability']=='available' for x in c) else None))
+        cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 and all(not x['loading'] for x in c) else None))
         item=cards[0]['id']
         source.unavailable=True
         assert client.post('/api/v3/materials/'+item+'/retry').status_code==200
@@ -229,7 +230,7 @@ def test_refresh_retries_failed_filter_without_repeating_successful_filters(tmp_
         configure_codex(client)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'Keep all text'})
-        cards=wait_for(client,lambda:(c if len(c:=client.get('/api/v3/cards').json())==3 else None))
+        cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 else None))
         wait_for(client,lambda:sum(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state']=='ready' for c in cards)==2)
         old=list(model.calls)
         model.failed=False

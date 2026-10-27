@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import add_sources
 import time
@@ -67,9 +68,10 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
         presence(client,'history')
         progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert progress['progress']['loaded'] == 6 and progress['progress']['available'] == 6
-        cards = client.get('/api/v3/cards', params={'feed': feed}).json()
+        cards = read_all_cards(client, '/api/v3/cards', params={'feed': feed})
         assert len(cards) == 6
-        assert [c['title'] for c in cards[:3]] == ['Video 60', 'Video 59', 'Video 58']
+        assert {c['title'] for c in cards} == {f'Video {n}' for n in range(55,61)}
+        assert [c['id'] for c in cards] == sorted(c['id'] for c in cards)
         assert all(c['published_at'] is None for c in cards)
         assert 2<=len(history.calls)<=3
         history_calls=len(history.calls)
@@ -80,7 +82,7 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
         presence(client, 'history')
         time.sleep(.1)
         assert len(history.calls)==history_calls
-        assert len(client.get('/api/v3/cards', params={'feed': feed}).json()) == 5
+        assert len(read_all_cards(client, '/api/v3/cards', params={'feed': feed})) == 5
 
 
 def test_refresh_resumes_partial_history_error_and_collects_new_rss_publications(tmp_path):
@@ -109,7 +111,7 @@ def test_refresh_resumes_partial_history_error_and_collects_new_rss_publications
         wait_history(client,feed,lambda h:h['state']=='complete')
         client.post('/api/v3/collect')  # New arrivals belong to the following serialized window.
         for _ in range(100):
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             arrived = next((c for c in cards if c['title'] == 'New arrival'), None)
             if arrived and not arrived['loading']:
                 break
@@ -125,8 +127,8 @@ def test_refresh_resumes_partial_history_error_and_collects_new_rss_publications
         progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert progress['progress']['loaded'] == 8 and progress['progress']['available'] == 8
         assert len(history.calls) == 3
-        assert len(client.get('/api/v3/cards').json()) == 9
-        assert {c['title'] for c in client.get('/api/v3/cards').json()} >= {'Video 60','Video 59','Video 58'}
+        assert len(read_all_cards(client, '/api/v3/cards')) == 9
+        assert {c['title'] for c in read_all_cards(client, '/api/v3/cards')} >= {'Video 60','Video 59','Video 58'}
 
 
 def test_stop_then_new_selection_can_rediscover_viewed_and_retains_saved_materials(tmp_path):
@@ -136,14 +138,14 @@ def test_stop_then_new_selection_can_rediscover_viewed_and_retains_saved_materia
         presence(client, 'history')
         assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'4'}).status_code == 200
         wait_history(client, feed, lambda h: h['state'] == 'complete')
-        cards = client.get('/api/v3/cards').json()
+        cards = read_all_cards(client, '/api/v3/cards')
         client.post('/api/v3/materials/' + cards[0]['id'] + '/viewed')
         assert client.delete('/api/v3/feeds/' + feed + '/history').json()['history']['state'] == 'cancelled'
         assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused': False}).status_code == 409
         assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'2'}).status_code == 200
         progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert progress['progress']['available'] == 2 and progress['progress']['viewed'] == 0
-        assert len(client.get('/api/v3/cards').json()) == 4
+        assert len(read_all_cards(client, '/api/v3/cards')) == 4
         assert [count for _,count in history.calls][-2:]==[1,2]
 
 
@@ -172,7 +174,7 @@ def test_recovered_rss_window_imports_the_current_available_window(tmp_path):
         recovered = True
         client.post('/api/v3/collect')
         time.sleep(.4)
-        titles = {c['title'] for c in client.get('/api/v3/cards').json()}
+        titles = {c['title'] for c in read_all_cards(client, '/api/v3/cards')}
         assert titles == {'Video 40','Video 60','Video 99'}
 
 
@@ -188,8 +190,9 @@ def test_smaller_history_after_new_upload_preserves_retained_order(tmp_path):
         client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'2'})
         wait_history(client, feed, lambda h: h['state'] == 'complete' and int(h['selection']['count']) == 2)
         for sort, numbers in [('newest', [61, 60, 59, 58]), ('oldest', [58, 59, 60, 61])]:
-            cards = client.get('/api/v3/cards', params={'feed': feed, 'sort': sort}).json()
-            assert [c['source_url'].split('=')[-1] for c in cards] == [video(n) for n in numbers]
+            cards = read_all_cards(client, '/api/v3/cards', params={'feed': feed, 'sort': sort})
+            assert {c['source_url'].split('=')[-1] for c in cards} == {video(n) for n in numbers}
+            assert [c['id'] for c in cards] == sorted(c['id'] for c in cards)
 
 
 def test_large_unknown_date_window_keeps_order_across_pages_and_expansion(tmp_path):
@@ -200,7 +203,11 @@ def test_large_unknown_date_window_keeps_order_across_pages_and_expansion(tmp_pa
         feed=import_channel(client)
         client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'60'})
         wait_history(client,feed,lambda h:h['state']=='complete')
-        assert [card['source_url'].split('=')[-1] for card in client.get('/api/v3/cards?sort=newest').json()]==[video(n) for n in range(100,40,-1)]
+        first=read_all_cards(client, '/api/v3/cards?sort=newest',params={'limit':17})
+        assert {card['source_url'].split('=')[-1] for card in first}=={video(n) for n in range(100,40,-1)}
+        assert [card['id'] for card in first]==sorted(card['id'] for card in first)
         client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'100'})
         wait_history(client,feed,lambda h:h['state']=='complete' and h['selection']['count']=='100')
-        assert [card['source_url'].split('=')[-1] for card in client.get('/api/v3/cards?sort=newest').json()]==[video(n) for n in range(100,0,-1)]
+        expanded=read_all_cards(client, '/api/v3/cards?sort=newest',params={'limit':17})
+        assert {card['source_url'].split('=')[-1] for card in expanded}=={video(n) for n in range(100,0,-1)}
+        assert [card['id'] for card in expanded]==sorted(card['id'] for card in expanded)

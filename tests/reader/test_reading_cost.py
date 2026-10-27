@@ -22,12 +22,14 @@ def test_reading_http_budgets(tmp_path, count):
         assert int(response.headers['X-Test-SQL']) <= 11
         response = client.get('/api/v3/cards', params={'feed': feeds[0]})
         assert response.status_code == 200
-        assert len(response.json()) == count
-        assert {card['feed_id'] for card in response.json()} == {feeds[0]}
+        assert len(response.json()['items']) == min(count,40)
+        assert response.json()['total'] == count
+        assert {card['feed_id'] for card in response.json()['items']} == {feeds[0]}
         assert int(response.headers['X-Test-SQL']) < 50 + 11 * count
         response = client.get('/api/v3/cards')
         assert response.status_code == 200
-        assert len(response.json()) == count * 4
+        assert len(response.json()['items']) == 40
+        assert response.json()['total'] == count * 4
         assert int(response.headers['X-Test-SQL']) < 80 + 11 * count * 4
         response = client.get('/api/v3/materials/' + items[0])
         assert response.status_code == 200
@@ -65,11 +67,12 @@ def test_selected_scope_sql_does_not_grow_with_other_materials(tmp_path):
             folder = next(f['feed']['folder_id'] for f in nav['feeds'] if f['feed']['id'] == feeds[0])
             response = client.get('/api/v3/cards', params={'folder': folder})
             assert response.status_code == 200
-            assert len(response.json()) == 26
+            assert len(response.json()['items']) == 26
             costs.append(int(response.headers['X-Test-SQL']))
             assert client.patch('/api/v3/settings/feed/' + feeds[0], json={'originals': False}).status_code == 200
             response = client.get('/api/v3/cards', params={'feed': feeds[0]})
-            assert all(card['originals'] is False for card in response.json())
+            assert all('originals' not in card for card in response.json()['items'])
+            assert all(client.get('/api/v3/materials/'+card['id']).json()['originals'] is False for card in response.json()['items'])
     assert costs[1] <= costs[0] + 2, costs
 
 

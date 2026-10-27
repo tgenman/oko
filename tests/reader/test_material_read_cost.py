@@ -161,13 +161,8 @@ def test_idle_check_only_compares_versions(tmp_path,count):
     _,items=library(tmp_path,[count]*4)
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,tmp_path) as measure:
-        options=dict(target=dict(scope='all'),sort='newest',show_hidden=False)
-        initial=client.post('/api/v3/reading/check',json=dict(storage_id=None,resources=[dict(kind='status',known_version=None),dict(kind='navigation',known_version=None),dict(kind='list',options=options,known_version=None,known_cards={})])).json()
-        cards={r['id']:r['version'] for r in initial['resources'] if r['kind']=='card'}
-        resources=[]
-        for r in initial['resources']:
-            if r['kind']=='list':resources.append(dict(kind='list',options=options,known_version=r['version'],known_cards=cards))
-            elif r['kind']!='card':resources.append(dict(kind=r['kind'],**({'id':r['id']} if r['kind']=='feed' else {}),known_version=r['version']))
+        initial=client.post('/api/v3/reading/check',json=dict(storage_id=None,resources=[dict(kind='status',known_version=None),dict(kind='navigation',known_version=None)])).json()
+        resources=[dict(kind=r['kind'],**({'id':r['id']} if r['kind']=='feed' else {}),known_version=r['version']) for r in initial['resources']]
         opened=client.get('/api/v3/reading/materials/'+items[0]).json()
         resources.extend(dict(kind=r['kind'],id=r['id'],known_version=r['version']) for r in opened['resources'])
         reply,cost=measure.request('idle','POST','/api/v3/reading/check',json=dict(storage_id=initial['storage_id'],resources=resources))

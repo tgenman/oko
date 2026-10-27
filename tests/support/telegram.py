@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from datetime import date, timedelta
 import time
 
@@ -82,8 +83,8 @@ def connect_request(client, *, json):
 def settled(client, count=1, timeout=4):
     deadline = time.monotonic()+timeout
     while time.monotonic()<deadline:
-        cards = client.get('/api/v3/cards').json()
-        if len(cards) == count and all((c.get('availability') == 'available') and not c.get('loading') for c in cards):
+        cards = read_all_cards(client, '/api/v3/cards')
+        if len(cards) == count and all(not c['loading'] for c in cards):
             return cards
         time.sleep(.02)
     raise AssertionError(client.get('/api/v3/status').json())

@@ -1,4 +1,5 @@
 """API v3 integration of the implemented Telegram collection modules."""
+from tests.support.cards import read_all_cards
 import httpx
 import pytest
 
@@ -73,8 +74,8 @@ def test_confirmed_telegram_access_is_identical_in_catalog_composition_card_and_
         composition=next(row['feed'] for row in client.get('/api/v3/reading-composition').json()['feeds'] if row['feed']['id']==saved_id)
         assert composition['access']==catalog['access']
         assert composition['connection']==catalog['connection']=='ready'
-        card=wait_for(client,lambda: next((card for card in client.get('/api/v3/cards').json() if card['feed_id']==saved_id and card['availability']=='available'),None))
-        assert card['source']['access']==catalog['access']
+        card=wait_for(client,lambda: next((card for card in read_all_cards(client, '/api/v3/cards') if card['feed_id']==saved_id and client.get('/api/v3/materials/'+card['id']).json()['availability']=='available'),None))
+        assert 'source' not in card
         material=client.get('/api/v3/materials/'+card['id']).json()
         assert material['source']['access']==catalog['access']
         response=client.get('/api/v3/reading/materials/'+card['id'])

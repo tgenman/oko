@@ -23,25 +23,23 @@ def changed_within_background_interval(client, request, storage):
 
 
 def test_unchanged_versions_return_no_data_or_full_projection(tmp_path):
-    feeds, items = library(tmp_path, [26] * 4)
+    feeds, _ = library(tmp_path, [26] * 4)
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
         tracing(client, app)
-        request = [{'kind':'navigation','known_version':None}, {'kind':'list','options':{'target':{'scope':'feed','feed_id':feeds[0]},'sort':'newest','show_hidden':False},'known_version':None,'known_cards':{}}]
+        request = [{'kind':'navigation','known_version':None}]
         first = check(client, request).json()
-        assert first['state'] == 'current'
-        changed = {(r['kind'], r['id']):r for r in first['resources'] if r['state']=='changed'}
-        cards = [r for r in changed.values() if r['kind']=='card']
-        assert len(cards) == 26
-        assert all('theses' not in r['data'] and 'filter' not in r['data'] for r in cards)
-        list_resource = next(r for r in changed.values() if r['kind']=='list')
-        request[0]['known_version'] = next(r['version'] for r in changed.values() if r['kind']=='navigation')
-        request[1]['known_version'] = list_resource['version']
-        request[1]['known_cards'] = {r['id']:r['version'] for r in cards}
+        nav = next(r for r in first['resources'] if r['kind']=='navigation')
+        request[0]['known_version'] = nav['version']
         response = check(client, request, first['storage_id'])
-        frame = response.json()
-        assert all(r['state']=='unchanged' and 'data' not in r for r in frame['resources'])
-        assert int(response.headers['X-Test-SQL']) < 35
+        assert all(r['state']=='unchanged' and 'data' not in r for r in response.json()['resources'])
+        page=client.get('/api/v3/cards',params={'feed':feeds[0]})
+        assert page.status_code==200
+        assert len(page.json()['items'])==26
+        assert all('theses' not in r and 'filter' not in r and 'snippet' not in r for r in page.json()['items'])
+        unchanged=client.get('/api/v3/cards',params={'feed':feeds[0]},headers={'If-None-Match':page.headers['ETag']})
+        assert unchanged.status_code==304 and not unchanged.content
+        assert int(unchanged.headers['X-Test-SQL']) < 35
         assert not any('FROM settings' in q or 'SELECT * FROM items' in q for q in app.state.last_sql)
 
 
@@ -71,20 +69,17 @@ def test_noop_write_and_other_folder_leave_entity_versions_unchanged(tmp_path):
     feeds, items = library(tmp_path,[1,1])
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client:
-        req=[{'kind':'material','id':items[0],'known_version':None},{'kind':'list','options':{'target':{'scope':'feed','feed_id':feeds[0]},'sort':'newest','show_hidden':False},'known_version':None,'known_cards':{}}]
+        req=[{'kind':'material','id':items[0],'known_version':None}]
         first=check(client,req).json()
-        versions={(r['kind'],r['id']):r['version'] for r in first['resources']}
-        material=next(r for r in first['resources'] if r['kind']=='material')
-        listing=next(r for r in first['resources'] if r['kind']=='list')
-        card=next(r for r in first['resources'] if r['kind']=='card')
+        material=first['resources'][0]
+        page=client.get('/api/v3/cards',params={'feed':feeds[0]})
         req[0]['known_version']=material['version']
-        req[1]['known_version']=listing['version']
-        req[1]['known_cards']={card['id']:card['version']}
         assert client.patch('/api/v3/feeds/'+feeds[0],json={'title':'Synthetic 0'}).status_code==200
         assert client.post('/api/v3/materials/'+items[1]+'/viewed').status_code==200
         current=check(client,req,first['storage_id']).json()
-        assert all(r['state']=='unchanged' for r in current['resources'])
-        assert versions[material['kind'],material['id']]==next(r['version'] for r in current['resources'] if r['kind']=='material')
+        assert current['resources'][0]['state']=='unchanged'
+        assert current['resources'][0]['version']==material['version']
+        assert client.get('/api/v3/cards',params={'feed':feeds[0]},headers={'If-None-Match':page.headers['ETag']}).status_code==304
 
 
 def test_feed_version_increments_once_and_sql_rollback_keeps_it(tmp_path):
@@ -137,20 +132,16 @@ def test_due_fetch_publishes_a_new_material_version_without_dispatch(tmp_path):
 
 
 def test_list_member_changes_are_selective_and_reset_is_explicit(tmp_path):
-    feeds,items=library(tmp_path,[2])
+    _,items=library(tmp_path,[2])
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client:
-        req={'kind':'list','options':{'target':{'scope':'all'},'sort':'newest','show_hidden':False},'known_version':None,'known_cards':{}}
-        first=check(client,[req]).json()
-        listing=next(r for r in first['resources'] if r['kind']=='list')
-        req['known_version']=listing['version']
-        req['known_cards']={r['id']:r['version'] for r in first['resources'] if r['kind']=='card'}
-        assert client.post('/api/v3/materials/'+items[0]+'/viewed').status_code==200
-        changed=check(client,[req],first['storage_id']).json()
-        listing=next(r for r in changed['resources'] if r['kind']=='list')
-        assert listing['state']=='changed' and len(listing['data']['ids'])==1
-        assert not any(r['kind']=='card' and r['state']=='changed' for r in changed['resources'])
-        reset=check(client,[req],'00000000-0000-4000-8000-000000000000').json()
+        first=check(client,[{'kind':'status','known_version':None}]).json()
+        page=client.get('/api/v3/cards')
+        assert len(page.json()['items'])==2
+        assert client.post('/api/v3/cards/read',json={'ids':[items[0]]}).status_code==204
+        changed=client.get('/api/v3/cards',headers={'If-None-Match':page.headers['ETag']})
+        assert changed.status_code==200 and len(changed.json()['items'])==1
+        reset=check(client,[{'kind':'status','known_version':None}],'00000000-0000-4000-8000-000000000000').json()
         assert reset=={'state':'reset','storage_id':first['storage_id']}
 
 
@@ -226,21 +217,19 @@ def test_problem_expiry_advances_status_without_an_external_write(tmp_path):
 
 
 def test_linked_feed_move_updates_lists_without_retransmitting_cards(tmp_path):
-    feeds,items=library(tmp_path,[1,1])
+    feeds,_=library(tmp_path,[1,1])
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client:
-        folder=client.get('/api/v3/subscriptions').json()['feeds'][0]['folder_id']
-        options={'target':{'scope':'folder','folder_id':folder},'sort':'newest','show_hidden':False}
-        request={'kind':'list','options':options,'known_version':None,'known_cards':{}}
-        first=check(client,[request,{'kind':'feed','id':feeds[0],'known_version':None}]).json()
-        listing=next(r for r in first['resources'] if r['kind']=='list')
-        feed=next(r for r in first['resources'] if r['kind']=='feed')
-        request.update(known_version=listing['version'],known_cards={r['id']:r['version'] for r in first['resources'] if r['kind']=='card'})
-        assert client.patch('/api/v3/feeds/'+feeds[0],json={'folder_id':client.get('/api/v3/subscriptions').json()['feeds'][1]['folder_id'],'title':'Moved'}).status_code==200
-        current=check(client,[request,{'kind':'feed','id':feeds[0],'known_version':feed['version']}],first['storage_id']).json()
-        assert next(r for r in current['resources'] if r['kind']=='list')['data']['ids']==[]
-        assert next(r for r in current['resources'] if r['kind']=='feed')['data']['title']=='Moved'
-        assert not any(r['kind']=='card' and r['state']=='changed' for r in current['resources'])
+        folders=[f['folder_id'] for f in client.get('/api/v3/subscriptions').json()['feeds']]
+        page=client.get('/api/v3/cards',params={'folder':folders[0]})
+        assert len(page.json()['items'])==1
+        first=check(client,[{'kind':'feed','id':feeds[0],'known_version':None}]).json()
+        feed=first['resources'][0]
+        assert client.patch('/api/v3/feeds/'+feeds[0],json={'folder_id':folders[1],'title':'Moved'}).status_code==200
+        current=check(client,[{'kind':'feed','id':feeds[0],'known_version':feed['version']}],first['storage_id']).json()
+        assert current['resources'][0]['data']['title']=='Moved'
+        changed=client.get('/api/v3/cards',params={'folder':folders[0]},headers={'If-None-Match':page.headers['ETag']})
+        assert changed.status_code==200 and changed.json()['items']==[]
 
 
 def test_registered_list_batches_work_and_versions_in_the_write_transaction(tmp_path):
@@ -290,7 +279,7 @@ def test_filter_resource_keeps_saved_provenance_across_restart(tmp_path):
         with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
             if identity is None:
                 setup_filters(client)
-                cards=wait_for(client,lambda:(v if len(v:=client.get('/api/v3/cards').json())==2 and all(c['filter']['attempt']['state']=='ready' for c in v) else None))
+                cards=wait_for(client,lambda:(v if len(v:=[client.get('/api/v3/materials/'+c['id']).json() for c in client.get('/api/v3/cards').json()['items']])==2 and all(c['filter']['attempt']['state']=='ready' for c in v) else None))
                 identity=cards[0]['id']
             expected=client.get('/api/v3/materials/'+identity).json()['filter']['result']['provenance']
             frame=client.get('/api/v3/reading/materials/'+identity).json()

@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 import json, os, subprocess, sys, time, httpx
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -74,8 +75,8 @@ def connect(root: Path, process):
 
 def wait_cards(client, count):
     for _ in range(250):
-        cards = client.get('/api/v3/cards').json()
-        if len(cards) == count and all((c['availability'] == 'available') for c in cards):
+        cards = read_all_cards(client, '/api/v3/cards')
+        if len(cards) == count and all(not c['loading'] for c in cards):
             return cards
         time.sleep(.02)
     raise AssertionError(cards)

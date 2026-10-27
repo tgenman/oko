@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from datetime import datetime, timezone
 from tests.support.presence import presence, close_presence
@@ -187,7 +188,7 @@ def test_partial_material_is_visible_with_available_text(tmp_path):
     with TestClient(create_app(tmp_path, token='test', source=Partial()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         presence(client, 'reader')
-        wait_for(client,lambda:len(cards:=client.get('/api/v3/cards').json())==2 and all((c['availability'] == 'available') for c in cards))
+        wait_for(client,lambda:len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all((client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards))
         problems=client.get('/api/v3/status').json()['problems']
         assert problems['count']==2
         assert problems['current'][0]['code']=='material_incomplete'
@@ -277,8 +278,8 @@ def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
             for feed in response.json()['feeds']:
                 client.patch('/api/v3/feeds/'+feed['id'],json={'importance':'high'})
         presence(client, 'reader')
-        wait_for(client,lambda:captions.calls==1 and len(cards:=client.get('/api/v3/cards').json())==2 and sum(client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')=='available' for card in cards)==1)
-        waiting=next(card['id'] for card in client.get('/api/v3/cards').json() if client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')!='available')
+        wait_for(client,lambda:captions.calls==1 and len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and sum(client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')=='available' for card in cards)==1)
+        waiting=next(card['id'] for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')!='available')
         problems=client.get('/api/v3/status').json()['problems']
         assert not any(obj.get('material_id')==waiting for p in problems['current'] for obj in p['affected']),problems
         assert not any(p['code']=='youtube_rate_limited' for p in problems['current'])

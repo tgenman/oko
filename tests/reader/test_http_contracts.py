@@ -26,7 +26,7 @@ def test_exported_reading_contract_rejects_missing_fields_and_wrong_types(tmp_pa
         with pytest.raises(ValidationError):
             CONTRACTS['navigation'].validate_python({**navigation, 'count': '3'})
         with pytest.raises(ValidationError):
-            CONTRACTS['cards'].validate_python([{key: value for key, value in cards[0].items() if key != 'id'}])
+            CONTRACTS['cards'].validate_python({**cards, 'items':[{key: value for key, value in cards['items'][0].items() if key != 'id'}]})
 
 
 def test_material_and_stopped_status_preserve_wire_fields(tmp_path):

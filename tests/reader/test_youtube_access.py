@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from datetime import datetime
 from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import add_sources
@@ -76,7 +77,7 @@ def eventually(predicate):
 
 
 def materials(client):
-    return [client.get('/api/v3/materials/' + row['id']).json() for row in client.get('/api/v3/cards').json()]
+    return [client.get('/api/v3/materials/' + row['id']).json() for row in read_all_cards(client, '/api/v3/cards')]
 
 
 def heartbeat(client):
@@ -280,5 +281,5 @@ def test_viewed_waiting_material_and_closed_reader_do_not_resume(tmp_path):
         heartbeat(client)
         time.sleep(.1)
         assert client.get('/api/v3/materials/'+item['id']).status_code==404
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert len(captions.calls) == 1
