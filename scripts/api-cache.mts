@@ -35,7 +35,7 @@ export async function toolchain(root: string, python?: string) {
   const node = await fingerprint(root, ['package.json', 'package-lock.json', 'node_modules/.package-lock.json',
     ...packages.map(name => 'node_modules/' + name + '/package.json')], {version: process.version, executable: process.execPath,
     environment: Object.fromEntries(Object.entries(process.env)
-      .filter(([name]) => !name.startsWith('npm_') && !['PWD', 'OLDPWD', 'SHLVL', '_', 'INIT_CWD', 'OKO_TEST_ARTIFACT_DIR', 'OKO_TEST_LIBRARY_DIR', 'PYTEST_CURRENT_TEST', 'PYTEST_VERSION'].includes(name))
+      .filter(([name]) => !name.startsWith('npm_') && !['PWD', 'OLDPWD', 'SHLVL', '_', 'INIT_CWD', 'OKO_TEST_ARTIFACT_DIR', 'PYTEST_CURRENT_TEST', 'PYTEST_VERSION'].includes(name))
       .sort(([a], [b]) => a.localeCompare(b)))});
   const environment = python ? execFileSync(python, ['-c',
     'import importlib.metadata,json,sys; print(json.dumps([sys.version,sys.executable,sys.prefix,sorted((d.metadata["Name"],d.version) for d in importlib.metadata.distributions())]))'],

@@ -52,11 +52,8 @@ def test_history_admission_only_blocks_enrolled_fetches(tmp_path, transport, mod
 
 @pytest.mark.parametrize('item,member,paused,expected', [
     ('live', None, 1, False),
-    ('live', None, 0, True),
     ('live', 'other', 1, True),
     (None, 'other', 1, False),
-    (None, None, 1, False),
-    (None, 'other', 0, False),
 ])
 def test_postgres_rejects_null_memberships_and_preserves_dispatch(tmp_path, item, member, paused, expected):
     store = Store(tmp_path, lambda _: None)

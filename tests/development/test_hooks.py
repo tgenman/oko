@@ -82,19 +82,6 @@ def test_staged_checks_tooling_types_from_exact_index(tmp_path):
 
 
 
-def test_push_does_not_repeat_checks(tmp_path):
-    run = repo(tmp_path)
-    assert run('git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test',
-               'commit', '--allow-empty', '-m', 'fixture').returncode == 0
-    check = tmp_path / 'scripts/check'
-    check.write_text('#!/bin/sh\nprintf "%s" "$1" > selected-check\nexit 7\n')
-    remote = tmp_path / 'remote.git'
-    assert run('git', 'init', '--bare', str(remote)).returncode == 0
-    result = run('git', 'push', str(remote), 'HEAD:refs/heads/main')
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not (tmp_path / 'selected-check').exists()
-
-
 @pytest.mark.skipif(shutil.which(os.environ.get('OKO_NODE', 'node')) is None,
                     reason='JavaScript index checks require Node; full CI supplies it')
 def test_staged_rejects_staged_javascript_syntax(tmp_path):

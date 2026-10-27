@@ -237,30 +237,6 @@ def start(home, port_wait=0):
         raise
 
 
-def tree_digest(root):
-    value = hashlib.sha256()
-    for path in sorted(root.rglob('*')):
-        if path.is_symlink():
-            raise ValueError('Data symlinks require an explicit migration plan')
-        if path.is_file() and path.name not in ('instance.lock', 'runtime.json', 'runtime.tmp'):
-            name = str(path.relative_to(root)).encode()
-            value.update(len(name).to_bytes(8, 'big'))
-            value.update(name)
-            value.update(path.stat().st_size.to_bytes(8, 'big'))
-            with path.open('rb') as source:
-                for block in iter(lambda: source.read(1024 * 1024), b''):
-                    value.update(block)
-    return value.hexdigest()
-
-
-
-
-
-
-
-
-
-
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)

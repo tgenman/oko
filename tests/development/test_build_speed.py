@@ -25,7 +25,7 @@ def test_batched_syntax_checks_every_file_and_reports_all_errors(tmp_path):
     assert 'first.tsx' in result.stderr and 'last.ts' in result.stderr
 
 
-def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path, monkeypatch):
+def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path):
     api_repository(tmp_path)
     command = ('node', '--import', 'tsx', 'scripts/generate-api.mts')
     generated = run(tmp_path, *command, 'generate')
@@ -34,9 +34,6 @@ def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path, mo
     assert checked.returncode == 0, checked.stdout + checked.stderr
     hit = run(tmp_path, *command, 'check')
     assert hit.returncode == 0 and 'API check cache hit' in hit.stdout
-    monkeypatch.setenv('OKO_TEST_LIBRARY_DIR', str(tmp_path/'another-seed'))
-    reused = run(tmp_path, *command, 'check')
-    assert reused.returncode == 0 and 'API check cache hit' in reused.stdout
     fresh = run(tmp_path, *command, 'check', '--fresh')
     assert fresh.returncode == 0 and 'API check cache hit' not in fresh.stdout
     lock = tmp_path / 'uv.lock'
@@ -86,7 +83,6 @@ assert.notEqual(await key(), development);
 const production = await key();
 process.env.npm_lifecycle_event = 'another-command';
 process.env.OKO_TEST_ARTIFACT_DIR = '/another-report';
-process.env.OKO_TEST_LIBRARY_DIR = '/another-test-seed';
 process.env.PYTEST_CURRENT_TEST = 'different test (call)';
 process.env.PYTEST_VERSION = 'pytest process marker';
 assert.equal(await key(), production);
