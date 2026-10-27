@@ -20,6 +20,7 @@ def blocks(content: dict[str, Any]) -> list[dict[str, Any]]:
     return [block for block in content.get('blocks',[]) if block['type']=='quote' or block['type']=='text' and block['role']=='body']
 
 
+@reading_value
 def content(store: 'Store', item: str) -> dict[str, Any]:
     row=material_read.item(store.db,item)
     own=youtube_media.add_input(store,saved_content(row['content'],mutable=True)) if row else {}

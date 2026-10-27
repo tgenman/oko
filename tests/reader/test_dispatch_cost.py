@@ -159,3 +159,17 @@ def test_empty_dispatch_with_linked_articles_grows_linearly(tmp_path):
         finally:
             store.db.close()
     assert costs[1]<=costs[0]*25,costs
+
+
+def test_idle_media_dispatch_does_not_scan_all_saved_media(tmp_path):
+    store, feeds = _pending_files(tmp_path, 400)
+    try:
+        with store.db:
+            store.db.execute("UPDATE jobs SET status='done' WHERE kind='download_media'")
+        for captions in (False, True):
+            with measure_reads(store.db) as work:
+                job = store.jobs.next_job(store.clock(), feeds=feeds, media_only=True, captions_only=captions)
+            assert job is None
+            assert work.rows < 100, work
+    finally:
+        store.db.close()
