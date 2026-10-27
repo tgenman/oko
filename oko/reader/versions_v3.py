@@ -127,7 +127,7 @@ class VersionedReading:
                             return dict(state='reset',storage_id=owner.identity)
                         ids=owner.ids(options) if request['known_version']!=str(row['version']) else None
                         lists[identity]=(request,row,ids)
-                        for item in ids if ids is not None else request['known_cards']:
+                        for item in ids[:request.get('card_limit')] if ids is not None else request['known_cards']:
                             requested.setdefault(('card',item),dict(kind='card',id=item,known_version=request['known_cards'].get(item)))
                 else:
                     identity='runtime' if kind=='status' else 'navigation' if kind=='navigation' else request['id']

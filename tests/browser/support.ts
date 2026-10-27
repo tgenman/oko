@@ -149,7 +149,7 @@ async function reader() {
           }else if(kind==='list'){
             const o=item.options,p=new URLSearchParams({sort:o.sort});if(o.show_hidden)p.set('show_hidden','true');if(o.target.scope==='feed')p.set('feed',o.target.feed_id);if(o.target.scope==='folder')p.set('folder',o.target.folder_id);
             const cards:Card[]=await fixtureRead('/api/v3/cards?'+p);
-            for(const card of cards)changed('card',card.id,compact(card),item.known_cards[card.id]??null);
+            for(const card of cards.slice(0,item.card_limit))changed('card',card.id,compact(card),item.known_cards[card.id]??null);
             changed(kind,JSON.stringify([o.target.scope,o.target.scope==='feed'?o.target.feed_id:o.target.scope==='folder'?o.target.folder_id:'',o.sort,o.show_hidden]),{ids:cards.map(c=>c.id),options:o},item.known_version);
           }else if(kind==='card'){
             const card=(await fixtureRead('/api/v3/cards') as Card[]).find(c=>c.id===item.id);if(card)changed(kind,item.id,compact(card),item.known_version);
@@ -207,7 +207,7 @@ async function reader() {
         }
       }, materials);
       await target.goto(origin + '/#token=' + token);
-      await expect(target.locator('#cards button')).toHaveCount(materials.length);
+      await expect(target.locator('#cards button')).toHaveCount(Math.min(40,materials.length));
     }
   return {...fixture, errors, start, async close() {await fixture.close(); expect(schemaFailures).toEqual([]);}};
   } catch (error) {await fixture.close(); throw error;}

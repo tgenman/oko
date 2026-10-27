@@ -4,6 +4,7 @@ import type {ReaderApi} from '../api/reader';
 import type {Navigation} from './tree';
 
 export type CardView = CompactReadingCard & Pick<SubscriptionFeed,'folder_id'|'importance'> & {feed_title:string};
+const portionSize=40;
 type Value = {version:string; data:unknown};
 const key = (kind:string,id:string) => kind+'/'+id;
 export const listIdentity = (options:ReadingListOptions) => JSON.stringify([options.target.scope,options.target.scope==='feed'?options.target.feed_id:options.target.scope==='folder'?options.target.folder_id:'',options.sort,options.show_hidden]);
@@ -13,16 +14,18 @@ export const listIdentity = (options:ReadingListOptions) => JSON.stringify([opti
 export function createReadingResources(api:ReaderApi) {
   let storageId:string|null=null;
   const values=new Map<string,Value>();
+  const limits=new Map<string,number>();
+  const limit=(options:ReadingListOptions)=>limits.get(listIdentity(options))??portionSize;
   const version=(kind:string,id:string) => values.get(key(kind,id))?.version??null;
   function data<T>(kind:string,id:string):T|undefined {return values.get(key(kind,id))?.data as T|undefined;}
   function forget(ids:string[]) {for(const id of ids)values.delete(key('card',id));}
   function plan(options:ReadingListOptions, extra:ReadingCheck[]=[],listOnly=false):ReadingCheck[] {
     const known:Record<string,string|null>={};
     const previous=data<ReadingListData>('list',listIdentity(options));
-    for(const id of previous?.ids??[])known[id]=version('card',id);
+    for(const id of previous?.ids.slice(0,limit(options))??[])known[id]=version('card',id);
     // Cached cards from another area can be reused when the composition changes.
     if(!previous)for(const [identity,value] of values)if(identity.startsWith('card/'))known[identity.slice(5)]=value.version;
-    const listing:ReadingCheck={kind:'list',options,known_version:version('list',listIdentity(options)),known_cards:known};
+    const listing:ReadingCheck={kind:'list',options,known_version:version('list',listIdentity(options)),known_cards:known,card_limit:limit(options)};
     if(listOnly)return [listing];
     const index=data<ReadingIndex>('navigation','navigation');
     return [{kind:'status',known_version:version('status','runtime')},{kind:'navigation',known_version:version('navigation','navigation')},
@@ -33,13 +36,20 @@ export function createReadingResources(api:ReaderApi) {
   function accept(frame:ReadingCheckResponse) {
     const changed=new Set<string>();
     const reset=frame.state==='reset'||storageId!==null&&storageId!==frame.storage_id;
-    if(reset)values.clear();
+    if(reset){values.clear();limits.clear();}
     storageId=frame.storage_id;
     if(frame.state==='reset')return {reset:true,changed};
     for(const resource of frame.resources) {
       if(!['status','navigation','feed','card','list'].includes(resource.kind))continue;
       const identity=key(resource.kind,resource.id),previous=values.get(identity);
       if(resource.state==='changed'&&(!previous||BigInt(resource.version)>BigInt(previous.version))) {
+        if(resource.kind==='list'&&previous){
+          const before=previous.data as ReadingListData,after=resource.data;
+          const retained=new Set(before.ids.slice(0,limit(before.options)));
+          let end=limit(after.options);
+          after.ids.forEach((id,index)=>{if(retained.has(id))end=Math.max(end,index+1);});
+          limits.set(listIdentity(after.options),end);
+        }
         values.set(identity,{version:resource.version,data:resource.data});changed.add(resource.kind);
       } else if(resource.state==='unavailable') {if(values.delete(identity))changed.add(resource.kind);}
     }
@@ -58,10 +68,28 @@ export function createReadingResources(api:ReaderApi) {
   }
   function cards(options:ReadingListOptions):CardView[]|undefined {
     const list=data<ReadingListData>('list',listIdentity(options));if(!list)return;
-    return list.ids.flatMap(id=>{
+    return list.ids.slice(0,limit(options)).flatMap(id=>{
       const card=data<CompactReadingCard>('card',id),feed=card&&data<SubscriptionFeed>('feed',card.feed_id);
       return card&&feed?[{...card,feed_title:feed.title,folder_id:feed.folder_id,importance:feed.importance}]:[];
     });
   }
-  return {plan,check,accept,forget,navigation,cards,get storageId(){return storageId;},get status(){return data<RuntimeStatus>('status','runtime');}};
+  function ids(options:ReadingListOptions):string[] {return data<ReadingListData>('list',listIdentity(options))?.ids??[];}
+  function more(options:ReadingListOptions) {return ids(options).length>limit(options);}
+  function extend(options:ReadingListOptions) {
+    if(!more(options))return false;
+    limits.set(listIdentity(options),limit(options)+portionSize);return true;
+  }
+  async function titles(ids:string[],signal:AbortSignal):Promise<Pick<CardView,'id'|'title'>[]> {
+    const identity=storageId;
+    const missing=ids.filter(id=>!data<CompactReadingCard>('card',id));
+    for(let offset=0;offset<missing.length;offset+=portionSize){
+      signal.throwIfAborted();
+      const frame=await check(missing.slice(offset,offset+portionSize).map(id=>({kind:'card',id,known_version:null})),signal);
+      signal.throwIfAborted();
+      if(storageId!==identity||frame.storage_id!==identity||frame.state==='reset')throw new Error('Reading list changed; reopen the action');
+      accept(frame);
+    }
+    return ids.map(id=>{const card=data<CompactReadingCard>('card',id);if(!card)throw new Error('Could not load all selected items; reopen the action');return {id,title:card.title};});
+  }
+  return {plan,check,accept,forget,navigation,cards,ids,more,extend,titles,get storageId(){return storageId;},get status(){return data<RuntimeStatus>('status','runtime');}};
 }
