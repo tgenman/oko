@@ -146,6 +146,10 @@ class ReadingQueries:
         return self._storage().reading.page(options, cursor, limit)
 
     @repository_access
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None]]:
+        return self._facts.card_validators(identities)
+
+    @repository_access
     def card(self, identity: str) -> dict[str, Any] | None:
         from oko.storage.card_read import card
         return card(self._storage(), identity)

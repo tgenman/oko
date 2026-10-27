@@ -21391,7 +21391,10 @@ components:
           - $ref: '#/components/schemas/Timestamp'
           - type: 'null'
         source_url:
-          $ref: '#/components/schemas/SourceUrl'
+          anyOf:
+          - $ref: '#/components/schemas/SourceUrl'
+          - type: 'null'
+          description: Null only when a damaged publication has no valid source URL.
         preview_url:
           anyOf:
           - $ref: '#/components/schemas/MediaUrl'

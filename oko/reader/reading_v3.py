@@ -223,8 +223,8 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
             if page is None:return JSONResponse({'code':'cursor_expired'},status_code=409)
             identities,total=page
             shown=identities[:limit]
-            versions=current.versions.batch({('card',item) for item in shown})
-            signature=[current.versions.identity,options,request.query_params.get('cursor'),limit,total,identities,[(item,versions.get(('card',item),{}).get('version')) for item in shown]]
+            versions=current.card_validators(shown)
+            signature=[current.versions.identity,options,request.query_params.get('cursor'),limit,total,identities,[(item,versions.get(item)) for item in shown]]
             tag='"'+hashlib.sha256(json.dumps(signature,sort_keys=True,ensure_ascii=False).encode()).hexdigest()+'"'
             headers={'ETag':tag,'Cache-Control':'private, no-cache'}
             if request.headers.get('if-none-match')==tag:return Response(status_code=304,headers=headers)
@@ -233,9 +233,28 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
                 for item in shown:
                     card_data=current.card(item)
                     if card_data is None:continue
-                    if card_data['published_at'] is not None:card_data['published_at']=project.timestamp(card_data['published_at']).root
-                    keys=('id','title','feed_id','published_at','source_url','preview_url','loading','changed','hidden','post_web_unavailable','external_attachment_kinds')
-                    items.append({key:card_data[key] for key in keys})
+                    try:
+                        if card_data['published_at'] is not None:
+                            card_data['published_at']=project.timestamp(card_data['published_at']).root
+                        projected=wire.CardListItem.model_validate(card_data)
+                    except (ValueError,OverflowError,OSError,TypeError):
+                        from oko.diagnostics import record_caught
+                        record_caught('reader.card')
+                        try:
+                            source=wire.SourceUrl(card_data['source_url']).root
+                        except (ValueError,TypeError):
+                            source=None
+                        published=card_data['published_at']
+                        try:
+                            date=published if isinstance(published,str) else project.timestamp(published).root if published is not None else None
+                        except (ValueError,OverflowError,OSError,TypeError):
+                            date=None
+                        projected=wire.CardListItem.model_validate(dict(
+                            id=item,feed_id=card_data['feed_id'],title='Публикация недоступна',
+                            published_at=date,source_url=source,preview_url=None,loading=False,
+                            changed=False,hidden=bool(card_data['hidden']),post_web_unavailable=False,
+                            external_attachment_kinds=[]))
+                    items.append(projected.model_dump(mode='json'))
             return JSONResponse(wire.CardPage.model_validate(dict(items=items,total=total,next_cursor=identities[limit] if len(identities)>limit else None)).model_dump(mode='json'),headers=headers)
 
     @app.post('/api/v3/cards/read', status_code=204, dependencies=[Depends(no_query)])

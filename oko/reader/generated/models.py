@@ -1401,7 +1401,9 @@ class CardListItem(WireModel):
     )
     preview_url: MediaUrl | None
     published_at: Timestamp | None
-    source_url: SourceUrl
+    source_url: SourceUrl | None = Field(
+        ..., description="Null only when a damaged publication has no valid source URL."
+    )
     title: StrictStr
 
 

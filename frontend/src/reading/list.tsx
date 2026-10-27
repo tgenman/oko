@@ -90,6 +90,7 @@ export function createMaterialList({readerApi,onOpen,onRetry,onContext,onMore,on
     visible(){const scroll=host('card-scroll'),bounds=scroll.getBoundingClientRect(),rows=[...host('cards').querySelectorAll<HTMLElement>('[data-card]')].filter(node=>{const rect=node.getBoundingClientRect();return rect.bottom>=bounds.top-150&&rect.top<=bounds.bottom+150;});return rows.length&&rows[0]?.dataset.card?{cursor:rows[0].dataset.card,limit:rows.length}:null;},
     atTop(){return (restore?.top??host('card-scroll').scrollTop)<40;},
     top(){host('card-scroll').scrollTop=0;},
+    newest(){save('oko-material-sort','newest');store.set({...store.get(),sort:'newest'});},
     context,preview(ids:string[]){store.set({...store.get(),preview:ids});},
     title(id:string){return store.get().cards.find(card=>card.id===id)?.title;},
     select,update,

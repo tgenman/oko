@@ -64,7 +64,7 @@ test('failed batch reports an error and keeps all selected items',async()=>{
   await r.start(['a','b','c','d'].map(id=>material(id)));
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards/read',{status:503,body:{code:'storage_unavailable',message:'Disk unavailable',details:{retry_at:null},command_id:null,diagnostic_id:null}}));
   await r.page.locator('[data-card="d"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();await r.page.locator('#news-read-confirm').click();
-  await expect(r.page.locator('#news-read-dialog [role=status]')).toContainText('Could not mark');await expect(r.page.locator('#news-read-confirm')).toBeDisabled();
+  await expect(r.page.locator('#news-read-dialog [role=status]')).toContainText('Retrying is safe');await expect(r.page.locator('#news-read-confirm')).toBeEnabled();
   await expect(r.page.locator('#cards [data-card]')).toHaveCount(4);
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/cards/read').map(q=>q.body))).toEqual([{ids:['a','b','c']}]);await r.page.locator('#news-read-cancel').click();expect(r.errors).toEqual([]);
  }finally{await r.close();}

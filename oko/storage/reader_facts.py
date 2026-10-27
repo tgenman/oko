@@ -25,6 +25,12 @@ class ReaderFacts:
         with self.storage().db.access_lock, material_read.material_inputs(self.storage().db, identities, include_subtitles=include_subtitles):
             yield
 
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None]]:
+        if not identities:
+            return {}
+        rows=self.storage().db.execute("SELECT i.id, i.xmin::text AS row_generation, e.version FROM items i LEFT JOIN reader_entities e ON e.kind='card' AND e.identity=i.id WHERE i.id = ANY(%s)", (identities,))
+        return {row['id']:(row['row_generation'],row['version']) for row in rows}
+
     def feed_resources(self, identities: set[str] | None = None) -> dict[str, tuple[dict[str, Any], dict[str, Any] | None]]:
         subscriptions = self.storage().subscriptions
         rows = subscriptions.feeds() if identities is None else subscriptions.feeds_many(identities)

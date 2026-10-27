@@ -55,10 +55,16 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     finally{refreshing.delete(key);}
   }
   let readingCatalog: Navigation = {folders: [], feeds: [], count: 0};
+  function invalidate() {
+    contentEpoch++;
+    checking?.abort();
+    moreLoading?.controller.abort();
+    moreLoading=undefined;
+  }
   const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 
   function viewed(id: string, broadcast: boolean) {
-    contentEpoch++;
+    invalidate();
     pages.forget([id]);
     debug.forgetMaterials([id]);
     statusPanel.forgetMaterials([id]);
@@ -67,7 +73,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     if (broadcast) session.post(id);
   }
   function changed() {
-    contentEpoch++;
+    invalidate();
     return refresh();
   }
   const opened = createOpenedMaterial({
@@ -76,7 +82,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     acceptStorage:identity=>resources.storageId===null||resources.storageId===identity,
     fetchMedia: (path, signal) => fetchMedia(path, signal, 'no-store'),
     onViewed: id => { viewed(id, true); void refresh(); },
-    onChanged: contentChanged => {if (contentChanged) contentEpoch++; void refresh();},
+    onChanged: contentChanged => {if (contentChanged) invalidate(); void refresh();},
   });
   const list = createMaterialList({
     readerApi, fetchMedia,
@@ -97,7 +103,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       moreLoading=operation;
       return operation.promise;
     },
-    onNew: () => {if(currentOptions){pages.reset(currentOptions);list.top();void changed();}},
+    onNew: () => {if(currentOptions){const options=currentOptions;pages.reset(options);if(options.sort==='oldest'){pages.reset({...options,sort:'newest'});list.newest();}list.top();void changed();}},
   });
   const newsActions = createNewsActions({
     readerApi, isStopped: () => stopped,
@@ -109,7 +115,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     readerApi, isStopped: () => stopped,
     getFolder: () => tree.selection.kind === 'folder' ? tree.selection.id : null,
     onSettled: folder => {
-      contentEpoch++;
+      invalidate();
       // A captured token does not cover later arrivals; refresh reconciles exact cards.
       session.post({kind: 'folder-viewed', folder});
       void refresh();
@@ -124,7 +130,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onSettled: feed => {
       // A completion token cannot cover later arrivals. Reconcile the accepted
       // cards on refresh instead of clearing everything belonging to this feed.
-      contentEpoch++;
+      invalidate();
       session.post({kind: 'feed-viewed', feed});
       void refresh();
     },
@@ -142,7 +148,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     readerApi, fetchMedia,
     onSelect: (selection,reason) => {
       newsActions.close(false);
-      contentEpoch++;
+      invalidate();
       if(reason==='user')opened.clear();
       list.setArea(selection, readingCatalog);
       void refresh();
@@ -159,7 +165,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     menus.stop();
     stopped = true;
     statusPanel.stop();
-    contentEpoch++;
+    invalidate();
     opened.clear();
     list.clear();
     tree.clear();
@@ -175,7 +181,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   function readerMessage(data: ReaderMessage) {
     if (data === 'stop') stopUi('Oko stopped');
     else if (typeof data === 'object') {
-      contentEpoch++;
+      invalidate();
       // Completion broadcasts invalidate the snapshot, not newly arrived items.
       refresh();
     } else {
@@ -287,7 +293,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
         progress('No connection to Oko');
       }
     },
-    onClosed: () => {newsActions.close(false); contentEpoch++; opened.clear(); list.clear();},
+    onClosed: () => {newsActions.close(false); invalidate(); opened.clear(); list.clear();},
     onCloseError: error => reportError(error, 'Closing tab'),
   });
   input('sort').onchange = () => {newsActions.close(false); void changed();};
@@ -304,7 +310,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       : resource.kind === 'folder' ? readingCatalog.folders.find(folder => folder.id === resource.folder_id)?.title : undefined,
     async setPower(enabled:boolean) {
       try {await readerApi.setPower(enabled);}
-      finally {contentEpoch++;session.post({kind:'power'});await refresh();}
+      finally {invalidate();session.post({kind:'power'});await refresh();}
     },
   };
 }

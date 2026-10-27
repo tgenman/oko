@@ -25,7 +25,7 @@ test('real HTTP settings load three YouTube materials and can rediscover a viewe
   await expect(page.locator('#cards button')).toHaveCount(3);
   await expect(page.locator('#cards .date-group').first()).toHaveText('Unknown date');
   await expect(page.locator('#cards .card-date')).toHaveCount(0);
-  const latest=((await api('cards')).items).find(card=>card.source_url.endsWith('v0000000060'));
+  const latest=((await api('cards')).items).find(card=>card.source_url?.endsWith('v0000000060'));
   expect(latest).toBeDefined();
   await page.locator(`button[data-card="${latest!.id}"]`).click();
   await page.locator('#viewed').click();

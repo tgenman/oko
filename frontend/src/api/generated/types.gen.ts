@@ -225,7 +225,10 @@ export type CardListItem = {
     post_web_unavailable: boolean;
     preview_url: MediaUrl | null;
     published_at: Timestamp | null;
-    source_url: SourceUrl;
+    /**
+     * Null only when a damaged publication has no valid source URL.
+     */
+    source_url: SourceUrl | null;
     title: string;
 };
 
