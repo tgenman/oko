@@ -62,3 +62,28 @@ wait, browser rendering and network. It is not a deployed browser result.
 
 Reports: `/tmp/oko-card-task-check/.scratch/check-runs/20261027T132533Z-3696a48c/report.json`
 and `/tmp/oko-card-task-check/.scratch/check-runs/20261027T132627Z-19a53406/report.json`.
+
+## Additional pre-release checks
+
+Three completed browser sequences on the unchanged working release measured
+login at 6.962–7.937 s, first folder at 4.423–5.442 s, later folder transitions
+at 0.237–0.832 s, and two material openings per sequence at 0.247–0.802 s.
+Artifacts: `/tmp/oko-card-expanded-before-final.json` (first sequence completed;
+its cleanup wait incorrectly expected a URL fragment) and
+`/tmp/oko-card-expanded-before-series.json` (two complete sequences).
+
+A separate loopback HTTP run measured all resources at 3.720 s / 2,052,820 bytes,
+a folder reusing known cards at 0.249 s, and opening a material at 0.216 s.
+Artifact: `/tmp/oko-card-loopback-before.jsonl`.
+
+PR CI run 40512343376 passed all functional groups but failed one latency case:
+400 materials, idle, first opening p95 287.1 ms against the existing 200 ms
+threshold. The same four-case latency suite on the integrated change passed
+locally: for 400 materials, first/repeat p95 65.1/53.0 ms idle and 61.0/146.4 ms
+with processing active. This does not erase the CI failure or prove its cause.
+No thresholds changed. Local report:
+`/tmp/oko-card-integration/.scratch/check-runs/20261027T133350Z-98a8cd2b/report.json`.
+
+The measurement harness also reached the existing 16-session login limit.
+One session created by this task was revoked; other sessions were preserved.
+The harness now waits for completed logout before closing the browser.
