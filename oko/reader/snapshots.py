@@ -153,13 +153,6 @@ class InitialHistoryStatus(WireModel):
     waiting: StrictBool | MISSING = Field(default=MISSING, title='Waiting')
     warnings: list[StrictStr] | MISSING = Field(default=MISSING, title='Warnings')
 
-class Job(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    count: StrictInt = Field(..., title='Count')
-    error: StrictStr | None = Field(..., title='Error')
-    kind: Literal['discover', 'fetch', 'download_media', 'theses', 'filter', 'delete', 'read'] = Field(..., title='Kind')
-    status: Literal['pending', 'running', 'done', 'cancelled', 'failed', 'unavailable'] = Field(..., title='Status')
-
 class LocalProvenance(WireModel):
     model_config = ConfigDict(extra='forbid', regex_engine='python-re')
     model: StrictStr | None = Field(..., title='Model')
@@ -329,19 +322,11 @@ class ProblemSnapshot(WireModel):
 
 class Status(WireModel):
     model_config = ConfigDict(extra='forbid')
-    debug_count: StrictInt | MISSING = Field(default=MISSING, title='Debug Count')
-    debug_persistence_error: StrictStr | MISSING = Field(default=MISSING, title='Debug Persistence Error')
-    deleting: StrictBool | MISSING = Field(default=MISSING, title='Deleting')
     error: StrictStr | None | MISSING = Field(default=MISSING, title='Error')
-    errors: list[StrictStr] = Field(..., title='Errors')
     initial_histories: list[InitialHistoryStatus] | MISSING = Field(default=MISSING, title='Initial Histories')
-    jobs: list[Job] | MISSING = Field(default=MISSING, title='Jobs')
-    live_tabs: StrictInt | MISSING = Field(default=MISSING, title='Live Tabs')
     problems: ProblemSnapshot | MISSING = MISSING
     ready_sources: StrictInt = Field(..., title='Ready Sources')
     sources: list[SourceStatus] = Field(..., title='Sources')
-    stage: StrictStr = Field(..., title='Stage')
-    stopped: StrictBool | MISSING = Field(default=MISSING, title='Stopped')
     telegram_reads: list[TelegramRead] | MISSING = Field(default=MISSING, title='Telegram Reads')
     total_sources: StrictInt = Field(..., title='Total Sources')
     viewed_ids: list[StrictStr] | MISSING = Field(default=MISSING, title='Viewed Ids')

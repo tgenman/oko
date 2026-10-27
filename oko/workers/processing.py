@@ -107,7 +107,6 @@ class ProcessingWorker:
                     adapter=LlamaCpp(config,self.transport)
                 else:
                     raise ProcessingError('Ожидание выбранного обработчика; llama.cpp не настроен или не выбран',code='processor-config')
-                self.tasks.stage='Проверка обработчика'
                 try:
                     checked=await adapter.check()
                 except Exception:
@@ -122,7 +121,6 @@ class ProcessingWorker:
                         return
                     if not checked['local'] and not work.public_ai:
                         raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель',code='ai-permission')
-                self.tasks.stage='Фильтрация' if self.kind=='filter' else 'Подготовка тезисов'
                 result=(await adapter.generate(work.request,jobs.workspace(job)) if isinstance(adapter,Codex) else await adapter.generate(work.request))
             async with self.execution._actions:
                 if self.execution._store is not store or not self.execution._live():

@@ -54,14 +54,14 @@ To start a new library:
 uv run --locked python -m oko --database-url-file /path/to/private-reader-dsn --data ./data
 ```
 
-Existing nonempty stores from the previous pipeline require the documented offline migration before launch; see the [migration runbook](docs/development/publication-migration.md).
+PostgreSQL is the only supported Oko storage. The current release does not import old SQLite libraries; the [PostgreSQL guide](docs/development/postgresql.md) describes schema setup and the limits of legacy tools.
 
 Add a feed in the reader and choose its topic folder and initial history. Model connections are optional and configured separately in settings.
 
 By default, the server pauses work after losing its reader-tab heartbeat and exits after the reconnection grace period. For an instance that stays available without open tabs:
 
 ```sh
-uv run --locked python -m oko --persistent --port 8765 --data ./data
+uv run --locked python -m oko --persistent --port 8765 --database-url-file /path/to/private-reader-dsn --data ./data
 ```
 
 The persistent profile remembers browser sign-in and keeps serving the reader. Switching Oko off stops collection and processing; stopping the server is a separate action. See the [user guide](docs/guide.md) for profiles, integrations, and data handling.

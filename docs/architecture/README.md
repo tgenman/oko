@@ -127,7 +127,7 @@ Enabled/disabled work is separate from server lifetime. Switching Oko off stops 
 
 Python validates frontend assets and contract freshness before starting application work. Vite builds immutable asset generations; older chunks remain available to open tabs during watch rebuilds. The OpenAPI specification generates Python DTOs and the TypeScript SDK. `/docs` and `/openapi.json` expose API documentation; Swagger does not create a reader lease.
 
-New or empty stores use the current pipeline. Nonempty legacy stores require offline migration; startup refuses to silently convert them. See [migration](../development/publication-migration.md), [pipeline release](../development/pipeline-release.md), [checkout delivery](../development/package.md), and [Docker operations](../development/docker.md).
+PostgreSQL is the only supported Oko database. Apply schema migrations separately; the reader verifies the schema at startup. The current release does not provide an import from old SQLite libraries. See [PostgreSQL setup](../development/postgresql.md), [checkout delivery](../development/package.md), [cloud deployment](../development/cloud-deploy.md), and [backup](../development/cloud-backup.md). Earlier migration and pipeline-switch procedures are historical records, not current runbooks.
 
 ## Verification and detailed documents
 

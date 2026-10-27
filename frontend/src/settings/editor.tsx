@@ -1,6 +1,5 @@
 import {HistoryFields,selection,type Selection} from './connections';
 import {FeedDetails} from './feed-details';
-import {serviceText} from '../service-text';
 import {useId, useState, useSyncExternalStore, type ReactNode} from 'react';
 import type {SubscriptionFeed} from '../api/generated/types.gen';
 import {accessLabel,TelegramAccessEditor} from './telegram';
@@ -74,7 +73,7 @@ function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefi
  const connection=feed.kind==='demo'?'Test source connected':feed.kind==='telegram'?accessLabel(feed.access):transport==='rss'?'RSS connected: collects while the tab is open':transport==='youtube'?'YouTube connected: collects while the tab is open':feed.kind==='youtube'?'YouTube disabled':feed.connection==='ambiguous'?'Ambiguous address: select a connection explicitly':'Collector connection required';
  const historyBusy=owner.historyBusy(feed.id);
  const count=String(values.youtubeHistoryCount??(history?.selection.mode==='count'?history.selection.count:60));
- return <><details hidden={!help}><summary>Update Detection Capabilities</summary><p id="source-help">{help&&serviceText(help)}</p></details><h2>Feed Connection</h2>
+ return <><details hidden={!help}><summary>Update Detection Capabilities</summary><p id="source-help">{help&&help}</p></details><h2>Feed Connection</h2>
  {(history||feed.kind==='youtube'&&transport==='youtube')&&<><p id="history-progress" data-feed={feed.id} role="status" hidden={!history}>{historyProgress(history)}</p></>}
  {transport==='rss'&&<RSSHistoryControls owner={owner} feed={feed} active={Boolean(active)} busy={historyBusy}/>}
  {feed.kind==='youtube'&&transport==='youtube'&&<><p>History includes regular videos and recorded streams, excluding Shorts. Saved videos are not duplicated. Older videos may lack dates and descriptions.</p><label>Latest N Videos<input id="youtube-history-count" type="number" min={1} step={1} required value={count} onChange={event=>owner.edit('feed/'+feed.id,'youtubeHistoryCount',event.target.value)}/></label><button id="youtube-history-start" disabled={!owner.workAllowed||historyBusy||Boolean(active)} onClick={()=>{const input=document.getElementById('youtube-history-count')as HTMLInputElement;input.setCustomValidity(/^\d+$/.test(count)?'':'Enter a whole number, at least 1');if(input.reportValidity())void owner.history(feed,'start',count);}}>Load Latest N Videos</button><button id="youtube-history-stop" disabled={!owner.workAllowed||historyBusy} hidden={!active} onClick={()=>void owner.history(feed,'stop')}>Stop History Download</button></>}

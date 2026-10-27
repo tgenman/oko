@@ -1,4 +1,3 @@
-import {serviceText} from '../service-text';
 import type {HistoryState,HistoryStopReason} from '../api/generated/types.gen';
 const stopReasons:Record<HistoryStopReason,string>={
  count_reached:'Requested number selected', date_boundary:'Reached the selected date; coverage of the period is not confirmed',
@@ -14,7 +13,7 @@ export function historyProgress(history: HistoryState | null | undefined) {
   const state = history.state === 'cancelled' ? 'History download stopped' : history.state === 'waiting' ? 'Discovery incomplete — refresh this feed' : history.state === 'paused' ? 'History waiting — refresh this feed' : history.state === 'discovering' ? 'Discovering initial history' : history.state === 'not_started' ? 'Waiting for the first source request' : history.state === 'complete' ? counts.stop_reason?'History selection finished':'Initial history complete' : 'Loading initial history';
   const short = counts.scan_complete && counts.manifest_complete && selection.mode === 'count' && BigInt(selection.count || 0) > BigInt(counts.available) ? ` · Requested ${selection.count}, available ${counts.available}` : '';
   const outcomes = (counts.incomplete ? ` · ${counts.incomplete} incomplete` : '') + (counts.retrying ? ` · ${counts.retrying} awaiting retry` : '') + (counts.unavailable ? ` · ${counts.unavailable} permanently unavailable` : '');
-  const errors = counts.errors?.length ? ' · ' + [...new Set(counts.errors.map(error => serviceText(error.message)))].join(' · ') : '';
-  const discovery = counts.discovery_problem?.message ? ' · ' + serviceText(counts.discovery_problem.message) + (counts.discovery_problem?.retry_at ? ' · retry after ' + new Date(counts.discovery_problem.retry_at).toLocaleString() : '') : '';
-  return progress + ' · ' + state + (counts.stop_reason?' · '+stopReasons[counts.stop_reason]:'') + outcomes + errors + discovery + short + (counts.warnings?.length ? ' · ' + counts.warnings.map(serviceText).join(' · ') : '');
+  const errors = counts.errors?.length ? ' · ' + [...new Set(counts.errors.map(error => error.message))].join(' · ') : '';
+  const discovery = counts.discovery_problem?.message ? ' · ' + counts.discovery_problem.message + (counts.discovery_problem?.retry_at ? ' · retry after ' + new Date(counts.discovery_problem.retry_at).toLocaleString() : '') : '';
+  return progress + ' · ' + state + (counts.stop_reason?' · '+stopReasons[counts.stop_reason]:'') + outcomes + errors + discovery + short + (counts.warnings?.length ? ' · ' + counts.warnings.join(' · ') : '');
 }

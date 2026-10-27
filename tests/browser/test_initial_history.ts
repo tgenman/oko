@@ -75,6 +75,6 @@ test('finite history warning and unknown date are visible in settings and materi
     await r.page.locator('#feed-tree [data-owner="feed/rss"]').click();
     await feedOptions(r.page);
     await expect(r.page.locator('#feed-options')).toContainText('Requested 100, available 15');
-    await expect(r.page.locator('#feed-options')).toContainText('the accuracy of the latest N selection is not confirmed');
+    await expect(r.page.locator('#feed-options')).toContainText('Порядок RSS неоднозначен: точность выбора последних N не подтверждена');
   } finally { await r.close(); }
 });

@@ -91,7 +91,7 @@ def test_recorded_album_anchors_are_one_web_publication(tmp_path):
         configure_fast_web(client)
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@durov',folder='Inbox',initial_history={'mode':'count','count':'1'}))
         assert result.status_code == 200, result.text
-        cards = settled(client,1)
+        cards = settled(client,1,timeout=10)
         albums = [c for c in cards if 373 in [int(identity) for identity in c['source']['message_ids']]]
         assert len(albums) == 1
         assert [int(identity) for identity in albums[0]['source']['message_ids']] == list(range(373,382))

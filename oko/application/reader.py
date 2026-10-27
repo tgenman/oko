@@ -41,7 +41,7 @@ class StatusSnapshot:
 
 
 class ReaderApplication:
-    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, Source], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], stage: Callable[[], str], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram: TelegramClient | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
+    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, Source], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram: TelegramClient | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
         self.execution, self.jobs = execution, jobs
         self.subscriptions = SubscriptionService(execution.require_store)
         self.queries = ReadingQueries(execution.require_store)
@@ -52,7 +52,7 @@ class ReaderApplication:
         self._actions, self._clock, self._wall_clock = execution._actions, clock, wall_clock
         self._sources, self._telegram_bindings = sources, bindings
         self._sync_sources, self._interval_changed = sync_sources, interval_changed
-        self._stage, self._source_description = stage, source_description
+        self._source_description = source_description
         self._rss_transport, self._ai_transport = rss_transport, ai_transport
         self._telegram_client, self._telegram_http, self._codex_client = telegram, telegram_http, codex
         self.stop, self.admission_changed, self.set_power = stop, admission_changed, set_power
@@ -138,10 +138,6 @@ class ReaderApplication:
                     observed_at=self._wall_clock(), work_allowed=self._live(), sources=self._clean_collection(sources))
 
 
-    def status(self) -> dict[str, Any]:
-        return self.status_snapshot().state
-
-
     def status_snapshot(self) -> StatusSnapshot:
         candidates = None
         with reading_snapshot():
@@ -158,7 +154,7 @@ class ReaderApplication:
 
 
     def _status(self) -> dict[str, Any]:
-        state: dict[str, Any] = self._store.status() if self._store and not self.stopped else dict(jobs=[], errors=[], deleting=False)
+        state: dict[str, Any] = {}
         state['youtube'] = self.youtube_status() if self._store and not self.stopped else None
         if self._store and not self.stopped:
             self._viewed_ids = self.queries.viewed_ids()
@@ -168,32 +164,10 @@ class ReaderApplication:
                 consequence='Сбор и обработка остановлены.',next_step='Проверьте доступность хранилища; состояние не сбрасывается.',
                 objects=[],action=None,created_at=self._wall_clock(),next_at=None,state='current',finished_at=None,outcome=None)],recent=[],count=1,updated_at=self._wall_clock())
         state['viewed_ids'] = self._viewed_ids
-        pending = any(j['status'] in ('pending', 'running') for j in state['jobs'])
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
         source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources]
-        if self.stopped:
-            stage = 'Остановлено'
-        elif self._error:
-            stage = 'Ошибка хранилища'
-        elif state['deleting']:
-            stage = 'Удаление'
-        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'running' for j in state['jobs']):
-            stage = self._stage()
-        elif any(j['kind'] in ('theses', 'filter') and j['status'] == 'pending' for j in state['jobs']) and not self._sources:
-            stage = 'Ожидание обработчика' if state['errors'] else 'Подготовка тезисов'
-        elif pending and self._sources and all(j['kind'] == 'read' for j in state['jobs'] if j['status'] in ('pending', 'running')):
-            stage = 'Ожидание синхронизации Telegram'
-        elif pending and not self._sources:
-            stage = 'Источник не подключён'
-        elif pending and state['errors']:
-            stage = 'Сбор с ошибками' if any(not task.done() for task in self.jobs._lanes.values()) else 'Ожидание повтора'
-        elif pending:
-            stage = 'Сбор'
-        else:
-            stage = 'Завершено с ошибками' if state['errors'] else 'Готово'
-        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], telegram_reads=self._store.read_sync.statuses() if self._store and not self.stopped else [], sources=source_states, error=self._error, stopped=self.stopped,
-                    stage=stage,
+        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], telegram_reads=self._store.read_sync.statuses() if self._store and not self.stopped else [], sources=source_states, error=self._error,
                     ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
                     total_sources=len(self._sources))
 

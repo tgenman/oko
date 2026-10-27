@@ -17,7 +17,7 @@ class ReaderFacts:
     def jobs(self, identity: str) -> dict[str, dict[str, Any]]:
         return {kind: dict(row) for kind, row in material_read.jobs(self.storage().db, identity).items()}
 
-    def feed(self, identity: str) -> dict[str, Any]:
+    def feed(self, identity: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
         return material_read.feed(self.storage().db, identity)
 
     @contextmanager

@@ -11,6 +11,8 @@ from collections.abc import Iterator
 from typing import Any
 
 from oko.storage.reading import reading_value, saved_content
+from oko.storage.feed_facts import feed_facts
+import json
 
 
 @dataclass
@@ -64,19 +66,13 @@ def jobs(db: Database, identity: str) -> dict[str, Row]:
 
 
 @reading_value
-def feed(db: Database, identity: str) -> dict[str, Any]:
+def feed(db: Database, identity: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
     value = current(db)
     row = value.feeds.get(identity) if value and identity in value.feeds else db.execute(f'{_FEED} WHERE f . id = %s', (identity,)).fetchone()
     if row is None:
         raise ValueError('Feed not found')
-    result = dict(row)
-    result.pop('rowid', None)
-    from oko.storage.publications import FEED_COLUMNS
-    for field in FEED_COLUMNS:
-        result.pop(field, None)
-    for name in ('public_ai', 'read_history', 'auto_read'):
-        result[name] = None if result[name] is None else bool(result[name])
-    return result
+    binding = json.loads(row['reader_binding']) if row['kind'] == 'telegram' and row['reader_binding'] else None
+    return feed_facts(row), binding
 
 
 def state(db: Database, key: str) -> str | None:

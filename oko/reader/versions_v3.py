@@ -76,15 +76,12 @@ class VersionedReading:
         row=store.item(identity)
         if row is None or row['viewed']:
             raise ValueError('Material unavailable')
-        feed=store.feed(row['feed_id'])
+        feed,binding=store.feed(row['feed_id'])
         header,text=store.original(identity) if row['complete'] else ({},'')
         source=dict(kind=feed['kind'],feed_id=row['feed_id'],source_url=row['url'])
         if feed['kind']=='youtube':source['captions']=header.get('captions') or 'not_requested'
         if feed['kind']=='telegram':
-            binding=json.loads(feed['reader_binding']) if feed['reader_binding'] else None
-            saved={k:v for k,v in feed.items() if k not in ('reader_binding','telegram_topic')}
-            saved.update(original_urls=json.loads(saved['original_urls']),initial_history=None)
-            access=project.telegram_access(facts.SubscriptionFeed.model_validate(saved),binding)
+            access=project.telegram_access(facts.SubscriptionFeed.model_validate(feed),binding)
             source.update(access=access.model_dump(mode='json'),message_ids=[str(n) for n in json.loads(row['members'])])
         settings=store.effective('feed',row['feed_id'],details=False)
         job=store.jobs(identity).get('fetch')

@@ -68,7 +68,7 @@ class LocalCaptions:
 
 
 class YouTubeSource(RSSSource):
-    changes = 'YouTube: повторно проверяются название и превью видео в окне Atom. Полученные субтитры сохраняются без повторных запросов. Удаление видео и правки вне этого окна не определяются.'
+    changes = 'YouTube: video titles and previews are checked again within the Atom window. Downloaded subtitles are kept without further requests. Deleted videos and changes outside this window are not detected.'
     def __init__(self, url: str, initial_days: int, captions: CaptionsClient,
                  transport: httpx.AsyncBaseTransport | None = None,
                  history: HistoryClient | None = None) -> None:

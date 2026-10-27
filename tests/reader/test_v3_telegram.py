@@ -77,3 +77,7 @@ def test_confirmed_telegram_access_is_identical_in_catalog_composition_card_and_
         assert card['source']['access']==catalog['access']
         material=client.get('/api/v3/materials/'+card['id']).json()
         assert material['source']['access']==catalog['access']
+        response=client.get('/api/v3/reading/materials/'+card['id'])
+        assert response.status_code==200,response.text
+        text=next(resource['data'] for resource in response.json()['resources'] if resource['kind']=='material')
+        assert text['source']['access']==catalog['access']

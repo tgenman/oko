@@ -228,7 +228,7 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
         time.sleep(.1)
         retained = client.get('/api/v3/materials/' + item).json()
         assert retained['title'] == 'Новое название видео' and retained['content']['source_deleted'] is False
-        assert 'не определяются' in client.get('/api/v3/status').json()['sources'][0]['changes']
+        assert 'changes outside this window are not detected' in client.get('/api/v3/status').json()['sources'][0]['changes']
 
 
 
