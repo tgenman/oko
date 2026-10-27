@@ -207,6 +207,10 @@ class JobRepository:
         return self._claim(row)
 
     def _media_candidate(self, now: float, feeds: list[str], dependencies: list[str], captions: bool) -> Row | None:
+        # Avoid walking every publication and media file when no due download
+        # exists anywhere. The scoped query below remains authoritative when it does.
+        if not self.store.db.execute("SELECT 1 FROM jobs WHERE kind='download_media' AND status='pending' AND next<=%s AND NOT (coalesce(problem_code,'')='ai-permission' AND error IS NOT NULL) LIMIT 1", (now,)).fetchone():
+            return None
         # LATERAL keeps the indexed search scoped to each selected publication.
         # Each media identity has one job of this kind. Keep parameterized
         # index probes instead of joining the entire foreign pending archive.

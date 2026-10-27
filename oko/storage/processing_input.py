@@ -35,6 +35,12 @@ def content(store: 'Store', item: str) -> dict[str, Any]:
     return own
 
 
+@reading_value
+def _reading_content(store: 'Store', item: str) -> dict[str, Any]:
+    """Borrow an assembled input only within the synchronous read snapshot."""
+    return content(store, item)
+
+
 def selected_content(store: 'Store', item: str, kind: str) -> dict[str, Any]:
     selected=content(store,item)
     row=store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone()
@@ -106,7 +112,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not summary:
         return None
     rules=live_settings(store,item)
-    selected_content=saved_content(row['content']) if youtube else content(store,item)
+    selected_content=saved_content(row['content']) if youtube else _reading_content(store,item)
     if youtube and selected_content.get('extra',{}).get('youtube',{}).get('captions')=='available' and not youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content)):
         return None
     if awaiting_input(selected_content) or awaiting_linked_input(store,item,selected_content):
@@ -167,7 +173,7 @@ def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict
 
 
 def input_hash(store: 'Store', item: str) -> str:
-    selected=content(store,item)
+    selected=_reading_content(store,item)
     youtube=selected.get('extra',{}).get('youtube',{})
     row=material_read.item(store.db,item)
     return digest([row['title'] if row and not youtube else None,
