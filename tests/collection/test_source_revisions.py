@@ -284,13 +284,14 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'test')
         connect(client)
-        original = settled(client)[0]
-        item = original['id']
+        card = settled(client)[0]
+        item = card['id']
+        original = client.get('/api/v3/materials/' + item).json()
         source.fail = True
         client.post('/api/v3/materials/' + item + '/retry')
         wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']) or client.get('/api/v3/materials/' + item).json()['content']['changed'])
         retained = client.get('/api/v3/materials/' + item).json()
-        assert retained['content']['revision_id'] == original['revision_id']
+        assert retained['content']['revision_id'] == original['content']['revision_id']
         assert retained['content']['changed'] is False and 'previous_versions' not in retained['content']
         assert (retained['content']['completeness']['state']=='complete') is True
         assert client.get(retained['content']['attachments'][0]['url']).content == b'saved-image'
@@ -298,7 +299,7 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
         source.fail = False
         client.post('/api/v3/materials/' + item + '/retry')
         wait_for(client, lambda: not client.get('/api/v3/materials/' + item).json()['content']['loading'])
-        assert client.get('/api/v3/materials/' + item).json()['content']['revision_id'] == original['revision_id']
+        assert client.get('/api/v3/materials/' + item).json()['content']['revision_id'] == original['content']['revision_id']
         source.text = 'Настоящая правка текста при недоступном вложении'
         source.fail = True
         client.post('/api/v3/materials/' + item + '/retry')
@@ -328,9 +329,10 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
         feed = subscribe(client)
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True})
         presence(client, 'test')
-        original = wait_cards(client)[0]
-        item = original['id']
-        assert client.get('/api/v3/materials/' + item).json()['source']['captions'] == 'available'
+        card = wait_cards(client)[0]
+        item = card['id']
+        original = client.get('/api/v3/materials/' + item).json()
+        assert original['source']['captions'] == 'available'
         count = captions.calls
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.post('/api/v3/collect')
@@ -338,6 +340,6 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
         retained = client.get('/api/v3/materials/' + item).json()
         assert retained['content']['text'] == 'Уже сохранённые субтитры'
         assert retained['source']['captions'] == 'available'
-        assert retained['content']['revision_id'] == original['revision_id']
+        assert retained['content']['revision_id'] == original['content']['revision_id']
         assert retained['content']['changed'] is False and 'previous_versions' not in retained['content']
         assert captions.calls == count

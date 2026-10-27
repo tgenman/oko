@@ -139,13 +139,19 @@ def test_stop_then_new_selection_can_rediscover_viewed_and_retains_saved_materia
         assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'4'}).status_code == 200
         wait_history(client, feed, lambda h: h['state'] == 'complete')
         cards = read_all_cards(client, '/api/v3/cards')
-        client.post('/api/v3/materials/' + cards[0]['id'] + '/viewed')
+        # The first displayed card is now selected by timestamp and opaque ID;
+        # explicitly view a video that the next two-item selection rediscovers.
+        viewed = next(card for card in cards if card['source_url'].endswith(video(60)))
+        assert client.post('/api/v3/materials/' + viewed['id'] + '/viewed').status_code == 200
+        assert len(read_all_cards(client, '/api/v3/cards')) == 3
         assert client.delete('/api/v3/feeds/' + feed + '/history').json()['history']['state'] == 'cancelled'
         assert client.patch('/api/v3/feeds/' + feed + '/history', json={'paused': False}).status_code == 409
         assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'2'}).status_code == 200
         progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert progress['progress']['available'] == 2 and progress['progress']['viewed'] == 0
-        assert len(read_all_cards(client, '/api/v3/cards')) == 4
+        restored=read_all_cards(client, '/api/v3/cards')
+        assert len(restored) == 4
+        assert {card['source_url'].split('=')[-1] for card in restored} == {video(n) for n in range(57,61)}
         assert [count for _,count in history.calls][-2:]==[1,2]
 
 
