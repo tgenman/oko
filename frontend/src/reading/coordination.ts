@@ -37,7 +37,10 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   let checking:AbortController|undefined;
   let unavailable=false;
   let displayedList:string|undefined;
+  let displayedCount=0;
   let listOnly=false;
+  let currentOptions:ReadingListOptions|undefined;
+  let loadingMore:Promise<void>|undefined;
   let settingsAppliedRevision:number|undefined;
   let contentEpoch = 0;
   let refreshSequence = 0;
@@ -80,12 +83,19 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onContext: (card, context, x, y, trigger) => {folderMenu.close(false);feedActions.close(false);newsActions.open(card, context, x, y, trigger);},
     onOpen: card => opened.open(card),
     onRetry: refresh,
+    onMore: () => {
+      if(loadingMore)return loadingMore;
+      if(!currentOptions||!resources.extend(currentOptions))return Promise.resolve();
+      listOnly=true;
+      loadingMore=refresh().finally(()=>{loadingMore=undefined;});return loadingMore;
+    },
   });
   const newsActions = createNewsActions({
     readerApi, isStopped: () => stopped,
     onViewed: id => {if(opened.selection?.id===id)opened.clear();viewed(id, true);},
     onRefresh: changed,
     onPreview: ids => list.preview(ids),
+    loadTitles: (ids,signal) => resources.titles(ids,signal),
   });
   const folderActions = createFolderActions({
     readerApi, isStopped: () => stopped,
@@ -181,6 +191,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       const selection=tree.selection;
       const sort=input('sort').value;
       const options:ReadingListOptions={target:selection.kind==='feed'?{scope:'feed',feed_id:selection.id!}:selection.kind==='folder'?{scope:'folder',folder_id:selection.id!}:{scope:'all'},sort:sort==='oldest'||sort==='importance'?sort:'newest',show_hidden:input('show-hidden').checked};
+      currentOptions=options;
       const openedCheck=opened.poll();
       const selectedOnly=listOnly;listOnly=false;
       const frame=await resources.check(resources.plan(options,openedCheck.resources,selectedOnly),controller.signal);
@@ -232,10 +243,11 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       if(state.runtime_state==='unavailable'){opened.disconnected();list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable');return;}
       const cards=resources.cards(options);
       if(!cards)throw new Error('Reading list temporarily unavailable');
-      if(recovered||displayedList!==listIdentity(options)||navigationChanged||accepted.changed.has('list')||accepted.changed.has('card')){
+      if(cards.length!==displayedCount||recovered||displayedList!==listIdentity(options)||navigationChanged||accepted.changed.has('list')||accepted.changed.has('card')){
         displayedList=listIdentity(options);
         opened.reconcile(cards);
-        list.update(cards,opened.selection?.id);
+        list.update(cards,opened.selection?.id,resources.ids(options),resources.more(options));
+        displayedCount=cards.length;
         newsActions.update(list.context());
       }
 

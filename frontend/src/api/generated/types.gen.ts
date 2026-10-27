@@ -303,6 +303,10 @@ export type CheckFilter = {
 };
 
 export type CheckList = {
+    /**
+     * Limit automatic card hydration to this many leading cards when the composition changes. Composition IDs remain complete. An unchanged composition checks the explicit known_cards set. Omit for the legacy full-card response.
+     */
+    card_limit?: number;
     kind: 'list';
     known_cards: {
         [key: string]: ReadingKnownVersion;

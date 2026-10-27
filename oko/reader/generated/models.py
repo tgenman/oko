@@ -3491,6 +3491,13 @@ class AddFeed503Errors(RootModel[SourceUnavailableError | StorageUnavailableErro
 
 class CheckList(WireModel):
     model_config = ConfigDict(extra="forbid")
+    card_limit: StrictInt | MISSING = Field(
+        default=MISSING,
+        description="Limit automatic card hydration to this many leading cards when the composition changes. Composition IDs remain complete. An unchanged composition checks the explicit known_cards set. Omit for the legacy full-card response.",
+        examples=[40],
+        ge=0,
+        le=50000,
+    )
     kind: Literal["list"] = Field(..., examples=["list"])
     known_cards: dict[str, ReadingKnownVersion | None] = Field(..., max_length=50000)
     known_version: ReadingKnownVersion | None

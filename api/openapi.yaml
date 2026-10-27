@@ -21217,6 +21217,13 @@ components:
           $ref: '#/components/schemas/ReadingListOptions'
         known_version:
           $ref: '#/components/schemas/ReadingKnownVersion'
+        card_limit:
+          type: integer
+          minimum: 0
+          maximum: 50000
+          description: Limit automatic card hydration to this many leading cards when the composition changes. Composition IDs remain complete. An unchanged composition checks the explicit known_cards set. Omit for the legacy full-card response.
+          examples:
+          - 40
         known_cards:
           type: object
           additionalProperties:
