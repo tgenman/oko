@@ -14,7 +14,7 @@ def material(value: PublicationContent) -> Material:
                      if block['type']=='quote' or block['type']=='text' and block.get('role')=='body')
     external=any(block['type']=='external_media' for block in value.content.get('blocks',[]))
     return Material(value.metadata.title,text,not value.needs_fetch and not value.media and not external,
-        'Внешнее встраивание не сохранено локально' if external else 'Вложения ещё не загружены' if value.media else '',adapter_content=value)
+        'External embed not saved locally' if external else 'Вложения ещё не загружены' if value.media else '',adapter_content=value)
 
 
 def publication(value: PublicationContent) -> Publication:

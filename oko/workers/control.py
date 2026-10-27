@@ -33,7 +33,6 @@ class JobControl:
         self._lanes: dict[str, asyncio.Task[None]] = {}
         self._media_jobs: dict[str, Job] = {}
         self._lane_feeds: dict[str, str] = {}
-        self.stage = 'Проверка обработчика'
         self._ai_feed: str | None = None
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()

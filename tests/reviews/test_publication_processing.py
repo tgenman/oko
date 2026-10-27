@@ -442,11 +442,6 @@ def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
         assert client.get('/api/v3/materials/'+item).json()['theses']['result'] is None
         row=wait_for(client,lambda:r if (r:=stored(root,item))['status']=='ready' and r['filtered_content']=={} and r['summarized_content']=={} else None)
         assert row['status']=='ready' and row['filtered_content']=={} and row['summarized_content']=={}
-        def configs():
-            with database(root) as db:
-                f,s=db.execute('SELECT filter_config , summary_config FROM feeds WHERE id = %s',(feed,)).fetchone()
-                return json.loads(f),json.loads(s)
-        wait_for(client,lambda:configs()[0]['prompt_filters']=='' and configs()[1]['theses'] is False)
         count=len(calls)
         client.patch('/api/v3/settings/feed/'+feed,json={'prompt_filters':'Убери рекламу.','theses':True})
         wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['result'])

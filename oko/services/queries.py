@@ -72,7 +72,7 @@ class ReadingQueries:
         return self._facts.jobs(identity)
 
     @repository_access
-    def feed(self, identity: str) -> dict[str, Any]:
+    def feed(self, identity: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
         return self._facts.feed(identity)
 
     @repository_access

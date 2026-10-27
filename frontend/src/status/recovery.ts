@@ -1,4 +1,3 @@
-import {serviceText} from '../service-text';
 import type {AffectedResource,CommandContext,Problem,RecoveryIntent,RuntimeStatus} from '../api/generated/types.gen';
 export type Section='action'|'wait'|'object';
 const presentation:Record<Problem['code'],{section:Section;title:string}>={
@@ -26,7 +25,18 @@ const presentation:Record<Problem['code'],{section:Section;title:string}>={
  profile_account_conflict:{section:'action',title:'Same Account Assigned to Both Roles'},
 };
 export const section=(problem:Problem):Section=>presentation[problem.code]?.section||'object';
-export const problemTitle=(problem:Problem)=>problem.code==='command_failed'&&problem.message.trim()?serviceText(problem.message):problem.code==='processor_not_configured'&&problem.affected.some(r=>r.kind==='processor'&&r.processor_id==='codex')?'No Codex Model Selected':presentation[problem.code]?.title||problem.title;
+export const problemTitle=(problem:Problem)=>problem.code==='command_failed'&&problem.message.trim()?problem.message:problem.code==='processor_not_configured'&&problem.affected.some(r=>r.kind==='processor'&&r.processor_id==='codex')?'No Codex Model Selected':presentation[problem.code]?.title||problem.title;
+export function problemConsequence(problem:Problem):string {
+ switch(problem.code){
+ case 'processor_not_configured':
+  return problem.affected.some(r=>r.kind==='processor'&&r.processor_id==='codex')?'Summaries are not being generated yet.':problem.consequence;
+ case 'storage_unavailable':return 'Collection and processing are stopped.';
+ case 'material_incomplete':return 'The available portion can still be read.';
+ case 'feed_delete_failed':return 'Oko continues trying to delete the data.';
+ case 'command_outcome_unknown':return 'saved' in problem&&problem.saved===false?problem.consequence:'Oko is checking the result; the action will not be retried automatically.';
+ default:return problem.consequence;
+ }
+}
 export const isNavigation=(intent:RecoveryIntent)=>['configure_processor','configure_telegram_profile','change_setting','connect_source','inspect_materials'].includes(intent.kind);
 export function recoveryLabel(intent:RecoveryIntent):string {
  switch(intent.kind){

@@ -2,6 +2,7 @@ from oko.storage.database import INTEGRITY_ERRORS
 from oko.storage.database import expect_row, Connection, Row
 from oko.storage.reading import reading_value
 from oko.storage.settings_cache import SettingsCache
+from oko.storage.feed_facts import feed_facts
 import json
 import re
 import secrets
@@ -139,23 +140,13 @@ class SubscriptionRepository:
     @staticmethod
     def _feed_value(row: Row, binding: dict[str,Any] | None, history: dict[str,Any] | None,
                     avatar: str | None, profile: dict[str,Any] | None) -> dict[str,Any]:
-        feed = dict(row)
-        # The existing reader DTO contains subscription settings only. New
-        # persistence fields are consumed by the publication collection path.
-        from oko.storage.publications import FEED_COLUMNS
-        for field in FEED_COLUMNS:
-            feed.pop(field, None)
-        feed.pop('telegram_topic', None)
-        feed.pop('rowid', None)
+        feed = feed_facts(row)
         if avatar:
             feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar
-        feed['original_urls'] = json.loads(feed['original_urls'])
         if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
             if not profile or profile['state'] != 'ready':
                 feed['connection'] = 'unavailable'
         feed['initial_history'] = history
-        for field in ('public_ai', 'read_history', 'auto_read'):
-            feed[field] = None if feed[field] is None else bool(feed[field])
         return feed
 
     def add_feed(self, body: AddFeed) -> dict[str, Any]:

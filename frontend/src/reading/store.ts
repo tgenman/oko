@@ -1,5 +1,6 @@
 import {useSyncExternalStore} from 'react';
 import {flushSync} from 'react-dom';
+export {errorMessage} from '../api/errors';
 
 export function createStore<T>(initial:T) {
   let snapshot = initial;
@@ -14,4 +15,3 @@ export function useStore<T>(store:{get:()=>T;subscribe:(listener:()=>void)=>()=>
 export function saved(key:string,fallback:string) {try{return localStorage.getItem(key)||fallback;}catch{return fallback;}}
 export function save(key:string,value:string|number) {try{localStorage.setItem(key,String(value));}catch{/* Storage can be unavailable. */}}
 export function host(id:string) {const element=document.getElementById(id);if(!element)throw new Error('Missing reader surface '+id);return element;}
-export function errorMessage(error:unknown) {return error instanceof Error?error.message:String(error);}

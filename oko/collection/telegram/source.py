@@ -255,12 +255,12 @@ class LocalTelegram(_TelegramOperations):
 
 
 class TelegramSource:
-    changes = 'Telegram: при сборе перечитываются известные непросмотренные сообщения и вложения. Отсутствующие сообщения сохраняются локально; исчезновение может означать удаление или потерю доступа.'
+    changes = 'Telegram: known unread messages and attachments are checked again during collection. Missing messages are kept locally; their absence may mean deletion or lost access.'
     def __init__(self, client: TelegramClient | WebTelegram, account: str, peer: int, initial_days: int, username: str | None = None, *, http_transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.http_transport = client.transport if isinstance(client,WebTelegram) else http_transport
         self.adapter: Adapter = 'web' if isinstance(client, WebTelegram) else 'client'
         if isinstance(client, WebTelegram):
-            self.changes = 'Telegram web: видимая публичная история; скрытые сообщения и неизвестная смена username могут быть не обнаружены.'
+            self.changes = 'Telegram web: visible public history only; hidden messages and unknown username changes may go undetected.'
         self.identity_info: dict[str, Any] | None = None
         self.username = username
         self.client, self.account, self.peer, self.initial_days = client, account, peer, initial_days

@@ -1,4 +1,5 @@
 import {flushSync} from 'react-dom';
+import {errorMessage} from '../api/errors';
 import type {ReaderApi} from '../api/reader';
 import * as settings from '../api/generated/sdk.gen';
 import type {EffectiveSettingsSnapshot,RetrySettings,EffectiveFeedRefreshMinutes,EffectiveTelegramHttpRps,SettingsPatch,SettingsTarget,HistoryCountSelection,HistoryState,FeedHistoryState,YouTubeState,FeedPatchRequest as FeedPatch,RuntimeStatus,SourceState,RemoveFeedResult} from '../api/generated/types.gen';
@@ -8,7 +9,7 @@ type SettingsScope=SettingsTarget['scope'];
 export type DialogName='add'|'feeds'|'settings';
 export type Draft=Record<string,string|boolean>;
 export type Discard=(path:string,field:string,method?:string)=>Promise<unknown>|undefined;
-export const message=(error:unknown)=>error instanceof Error?error.message:'Action failed';
+export const message=(error:unknown)=>error instanceof Error?errorMessage(error):'Action failed';
 export class MenusOwner {
   private navigationRevision=0;
   private version=0; private listeners=new Set<()=>void>();

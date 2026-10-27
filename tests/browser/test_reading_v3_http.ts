@@ -5,6 +5,22 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 import {validate} from './contracts';
 
+test('a typed action error is presented independently of the server wording', {timeout:20000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ await addSources(api, [['https://a.test/feed','Альфа','Наука']]);
+ await page.goto(origin+'/#token='+token);
+ await page.locator('#cards button').first().click();
+ await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ let count=0;
+ await page.route('**/api/v3/materials/*/viewed',route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({code:'runtime_stopped',message:++count===1?'Старая формулировка':'Изменённая формулировка',details:null,diagnostic_id:null,command_id:null})}));
+ for(let i=0;i<2;i++){
+  await page.locator('#viewed').click();
+  await expect(page.locator('#message')).toHaveText('Oko stopped');
+ }
+ expect(count).toBe(2);
+});
+
 test('hide read hides folders without unviewed feeds even when selected', {timeout:25000}, async t=>{
  const {page,api,origin,token}=await productionReader(t);
  const catalog=await addSources(api,[["https://a.test/feed","Альфа","Новости"],["https://b.test/feed","Бета","Наука"]]);

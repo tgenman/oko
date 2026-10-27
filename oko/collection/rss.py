@@ -203,7 +203,7 @@ def entries(raw: bytes, base: str, *, strict: bool = False, diagnostics: list[st
 
 
 class RSSSource:
-    changes = 'RSS: повторно проверяются статьи в доступном окне фида; 404/410 сохраняют локальную копию. Исчезновение из окна не означает удаление.'
+    changes = 'RSS: articles are checked again within the available feed window; a local copy is kept after 404/410 responses. Disappearance from the window does not mean deletion.'
     def __init__(self, url: str, initial_days: int, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.url, self.initial_days, self.transport = normalized(url), initial_days, transport
         self.gap: str | None = None

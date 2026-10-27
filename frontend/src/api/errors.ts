@@ -1,4 +1,23 @@
-import {serviceText} from '../service-text';
+import type {ErrorEnvelope} from './generated/types.gen';
+
+// Only codes with an unambiguous meaning belong here. Other errors retain
+// the original message, which may contain actionable diagnostic details.
+const messages: Partial<Record<ErrorEnvelope['code'], string>> = {
+  runtime_disabled: 'Oko is off',
+  runtime_stopped: 'Oko stopped',
+  storage_unavailable: 'Storage unavailable',
+  session_required: 'Local session required',
+  host_not_allowed: 'Address not allowed',
+  origin_not_allowed: 'Page not allowed',
+  client_session_expired: 'Client session expired',
+  media_unavailable: 'Media unavailable',
+  version_unavailable: 'Version unavailable',
+  command_context_mismatch: 'Command context mismatch',
+  folder_name_conflict: 'A folder with this name already exists',
+  folder_not_empty: 'Move or delete all feeds before deleting this folder',
+  deletion_in_progress: 'Feed is being deleted',
+  verification_expired: 'Check the current feed URL first',
+};
 export class ReaderError extends Error {
   detail: unknown;
   code: string | null = null;
@@ -33,4 +52,8 @@ export async function decodeJson(response:Response):Promise<unknown> {
   return value;
 }
 
-export const errorMessage=(error:unknown)=>serviceText(error instanceof Error?error.message:String(error));
+export const errorMessage=(error:unknown)=>{
+  if(error instanceof ReaderError&&error.code&&Object.hasOwn(messages,error.code))
+    return messages[error.code as ErrorEnvelope['code']]!;
+  return error instanceof Error?error.message:String(error);
+};

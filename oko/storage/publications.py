@@ -26,11 +26,6 @@ if TYPE_CHECKING:
     from oko.storage.store import Store
 
 
-FEED_COLUMNS = frozenset(('platform', 'external_id', 'url', 'description',
-    'created_at', 'enabled', 'adapter', 'config', 'cursor', 'interval_seconds',
-    'filter_config', 'summary_config'))
-
-
 @dataclass
 class DiscoveryProjection:
     item: str
@@ -79,35 +74,26 @@ class Publications:
                 platform,external_id,adapter='youtube',ref.key.external_id,'youtube_adapter'
                 url=ref.url
             details=store.subscriptions.details.snapshot(feed)
-            effective=store.subscriptions.effective('feed',feed)['effective']
-            store.db.execute("UPDATE feeds SET platform = %s , external_id = %s , url = %s , description = %s , created_at = %s , adapter = %s , config = '{}' , interval_seconds = %s , filter_config = %s , summary_config = %s , enabled = %s WHERE id = %s",
+            store.db.execute("UPDATE feeds SET platform = %s , external_id = %s , url = %s , description = %s , created_at = %s , adapter = %s , config = '{}' , enabled = %s WHERE id = %s",
                 (platform,external_id,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),adapter,
-                 store.subscriptions.feed_refresh_minutes()*60,
-                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
-                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),int(row['transport'] is not None),feed))
+                 int(row['transport'] is not None),feed))
             return
         if row and binding and binding['kind']=='client' and json.loads(row['config']).get('source_kind')=='channel':
             config={**json.loads(row['config']),**binding}
             url='https://t.me/'+row['telegram_username'] if row['telegram_username'] else 'https://t.me/c/'+str(-row['telegram_peer']-1000000000000)
             details=store.subscriptions.details.snapshot(feed)
-            effective=store.subscriptions.effective('feed',feed)['effective']
-            store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_client_adapter' , config = %s , interval_seconds = %s , filter_config = %s , summary_config = %s WHERE id = %s",
+            store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_client_adapter' , config = %s WHERE id = %s",
                 (str(row['telegram_peer']),url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),json.dumps(config),
-                 store.subscriptions.feed_refresh_minutes()*60,
-                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('prompt_filters','processor')}),
-                 json.dumps({k:v['value'] for k,v in effective.items() if k in ('theses','prompt_theses','processor')}),feed))
+                 feed))
             return
         if not row or not binding or binding['kind'] != 'web':
             return
         url = reference('https://t.me/s/'+binding['username']).url
         details = store.subscriptions.details.snapshot(feed)
-        effective = store.subscriptions.effective('feed', feed)['effective']
         external_id = str(row['telegram_peer']) if row['telegram_peer'] is not None else url
-        store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_web_adapter' , config = %s , interval_seconds = %s , filter_config = %s , summary_config = %s WHERE id = %s",
+        store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_web_adapter' , config = %s WHERE id = %s",
             (external_id, url, details['description'] or '', details['created'] or row['created_at'] or store.wall_clock(), json.dumps({**json.loads(row['config']),**binding}),
-             store.subscriptions.feed_refresh_minutes()*60,
-             json.dumps({k: v['value'] for k, v in effective.items() if k in ('prompt_filters', 'processor')}),
-             json.dumps({k: v['value'] for k, v in effective.items() if k in ('theses', 'prompt_theses', 'processor')}), feed))
+             feed))
 
     def identify(self, item: str, ref: ExternalReference) -> None:
         row = expect_row(self.store.db.execute('SELECT * FROM items WHERE id = %s', (item,)).fetchone())
