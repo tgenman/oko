@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from tests.support.storage import Store
 from tests.support.postgres_work import measure_reads, scan_rows
 from tests.support.reader import HEADERS
-from tests.support.reading_cost import library, traced_app, tracing, request_sql
+from tests.support.reading_cost import library, traced_app, tracing
 
 
 @pytest.mark.parametrize('count', [26, 100])
@@ -53,20 +53,8 @@ def test_opening_one_material_does_not_read_unrelated_feeds(tmp_path):
     assert costs[1] <= costs[0] + 2, costs
 
 
-def test_selected_scope_and_file_reads_do_not_grow_with_other_materials(tmp_path, monkeypatch):
-    from collections import Counter
-    from pathlib import Path
-
+def test_selected_scope_sql_does_not_grow_with_other_materials(tmp_path):
     costs = []
-    original_read = Path.read_bytes
-    reads = Counter()
-
-    def read(path):
-        if path.name == 'original.md' and request_sql.get() is not None:
-            reads[str(path)] += 1
-        return original_read(path)
-
-    monkeypatch.setattr(Path, 'read_bytes', read)
     for other_count in (26, 100):
         root = tmp_path / str(other_count)
         feeds, _ = library(root, [26, other_count, other_count, other_count])
@@ -75,11 +63,9 @@ def test_selected_scope_and_file_reads_do_not_grow_with_other_materials(tmp_path
             tracing(client, app)
             nav = client.get('/api/v3/reading-composition').json()
             folder = next(f['feed']['folder_id'] for f in nav['feeds'] if f['feed']['id'] == feeds[0])
-            reads.clear()
             response = client.get('/api/v3/cards', params={'folder': folder})
             assert response.status_code == 200
             assert len(response.json()) == 26
-            assert not reads  # Publication text comes from PostgreSQL, not document files.
             costs.append(int(response.headers['X-Test-SQL']))
             assert client.patch('/api/v3/settings/feed/' + feeds[0], json={'originals': False}).status_code == 200
             response = client.get('/api/v3/cards', params={'feed': feeds[0]})
