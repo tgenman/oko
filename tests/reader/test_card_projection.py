@@ -18,12 +18,10 @@ def test_card_does_not_construct_opened_material(tmp_path, monkeypatch):
             opened.append(identity)
             return original(self, identity)
         monkeypatch.setattr(Store, 'original', observed)
-        response = client.post('/api/v3/reading/check', json=dict(storage_id=None, resources=[
-            dict(kind='card', id=item, known_version=None)]))
+        response = client.get('/api/v3/cards')
         assert response.status_code == 200
-        card = response.json()['resources'][0]
-        assert card['state'] == 'changed'
-        assert card['data']['snippet'] == ('Useful text ' * 2000).strip()[:500]
+        card = next(card for card in response.json()['items'] if card['id']==item)
+        assert 'snippet' not in card and 'text' not in card
         assert opened == [], 'Card read constructed the full opened material'
         response = client.get('/api/v3/reading/materials/' + item)
         assert response.status_code == 200
@@ -52,16 +50,14 @@ def test_card_keeps_linked_preview_without_mutating_opened_material(tmp_path):
         store.db.execute('INSERT INTO publication_links VALUES (%s,%s)', (item, 'child'))
     store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        request = dict(storage_id=None, resources=[dict(kind=kind, id=item, known_version=None) for kind in ('card', 'material')])
-        response = client.post('/api/v3/reading/check', json=request)
+        response = client.get('/api/v3/cards')
         assert response.status_code == 200
-        resources = {r['kind']: r for r in response.json()['resources']}
-        assert all(r['state'] == 'changed' for r in resources.values())
-        card = resources['card']['data']
-        assert card['snippet'] == 'Own text --- # Article Исходник: https://example.org/article Linked body'
+        card = next(card for card in response.json()['items'] if card['id']==item)
+        assert 'snippet' not in card and 'text' not in card
         assert card['changed'] is True
         assert card['preview_url'] == '/api/v3/materials/child/media/image.png'
-        assert 'Linked body' in resources['material']['data']['content']['text']
-        assert card['revision_id'] == resources['material']['data']['content']['revision_id']
-        repeated = client.post('/api/v3/reading/check', json=request).json()
-        assert next(r['data'] for r in repeated['resources'] if r['kind'] == 'card') == card
+        opened = client.get('/api/v3/reading/materials/'+item).json()
+        material = next(r['data'] for r in opened['resources'] if r['kind']=='material')
+        assert 'Linked body' in material['content']['text']
+        repeated = client.get('/api/v3/cards').json()
+        assert next(c for c in repeated['items'] if c['id']==item) == card

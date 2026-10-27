@@ -1,4 +1,5 @@
 """The real CLI consumes a private DSN file; migration is a separate operation."""
+from tests.support.cards import read_all_cards
 import os
 from pathlib import Path
 import subprocess
@@ -32,7 +33,7 @@ def test_private_database_file_runs_cli_without_sqlite(postgres_url, tmp_path):
     process = launch(data, api_only=True, database_url_file=credential)
     try:
         with connect(data, process) as client:
-            assert len(client.get('/api/v3/cards').json()) == 3
+            assert len(read_all_cards(client, '/api/v3/cards')) == 3
             assert not (data / 'state.sqlite').exists()
     finally:
         cleanup(process)

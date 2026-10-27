@@ -38,7 +38,7 @@ def current(db: Database) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = 'SELECT i . * , d . item AS source_deleted FROM items_read i LEFT JOIN source_deleted d ON d . item = i . id'
+_ITEM = 'SELECT i . * , d . item AS source_deleted , coalesce ( v . hidden , 0 ) AS reader_hidden FROM items_read i LEFT JOIN source_deleted d ON d . item = i . id LEFT JOIN reader_visibility v ON v . item = i . id'
 _FEED = 'SELECT f . * , b . binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b . feed = f . id'
 
 
@@ -84,7 +84,7 @@ def state(db: Database, key: str) -> str | None:
 
 
 @contextmanager
-def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
+def material_inputs(db: Database, identities: set[str], *, include_subtitles: bool = True) -> Iterator[None]:
     """Bounded inputs for requested materials; independent of foreign data."""
     value = Inputs(db)
     ids = sorted(identities)
@@ -113,7 +113,7 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
         batch = keys[start:start+400]
         value.state.update({r['key']:r['value'] for r in db.execute("SELECT key , value FROM state WHERE key = ANY(%s)", (batch,))})
     from oko.storage.youtube_media import subtitle_id
-    for row in value.items.values():
+    for row in value.items.values() if include_subtitles else ():
         try:
             content = saved_content(row['content'])
             identity = subtitle_id(content) if 'youtube' in content.get('extra', {}) else None

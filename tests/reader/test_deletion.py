@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 from tests.support.sources import LateSource
 from tests.support.reader import Clock, wait_for
@@ -21,7 +22,7 @@ def test_viewed_during_fetch_never_publishes_late_result(tmp_path: Path):
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             if cards:
                 break
             time.sleep(.02)
@@ -45,8 +46,8 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):
-            cards = client.get('/api/v3/cards').json()
-            if len(cards) == 3 and all((card['availability'] == 'available') for card in cards):
+            cards = read_all_cards(client, '/api/v3/cards')
+            if len(cards) == 3 and all((client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available') for card in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']
@@ -87,8 +88,8 @@ def test_explicitly_repeated_discovery_can_recreate_viewed_identity(tmp_path: Pa
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):
-            cards = client.get('/api/v3/cards').json()
-            if len(cards) == 3 and all((c['availability'] == 'available') for c in cards):
+            cards = read_all_cards(client, '/api/v3/cards')
+            if len(cards) == 3 and all((client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']
@@ -98,7 +99,7 @@ def test_explicitly_repeated_discovery_can_recreate_viewed_identity(tmp_path: Pa
     with TestClient(create_app(tmp_path, source=source, token='test-token'), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
-        wait_for(client,lambda: len(client.get('/api/v3/cards').json())==3 and viewed_source in source.downloaded)
+        wait_for(client,lambda: len(read_all_cards(client, '/api/v3/cards'))==3 and viewed_source in source.downloaded)
         assert set(source.downloaded) <= {'1','2','3'}
         assert client.get(f'/api/v3/materials/{item}').status_code == 404
 
@@ -119,8 +120,8 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):
-            cards = client.get('/api/v3/cards').json()
-            if len(cards) == 3 and all((c['availability'] == 'available') for c in cards):
+            cards = read_all_cards(client, '/api/v3/cards')
+            if len(cards) == 3 and all((client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']

@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards, read_materials_for_cards
 from tests.support.storage import database
 from tests.support.reader import wait_for
 from tests.support.telegram import connected_feed
@@ -31,7 +32,7 @@ def test_public_channel_connects_reads_and_viewed_does_not_resurrect(tmp_path: P
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
         time.sleep(.15)
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
 
 
 def test_album_partial_media_survives_restart_retry_and_deletes_all_parts(tmp_path: Path):
@@ -54,7 +55,8 @@ def test_album_partial_media_survives_restart_retry_and_deletes_all_parts(tmp_pa
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
         connect(client)
-        card = settled(client)[0]
+        selected = settled(client)[0]
+        card = client.get('/api/v3/materials/' + selected['id']).json()
         item = card['id']
         material = client.get('/api/v3/materials/' + item).json()
         assert (material['content']['completeness']['state']=='complete') is False
@@ -68,15 +70,16 @@ def test_album_partial_media_survives_restart_retry_and_deletes_all_parts(tmp_pa
         assert len(material['content']['attachments']) == 2 and not (material['content']['completeness']['state']=='complete')
         tg.available = True
         client.post('/api/v3/materials/' + item + '/retry')
-        card = settled(client)[0]
-        assert (card['completeness']['state']=='complete') is True
-        assert len(card['attachments']) == 3
-        for attachment in card['attachments']:
+        selected = settled(client)[0]
+        card = client.get('/api/v3/materials/' + selected['id']).json()
+        assert (card['content']['completeness']['state']=='complete') is True
+        assert len(card['content']['attachments']) == 3
+        for attachment in card['content']['attachments']:
             response = client.get(attachment['url'])
             assert response.status_code == 200
             assert response.content in (b'jpeg-image', b'mp4-video', b'mp4-circle')
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert all(client.get(a['url']).status_code == 404 for a in card['attachments'])
+        assert all(client.get(a['url']).status_code == 404 for a in card['content']['attachments'])
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
 
@@ -103,7 +106,7 @@ def test_late_video_after_viewed_cannot_publish_or_leave_files(tmp_path: Path):
         presence(client, 'test')
         connect(client)
         assert downloading.wait(2)
-        item = client.get('/api/v3/cards').json()[0]['id']
+        item = read_all_cards(client, '/api/v3/cards')[0]['id']
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         released.set()
         time.sleep(.1)
@@ -131,9 +134,10 @@ def test_discovery_interruption_keeps_album_identity_and_files_recover(tmp_path:
         assert failed
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
-        card = settled(client)[0]
-        assert (card['completeness']['state']=='complete') and card['title'] == 'Текст канала'
-        assert len(client.get('/api/v3/cards').json()) == 1
+        selected = settled(client)[0]
+        card = client.get('/api/v3/materials/' + selected['id']).json()
+        assert (card['content']['completeness']['state']=='complete') and card['title'] == 'Текст канала'
+        assert len(read_materials_for_cards(client, '/api/v3/cards')) == 1
 
 
 def fake_sdk_project(tmp_path: Path, monkeypatch):
@@ -195,7 +199,7 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
                 break
             time.sleep(.02)
         assert partial.read_bytes() == b'partial-download'
-        card = client.get('/api/v3/cards').json()[0]
+        card = read_materials_for_cards(client, '/api/v3/cards')[0]
         assert [int(identity) for identity in card['source']['message_ids']] == [11, 12] and card['title'] == 'Album'
         downloading = bridge.workers[10001].process
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
@@ -204,7 +208,7 @@ def test_worker_pipe_reads_album_pages_and_terminates_mid_download(tmp_path: Pat
         # download and its bytes must already be gone when viewed returns.
         assert not partial.exists()
         assert not (root / 'content' / card['id']).exists()
-        assert client.get('/api/v3/cards').json() == []
+        assert read_materials_for_cards(client, '/api/v3/cards') == []
 
 
 def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Path):
@@ -232,9 +236,9 @@ def test_media_file_commit_interruption_recovers_without_duplicate(tmp_path: Pat
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
         client.post('/api/v3/collect')
-        card = wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['completeness']['state']=='complete' and len(card['attachments'])==1),None))
-        assert len(card['attachments']) == 1
-        assert client.get(card['attachments'][0]['url']).content == b'media'
+        card = wait_for(client,lambda:next((card for card in read_materials_for_cards(client, '/api/v3/cards') if card['content']['completeness']['state']=='complete' and len(card['content']['attachments'])==1),None))
+        assert len(card['content']['attachments']) == 1
+        assert client.get(card['content']['attachments'][0]['url']).content == b'media'
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
         assert not (tmp_path / 'content' / card['id']).exists()
 
@@ -337,7 +341,8 @@ def test_owned_worker_verifies_readback_when_ack_returns_false(tmp_path: Path, m
     with TestClient(create_app(root, token='test-token', telegram_client=LocalTelegram(project / '.env', root)), headers=HEADERS) as client:
         presence(client, 'test')
         connect(client)
-        card = settled(client)[0]
+        selected = settled(client)[0]
+        card = client.get('/api/v3/materials/' + selected['id']).json()
         assert [int(identity) for identity in card['source']['message_ids']] == [11, 12]
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200
         for _ in range(200):

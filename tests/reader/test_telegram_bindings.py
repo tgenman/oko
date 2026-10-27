@@ -1,4 +1,5 @@
 """Telegram profile/binding/claim lifecycle through the existing HTTP seam."""
+from tests.support.cards import read_all_cards
 from tests.support.app import create_app
 from tests.support.telegram import Telegram
 from tests.support.v3 import TestClient
@@ -82,7 +83,7 @@ def test_delete_reserves_claim_until_restart_cleanup_then_readd_has_fresh_id(tmp
         from tests.support.storage import database
         with database(tmp_path) as db:
             assert db.execute("SELECT oko_json_extract(payload, '$.cleanup_feed') FROM jobs WHERE kind = 'delete' AND item = %s", (material,)).fetchone()[0] == feed
-        assert not client.get('/api/v3/cards').json()
+        assert not read_all_cards(client, '/api/v3/cards')
         assert client.get('/api/v3/materials/'+material).status_code == 404
         duplicate = client.post('/api/v3/telegram/connect', json=body)
         assert duplicate.status_code == 409
@@ -143,7 +144,9 @@ def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
         assert response.status_code == 200, response.text
         feed = response.json()['feed_id']
         assert response.json()['access'] == {'kind':'web', 'username':'telegram', 'preview_url':'https://t.me/s/telegram'}
-        assert settled(client)[0]['source']['message_ids'] == ['392']
+        card = settled(client)[0]
+        material = client.get('/api/v3/materials/' + card['id']).json()
+        assert material['source']['message_ids'] == ['392']
         collected_calls = len(calls)
         assert collected_calls >= 1
         assert client.post('/api/v3/telegram/connect', json={'source_locator':'@TELEGRAM', 'folder':'Other'}).status_code == 409
@@ -268,7 +271,7 @@ def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
             body = dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})
             old_feed = client.post('/api/v3/telegram/connect', json=body).json()['feed_id']
             assert started.wait(2)
-            old_material = client.get('/api/v3/cards').json()[0]['id']
+            old_material = read_all_cards(client, '/api/v3/cards')[0]['id']
             assert client.delete('/api/v3/feeds/'+old_feed).status_code == 200
             release.set()
             for _ in range(100):
@@ -367,7 +370,7 @@ def test_late_discovery_cannot_complete_a_recreated_feed_job(tmp_path):
             assert new_started.wait(2)
             old_release.set()
             time.sleep(.1)
-            assert not client.get('/api/v3/cards').json()
+            assert not read_all_cards(client, '/api/v3/cards')
             new_release.set()
             from tests.support.telegram import settled
             assert settled(client)[0]['title'] == 'Current'

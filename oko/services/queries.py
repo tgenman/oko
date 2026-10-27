@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 from oko.storage.store import Store, WorkSummary
 from oko.storage.problems import CommandRecord
-from oko.storage.reader_versions import ReaderVersions
 from oko.storage.reader_facts import ReaderFacts
 from oko.processing.llamacpp import ProcessorConfig
 from oko.storage.composition import Navigation
@@ -42,18 +41,6 @@ class VersionQueries:
         return dict(row) if row else None
 
     @repository_access
-    def list_version(self, options: dict[str, Any]) -> dict[str, Any]:
-        return dict(self._storage().read_versions.list_version(options))
-
-    @repository_access
-    def ids(self, options: dict[str, Any]) -> list[str]:
-        return self._storage().read_versions.ids(options)
-
-    @repository_access
-    def list_identity(self, options: dict[str, Any]) -> str:
-        return ReaderVersions.list_identity(options)
-
-    @repository_access
     def advance(self, metadata: dict[str, Any]) -> None:
         self._storage().read_versions.advance(metadata)
 
@@ -76,12 +63,8 @@ class ReadingQueries:
         return self._facts.feed(identity)
 
     @repository_access
-    def inputs(self, identities: set[str]) -> AbstractContextManager[None]:
-        return self._facts.inputs(identities)
-
-    @repository_access
-    def scope_exists(self, scope: str, identity: str) -> bool:
-        return self._facts.scope_exists(scope, identity)
+    def inputs(self, identities: set[str], *, include_subtitles: bool = True) -> AbstractContextManager[None]:
+        return self._facts.inputs(identities, include_subtitles=include_subtitles)
 
     @repository_access
     def avatar(self, feed: str, revision: str) -> tuple[bytes, str] | None:
@@ -157,6 +140,14 @@ class ReadingQueries:
     @repository_access
     def navigation(self) -> Navigation:
         return self._storage().reading.navigation()
+
+    @repository_access
+    def page(self, options: dict[str, Any], cursor: str | None, limit: int) -> tuple[list[str], int] | None:
+        return self._storage().reading.page(options, cursor, limit)
+
+    @repository_access
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None]]:
+        return self._facts.card_validators(identities)
 
     @repository_access
     def card(self, identity: str) -> dict[str, Any] | None:

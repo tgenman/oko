@@ -11,7 +11,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   const plan=await addSources(api, [["https://a.test/feed", "Альфа", "Наука"], ["https://b.test/feed", "Бета", "Наука"], ["https://empty.test/feed", "Пустой", "Наука"]]);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await page.goto(origin+'/#token='+token);
-  await expect.poll(async()=>{const cards=await api('cards'); return cards.length===2&&cards.every(c=>c.availability==='available'&&!c.loading);},{timeout:15000}).toBe(true);
+  await expect.poll(async()=>{const cards=(await api('cards')).items; return cards.length===2&&cards.every(c=>!c.loading);},{timeout:15000}).toBe(true);
   await expect(page.locator('#cards button')).toHaveCount(2);
   await expect(page.locator('#cards .card-snippet')).toHaveCount(0);
   await expect(page.locator('#cards img')).toHaveCount(2);
@@ -28,7 +28,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   }
   await api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
   await api('settings/oko/global','PATCH',{theses:true});
-  await expect.poll(async()=>{const cards=await api('cards');return cards.length===2&&cards.every(c=>!!c.theses.result);},{timeout:15000}).toBe(true);
+  await expect.poll(async()=>{const cards=(await api('cards')).items;return cards.length===2&&(await Promise.all(cards.map(c=>api(`materials/${c.id}`)))).every(c=>!!c.theses.result);},{timeout:15000}).toBe(true);
   await expect(page.locator(`[data-feed="${empty!.id}"]`)).toHaveCount(0);
   await page.locator('#read-feeds-toggle').click();
   await page.locator(`[data-feed="${empty!.id}"]`).click();
@@ -46,6 +46,6 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   await expect(page.locator('#title')).toContainText('Статья');
   await page.locator('#viewed').click();
   await expect(page.locator('#cards button')).toHaveCount(0);
-  assert.deepEqual(await api('cards'),[]); assert.equal((await api('reading-composition')).count,0);
+  assert.deepEqual((await api('cards')).items,[]); assert.equal((await api('reading-composition')).count,0);
   assert.deepEqual(errors,[]);
 });

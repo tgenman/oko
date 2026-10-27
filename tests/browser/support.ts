@@ -95,14 +95,14 @@ async function reader() {
       const response = async (url: string, method: string, body: unknown, status = 200) => {
         body=window.readingFixtureReply(url,method,body,status);
         if(status>=200&&status<300)body=v3Reply(url,method,body);
-        await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
+        if(!(new URL(url,'http://localhost').pathname==='/api/v3/cards'&&Array.isArray(body)))await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
         return new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
       };
       window.readerTransport = {
         replies, held, pending, aliases, native: new Set(), requests: [],
         release(url, body, status = 200) {
           const resolve = pending.get(url); if (!resolve) throw new Error('No pending reply: ' + url); pending.delete(url); held.delete(url);
-          resolve(response(url, window.readerTransport.requests.filter(request=>request.url===url).at(-1)?.method||'GET', body, status));
+          resolve(status===204?new Response(null,{status:204}):response(url, window.readerTransport.requests.filter(request=>request.url===url).at(-1)?.method||'GET', body, status));
         },
       };
       // Existing scenarios describe publication snapshots. Adapt those snapshots
@@ -120,7 +120,6 @@ async function reader() {
       const storageId='3f003741-d0c7-4e62-8d12-55fb652f404a';
       async function selective(request:import('../../frontend/src/api/generated/types.gen').ReadingCheckRequest) {
         type Resource=import('../../frontend/src/api/generated/types.gen').ReadingResource;
-        type Card=import('../../frontend/src/api/generated/types.gen').ReadingCard;
         type Material=import('../../frontend/src/api/generated/types.gen').ReadableMaterial;
         const resources:Resource[]=[],added=new Set<string>();
         const changed=(kind:Resource['kind'],id:string,data:unknown,known:string|null)=>{
@@ -133,7 +132,7 @@ async function reader() {
         const navigation=async():Promise<import('../../frontend/src/api/generated/types.gen').ReadingComposition>=>catalog??=await fixtureRead('/api/v3/reading-composition');
         const opened=new Map<string,Material>();
         async function material(id:string){if(!opened.has(id))opened.set(id,await fixtureRead('/api/v3/materials/'+id));return opened.get(id)!;}
-        const compact=(card:Card)=>({id:card.id,feed_id:card.feed_id,title:card.title,published_at:card.published_at,source_url:card.source_url,snippet:card.snippet,availability:card.availability,loading:card.loading,changed:card.availability==='available'&&card.changed,revision_id:card.availability==='available'?card.revision_id:null,preview_url:card.availability==='available'?(card.images[0]||card.attachments.find(a=>a.kind==='image')?.url||null):null,hidden:!!card.filter.result?.hidden,filter_state:card.filter.attempt.state,theses_state:card.theses.attempt.state});
+
         if(request.storage_id&&request.storage_id!==storageId)return {state:'reset',storage_id:storageId};
         for(const item of request.resources){
           const kind=item.kind;
@@ -146,13 +145,6 @@ async function reader() {
             const feed=(await navigation()).feeds.find(f=>f.feed.id===item.id)?.feed;
             if(feed)changed(kind,item.id,feed,item.known_version);
             else resources.push({kind,id:item.id,state:'unavailable',version:null,reason:'not_found'});
-          }else if(kind==='list'){
-            const o=item.options,p=new URLSearchParams({sort:o.sort});if(o.show_hidden)p.set('show_hidden','true');if(o.target.scope==='feed')p.set('feed',o.target.feed_id);if(o.target.scope==='folder')p.set('folder',o.target.folder_id);
-            const cards:Card[]=await fixtureRead('/api/v3/cards?'+p);
-            for(const card of cards)changed('card',card.id,compact(card),item.known_cards[card.id]??null);
-            changed(kind,JSON.stringify([o.target.scope,o.target.scope==='feed'?o.target.feed_id:o.target.scope==='folder'?o.target.folder_id:'',o.sort,o.show_hidden]),{ids:cards.map(c=>c.id),options:o},item.known_version);
-          }else if(kind==='card'){
-            const card=(await fixtureRead('/api/v3/cards') as Card[]).find(c=>c.id===item.id);if(card)changed(kind,item.id,compact(card),item.known_version);
           }else{
             const m=await material(item.id),revision=m.availability==='available'?m.content.revision_id:null;
             if(kind==='filter')changed(kind,item.id,{revision_id:revision,filter:m.filter},item.known_version);
@@ -171,6 +163,24 @@ async function reader() {
         const key = String(url);
         window.readerTransport.requests.push({url: key, method: options?.method || 'GET', body: options?.body ? JSON.parse(String(options.body)) : null});
         if (window.readerTransport.native.has(key)) return nativeFetch(url, options);
+        if(new URL(key,'http://localhost').pathname==='/api/v3/cards'&&(options?.method||'GET')==='GET'){
+          const query=new URL(key,'http://localhost').searchParams,p=new URLSearchParams({sort:query.get('sort')||'newest'});
+          for(const name of ['folder','feed','show_hidden'])if(query.has(name)&&(name!=='show_hidden'||query.get(name)==='true'))p.set(name,query.get(name)!);
+          const rows=await fixtureRead('/api/v3/cards?'+p) as import('../../frontend/src/api/generated/types.gen').ReadingCard[];
+          const cursor=query.get('cursor'),start=cursor?rows.findIndex(card=>card.id===cursor):0;
+          if(start<0)return new Response(JSON.stringify({code:'cursor_expired'}),{status:409,headers:{'Content-Type':'application/json'}});
+          const limit=Number(query.get('limit')||40),selected=rows.slice(start,start+limit),next=rows[start+limit]?.id||null;
+          const items=selected.map(card=>({id:card.id,feed_id:card.feed_id,title:card.title,published_at:card.published_at,source_url:card.source_url,preview_url:card.availability==='available'?(card.images[0]||card.attachments.find(a=>a.kind==='image')?.url||null):null,loading:card.loading||card.availability==='pending',changed:card.availability==='available'&&card.changed,hidden:!!card.filter.result?.hidden,post_web_unavailable:card.availability==='available'&&!!card.post_web_unavailable,external_attachment_kinds:card.availability==='available'?card.external_attachment_kinds||[]:[]}));
+          return response(key,'GET',{items,total:rows.length,next_cursor:next});
+        }
+        if(key==='/api/v3/cards/read'&&options?.method==='POST'){
+          if(held.has(key))return new Promise(resolve=>pending.set(key,resolve));
+          const failure=replies.get('POST '+key)||replies.get(key);if(failure&&(failure.status||200)>=400)return response(key,'POST',failure.body,failure.status);
+          const ids=JSON.parse(String(options.body)).ids as string[];
+          const updates=ids.flatMap(id=>replies.get('POST /api/v3/materials/'+id+'/viewed')?.next||[]);
+          for(const [route,next] of updates)replies.set(route,next);
+          return new Response(null,{status:204});
+        }
         if(key==='/api/v3/reading/check')return response(key,'POST',await selective(JSON.parse(String(options?.body))));
         if(key.startsWith('/api/v3/reading/materials/')){const id=key.split('/')[5];return response(key,'GET',await selective({storage_id:null,resources:(['material','filter','theses','media'] as const).map(kind=>({kind,id,known_version:null}))}));}
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
@@ -207,7 +217,7 @@ async function reader() {
         }
       }, materials);
       await target.goto(origin + '/#token=' + token);
-      await expect(target.locator('#cards button')).toHaveCount(materials.length);
+      await expect(target.locator('#cards button')).toHaveCount(Math.min(40,materials.length));
     }
   return {...fixture, errors, start, async close() {await fixture.close(); expect(schemaFailures).toEqual([]);}};
   } catch (error) {await fixture.close(); throw error;}

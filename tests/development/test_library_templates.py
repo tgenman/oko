@@ -1,4 +1,5 @@
 """Templates must retain real Store output without sharing mutable scenario data."""
+from tests.support.cards import read_all_cards
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -27,20 +28,20 @@ def test_library_copies_remain_independent_through_http(tmp_path, kind):
     metadata = prepare(second)
     assert len(metadata['feeds'] if isinstance(metadata, dict) else metadata[0]) == 4
     with TestClient(create_app(first, api_only=True, token='test'), headers=HEADERS) as a, TestClient(create_app(second, api_only=True, token='test'), headers=HEADERS) as b:
-        cards = a.get('/api/v3/cards').json()
+        cards = read_all_cards(a, '/api/v3/cards')
         assert len(cards) == 104
-        assert cards == b.get('/api/v3/cards').json()
+        assert cards == read_all_cards(b, '/api/v3/cards')
         item = cards[0]['id']
         content = b.get('/api/v3/materials/' + item).json()['content']
         assert a.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         assert a.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'first only'}).status_code == 200
-        assert len(a.get('/api/v3/cards').json()) == 103
-        assert len(b.get('/api/v3/cards').json()) == 104
+        assert len(read_all_cards(a, '/api/v3/cards')) == 103
+        assert len(read_all_cards(b, '/api/v3/cards')) == 104
         assert b.get('/api/v3/materials/' + item).json()['content'] == content
         assert b.get('/api/v3/settings/oko/global').json()['effective']['prompt_theses']['value'] != 'first only'
     prepare(third)
     with TestClient(create_app(third, api_only=True, token='test'), headers=HEADERS) as c:
-        assert len(c.get('/api/v3/cards').json()) == 104
+        assert len(read_all_cards(c, '/api/v3/cards')) == 104
         assert c.get('/api/v3/materials/' + item).json()['content'] == content
 
 

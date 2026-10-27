@@ -39,23 +39,25 @@ def test_card_and_opened_read_decode_each_saved_content_once(tmp_path, monkeypat
         while app.state.host.execution._store is None or app.state.host.execution._store.processing.recovering:
             assert time.monotonic() < deadline
             time.sleep(.01)
-        body = dict(storage_id=None, resources=[dict(kind='list', known_version=None, known_cards={},
-                    options=dict(target=dict(scope='all'), sort='newest', show_hidden=False))])
         revisions = []
-        for method, url, kwargs in [('POST', '/api/v3/reading/check', {'json': body}),
-                                    ('GET', '/api/v3/reading/materials/'+parent, {}),
-                                    ('POST', '/api/v3/reading/check', {'json': body})]:
+        for url in ['/api/v3/cards','/api/v3/reading/materials/'+parent,'/api/v3/cards']:
             decoded.clear()
-            response = client.request(method, url, **kwargs)
+            response = client.get(url)
             assert response.status_code == 200
-            resources = response.json()['resources']
-            resource = next(r for r in resources if r['kind'] == ('card' if method == 'POST' else 'material'))
-            assert resource['state'] == 'changed'
-            data = resource['data']
-            revisions.append(data['revision_id'] if method == 'POST' else data['content']['revision_id'])
-            assert decoded[row['content']] == 1
-            assert decoded[linked['content']] == 1
-        assert len(set(revisions)) == 1
+            if url.endswith('/cards'):
+                card=next(c for c in response.json()['items'] if c['id']==parent)
+                assert 'snippet' not in card and 'text' not in card
+            else:
+                resource=next(r for r in response.json()['resources'] if r['kind']=='material')
+                assert resource['state']=='changed'
+                revisions.append(resource['data']['content']['revision_id'])
+            assert decoded[row['content']] <= 1
+            assert decoded[linked['content']] <= 1
+            if not url.endswith('/cards'):
+                assert decoded[row['content']] == 1
+                assert decoded[linked['content']] == 1
+        assert len(revisions)==1
+
 
 
 def test_derived_youtube_and_linked_content_does_not_mutate_saved_facts(tmp_path):

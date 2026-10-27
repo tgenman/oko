@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 import pytest
 from fastapi.testclient import TestClient
@@ -24,7 +25,7 @@ def load_materials(client):
     from tests.support.reader import wait_for
     client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''})
     presence(client, 'reader')
-    cards = wait_for(client, lambda: (cards if len(cards := client.get('/api/v3/cards').json()) == 3 and all((c['availability'] == 'available') for c in cards) else None))
+    cards = wait_for(client, lambda: (cards if len(cards := read_all_cards(client, '/api/v3/cards')) == 3 and all(not c['loading'] for c in cards) else None))
     return cards[0]['id']
 
 
@@ -56,7 +57,7 @@ def test_new_choice_keeps_ready_theses_and_explicit_retry_uses_new_model(tmp_pat
         assert client.put('/api/v3/processors/codex', json=configuration()).status_code == 200
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
         client.patch('/api/v3/settings/oko/global', json={'theses': True})
-        wait_for(client, lambda: all(c['theses']['result'] for c in client.get('/api/v3/cards').json()))
+        wait_for(client, lambda: all(client.get('/api/v3/materials/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
         count = len(service.inputs)
         assert client.put('/api/v3/processors/codex', json=configuration('test-large', 'high')).status_code == 200
         material = client.get('/api/v3/materials/' + item).json()
@@ -98,7 +99,7 @@ def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
             released.set()
         material = wait_for(client,lambda: (m if (m:=client.get('/api/v3/materials/'+item).json())['theses']['result'] else None))
         assert material['theses']['result']['provenance']['model']=='test-small'
-        wait_for(client,lambda: all(c['theses']['result'] for c in client.get('/api/v3/cards').json()))
+        wait_for(client,lambda: all(client.get('/api/v3/materials/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
         assert service.inputs[0]=='test-small' and service.inputs[1:]==['test-large','test-large']
 
 

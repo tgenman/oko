@@ -1,4 +1,5 @@
 """Telegram headings preserve the first line, including older saved publications."""
+from tests.support.cards import read_all_cards
 import json
 import time
 
@@ -39,7 +40,7 @@ def test_full_telegram_heading_in_list_and_opened_material(tmp_path, access):
         identity = card['id']
         version = client.get('/api/v3/materials/' + identity).json()['content']['version']
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
-        card = client.get('/api/v3/cards').json()[0]
+        card = read_all_cards(client, '/api/v3/cards')[0]
         material = client.get('/api/v3/materials/' + identity).json()
         assert card['title'] == FIRST_LINE
         assert material['title'] == FIRST_LINE

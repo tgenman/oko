@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.storage import analyze
 """Operational credentials cannot become reader credentials or expose inputs."""
 import json
@@ -93,8 +94,8 @@ def test_real_collection_attempts_export_timings_without_source_contents(tmp_pat
         assert added.status_code==200
         deadline=time.monotonic()+5
         while True:
-            cards=client.get('/api/v3/cards').json()
-            if cards and cards[0]['availability']=='available':break
+            cards=read_all_cards(client, '/api/v3/cards')
+            if cards and client.get('/api/v3/materials/'+cards[0]['id']).json()['availability']=='available':break
             assert time.monotonic()<deadline
             time.sleep(.02)
         text=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN}).text
@@ -223,11 +224,11 @@ def test_worker_codex_checks_update_metrics_without_ui_check_or_new_scrape_reque
     with TestClient(app,headers={'Authorization':'Bearer service'}) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         presence(client,'reader')
-        wait_for(client,lambda:len(client.get('/api/v3/cards').json())==3)
+        wait_for(client,lambda:len(read_all_cards(client, '/api/v3/cards'))==3)
         configure_codex(client)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
-        wait_for(client,lambda:all(card['theses']['result'] for card in client.get('/api/v3/cards').json()))
+        wait_for(client,lambda:all(client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
         assert service.checks>0
         before=service.checks
         text=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN}).text

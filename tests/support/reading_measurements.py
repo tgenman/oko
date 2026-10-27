@@ -81,13 +81,13 @@ class ReadingMeasurements:
             enabled=lambda:request_sql.get() is not None))
         return self
 
-    def request(self,name,method,url,**options):
+    def request(self,name,method,url,expected_status=200,**options):
         self.counts.clear();self.files.clear()
         self.work.rows=self.work.buffers=self.work.reads=self.work.writes=0
         start=time.perf_counter()
         response=self.client.request(method,url,**options)
         elapsed=time.perf_counter()-start
-        assert response.status_code==200,response.text
+        assert response.status_code==expected_status,response.text
         result=dict(name=name,sql=int(response.headers['X-Test-SQL']),rows_scanned=self.work.rows,buffers=self.work.buffers,
             content_opens=self.counts['content_opens'],content_stats=self.counts['content_stats'],read_bytes=self.counts['read_bytes'],
             json_loads=self.counts['json_loads'],json_input_bytes=self.counts['json_input_bytes'],

@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 import base64
 import httpx
 from fastapi.testclient import TestClient
@@ -39,7 +40,7 @@ def test_client_avatar_is_local_authenticated_and_survives_restart(tmp_path):
         client.post('/api/v3/collect', json={'scope':'all'})
         wait_for(client, lambda: 'avatar_url' not in next(f for f in client.get('/api/v3/subscriptions').json()['feeds'] if f['id']==feed))
         assert client.get(url).status_code == 404
-        assert client.get('/api/v3/cards').json()
+        assert read_all_cards(client, '/api/v3/cards')
 
 
 def test_web_avatar_is_saved_locally_without_browser_cdn_access(tmp_path):

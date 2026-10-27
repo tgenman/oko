@@ -21,9 +21,15 @@ class ReaderFacts:
         return material_read.feed(self.storage().db, identity)
 
     @contextmanager
-    def inputs(self, identities: set[str]) -> Iterator[None]:
-        with self.storage().db.access_lock, material_read.material_inputs(self.storage().db, identities):
+    def inputs(self, identities: set[str], *, include_subtitles: bool = True) -> Iterator[None]:
+        with self.storage().db.access_lock, material_read.material_inputs(self.storage().db, identities, include_subtitles=include_subtitles):
             yield
+
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None]]:
+        if not identities:
+            return {}
+        rows=self.storage().db.execute("SELECT i.id, i.xmin::text AS row_generation, e.version FROM items i LEFT JOIN reader_entities e ON e.kind='card' AND e.identity=i.id WHERE i.id = ANY(%s)", (identities,))
+        return {row['id']:(row['row_generation'],row['version']) for row in rows}
 
     def feed_resources(self, identities: set[str] | None = None) -> dict[str, tuple[dict[str, Any], dict[str, Any] | None]]:
         subscriptions = self.storage().subscriptions
@@ -32,9 +38,6 @@ class ReaderFacts:
         for start in range(0, len(rows), 400):
             bindings.update(subscriptions.telegram.bindings([row['id'] for row in rows[start:start+400]]))
         return {row['id']: (row, bindings.get(row['id'])) for row in rows}
-
-    def scope_exists(self, scope: str, identity: str) -> bool:
-        return scope == 'all' or bool(self.storage().db.execute(f"SELECT 1 FROM {'feeds' if scope == 'feed' else 'folders'} WHERE id = %s", (identity,)).fetchone())
 
     def avatar(self, feed: str, revision: str) -> tuple[bytes, str] | None:
         row=self.storage().db.execute("SELECT a . image , a . mime FROM telegram_avatars a JOIN feeds f ON f . id = a . feed WHERE a . feed = %s AND a . digest = %s AND f . connection != 'deleting'", (feed, revision)).fetchone()

@@ -212,12 +212,34 @@ export type BrowserSessionRevoked = {
     revoked: true;
 };
 
-export type ChangedCardResource = {
-    data: CompactReadingCard;
-    id: string;
-    kind: 'card';
-    state: 'changed';
-    version: ReadingEntityVersion;
+export type CardListItem = {
+    changed: boolean;
+    external_attachment_kinds: Array<'audio' | 'video' | 'image' | 'document' | 'unsupported'>;
+    feed_id: FeedId;
+    hidden: boolean;
+    id: MaterialId;
+    loading: boolean;
+    /**
+     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
+     */
+    post_web_unavailable: boolean;
+    preview_url: MediaUrl | null;
+    published_at: Timestamp | null;
+    /**
+     * Null only when a damaged publication has no valid source URL.
+     */
+    source_url: SourceUrl | null;
+    title: string;
+};
+
+export type CardPage = {
+    items: Array<CardListItem>;
+    next_cursor: MaterialId | null;
+    total: number;
+};
+
+export type CardReadRequest = {
+    ids: Array<MaterialId>;
 };
 
 export type ChangedFeedResource = {
@@ -232,14 +254,6 @@ export type ChangedFilterResource = {
     data: ReadingFilterData;
     id: string;
     kind: 'filter';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type ChangedListResource = {
-    data: ReadingListData;
-    id: string;
-    kind: 'list';
     state: 'changed';
     version: ReadingEntityVersion;
 };
@@ -284,12 +298,6 @@ export type ChangedThesesResource = {
     version: ReadingEntityVersion;
 };
 
-export type CheckCard = {
-    id: MaterialId;
-    kind: 'card';
-    known_version: ReadingKnownVersion;
-};
-
 export type CheckFeed = {
     id: FeedId;
     kind: 'feed';
@@ -300,15 +308,6 @@ export type CheckFilter = {
     id: MaterialId;
     kind: 'filter';
     known_version: ReadingKnownVersion;
-};
-
-export type CheckList = {
-    kind: 'list';
-    known_cards: {
-        [key: string]: ReadingKnownVersion;
-    };
-    known_version: ReadingKnownVersion;
-    options: ReadingListOptions;
 };
 
 export type CheckMaterial = {
@@ -953,28 +952,6 @@ export type CommandYoutubeConfigure = {
     operation: 'youtube_configure';
 };
 
-export type CompactReadingCard = {
-    availability: 'pending' | 'available';
-    changed: boolean;
-    external_attachment_kinds?: Array<'audio' | 'video' | 'image' | 'document' | 'unsupported'>;
-    feed_id: FeedId;
-    filter_state: 'disabled' | 'queued' | 'running' | 'ready' | 'waiting' | 'cancelled';
-    hidden: boolean;
-    id: MaterialId;
-    loading: boolean;
-    /**
-     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-     */
-    post_web_unavailable?: boolean;
-    preview_url: MediaUrl | null;
-    published_at: Timestamp | null;
-    revision_id: RevisionId | null;
-    snippet: string;
-    source_url: SourceUrl;
-    theses_state: 'disabled' | 'queued' | 'running' | 'ready' | 'waiting' | 'cancelled';
-    title: string;
-};
-
 export type CompleteContent = {
     state: 'complete';
 };
@@ -1064,6 +1041,10 @@ export type CurrentProblem = {
      * Human-readable subject explanation; clients branch on code, not this text.
      */
     title: string;
+};
+
+export type CursorExpired = {
+    code: 'cursor_expired';
 };
 
 export type DefaultSettingOrigin = {
@@ -2188,8 +2169,6 @@ export type ReadingCheck = ({
 } & CheckNavigation) | ({
     kind: 'feed';
 } & CheckFeed) | ({
-    kind: 'card';
-} & CheckCard) | ({
     kind: 'material';
 } & CheckMaterial) | ({
     kind: 'filter';
@@ -2197,9 +2176,7 @@ export type ReadingCheck = ({
     kind: 'theses';
 } & CheckTheses) | ({
     kind: 'media';
-} & CheckMedia) | ({
-    kind: 'list';
-} & CheckList);
+} & CheckMedia);
 
 export type ReadingCheckRequest = {
     resources: Array<ReadingCheck>;
@@ -2272,19 +2249,6 @@ export type ReadingIndex = {
 
 export type ReadingKnownVersion = ReadingEntityVersion | null;
 
-export type ReadingListData = {
-    ids: Array<MaterialId>;
-    options: ReadingListOptions;
-};
-
-export type ReadingListOptions = {
-    show_hidden: boolean;
-    sort: 'newest' | 'oldest' | 'importance';
-    target: ReadingListTarget;
-};
-
-export type ReadingListTarget = AllCollectionTarget | FeedCollectionTarget | FolderCollectionTarget;
-
 export type ReadingMediaData = {
     attachments: Array<Attachment>;
     external_attachments?: Array<ExternalAttachment>;
@@ -2301,9 +2265,9 @@ export type ReadingReset = {
     storage_id: ReadingStorageId;
 };
 
-export type ReadingResource = ChangedStatusResource | ChangedNavigationResource | ChangedFeedResource | ChangedCardResource | ChangedMaterialResource | ChangedFilterResource | ChangedThesesResource | ChangedMediaResource | ChangedListResource | UnchangedReadingResource | UnavailableReadingResource | FailedReadingResource;
+export type ReadingResource = ChangedStatusResource | ChangedNavigationResource | ChangedFeedResource | ChangedMaterialResource | ChangedFilterResource | ChangedThesesResource | ChangedMediaResource | UnchangedReadingResource | UnavailableReadingResource | FailedReadingResource;
 
-export type ReadingResourceKind = 'status' | 'navigation' | 'feed' | 'card' | 'material' | 'list' | 'filter' | 'theses' | 'media';
+export type ReadingResourceKind = 'status' | 'navigation' | 'feed' | 'material' | 'filter' | 'theses' | 'media';
 
 export type ReadingStorageId = string;
 
@@ -3209,6 +3173,9 @@ export type RevokeBrowserSessionResponse = RevokeBrowserSessionResponses[keyof R
 
 export type CardsData = {
     body?: never;
+    headers?: {
+        'If-None-Match'?: string;
+    };
     path?: never;
     query?: {
         /**
@@ -3222,11 +3189,13 @@ export type CardsData = {
         /**
          * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
-        sort?: 'newest' | 'oldest' | 'importance';
+        sort?: 'newest' | 'oldest';
         /**
          * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
         show_hidden?: boolean;
+        limit?: number;
+        cursor?: MaterialId;
     };
     url: '/api/v3/cards';
 };
@@ -3236,6 +3205,10 @@ export type CardsErrors = {
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
     403: AuthorizationErrors;
+    /**
+     * The cursor is no longer in the selected list.
+     */
+    409: CursorExpired;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
@@ -3256,10 +3229,47 @@ export type CardsResponses = {
     /**
      * Read ordered publication cards for optional folder/feed filters. Preserve hidden-material and sort semantics; no grouped events or digests.
      */
-    200: Array<ReadingCard>;
+    200: CardPage;
 };
 
 export type CardsResponse = CardsResponses[keyof CardsResponses];
+
+export type ReadCardsData = {
+    body: CardReadRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v3/cards/read';
+};
+
+export type ReadCardsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type ReadCardsError = ReadCardsErrors[keyof ReadCardsErrors];
+
+export type ReadCardsResponses = {
+    /**
+     * The selected cards have been marked viewed.
+     */
+    204: void;
+};
+
+export type ReadCardsResponse = ReadCardsResponses[keyof ReadCardsResponses];
 
 export type CreateClientSessionData = {
     body?: never;

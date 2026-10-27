@@ -7,7 +7,7 @@ export type VisibleProblem=Problem&{saved?:boolean};
 type Request={id:string;context:CommandContext;result:'unknown'|'failed';key:string;sequence:number};
 export function createReaderActions({readerApi,onChanged}:{readerApi:ReaderApi;onChanged():void}) {
  const pending=new Map<string,{request:Request;problem:VisibleProblem}>(),latest=new Map<string,number>();
- let sequence=0,sending=false;
+ let sequence=0,sending:Promise<void>|undefined;
  function beginCommand(context:CommandContext):Request {
   const key=JSON.stringify(context),request:Request={id:randomId(),context,result:'unknown',key,sequence:++sequence};
   latest.set(key,request.sequence);return request;
@@ -20,7 +20,12 @@ export function createReaderActions({readerApi,onChanged}:{readerApi:ReaderApi;o
    title:unknown?'Action outcome unknown':'Action failed',message:unknown?'The action will not be retried automatically. Its result will be checked when the connection is restored.':'The draft stays in its original form.',
    consequence:'Check the action status.',affected:resources.affected,recovery,created_at:new Date().toISOString(),state:'current',saved:false};
  }
- async function flush(){if(sending||!pending.size)return;sending=true;try{for(const[key,entry]of pending){const{id,context,result}=entry.request;await observeCommand({client:readerApi.client,body:{id,context,result}});const receipt=(await commandReceipt({client:readerApi.client,path:{identity:id}})).data;if(pending.get(key)!==entry)continue;if(receipt.outcome==='succeeded'||receipt.outcome==='abandoned')pending.delete(key);else entry.problem.saved=true;}}catch{/* The visible local outcome remains until a later status response. */}finally{sending=false;onChanged();}}
+ function flush():Promise<void>{
+  if(sending)return sending;
+  if(!pending.size)return Promise.resolve();
+  sending=(async()=>{try{for(const[key,entry]of pending){const{id,context,result}=entry.request;await observeCommand({client:readerApi.client,body:{id,context,result}});const receipt=(await commandReceipt({client:readerApi.client,path:{identity:id}})).data;if(pending.get(key)!==entry)continue;if(receipt.outcome==='succeeded'||receipt.outcome==='abandoned')pending.delete(key);else entry.problem.saved=true;}}catch{/* The visible local outcome remains until a later status response. */}finally{sending=undefined;onChanged();}})();
+  return sending;
+ }
  function matchesDraft(problem:Problem,path:string,field:string):boolean{if((field==='feed_refresh_minutes'||field==='telegram_http_rps')&&path==='settings/oko/global'&&!problem.recovery.length)return problem.affected.some(resource=>resource.kind==='settings'&&resource.target.scope==='oko');return problem.recovery.some(intent=>intent.kind==='change_setting'?path==='settings/'+intent.target.scope+'/'+intent.target.owner&&intent.keys.some(key=>key===field):intent.kind==='configure_processor'?path==='processors/'+intent.processor_id:false);}
  return {
   beginCommand,flush,

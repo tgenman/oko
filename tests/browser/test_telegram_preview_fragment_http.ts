@@ -27,7 +27,7 @@ test('Forwarded Telegram metadata is a labelled partial fragment with original l
  await r.page.screenshot({path:artifactPath('telegram-preview-fragment-desktop.png')});
  const retried=r.page.waitForResponse(response=>response.url().endsWith('/retry')&&response.request().method()==='POST');
  await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();await retried;
- await expect.poll(async()=>{const cards=await r.api('cards');const material=await r.api(`materials/${cards[0]!.id}`);return material.content.availability==='available'&&!material.content.loading;}).toBe(true);
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;const material=await r.api(`materials/${cards[0]!.id}`);return material.content.availability==='available'&&!material.content.loading;}).toBe(true);
  await expect(text).toContainText('Сохранённый фрагмент [это не восстановленная ссылка](https://example.test/fake)…');
  await expect(r.page.getByRole('button',{name:'Retry Download',exact:true})).toBeVisible();
  await r.page.setViewportSize({width:390,height:844});await text.scrollIntoViewIfNeeded();

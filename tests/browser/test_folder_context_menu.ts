@@ -33,7 +33,7 @@ test('folder menu A preserves selection and supports settings, rename, read all 
  await expect(row(science.id)).toHaveAttribute('aria-label','Research');await expect(page.locator('[data-collapse="'+science.id+'"]').first()).toHaveAttribute('aria-expanded','false');
  await expect(row(personal.id)).toHaveAttribute('aria-pressed','true');await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await row(science.id).click({button:'right'});await page.getByRole('menuitem',{name:'Mark All as Read',exact:true}).click();await expect(page.locator('#completion-heading')).toContainText('Research');await expect(page.locator('#completion-confirm')).toBeEnabled();await page.locator('#completion-confirm').click();
- await expect.poll(async()=>(await api('cards')).length).toBe(1);await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await expect.poll(async()=>((await api('cards')).items).length).toBe(1);await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await page.locator('#read-feeds-toggle').click();await row(science.id).click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await expect(page.locator('#folder-action-heading')).toHaveText('Folder Is Not Empty');await page.locator('#folder-action-close').click();
  await api('feeds/'+alpha.id,'PATCH',{folder_id:personal.id});
  await row(science.id).click();await row(science.id).click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await expect(page.locator('#folder-action-heading')).toHaveText('Delete Folder');await page.locator('#folder-action-cancel').click();

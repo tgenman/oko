@@ -1,4 +1,5 @@
 """Current Publication storage and removed capabilities at the reader boundary."""
+from tests.support.cards import read_all_cards
 import httpx
 import pytest
 from tests.support.app import create_app
@@ -48,7 +49,7 @@ def test_canonical_reader_and_results_use_sql_without_persistent_markdown_projec
         client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'','telegram_http_rps':10})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',initial_history={'mode':'count','count':'1'}))
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        card=wait_for(client,lambda:next((c for c in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+c['id']).json()['theses']['result']),None))
         item=card['id']
         material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
         assert material['content']['text']=='Latest SQL text'
@@ -72,7 +73,7 @@ def test_new_cli_store_uses_canonical_publication_pipeline(tmp_path):
             client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'','telegram_http_rps':10})
             result=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox','initial_history':{'mode':'count','count':'1'}})
             assert result.status_code==200,result.text
-            card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
+            card=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
             UUID(card['id'])
             material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] else None))
             UUID(material['content']['attachments'][0]['url'].rsplit('/',1)[-1])

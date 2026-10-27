@@ -10,11 +10,11 @@ test('publication shows latest text and media without stored history', {timeout:
   await r.openReader();
   await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
   await expect(r.page.locator('[data-card]')).toHaveCount(1);
-  await expect.poll(async()=>{const cards=await r.api('cards');return cards[0]?.availability==='available'&&!cards[0].loading;}).toBe(true);
+  await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&!cards[0].loading;}).toBe(true);
   await r.page.locator('[data-card]').click();
   await expect(r.page.locator('#text')).toContainText('Initial publication');
   await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
-  const cards=await r.api('cards'), id=cards[0].id;
+  const cards=(await r.api('cards')).items, id=cards[0].id;
   await r.updatePublication('Updated publication');
   await r.api(`materials/${id}/retry`,'POST');
   await expect.poll(async()=>{const material=await r.api(`materials/${id}`);return material.availability==='available'&&material.content.text==='Updated publication'&&!material.content.loading;}).toBe(true);

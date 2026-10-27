@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.storage import analyze
 from tests.support.postgres_work import measure_reads
 from tests.support.collection_acceptance import discovered
@@ -70,14 +71,14 @@ def test_feed_settings_preserve_other_accepted_filters(tmp_path):
         presence(client,'reader')
         assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'theses': False, 'processor': 'llamacpp', 'prompt_filters': 'Keep useful text'}).status_code == 200
-        cards = wait_for(client, lambda: (v if len(v := client.get('/api/v3/cards').json()) == 4 and all(c['filter']['attempt']['state'] == 'ready' for c in v) else None))
+        cards = wait_for(client, lambda: (v if len(v := read_all_cards(client, '/api/v3/cards')) == 4 and all(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state'] == 'ready' for c in v) else None))
         selected = cards[0]['feed_id']
         others = {c['id'] for c in cards if c['feed_id'] != selected}
         calls.clear()
         assert client.patch('/api/v3/settings/feed/' + selected, json={'prompt_filters': 'Keep all useful text'}).status_code == 200
-        cards = client.get('/api/v3/cards').json()
-        assert all(c['filter']['attempt']['state'] == 'ready' for c in cards if c['id'] in others)
-        wait_for(client, lambda: all(c['filter']['attempt']['state'] == 'ready' for c in client.get('/api/v3/cards').json()))
+        cards = read_all_cards(client, '/api/v3/cards')
+        assert all(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state'] == 'ready' for c in cards if c['id'] in others)
+        wait_for(client, lambda: all(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state'] == 'ready' for c in read_all_cards(client, '/api/v3/cards')))
         generated = [r for r in calls if r.url.path == '/v1/chat/completions']
         assert len(generated) == 1
 

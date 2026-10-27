@@ -61,7 +61,7 @@ test('Markdown publication links travel through the production HTTP reader uncha
  const link=page.locator('#text').getByRole('link',{name:'YouTube Christa Pike 911 Calls',exact:true});
  await expect(link).toHaveAttribute('href','https://youtu.be/BPoce9VGatE');
  await expect(page.locator('#text').getByRole('link',{name:'Статья',exact:true})).toHaveAttribute('href','https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust');
- const cards=await api('cards');const response=await api(`materials/${cards[0]!.id}`);
+ const cards=(await api('cards')).items;const response=await api(`materials/${cards[0]!.id}`);
  assert.equal(response.content.availability,'available');if(response.content.availability!=='available')throw Error('Expected available content');
  assert.ok(response.content.text.includes('[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)'));
  assert.ok(response.content.text.endsWith('[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)'));

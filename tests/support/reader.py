@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 import time
 
@@ -29,5 +30,5 @@ def setup_reader(client, *, theses):
     response = client.patch('/api/v3/settings/oko/global', json={'theses': theses, 'prompt_filters': ''})
     assert response.status_code == 200, response.text
     presence(client, 'reader')
-    cards = wait_for(client, lambda: (cards if len(cards := client.get('/api/v3/cards').json()) == 3 and all((c['availability'] == 'available') for c in cards) else None))
+    cards = wait_for(client, lambda: (cards if len(cards := read_all_cards(client, '/api/v3/cards')) == 3 and all(not c['loading'] for c in cards) else None))
     return cards[0]['id']

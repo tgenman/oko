@@ -26,14 +26,14 @@ def test_complete_http_cost_matrix(tmp_path,count):
             if name=='status':
                 _,warm=measure.request('status_warm','GET',url);records.append(warm)
                 assert warm['content_opens']==0
-        options=dict(target=dict(scope='all'),sort='newest',show_hidden=False)
-        initial,cost=measure.request('check_initial','POST','/api/v3/reading/check',json=dict(storage_id=None,resources=[dict(kind='status',known_version=None),dict(kind='navigation',known_version=None),dict(kind='list',options=options,known_version=None,known_cards={})]));records.append(cost)
+        initial,cost=measure.request('check_initial','POST','/api/v3/reading/check',json=dict(storage_id=None,resources=[dict(kind='status',known_version=None),dict(kind='navigation',known_version=None)]));records.append(cost)
         frame=initial.json()
-        cards={r['id']:r['version'] for r in frame['resources'] if r['kind']=='card'}
-        resources=[]
-        for r in frame['resources']:
-            if r['kind']=='list':resources.append(dict(kind='list',options=options,known_version=r['version'],known_cards=cards))
-            elif r['kind']!='card':resources.append(dict(kind=r['kind'],**({'id':r['id']} if r['kind']=='feed' else {}),known_version=r['version']))
+        resources=[dict(kind=r['kind'],**({'id':r['id']} if r['kind']=='feed' else {}),known_version=r['version']) for r in frame['resources']]
+        first_page,first_cost=measure.request('cards_initial','GET','/api/v3/cards');records.append(first_cost)
+        assert len(first_page.json()['items'])==40
+        assert first_page.json()['total']==count*4
+        unchanged,conditional_cost=measure.request('cards_unchanged','GET','/api/v3/cards',expected_status=304,headers={'If-None-Match':first_page.headers['ETag']});records.append(conditional_cost)
+        assert unchanged.status_code==304 and conditional_cost['content_opens']==0 and conditional_cost['read_bytes']==0
         opened,_=measure.request('open','GET','/api/v3/reading/materials/'+items[0])
         resources.extend(dict(kind=r['kind'],id=r['id'],known_version=r['version']) for r in opened.json()['resources'])
         for _ in range(2):
@@ -56,7 +56,7 @@ def test_selected_cost_does_not_move_to_files_or_json(tmp_path):
         app=traced_app(root)
         with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,root) as measure:
             response,cost=measure.request('selected','GET','/api/v3/cards',params={'feed':feeds[0]})
-            assert len(response.json())==26
+            assert len(response.json()['items'])==26
             assert cost['content_opens']==0
             assert len(measure.files)==0
             results.append(cost)

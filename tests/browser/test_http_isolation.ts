@@ -18,7 +18,7 @@ test('HTTP scenarios isolate storage, settings, authentication and journals whil
   await a.api('diagnostics','POST',{source:'browser',message:'only A'});
   await addSources(a.api, [["https://a.test/feed", "A", "Без папки"]]);
   assert.deepEqual(await b.api('settings/oko/global'),originalSettings);
-  assert.deepEqual(await b.api('cards'),[]);
+  assert.deepEqual((await b.api('cards')).items,[]);
   assert.deepEqual((await b.api('reading-composition')).feeds,[]);
   assert.deepEqual((await b.api('diagnostics')).groups,[]);
   assert.ok((await a.api('reading-composition')).feeds.length);
@@ -41,7 +41,7 @@ test('aborting one HTTP scenario closes its server and pages without stopping it
   controller.abort();
   await expect.poll(()=>a.page.isClosed()).toBe(true);
   await expect.poll(()=>isClosed(a.origin)).toBe(true);
-  assert.deepEqual(await b.api('cards'),[]);
+  assert.deepEqual((await b.api('cards')).items,[]);
   await a.close();
 });
 
@@ -51,5 +51,5 @@ test('abort during HTTP setup rejects and leaves the next scenario usable',async
   controller.abort();
   await assert.rejects(opening,{name:'AbortError'});
   const next=await productionReader(t);
-  assert.deepEqual(await next.api('cards'),[]);
+  assert.deepEqual((await next.api('cards')).items,[]);
 });

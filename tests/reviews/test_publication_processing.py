@@ -1,4 +1,5 @@
 """Latest-publication processing through real HTTP and synthetic source/model."""
+from tests.support.cards import read_materials_for_cards
 import json
 from tests.support.storage import database
 import httpx
@@ -68,7 +69,7 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'originals':False})
         setup(client)
-        cards=wait_for(client,lambda:rows if len(rows:=client.get('/api/v3/cards').json())==2 and all(c['theses']['result'] for c in rows) else None)
+        cards=wait_for(client,lambda:rows if len(rows:=read_materials_for_cards(client, '/api/v3/cards'))==2 and all(c['theses']['result'] for c in rows) else None)
         assert all('Реклама:' not in c['snippet'] for c in cards)
         assert {'filter','theses'}<={c['operation'] for c in calls}
         card=next(c for c in cards if c['source_url'].endswith('/11'))
@@ -101,14 +102,14 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
         assert len(calls)==count
 
         wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
-        saved=client.get('/api/v3/cards').json()
+        saved=read_materials_for_cards(client, '/api/v3/cards')
         time.sleep(1.2)  # More than two periodic reconciliation passes.
         assert len(calls)==count
-        assert [c['theses'] for c in client.get('/api/v3/cards').json()]==[c['theses'] for c in saved]
+        assert [c['theses'] for c in read_materials_for_cards(client, '/api/v3/cards')]==[c['theses'] for c in saved]
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         presence(client,'reader')
         wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
-        assert [c['theses'] for c in client.get('/api/v3/cards').json()]==[c['theses'] for c in saved]
+        assert [c['theses'] for c in read_materials_for_cards(client, '/api/v3/cards')]==[c['theses'] for c in saved]
         assert stored(root,item)['processing_metadata']==accepted
         assert len(calls)==count
 
@@ -119,7 +120,7 @@ def test_hidden_has_empty_blocks_original_and_no_restore_or_summary(tmp_path):
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Реклама: купите курс.')])) )
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards?show_hidden=true').json() if (c['filter']['result'] or {}).get('hidden')),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards?show_hidden=true') if (c['filter']['result'] or {}).get('hidden')),None))
         row=stored(root,card['id'])
         assert row['status']=='filter_out' and row['filtered_content']['blocks']==[]
         assert 'can_restore' not in card['filter']['result']
@@ -171,7 +172,7 @@ def test_unavailable_input_waits_without_model_and_processes_when_retrieved(tmp_
         return httpx.Response(200,text=html if available[0] else mark_post_unavailable(html,'fixture/11'))
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
-        item=wait_for(client,lambda:(c[0]['id'] if (c:=client.get('/api/v3/cards').json()) else None))
+        item=wait_for(client,lambda:(c[0]['id'] if (c:=read_materials_for_cards(client, '/api/v3/cards')) else None))
         wait_for(client,lambda:r['status']=='pending_collection' and r['content']!={} and r['complete'] if (r:=stored(root,item)) else False)
         row=stored(root,item)
         assert row['filtered_content']=={} and row['summarized_content']=={}
@@ -211,7 +212,7 @@ def test_rule_change_rejects_late_filter_and_uses_one_new_feed_snapshot(tmp_path
             assert started.wait(3)
             client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'Keep the text.','prompt_theses':'New summary rule.'})
             release.set()
-            card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+            card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
             assert not card['filter']['result']['hidden']
             assert len([c for c in calls if c['operation']=='filter'])==2
             assert calls[0]['prompt']=='Убери рекламу.'
@@ -246,7 +247,7 @@ def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_
             configure_fast_web(client)
             client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
             feed=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()['feed_id']
-            card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['availability']=='available'),None))
+            card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['availability']=='available'),None))
             item=card['id']
             client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
             client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':False})
@@ -257,8 +258,8 @@ def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_
             wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status').json()['work']))
             assert calls==[]
             assert client.get('/api/v3/status').json()['problems']['current']==[]
-            assert all(c['theses']['result'] is None for c in client.get('/api/v3/cards').json())
-            item=client.get('/api/v3/cards').json()[0]['id']
+            assert all(c['theses']['result'] is None for c in read_materials_for_cards(client, '/api/v3/cards'))
+            item=read_materials_for_cards(client, '/api/v3/cards')[0]['id']
             assert stored(root,item)['filtered_content']=={}
             assert stored(root,item)['summarized_content']=={}
         finally:
@@ -283,9 +284,9 @@ def test_processing_does_not_wait_for_the_media_lane(tmp_path):
         try:
             setup(client)
             assert started.wait(3)
-            card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+            card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
             assert stored(root,card['id'])['status']=='ready'
-            assert card['attachments']==[]
+            assert card['content']['attachments']==[]
             assert {c['operation'] for c in calls}=={'filter','theses'}
             metadata=stored(root,card['id'])['processing_metadata']
             release.set()
@@ -319,7 +320,7 @@ def test_article_retrieval_error_is_not_sent_as_publication_text(tmp_path):
         return httpx.Response(200,text=page([(11,'Useful post <a href="https://telegra.ph/Fixture">article</a>')]))
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
         setup(client)
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
         assert all('Статья ещё не сохранена' not in call['sources'][0]['text'] for call in calls)
         assert all('Telegraph:' not in call['sources'][0]['text'] for call in calls)
         broken[0]=False
@@ -350,7 +351,7 @@ def test_invalid_model_output_does_not_become_a_result(tmp_path,invalid):
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
         setup(client)
         stage='filter' if invalid=='quote_removal' else 'theses'
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c[stage]['diagnostic_message']),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c[stage]['diagnostic_message']),None))
         row=stored(root,card['id'])
         assert row['filtered_content' if stage=='filter' else 'summarized_content']=={}
         assert client.get('/api/v3/materials/'+card['id']).json()['content']['reply_preview']['text']=='Quoted context'
@@ -381,7 +382,7 @@ def test_local_retry_records_the_model_actually_used_and_ready_result_survives_c
         client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':selected[0],'local_execution':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'','retry_initial_seconds':1,'retry_max_seconds':1})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['diagnostic_message']),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['diagnostic_message']),None))
         selected[0]='local:second'
         client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':selected[0],'local_execution':True})
         broken[0]=False
@@ -410,7 +411,7 @@ def test_failed_regeneration_retains_only_current_results_across_restart(tmp_pat
     options=dict(token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         setup(client)
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
         item=card['id']
         accepted=stored(root,item)
         assert client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:new','local_execution':True}).status_code==200
@@ -436,7 +437,7 @@ def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])) )
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
         item,feed=card['id'],card['feed_id']
         client.patch('/api/v3/settings/feed/'+feed,json={'theses':False,'prompt_filters':''})
         assert client.get('/api/v3/materials/'+item).json()['theses']['result'] is None
@@ -450,7 +451,7 @@ def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
         count=len(calls)
         client.patch('/api/v3/settings/feed/'+feed,json={'prompt_filters':'Only filtering'})
         wait_for(client,lambda:any(card['id']==item and card['filter']['attempt']['state']=='ready'
-                                   for card in client.get('/api/v3/cards').json()))
+                                   for card in read_materials_for_cards(client, '/api/v3/cards')))
         assert [c['operation'] for c in calls[count:]]==['filter']
         assert stored(root,item)['summarized_content']=={}
         count=len(calls)
@@ -474,7 +475,7 @@ def test_codex_future_choices_preserve_results_and_explicit_regeneration_uses_ne
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True,'prompt_filters':''})
         feed=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()['feed_id']
         client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
         item=card['id']
         accepted=stored(root,item)['processing_metadata']
         count=len(model.inputs)
@@ -519,9 +520,9 @@ def test_folder_completion_includes_hidden_publications(tmp_path):
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': False, 'prompt_filters': 'Убери рекламу.'})
         presence(client, 'reader')
-        wait_for(client, lambda: len(c := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c))
-        assert len(client.get('/api/v3/cards').json()) == 2
+        wait_for(client, lambda: len(c := read_materials_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(x['filter']['attempt']['state'] == 'ready' for x in c))
+        assert len(read_materials_for_cards(client, '/api/v3/cards')) == 2
         preview = client.post('/api/v3/folders/demo/completion/preview').json()
         assert preview['cards_count'] == preview['publications_count'] == 3
         assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/v3/cards?show_hidden=true').json() == []
+        assert read_materials_for_cards(client, '/api/v3/cards?show_hidden=true') == []

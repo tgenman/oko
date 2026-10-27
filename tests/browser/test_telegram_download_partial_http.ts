@@ -15,7 +15,7 @@ test('Broken Telegram stream saves text, a separate reason and an explicit retry
  const error=r.page.locator('#completeness');
  await expect(r.page.locator('#text')).toContainText('Текст сохранён до обрыва');
  await expect(error).toContainText('соединение оборвано');
- const card=(await r.api('cards'))[0]!;
+ const card=((await r.api('cards')).items)[0]!;
  assert.equal(card.source_url,'https://t.me/brokenstream/11');
  await expect(r.page.getByRole('button',{name:'Retry Download',exact:true})).toBeVisible();
  await r.page.screenshot({path:artifactPath('telegram-download-partial-desktop.png')});

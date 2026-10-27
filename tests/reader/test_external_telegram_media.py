@@ -146,8 +146,9 @@ def test_reassessment_closes_only_the_recovered_material_problem(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         cards=settled(client,2)
-        target=next(c for c in cards if c['source']['message_ids']==['11'])
-        other=next(c for c in cards if c['source']['message_ids']==['12'])
+        materials=[client.get('/api/v3/materials/'+card['id']).json() for card in cards]
+        target=next(m for m in materials if m['source']['message_ids']==['11'])
+        other=next(m for m in materials if m['source']['message_ids']==['12'])
         assert client.get('/api/v3/status').json()['problems']['count']>=2
         recognized[0]=True
         result=client.post('/api/v3/materials/'+target['id']+'/retry')

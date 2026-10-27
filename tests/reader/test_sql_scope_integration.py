@@ -9,12 +9,9 @@ def test_scoped_cards_use_prefetched_inputs(tmp_path):
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
         tracing(client, app)
-        response = client.post('/api/v3/reading/check', json=dict(storage_id=None, resources=[dict(
-            kind='list', known_version=None, known_cards={},
-            options=dict(target=dict(scope='feed', feed_id=feeds[0]), sort='newest', show_hidden=False))]))
+        response = client.get('/api/v3/cards',params={'feed':feeds[0]})
         assert response.status_code == 200, response.text
-        resources = response.json()['resources']
-        cards = [r for r in resources if r['kind'] == 'card']
+        cards = response.json()['items']
         assert len(cards) == 10
-        assert all(r['state'] == 'changed' and r['data']['feed_id'] == feeds[0] for r in cards)
+        assert all(card['feed_id'] == feeds[0] for card in cards)
         assert int(response.headers['X-Test-SQL']) <= 30, app.state.last_sql

@@ -1,4 +1,5 @@
 """Native channel publications through actual reader HTTP and temporary storage."""
+from tests.support.cards import read_all_cards
 import asyncio
 import pytest
 import json
@@ -37,7 +38,7 @@ def test_channel_text_is_ready_before_independent_native_media(tmp_path):
             result=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
             assert result.status_code==200,result.text
             assert started.wait(3)
-            card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
+            card=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
             material=client.get('/api/v3/materials/'+card['id']).json()
             assert material['content']['text']=='Native own text'
             with database(root) as db:
@@ -101,7 +102,7 @@ def test_native_media_flood_wait_blocks_only_its_account_and_survives_restart(tm
         wall[0]+=1
         tick[0]+=1
         wait_for(client,lambda:len(calls)==3)
-        assert len(client.get('/api/v3/cards').json())==2
+        assert len(read_all_cards(client, '/api/v3/cards'))==2
 
 
 
@@ -130,7 +131,7 @@ def test_explicit_web_to_client_switch_keeps_feed_and_publication(tmp_path):
         assert switched.status_code==200,switched.text
         assert switched.json()['feed_id']==feed
         updated=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['text']=='New access text' else None))
-        assert updated['id']==item and len(client.get('/api/v3/cards').json())==1
+        assert updated['id']==item and len(read_all_cards(client, '/api/v3/cards'))==1
         with database(root) as db:
             assert db.execute('SELECT external_id , adapter FROM feeds WHERE id = %s',(feed,)).fetchone()==('-1001234567890','telegram_client_adapter')
         catalog=client.get('/api/v3/subscriptions').json()
@@ -168,7 +169,7 @@ def test_switch_rejects_late_native_file_and_keeps_new_web_content(tmp_path):
             result=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
             assert result.status_code==200,result.text
             assert started.wait(3)
-            item=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))['id']
+            item=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))['id']
             changed=client.post('/api/v3/telegram/connect',json=dict(feed_id=result.json()['feed_id'],source_locator='@fixture',folder='Keep',access={'kind':'web'}))
             assert changed.status_code==200,changed.text
             assert cancelled.wait(1)
@@ -214,7 +215,7 @@ def test_native_auto_read_waits_for_saved_file_and_manual_mode_waits_for_view(tm
                 assert connected.status_code==200,connected.text
                 assert started.wait(3)
                 assert acknowledgements==[]
-                card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
+                card=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
                 release.set()
                 wait_for(client,lambda:bool(client.get('/api/v3/materials/'+card['id']).json()['content']['attachments']))
                 if not automatic:
@@ -295,10 +296,10 @@ def test_true_feed_id_conflict_refuses_switch_without_merging_or_overwriting(tmp
         web=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web',initial_history={'mode':'count','count':'1'}))
         assert web.status_code==200,web.text
         settled(client,2)
-        before={card['id'] for card in client.get('/api/v3/cards').json()}
+        before={card['id'] for card in read_all_cards(client, '/api/v3/cards')}
         changed=client.post('/api/v3/telegram/connect',json=dict(feed_id=web.json()['feed_id'],source_locator='@fixture',folder='Keep',access={'kind':'client','profile':'personal'}))
         assert changed.status_code==409 and changed.json()['code']=='source_identity_conflict'
-        assert {card['id'] for card in client.get('/api/v3/cards').json()}==before
+        assert {card['id'] for card in read_all_cards(client, '/api/v3/cards')}==before
         catalog=client.get('/api/v3/subscriptions').json()
         assert len(catalog['feeds'])==2 and next(f for f in catalog['feeds'] if f['id']==web.json()['feed_id'])['access']['kind']=='web'
 
@@ -316,7 +317,7 @@ def test_unsupported_native_media_keeps_text_and_reports_incompleteness(tmp_path
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         result=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
         assert result.status_code==200,result.text
-        card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
+        card=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
         content=client.get('/api/v3/materials/'+card['id']).json()['content']
         assert content['text']=='Readable native text'
         assert content['completeness']['state']=='incomplete'
@@ -339,13 +340,13 @@ def test_native_peer_proof_handles_known_rename_and_keeps_publication_after_rest
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
         assert connected.status_code==200,connected.text
-        item=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))['id']
+        item=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))['id']
         renamed[0]=True
         assert client.post('/api/v3/materials/'+item+'/retry').status_code==200
         wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['content']['text']=='New native text')
         value=client.get('/api/v3/materials/'+item).json()
         assert value['source_url']=='https://t.me/renamed/11'
-        assert len(client.get('/api/v3/cards').json())==1
+        assert len(read_all_cards(client, '/api/v3/cards'))==1
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         presence(client,'reader')
         assert client.post('/api/v3/materials/'+item+'/retry').status_code==200
@@ -370,7 +371,7 @@ def test_native_album_growth_keeps_media_members_and_card_through_retry_and_coll
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
         assert connected.status_code==200,connected.text
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if len(c['attachments'])==1),None))
+        card=wait_for(client,lambda:next((c for c in read_all_cards(client, '/api/v3/cards') if len(client.get('/api/v3/materials/'+c['id']).json()['content'].get('attachments',[]))==1),None))
         item=card['id']
         parts.append(dict(id=12,date=time.time()-60,text='Second album part',group=77,
             media=dict(kind='video',extension='mp4',mime='video/mp4')))
@@ -379,13 +380,13 @@ def test_native_album_growth_keeps_media_members_and_card_through_retry_and_coll
         assert value['content']['completeness']['state']=='complete'
         assert value['source']['message_ids']==['11','12']
         assert 'First album part' in value['content']['text'] and 'Second album part' in value['content']['text']
-        assert [c['id'] for c in client.get('/api/v3/cards').json()]==[item]
+        assert [c['id'] for c in read_all_cards(client, '/api/v3/cards')]==[item]
         parts.append(dict(id=13,date=time.time()-60,text='Third album part',group=77,media=None))
         assert client.post('/api/v3/collect').status_code==200
         value=wait_for(client,lambda:m if 'Third album part' in (m:=client.get('/api/v3/materials/'+item).json())['content']['text'] else None)
         assert value['source']['message_ids']==['11','12','13']
         assert value['content']['completeness']['state']=='complete' and len(value['content']['attachments'])==2
-        assert [c['id'] for c in client.get('/api/v3/cards').json()]==[item]
+        assert [c['id'] for c in read_all_cards(client, '/api/v3/cards')]==[item]
 
 
 def test_native_media_change_refreshes_description_and_retries_same_file_after_backoff(tmp_path):
@@ -426,7 +427,7 @@ def test_native_media_change_refreshes_description_and_retries_same_file_after_b
         wait_for(client,refreshed)
         tick[0]+=60
         wall[0]+=60
-        item=client.get('/api/v3/cards').json()[0]['id']
+        item=read_all_cards(client, '/api/v3/cards')[0]['id']
         ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
         assert client.get(ready['content']['attachments'][0]['url']).content==b'fresh-file'
         assert ready['content']['attachments'][0]['url'].endswith('/'+identity) and len(calls)==2
@@ -463,7 +464,7 @@ def test_native_account_wait_does_not_hold_separate_telegraph_articles(tmp_path)
         connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
         assert connected.status_code==200,connected.text
         assert paused.wait(3)
-        card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
+        card=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
         wait_for(client,lambda:'Second independent article' in client.get('/api/v3/materials/'+card['id']).json()['content']['text'])
         assert len(calls)==1
 
@@ -486,7 +487,7 @@ def test_partial_native_album_reload_keeps_saved_content_until_members_return(tm
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         connected=connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
         assert connected.status_code==200,connected.text
-        item=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))['id']
+        item=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))['id']
         partial[0]=True
         client.post('/api/v3/materials/'+item+'/retry')
         wait_for(client,lambda:any('Часть альбома недоступна' in problem['message'] for problem in client.get('/api/v3/status').json()['problems']['current']))
@@ -528,7 +529,7 @@ def test_native_auto_read_waits_for_linked_article_image(tmp_path):
             connected=connect_request(client,json=dict(account='fixture',peer='@fixture',auto_read=True,initial_history={'mode':'count','count':1}))
             assert connected.status_code==200,connected.text
             assert started.wait(3)
-            card=wait_for(client,lambda:next(iter(client.get('/api/v3/cards').json()),None))
+            card=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
             wait_for(client,lambda:'Article body' in client.get('/api/v3/materials/'+card['id']).json()['content']['text'])
             assert acknowledgements==[]
             release.set()

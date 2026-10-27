@@ -26,7 +26,8 @@ for(const perFeed of [26,100] as const)for(const active of [false,true]){
     }).observe(document,{childList:true,subtree:true,characterData:true,attributes:true});
   });
   await r.page.goto(r.origin+'/#token='+r.token);
-  await expect(r.page.locator('#cards [data-card]')).toHaveCount(perFeed*4);
+  await expect(r.page.locator('#cards [data-card]')).toHaveCount(40);
+  await expect(r.page.locator('#count')).toHaveText(String(perFeed*4));
   if(active){
     let state=await r.api('status');
     try {await expect.poll(async()=>{state=await r.api('status');return state.work.some(w=>w.phase==='processing');},{timeout:20000}).toBe(true);}

@@ -68,6 +68,25 @@ class ReadingComposition:
     def __init__(self, store: 'Store') -> None:
         self._store = store
 
+    def page(self, options: dict[str, Any], cursor: str | None, limit: int) -> tuple[list[str], int] | None:
+        """Return the inclusive cursor page and total without reading card bodies."""
+        target=options['target']
+        scope=target['scope']
+        membership={
+            'all': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id)',
+            'feed': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND m.feed_id=%(owner)s)',
+            'folder': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND owner_feed.folder_id=%(owner)s)',
+        }[scope]
+        selected=f"SELECT i.id, i.published, i.published_known FROM items_read i JOIN feeds f ON f.id=i.feed_id LEFT JOIN reader_visibility v ON v.item=i.id WHERE i.viewed=0 AND (%(hidden)s=1 OR coalesce(v.hidden,0)=0) AND {membership}"
+        cte=f"WITH selected AS ({selected}), ordered AS (SELECT id, CASE WHEN published_known=0 THEN 1 ELSE 0 END AS missing, CASE WHEN published_known=0 THEN 0 WHEN %(sort)s='oldest' THEN published ELSE -published END AS stamp FROM selected)"
+        args=dict(owner=target.get('feed_id',target.get('folder_id','')),sort=options['sort'],hidden=int(options['show_hidden']),cursor=cursor,limit=limit+1)
+        db=self._store.db
+        total=expect_row(db.execute(cte+' SELECT count(*) FROM ordered',args).fetchone())[0]
+        if cursor is not None and not db.execute(cte+' SELECT 1 FROM ordered WHERE id = %(cursor)s',args).fetchone():return None
+        predicate=" WHERE (missing, stamp, id) >= (SELECT missing, stamp, id FROM ordered WHERE id = %(cursor)s)" if cursor is not None else ''
+        rows=db.execute(cte+' SELECT id FROM ordered'+predicate+' ORDER BY missing, stamp, id LIMIT %(limit)s',args)
+        return [row[0] for row in rows],total
+
     @reading_snapshot()
     def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
         where, parameters = ['i.viewed=0'], []
@@ -119,23 +138,13 @@ class ReadingComposition:
                     count=visible)
 
     def _contents(self, owner: str, scope: str) -> FolderContents:
-        from oko.storage.material_read import material_inputs, item
-
         self._store.subscriptions.check_owner(scope, owner)
         condition = 'm . feed_id = %s' if scope == 'feed' else 'f . folder_id = %s'
-        rows = list(self._store.db.execute(f'SELECT DISTINCT i . id , i . members FROM items_read i JOIN reading_memberships m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0 AND {condition} ORDER BY i . id', (owner,)))
-        cards = []
-        # Keep the exact publication identities (including Telegram members)
-        # even when a completed publication cannot currently be read.
-        ids = [row['id'] for row in rows]
-        for start in range(0, len(ids), 400):
-            with material_inputs(self._store.db, set(ids[start:start+400])):
-                for identity in ids[start:start+400]:
-                    row = item(self._store.db, identity)
-                    assert row is not None
-                    if row['feed_id'] is not None and (not row['complete'] or self._store.reading_content(row) is not None):
-                        cards.append(identity)
-        return FolderContents(tuple((row['id'], row['members']) for row in rows), tuple(cards))
+        rows = list(self._store.db.execute(f'SELECT DISTINCT i . id , i . members , i . feed_id FROM items_read i JOIN reading_memberships m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0 AND {condition} ORDER BY i . id', (owner,)))
+        # Pending and damaged publications both have a visible card. Completion
+        # still captures every member, including those with no current feed.
+        return FolderContents(tuple((row['id'], row['members']) for row in rows),
+                              tuple(row['id'] for row in rows if row['feed_id'] is not None))
 
     @reading_snapshot()
     def folder_contents(self, folder: str) -> FolderContents:
@@ -156,3 +165,13 @@ class ReadingComposition:
 
     def members(self, identity: str) -> list[str]:
         return [identity]
+
+    def unviewed(self, identities: list[str]) -> set[str]:
+        selected = sorted(set(identities))
+        members: set[str] = set()
+        for start in range(0, len(selected), 400):
+            batch = selected[start:start+400]
+            marks = ','.join('%s' for _ in batch)
+            members.update(row[0] for row in self._store.db.execute(
+                f'SELECT id FROM items_read WHERE viewed = 0 AND id IN ( {marks} )', batch))
+        return members

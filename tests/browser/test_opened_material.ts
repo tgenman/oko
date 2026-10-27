@@ -362,7 +362,8 @@ test('storage replacement rejects old media replies and stages the replacement b
         return new Response(JSON.stringify({...frame,storage_id}),{headers:{'Content-Type':'application/json'}});
       };
     });
-    await r.start([material('A',{version:'old',images:[url]})]);
+    await r.start([material('A',{version:'old',images:[]})]);
+    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/api/v3/materials/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,images:[url]};},url);
     await r.page.evaluate(url=>readerTransport.held.set(url,true),url);
     await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
     await r.page.evaluate(()=>{
@@ -436,7 +437,7 @@ test('reply context is a compact separate card with safe navigation and local ex
     // independent of the card, as is renewing the browser presence lease.
     const heartbeat=await r.api('client-sessions','POST');
     const requests=await r.page.evaluate(()=>readerTransport.requests);
-    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&['/api/v3/status','/api/v3/collection-status'].includes(q.url));
+    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||['/api/v3/status','/api/v3/collection-status'].includes(q.url)));
     const start=await r.page.evaluate(()=>readerTransport.requests.length),versions=await r.page.evaluate(()=>window.replyVersions);
     assert.deepEqual(Object.keys(versions).sort(),['filter','material','media','theses']);
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();

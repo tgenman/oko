@@ -1,4 +1,5 @@
 """Bounded per-feed failure retention through real reader HTTP requests."""
+from tests.support.cards import read_all_cards
 import asyncio
 import threading
 
@@ -158,7 +159,7 @@ def test_missing_rss_attachment_records_failure_without_removing_publication(tmp
         assert error['requests'][0]['url'] == 'https://synthetic.test/missing.png'
         assert error['requests'][0]['purpose'] == 'attachment'
         assert error['requests'][0]['http_status'] == 404
-        cards = client.get('/api/v3/cards').json()
+        cards = read_all_cards(client, '/api/v3/cards')
         assert len(cards) == 1
         material = client.get('/api/v3/materials/'+cards[0]['id']).json()
         assert material['content']['text'].endswith('Сохранённый текст')

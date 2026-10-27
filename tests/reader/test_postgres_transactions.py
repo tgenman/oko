@@ -1,4 +1,5 @@
 """Repository transaction ownership against real PostgreSQL and independent readers."""
+from tests.support.cards import read_all_cards
 from contextlib import contextmanager
 
 import pytest
@@ -134,23 +135,22 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None))
         assert 'Collected text' in material['content']['text']
         frame = client.post('/api/v3/reading/check', json={'storage_id': None, 'resources': [
-            {'kind': 'navigation', 'known_version': None},
-            {'kind': 'list', 'options': {'target': {'scope': 'all'}, 'sort': 'newest', 'show_hidden': False}, 'known_version': None, 'known_cards': {}}
+            {'kind': 'navigation', 'known_version': None}
         ]})
         assert frame.status_code == 200, frame.text
         snapshot = frame.json()
         assert snapshot['state'] == 'current'
-        assert [resource for resource in snapshot['resources'] if resource['kind'] == 'card'][0]['id'] == item
+        assert client.get('/api/v3/cards').json()['items'][0]['id'] == item
         media = material['content']['attachments'][0]['url']
         assert client.get(media).content == PNG
         previous = requests.count('/feed')
         assert client.post('/api/v3/collect').status_code == 200
         wait_for(client, lambda: requests.count('/feed') > previous)
-        assert len(client.get('/api/v3/cards').json()) == 1
+        assert len(read_all_cards(client, '/api/v3/cards')) == 1
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         assert not (tmp_path / 'state.sqlite').exists()
     with TestClient(app(), headers=HEADERS) as restarted:
-        assert [value['id'] for value in restarted.get('/api/v3/cards').json()] == [item]
+        assert [value['id'] for value in read_all_cards(restarted, '/api/v3/cards')] == [item]
         assert restarted.get(media).content == PNG
         restored = restarted.get('/api/v3/reading/materials/' + item)
         assert restored.status_code == 200, restored.text
@@ -161,7 +161,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         assert viewed.status_code == 200, viewed.text
         if delete_fault:
             wait_for(restarted, lambda: bool(failed_deletions))
-        assert restarted.get('/api/v3/cards').json() == []
+        assert read_all_cards(restarted, '/api/v3/cards') == []
         assert restarted.get('/api/v3/materials/' + item).status_code == 404
     if delete_fault:
         fail_delete[0] = False
@@ -170,7 +170,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
             assert recovered.post('/api/v3/materials/' + item + '/viewed').status_code == 200
             wait_for(recovered, lambda: not any(path.is_file() for path in (tmp_path / 'media').rglob('*')))
             assert recovered.get(media).status_code == 404
-            assert recovered.get('/api/v3/cards').json() == []
+            assert read_all_cards(recovered, '/api/v3/cards') == []
 
 
 def test_shared_publication_survives_primary_feed_deletion(postgres_url, tmp_path):
@@ -195,7 +195,7 @@ def test_shared_publication_survives_primary_feed_deletion(postgres_url, tmp_pat
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         feeds = [add_source(client, 'https://www.youtube.com/feeds/videos.xml?channel_id=' + channel, 'Source ' + str(index), 'Folder ' + str(index))
                  for index, channel in enumerate((CHANNEL, 'UC' + 'b' * 22))]
-        cards = wait_for(client, lambda: (cards if len(cards := client.get('/api/v3/cards').json()) == 1 and all(client.get('/api/v3/cards', params={'feed': feed['id']}).json() for feed in feeds) else None))
+        cards = wait_for(client, lambda: (cards if len(cards := read_all_cards(client, '/api/v3/cards')) == 1 and all(read_all_cards(client, '/api/v3/cards', params={'feed': feed['id']}) for feed in feeds) else None))
         item = cards[0]['id']
         material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None))
         media = material['content']['attachments'][0]['url']
@@ -207,10 +207,10 @@ def test_shared_publication_survives_primary_feed_deletion(postgres_url, tmp_pat
         deletion = client.delete('/api/v3/feeds/' + primary['id'])
         assert deletion.status_code == 200, deletion.text
         wait_for(client, lambda: not any(feed['id'] == primary['id'] for feed in client.get('/api/v3/subscriptions').json()['feeds']))
-        assert [card['id'] for card in client.get('/api/v3/cards', params={'feed': remaining['id']}).json()] == [item]
+        assert [card['id'] for card in read_all_cards(client, '/api/v3/cards', params={'feed': remaining['id']})] == [item]
         assert client.get(media).content == PNG
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert client.get(media).status_code == 404
 
 

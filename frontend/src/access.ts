@@ -55,7 +55,7 @@ export function createAccessGuard(adapter: typeof fetch, onLost:()=>void=()=>{})
         if(response.headers.get('X-Oko-Login-Required')==='1')lock();
         if(locked)throw new DOMException('Login required','AbortError');
         if(response.headers.get('X-Oko-Password-Login')==='1')install();
-        if (!installed || !response.body) {release();return response;}
+        if (!installed || !response.body || [204,205,304].includes(response.status)) {release();return response;}
         const reader=response.body.getReader();
         const stream=new ReadableStream<Uint8Array>({
           async pull(target) {

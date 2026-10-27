@@ -1,4 +1,5 @@
 """Settings stay in the reader's memory while HTTP edits retain SQL atomicity."""
+from tests.support.cards import read_all_cards
 import re
 import pytest
 
@@ -57,8 +58,8 @@ def test_reading_cards_reuses_feed_processing_options_without_point_reads(tmp_pa
 
     app = create_app(tmp_path, token='test', api_only=True, source=DemoSource())
     with TestClient(app, headers=HEADERS) as client:
-        wait_for(client, lambda: (cards if len(cards := client.get('/api/v3/cards').json()) == 3
-                                 and all(card['availability'] == 'available' for card in cards) else None))
+        wait_for(client, lambda: (cards if len(cards := read_all_cards(client, '/api/v3/cards')) == 3
+                                 and all(client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available' for card in cards) else None))
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         queries = []
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
@@ -66,7 +67,7 @@ def test_reading_cards_reuses_feed_processing_options_without_point_reads(tmp_pa
             for _ in range(3):
                 response = client.get('/api/v3/cards')
                 assert response.status_code == 200
-                assert len(response.json()) == 3
+                assert len(response.json()['items']) == 3
         finally:
             client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
         point_reads = [query for query in queries
@@ -262,8 +263,8 @@ def test_material_immediately_uses_moved_feed_settings_and_delete_removes_cache(
     app = create_app(tmp_path, token='test', api_only=True, source=DemoSource(), database_url=settings_database)
     with TestClient(app, headers=HEADERS) as client:
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
-        item = wait_for(client, lambda: (cards[0]['id'] if len(cards := client.get('/api/v3/cards').json()) == 3
-                                        and all(card['availability'] == 'available' for card in cards) else None))
+        item = wait_for(client, lambda: (cards[0]['id'] if len(cards := read_all_cards(client, '/api/v3/cards')) == 3
+                                        and all(client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available' for card in cards) else None))
         moved = client.patch('/api/v3/feeds/demo', json={'new_folder': 'Moved', 'importance': 'high', 'public_ai': True})
         assert moved.status_code == 200, moved.text
         folder = moved.json()['folder_id']

@@ -1,4 +1,5 @@
 """Feed completion at HTTP: exact scope, captured members and Telegram rules."""
+from tests.support.cards import read_all_cards
 from fastapi.testclient import TestClient
 import httpx
 from tests.support.app import create_app
@@ -14,13 +15,13 @@ from oko.collection.demo import DemoSource
 def test_feed_completion_includes_hidden_and_preserves_subscription(tmp_path):
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport([])), headers=HEADERS) as client:
         setup_filters(client)
-        wait_for(client, lambda: len(rows := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(r['filter']['attempt']['state']=='ready' for r in rows))
-        assert len(client.get('/api/v3/cards').json()) == 2
+        wait_for(client, lambda: len(rows := read_all_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(client.get('/api/v3/materials/'+r['id']).json()['filter']['attempt']['state']=='ready' for r in rows))
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         preview = client.post('/api/v3/feeds/demo/completion/preview').json()
         assert preview['publications_count'] == 3
         response = client.post('/api/v3/feeds/demo/completion', json={'token':preview['token']}, headers={'X-Oko-Action':'complete-demo'})
         assert response.status_code == 200, response.text
-        assert client.get('/api/v3/cards?show_hidden=true').json() == []
+        assert read_all_cards(client, '/api/v3/cards?show_hidden=true') == []
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == 'demo'
         assert not client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed']
         receipt = client.get('/api/v3/commands/complete-demo').json()
@@ -43,8 +44,8 @@ def test_feed_completion_isolated_from_sibling_feed_and_folder_token(tmp_path):
         token=client.post('/api/v3/feeds/demo/completion/preview').json()['token']
         assert client.post('/api/v3/feeds/'+other+'/completion',json={'token':token}).status_code == 409
         assert client.post('/api/v3/feeds/demo/completion',json={'token':token}).status_code == 200
-        assert len(client.get('/api/v3/cards').json()) == 1
-        assert client.get('/api/v3/cards').json()[0]['feed_id'] == other
+        assert len(read_all_cards(client, '/api/v3/cards')) == 1
+        assert read_all_cards(client, '/api/v3/cards')[0]['feed_id'] == other
 
 
 def test_new_feed_arrival_requires_confirmation_and_repeat_leaves_future_items(tmp_path):
@@ -59,11 +60,11 @@ def test_new_feed_arrival_requires_confirmation_and_repeat_leaves_future_items(t
         changed=client.post(path,json={'token':token})
         assert changed.status_code == 409
         accepted=changed.json()['details']['preview']['token']
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         assert client.post(path,json={'token':accepted}).status_code == 200
         current[0]=rss(guid='three',url='https://source.test/three');client.post('/api/v3/collect');rss_cards(client,1)
         assert client.post(path,json={'token':accepted}).status_code == 200
-        assert len(client.get('/api/v3/cards').json()) == 1
+        assert len(read_all_cards(client, '/api/v3/cards')) == 1
         assert client.post('/api/v3/feeds/missing/completion/preview').status_code == 404
         assert client.post('/api/v3/feeds/missing/completion',json={'token':'wrong'}).status_code == 404
 
@@ -71,9 +72,9 @@ def test_new_feed_arrival_requires_confirmation_and_repeat_leaves_future_items(t
 def test_feed_completion_covers_loading_and_rejects_late_fetch(tmp_path):
     with TestClient(create_app(tmp_path,source=LateSource(),token='test'),headers=HEADERS) as client:
         presence(client,'a')
-        rows=wait_for(client,lambda: client.get('/api/v3/cards').json())
-        assert any(r['availability']!='available' for r in rows)
+        rows=wait_for(client,lambda: read_all_cards(client, '/api/v3/cards'))
+        assert any(r['loading'] for r in rows)
         token=client.post('/api/v3/feeds/demo/completion/preview').json()['token']
         assert client.post('/api/v3/feeds/demo/completion',json={'token':token}).status_code == 200
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert not list((tmp_path/'content').glob('*/*'))

@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.subscriptions import configured_sources
 from fastapi.testclient import TestClient
 
@@ -178,7 +179,7 @@ def test_late_diagnostic_for_viewed_material_is_forgotten(tmp_path):
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''})
         client.post('/api/v3/collect')
-        cards = wait_for(client, lambda: client.get('/api/v3/cards').json())
+        cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
         identity = cards[0]['id']
         event = {'source': 'material viewer', 'message': 'private synthetic material text', 'material_ids': [identity]}
         assert client.post('/api/v3/diagnostics', json=event).json()['state'] == 'accepted'

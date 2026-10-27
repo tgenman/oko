@@ -13,7 +13,7 @@ test('explicit channel access changes keep the feed and publication in the real 
  if(!connection||typeof connection!=='object'||!('feed_id'in connection)||typeof connection.feed_id!=='string')throw new Error('Missing connected feed');
  const feed=connection.feed_id;
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
- const item=(await r.api('cards'))[0]!.id;
+ const item=((await r.api('cards')).items)[0]!.id;
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#text')).toContainText('Web original');
  const open=async()=>{await r.page.locator('#feeds-open').click();await r.page.locator(`[data-owner="feed/${feed}"]`).click();await feedOptions(r.page);};
@@ -28,7 +28,7 @@ test('explicit channel access changes keep the feed and publication in the real 
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#text')).toContainText('Client original');
  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
- expect((await r.api('cards')).map(c=>c.id)).toEqual([item]);
+ expect(((await r.api('cards')).items).map(c=>c.id)).toEqual([item]);
  await r.page.screenshot({path:artifactPath('telegram-client-publication.png')});
  await open();
  await r.page.locator('#feed-telegram-access').selectOption('web');
@@ -38,6 +38,6 @@ test('explicit channel access changes keep the feed and publication in the real 
  await expect.poll(async()=>{const material=await r.api(`materials/${item}`);return material.availability==='available'&&material.content.availability==='available'&&material.content.text.includes('Web original');}).toBe(true);
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#text')).toContainText('Web original');
- expect((await r.api('cards')).map(c=>c.id)).toEqual([item]);
+ expect(((await r.api('cards')).items).map(c=>c.id)).toEqual([item]);
  await r.page.screenshot({path:artifactPath('telegram-web-access-restored.png')});
 });

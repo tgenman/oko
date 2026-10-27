@@ -1,4 +1,5 @@
 """Automatic collection observed through HTTP commands and a synthetic source."""
+from tests.support.cards import read_all_cards, read_materials_for_cards
 import threading
 import time
 
@@ -105,7 +106,7 @@ def test_interval_save_does_not_cancel_in_flight_collection(tmp_path):
         finally:
             source.release.set()
         from tests.support.reader import wait_for
-        wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 3)
+        wait_for(client, lambda: len(read_all_cards(client, '/api/v3/cards')) == 3)
 
 
 def test_interval_change_preserves_running_and_ready_theses(tmp_path):
@@ -128,7 +129,7 @@ def test_interval_change_preserves_running_and_ready_theses(tmp_path):
             return await super().complete(prompt, schema, directory, choice)
     model = HeldModel()
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource(), codex_client=model), headers=HEADERS) as client:
-        wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 3)
+        wait_for(client, lambda: len(read_materials_for_cards(client, '/api/v3/cards')) == 3)
         config = {kind: dict(model='synthetic', reasoning_effort='low', fast=False) for kind in ('filter', 'theses')}
         assert client.put('/api/v3/processors/codex', json=config).status_code == 200
         assert client.patch('/api/v3/feeds/demo', json={'public_ai': True}).status_code == 200
@@ -140,10 +141,10 @@ def test_interval_change_preserves_running_and_ready_theses(tmp_path):
             assert not model.cancelled.is_set()
         finally:
             model.release.set()
-        cards = wait_for(client, lambda: (rows if len(rows := client.get('/api/v3/cards').json()) == 3 and all(c['theses']['result'] for c in rows) else None))
+        cards = wait_for(client, lambda: (rows if len(rows := read_materials_for_cards(client, '/api/v3/cards')) == 3 and all(c['theses']['result'] for c in rows) else None))
         before = [c['theses']['result'] for c in cards]
         count = len(model.inputs)
         assert client.patch(path, json={'feed_refresh_minutes': None}).status_code == 200
         time.sleep(.12)
-        assert [c['theses']['result'] for c in client.get('/api/v3/cards').json()] == before
+        assert [c['theses']['result'] for c in read_materials_for_cards(client, '/api/v3/cards')] == before
         assert len(model.inputs) == count

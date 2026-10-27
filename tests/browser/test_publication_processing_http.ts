@@ -12,7 +12,7 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await r.api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'Убери рекламу.',telegram_http_rps:10});
  await r.openReader();
  await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
- await expect.poll(async()=>{const cards=await r.api('cards');return cards.length===1&&cards[0].theses.result!==null;}).toBe(true);
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return cards.length===1&&(await r.api(`materials/${cards[0].id}`)).theses.result!==null;}).toBe(true);
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#filter-status')).toContainText('Реклама');
  await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
@@ -20,12 +20,12 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  const summary=r.page.locator('#theses');await expect(summary).toContainText('Просмотрено удаляет текст.');const accepted=await summary.textContent();
  await r.setProcessingState('error');
  await r.page.getByRole('button',{name:'Regenerate',exact:true}).click();
- await expect.poll(async()=>{const cards=await r.api('cards');return cards[0].theses.attempt.state;}).toBe('waiting');
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return (await r.api(`materials/${cards[0].id}`)).theses.attempt.state;}).toBe('waiting');
  await expect(summary).toHaveText(accepted!);await summary.scrollIntoViewIfNeeded();
  await r.page.screenshot({path:artifactPath('publication-processing-failed-regeneration.png')});
  await r.updatePublication('Реклама: купите курс.');
  await r.setProcessingState('ready');
- const cards=await r.api('cards');await r.api('materials/'+cards[0].id+'/retry','POST');
+ const cards=(await r.api('cards')).items;await r.api('materials/'+cards[0].id+'/retry','POST');
  await expect(r.page.locator('[data-card]')).toHaveCount(0);
  await r.page.getByRole('button',{name:'List Actions',exact:true}).click();await r.page.locator('#show-hidden').check();await r.page.getByRole('button',{name:'List Actions',exact:true}).click();
  await expect(r.page.locator('[data-card]')).toHaveCount(1);await r.page.locator('[data-card]').click();
@@ -38,7 +38,7 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
  expect((await r.api('settings/oko/global')).effective.prompt_filters.value).toBe('');
  await r.page.locator('#settings-close').click();
- await expect.poll(async()=>{const values=await r.api('cards');return values[0]?.filter.attempt.state==='disabled'&&values[0].theses.result!==null;}).toBe(true);
+ await expect.poll(async()=>{const values=(await r.api('cards')).items;if(!values[0])return false;const material=await r.api(`materials/${values[0].id}`);return material.filter.attempt.state==='disabled'&&material.theses.result!==null;}).toBe(true);
  await r.page.reload();await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#theses')).toContainText('Просмотрено удаляет текст.');
  await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();

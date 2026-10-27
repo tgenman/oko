@@ -62,11 +62,11 @@ test('date groups, saved sorting and displayed hidden card count use current row
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('#count-label')).toHaveText('4');
-  await r.page.locator('#sort').selectOption('importance');
-  await expect(r.page.locator('.date-group')).toHaveCount(0);
+  await r.page.locator('#sort').selectOption('oldest');
+  await expect(r.page.locator('.date-group')).toHaveCount(3);
   await r.page.reload();
-  await expect(r.page.locator('#sort')).toHaveValue('importance');
-  await expect(r.page.locator('.date-group')).toHaveCount(0);
+  await expect(r.page.locator('#sort')).toHaveValue('oldest');
+  await expect(r.page.locator('.date-group')).toHaveCount(3);
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });
@@ -104,7 +104,8 @@ test('polling preserves row focus and anchored scroll, and returning restores ar
   await r.page.locator('[data-card="item-20"]').focus();
   const before=await r.page.locator('[data-card="item-20"]').evaluate(n=>n.getBoundingClientRect().top);
   await r.page.evaluate(()=>readerTransport.replies.get('/api/v3/cards')!.body!.unshift({...readerTransport.replies.get('/api/v3/cards')!.body![0],id:'new',title:'Новый материал',published:2000}));
-  await expect(r.page.locator('#cards button')).toHaveCount(31);
+  await expect(r.page.locator('#cards-new')).toBeVisible();
+  await expect(r.page.locator('#cards button')).toHaveCount(30);
   await expect(r.page.locator('[data-card="item-20"]')).toBeFocused();
   expect(await r.page.locator('[data-card="item-20"]').evaluate(n=>n.getBoundingClientRect().top)).toBe(before);
   const allPosition=await r.page.locator('#card-scroll').evaluate(n=>n.scrollTop);
@@ -112,8 +113,10 @@ test('polling preserves row focus and anchored scroll, and returning restores ar
   await expect(r.page.locator('#cards button')).toHaveCount(16);
   await expect(r.page.locator('#card-scroll')).toHaveJSProperty('scrollTop',0);
   await r.page.locator('#all-folders').click();
-  await expect(r.page.locator('#cards button')).toHaveCount(31);
+  await expect(r.page.locator('#cards button')).toHaveCount(30);
   expect(await r.page.locator('#card-scroll').evaluate(n=>n.scrollTop)).toBe(allPosition);
+  await r.page.locator('#cards-new').click();
+  await expect(r.page.locator('#cards button')).toHaveCount(31);
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });
@@ -136,11 +139,12 @@ test('previews are reused during polling and late media cannot repopulate anothe
     await expect(r.page.locator('[data-card="one"] .card-title')).toHaveText('Poll '+cycle);
   }
   expect(await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path)).toBe(requests);
-  await r.page.evaluate(path=>{readerTransport.held.set(path,true); readerTransport.replies.get('/api/v3/cards')!.body![0].version='2';},path);
-  await r.page.waitForFunction(path=>readerTransport.pending.has(path),path);
+  const replacement='/api/v3/materials/one/images/image-1.png';
+  await r.page.evaluate(path=>{readerTransport.held.set(path,true); readerTransport.replies.get('/api/v3/cards')!.body![0].images=[path];},replacement);
+  await r.page.waitForFunction(path=>readerTransport.pending.has(path),replacement);
   await r.page.locator('[data-feed="second"]').click();
   await expect(r.page.locator('#cards button')).toHaveCount(1);
-  await r.page.evaluate(path=>readerTransport.release(path,{late:true}),path);
+  await r.page.evaluate(path=>readerTransport.release(path,{late:true}),replacement);
   await expect(r.page.locator('#cards img')).toHaveCount(0);
   const resources=await r.page.evaluate(()=>browserResources);
   expect(resources.revoked).toEqual(resources.created);
@@ -151,6 +155,7 @@ test('previews are reused during polling and late media cannot repopulate anothe
 test('failed refresh keeps rows and retry updates current area, late failed selection is ignored', async () => {
  const r=await reader(); try {
   await r.start([material('one'),material('two',{feed_id:'second'})]);
+  await r.page.locator('[data-card="one"]').click();await expect(r.page.locator('#text')).toContainText('Текст one');
   await r.page.evaluate(() => {const t=readerTransport;
    t.replies.get('/api/v3/reading-composition')!.body!.feeds=t.replies.get('/api/v3/reading-composition')!.body!.feeds.filter(f=>f.id!=='second').concat({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
    t.replies.set('/api/v3/cards?sort=newest&feed=second',{body:[t.replies.get('/api/v3/cards')!.body![1]]});
@@ -159,6 +164,7 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
   await expect(r.page.locator('#list-status')).toContainText('Сбой списка');
   await expect(r.page.locator('#cards button')).toHaveCount(2);
   await expect(r.page.locator('#list-retry')).toBeVisible();
+  await expect(r.page.locator('#stop')).toBeEnabled();await expect(r.page.locator('#text')).toContainText('Текст one');
   await r.page.evaluate(()=>document.getElementById('list-retry')!.addEventListener('click',()=>readerTransport.replies.delete('/api/v3/cards?sort=newest'),{capture:true,once:true}));
   await r.page.locator('#list-retry').click();
   await expect(r.page.locator('#list-retry')).toBeHidden();

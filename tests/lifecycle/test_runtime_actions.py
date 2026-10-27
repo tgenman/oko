@@ -1,4 +1,5 @@
 """Reader actions through the agreed HTTP interface and external-source seam."""
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -42,7 +43,7 @@ def test_viewed_and_feed_deletion_wait_for_one_cleanup(tmp_path: Path):
         presence(client, 'b')
         feed = connect(client)
         assert downloading.wait(2)
-        item = client.get('/api/v3/cards').json()[0]['id']
+        item = read_all_cards(client, '/api/v3/cards')[0]['id']
         with ThreadPoolExecutor(max_workers=2) as pool:
             viewed = pool.submit(client.post, '/api/v3/materials/' + item + '/viewed')
             try:
@@ -60,7 +61,7 @@ def test_viewed_and_feed_deletion_wait_for_one_cleanup(tmp_path: Path):
             if not client.get('/api/v3/subscriptions').json()['feeds']: break
             time.sleep(.02)
         assert not client.get('/api/v3/subscriptions').json()['feeds']
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
 

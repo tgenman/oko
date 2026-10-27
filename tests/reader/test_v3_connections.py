@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 import httpx
 from tests.support.v3 import TestClient
 from tests.support.app import create_app
@@ -111,7 +112,7 @@ def test_youtube_archive_controls_survive_restart_and_allow_explicit_replay(tmp_
             time.sleep(.01)
         assert state['state']=='complete',state
         assert state['progress']['loaded']==2
-        cards=client.get('/api/v3/cards').json()
+        cards=read_all_cards(client, '/api/v3/cards')
         viewed=cards[0]['id']
         assert client.post('/api/v3/materials/'+viewed+'/viewed').status_code==200
         assert client.post(path,json={'mode':'count','count':'2'}).status_code==200
@@ -120,7 +121,7 @@ def test_youtube_archive_controls_survive_restart_and_allow_explicit_replay(tmp_
             if state['state']=='complete':break
             time.sleep(.01)
         assert state['state']=='complete'
-        assert len(client.get('/api/v3/cards').json())==2
+        assert len(read_all_cards(client, '/api/v3/cards'))==2
     with reader() as client:
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['history']['selection']=={'mode':'count','count':'2'}
         assert client.get('/api/v3/materials/'+viewed).status_code==404

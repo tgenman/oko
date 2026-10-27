@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 from tests.support.subscriptions import configured_sources
@@ -43,7 +44,7 @@ def test_effective_fields_reset_and_feed_permissions_survive_restart(tmp_path: P
         assert client.get('/api/v3/settings/folder/' + folder).json()['effective']['prompt_filters']['value'] == ''
 
 
-def test_folders_and_sorting_use_feed_importance_not_folder_prefix(tmp_path: Path):
+def test_folders_and_time_sorting_are_independent_of_feed_importance(tmp_path: Path):
     import time
     from oko.collection.contracts import Publication, Material
 
@@ -67,16 +68,16 @@ def test_folders_and_sorting_use_feed_importance_not_folder_prefix(tmp_path: Pat
         with TestClient(create_app(tmp_path, source=source, source_feed=feed['id'], token='test-token'), headers=HEADERS) as client:
             presence(client, 'test')
             for _ in range(100):
-                cards = client.get('/api/v3/cards').json()
+                cards = read_all_cards(client, '/api/v3/cards')
                 if any(c['title'] == source.item for c in cards):
                     break
                 time.sleep(.02)
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
-        assert [c['title'] for c in client.get('/api/v3/cards').json()] == ['b', 'a']
-        assert [c['title'] for c in client.get('/api/v3/cards?sort=oldest').json()] == ['a', 'b']
-        assert [c['title'] for c in client.get('/api/v3/cards?sort=importance').json()] == ['a', 'b']
+        assert [c['title'] for c in read_all_cards(client, '/api/v3/cards')] == ['b', 'a']
+        assert [c['title'] for c in read_all_cards(client, '/api/v3/cards?sort=oldest')] == ['a', 'b']
+        assert client.get('/api/v3/cards?sort=importance').status_code == 422
         assert client.get('/api/v3/cards?sort=invalid').status_code == 422
-        assert [c['title'] for c in client.get('/api/v3/cards?folder=' + a['folder_id']).json()] == ['a']
+        assert [c['title'] for c in read_all_cards(client, '/api/v3/cards?folder=' + a['folder_id'])] == ['a']
         folders = client.get('/api/v3/folders').json()
         assert [f['title'] for f in folders] == ['1 Первый', '9 Второй']
         assert [f['count'] for f in folders] == [1, 1]
@@ -109,22 +110,22 @@ def test_same_url_in_two_feeds_remains_in_each_folder_after_viewing_one(tmp_path
         with TestClient(create_app(tmp_path, source=SharedArticle(), source_feed=feed['id'], token='test-token'), headers=HEADERS) as client:
             presence(client, 'test')
             for _ in range(100):
-                cards = client.get('/api/v3/cards?folder=' + feed['folder_id']).json()
-                if len(cards) == 1 and (cards[0]['availability'] == 'available'):
+                cards = read_all_cards(client, '/api/v3/cards?folder=' + feed['folder_id'])
+                if len(cards) == 1 and (client.get('/api/v3/materials/'+cards[0]['id']).json()['availability'] == 'available'):
                     break
                 time.sleep(.02)
-            assert len(cards) == 1 and (cards[0]['availability'] == 'available')
+            assert len(cards) == 1 and (client.get('/api/v3/materials/'+cards[0]['id']).json()['availability'] == 'available')
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
-        cards = client.get('/api/v3/cards').json()
+        cards = read_all_cards(client, '/api/v3/cards')
         assert len(cards) == 1
         first = cards[0]
         client.post('/api/v3/materials/' + first['id'] + '/viewed')
-        remaining = client.get('/api/v3/cards').json()
+        remaining = read_all_cards(client, '/api/v3/cards')
         assert remaining == []
     with TestClient(create_app(tmp_path, source=SharedArticle(), source_feed=feeds[0]['id'], token='test-token'), headers=HEADERS) as client:
         presence(client, 'test')
         time.sleep(.1)
-        assert len(client.get('/api/v3/cards').json()) == 1
+        assert len(read_all_cards(client, '/api/v3/cards')) == 1
 
 
 

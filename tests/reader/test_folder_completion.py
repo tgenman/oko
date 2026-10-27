@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -17,11 +18,11 @@ def test_folder_confirmation_deletes_all_originals_and_is_repeatable(tmp_path: P
         assert response.status_code == 200
         preview = response.json()
         assert preview['cards_count'] == 3 and preview['publications_count'] == 3
-        assert len(client.get('/api/v3/cards').json()) == 3
+        assert len(read_all_cards(client, '/api/v3/cards')) == 3
         for _ in range(2):
             response = client.post('/api/v3/folders/demo/completion', json={'token': preview['token']})
             assert response.status_code == 200
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         for item in originals:
             assert client.get('/api/v3/materials/' + item['id']).status_code == 404
             assert not (tmp_path / 'content' / item['id']).exists()
@@ -45,14 +46,14 @@ def test_new_arrivals_require_new_confirmation_and_old_retry_leaves_them(tmp_pat
         changed = client.post(f'/api/v3/folders/{folder}/completion', json={'token': preview['token']})
         assert changed.status_code == 409
         assert changed.json()['details']['preview']['cards_count'] == 2
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         accepted = changed.json()['details']['preview']['token']
         assert client.post(f'/api/v3/folders/{folder}/completion', json={'token': accepted}).status_code == 200
         current[0] = rss(guid='three', url='https://source.test/three')
         client.post('/api/v3/collect')
         remaining = rss_cards(client, 1)
         assert client.post(f'/api/v3/folders/{folder}/completion', json={'token': accepted}).status_code == 200
-        assert client.get('/api/v3/cards').json()[0]['id'] == remaining[0]['id']
+        assert read_all_cards(client, '/api/v3/cards')[0]['id'] == remaining[0]['id']
 
 
 def test_other_folder_and_wrong_folder_confirmation_are_untouched(tmp_path):
@@ -68,10 +69,10 @@ def test_other_folder_and_wrong_folder_confirmation_are_untouched(tmp_path):
         preview = client.post('/api/v3/folders/demo/completion/preview').json()
         assert preview['cards_count'] == 3
         assert client.post(f'/api/v3/folders/{other}/completion', json={'token': preview['token']}).status_code == 409
-        assert len(client.get('/api/v3/cards').json()) == 4
+        assert len(read_all_cards(client, '/api/v3/cards')) == 4
         assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert len(client.get('/api/v3/cards').json()) == 1
-        assert len(client.get('/api/v3/cards?folder=' + other).json()) == 1
+        assert len(read_all_cards(client, '/api/v3/cards')) == 1
+        assert len(read_all_cards(client, '/api/v3/cards?folder=' + other)) == 1
 
 
 
@@ -89,7 +90,7 @@ def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
         wait_cards(client, 3)
         preview = client.post('/api/v3/folders/demo/completion/preview').json()
         assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 503
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status').json()['problems']['current'])
     class Counting(DemoSource):
         calls = 0
@@ -99,12 +100,12 @@ def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
     source = Counting()
     with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault), headers=HEADERS) as client:
         presence(client, 'b')
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert source.calls == 0
         fail[0] = False
         wait_for(client, lambda: not list((tmp_path/'content').iterdir()))
         assert not list((tmp_path / 'content').iterdir())
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
 
 
 def test_folder_deletion_cancels_late_fetch(tmp_path):
@@ -113,11 +114,11 @@ def test_folder_deletion_cancels_late_fetch(tmp_path):
     with TestClient(create_app(tmp_path, source=LateSource(), token='test-token'), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'a')
-        wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 3)
+        wait_for(client, lambda: len(read_all_cards(client, '/api/v3/cards')) == 3)
         preview = client.post('/api/v3/folders/demo/completion/preview').json()
         assert preview['publications_count'] == 3
         assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert all(b'Late secret' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
 
 
@@ -138,5 +139,5 @@ def test_removed_member_requires_recount_and_restart_requires_fresh_preview(tmp_
         result = client.post('/api/v3/folders/demo/completion', json={'token': preview['token']})
         assert result.status_code == 409
         assert result.json()['details']['preview']['publications_count'] == 2
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         assert client.post('/api/v3/folders/missing/completion/preview').status_code == 404

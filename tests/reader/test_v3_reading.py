@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards, read_materials_for_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.v3 import TestClient
 from oko.collection.demo import DemoSource
@@ -11,30 +12,30 @@ def test_reading_and_explicit_completion_receipts(tmp_path):
         item = setup_reader(client, theses=False)
         response = client.get('/api/v3/cards')
         assert response.status_code == 200, response.text
-        cards = [wire.ReadingCard.model_validate(card).root for card in response.json()]
+        cards = [wire.CardListItem.model_validate(card) for card in response.json()['items']]
         assert len(cards) == 3
         card = next(card for card in cards if card.id.root == item)
         material = client.get('/api/v3/materials/' + item)
         assert material.status_code == 200, material.text
         value = wire.ReadableMaterial.model_validate(material.json()).root
         assert value.availability == 'available' and value.content.text
-        assert value.folder_id == card.folder_id
-        assert len(client.get('/api/v3/cards').json()) == 3
+        assert value.feed_id == card.feed_id
+        assert len(read_all_cards(client, '/api/v3/cards')) == 3
         result = client.post('/api/v3/materials/' + item + '/viewed', headers={'X-Oko-Action':'view-one'})
         assert result.status_code == 200, result.text
         assert client.get('/api/v3/commands/view-one').json()['outcome'] == 'succeeded'
         assert client.get('/api/v3/materials/' + item).status_code == 404
-        folder = card.folder_id.root
+        folder = value.folder_id.root
         preview = client.post(f'/api/v3/folders/{folder}/completion/preview').json()
         assert preview['publications_count'] == 2
         stale = client.post(f'/api/v3/folders/{folder}/completion', json={'token':'stale'}, headers={'X-Oko-Action':'stale-folder'})
         assert stale.status_code == 409, stale.text
         assert stale.json()['code'] == 'composition_changed'
         wire.ErrorEnvelope.model_validate(stale.json())
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         result = client.post(f'/api/v3/folders/{folder}/completion', json={'token':stale.json()['details']['preview']['token']}, headers={'X-Oko-Action':'complete-folder'})
         assert result.status_code == 200, result.text
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert client.get('/api/v3/commands/complete-folder').json()['outcome'] == 'succeeded'
 
 
@@ -77,9 +78,9 @@ def test_versions_all_media_and_receipt_survive_until_explicit_viewed(tmp_path):
     options = dict(token='test', api_only=True, source=source)
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses':False, 'prompt_filters':''})
-        first = wait_for(client, lambda: next((v for v in client.get('/api/v3/cards').json() if v['availability'] == 'available'), None))
+        first = wait_for(client, lambda: next((v for v in read_all_cards(client, '/api/v3/cards') if not v['loading']), None))
         item = first['id']
-        assert first['completeness']['state'] == 'incomplete'
+        assert client.get('/api/v3/materials/'+item).json()['content']['completeness']['state'] == 'incomplete'
         source.revision = 2
         response = client.post(f'/api/v3/materials/{item}/retry', headers={'X-Oko-Action':'fetch-again'})
         assert response.status_code == 200, response.text
@@ -100,7 +101,7 @@ def test_versions_all_media_and_receipt_survive_until_explicit_viewed(tmp_path):
         assert client.get('/api/v3/commands/fetch-again').json()['outcome'] == 'succeeded'
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/commands/view-with-media').json()['outcome'] == 'succeeded'
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
 
 
 def test_pending_unknown_dates_and_completion_do_not_admit_late_fetch(tmp_path):
@@ -117,22 +118,22 @@ def test_pending_unknown_dates_and_completion_do_not_admit_late_fetch(tmp_path):
             return FetchResult(Material('Never accepted','late'))
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=Source()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'originals':False,'theses':False,'prompt_filters':''})
-        cards = wait_for(client, lambda: client.get('/api/v3/cards').json())
+        cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
         pending = cards[0]
-        assert pending['availability'] == 'pending' and pending['published_at'] is None
-        assert pending['originals'] is False
-        assert pending['source_position'] is None
+        assert pending['loading'] and pending['published_at'] is None
         material = client.get('/api/v3/materials/' + pending['id']).json()
+        assert material['originals'] is False
+        assert material['source_position'] is None
         assert material['content'] == {'availability':'pending','loading':True}
         assert 'text' not in material['content']
         composition = client.get('/api/v3/reading-composition').json()
         assert composition['count'] == 1
-        folder = pending['folder_id']
+        folder = material['folder_id']
         preview = client.post(f'/api/v3/folders/{folder}/completion/preview').json()
         assert preview['publications_count'] == 1
         assert client.post(f'/api/v3/folders/{folder}/completion', json={'token':preview['token']}).status_code == 200
         assert client.get('/api/v3/reading-composition').json()['count'] == 0
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
 
 
 def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
@@ -141,13 +142,13 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
     from tests.support.filters import setup_filters
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=FilterSource(), ai_transport=transport([], theses=True)), headers=HEADERS) as client:
         setup_filters(client)
-        cards = wait_for(client, lambda: (v if len(v := client.get('/api/v3/cards?show_hidden=true').json()) == 3 and all(c['filter']['attempt']['state'] == 'ready' for c in v) else None))
+        cards = wait_for(client, lambda: (v if len(v := read_materials_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(c['filter']['attempt']['state'] == 'ready' for c in v) else None))
         hidden = next(c for c in cards if c['filter']['result']['hidden'])
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         assert client.get('/api/v3/reading-composition').json()['count'] == 2
         assert hidden['filter']['result']['provenance']['kind'] == 'local'
         assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore', headers={'X-Oko-Action':'restore-hidden'}).status_code == 404
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         client.patch('/api/v3/settings/oko/global', json={'theses':True})
         item = next(c['id'] for c in cards if not c['filter']['result']['hidden'])
         path = '/api/v3/materials/' + item
@@ -163,7 +164,7 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
         preview = client.post(f'/api/v3/folders/{folder}/completion/preview').json()
         assert preview['publications_count'] == 3
         assert client.post(f'/api/v3/folders/{folder}/completion', json={'token':preview['token']}).status_code == 200
-        assert client.get('/api/v3/cards?show_hidden=true').json() == []
+        assert read_all_cards(client, '/api/v3/cards?show_hidden=true') == []
         assert client.get('/api/v3/commands/restore-hidden').json()['outcome']=='unknown'
 
 
@@ -199,7 +200,7 @@ def test_waiting_reasons_and_previous_theses_during_failed_regeneration(tmp_path
         client.put('/api/v3/processors/llamacpp', json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
         clock.now+=1
         accepted = wait_for(client, lambda: client.get(path).json()['theses']['result'])
-        wait_for(client, lambda: all(c['theses']['result'] for c in client.get('/api/v3/cards').json()))
+        wait_for(client, lambda: all(c['theses']['result'] for c in read_materials_for_cards(client, '/api/v3/cards')))
         blocked[0] = True
         try:
             assert client.post(path + '/regenerate').status_code == 200

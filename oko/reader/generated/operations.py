@@ -4,7 +4,7 @@ from . import models
 
 RESPONSES: dict[tuple[str, str], Any] = {
     ('DELETE', '/api/v3/browser-session'): models.BrowserSessionRevoked,
-    ('GET', '/api/v3/cards'): list[models.ReadingCard],
+    ('GET', '/api/v3/cards'): models.CardPage,
     ('POST', '/api/v3/client-sessions'): models.ClientSession,
     ('DELETE', '/api/v3/client-sessions/{identity}'): models.ClientSessionClosed,
     ('PUT', '/api/v3/client-sessions/{identity}'): models.ClientSession,
@@ -64,6 +64,7 @@ RESPONSES: dict[tuple[str, str], Any] = {
 }
 
 REQUESTS: dict[tuple[str, str], Any] = {
+    ('POST', '/api/v3/cards/read'): models.CardReadRequest,
     ('POST', '/api/v3/collect'): models.CollectionTarget,
     ('POST', '/api/v3/command-observations'): models.CommandObservation,
     ('POST', '/api/v3/diagnostics'): models.ClientDiagnosticEvent,

@@ -14,7 +14,7 @@ test('unchanged reading checks transmit versions and opening bypasses the poll',
   page.on('response',async response=>{if(new URL(response.url()).pathname==='/api/v3/reading/check'&&response.ok())try{frames.push(await response.json());}catch{/* A response cancelled by fixture teardown is not an application failure. */}});
   await page.goto(origin+'/#token='+token);
   await expect(page.locator('#cards button')).toHaveCount(1);
-  await expect.poll(async()=>{const cards=await api('cards');return cards.length===1&&cards[0].availability==='available'&&!cards[0].loading;}).toBe(true);
+  await expect.poll(async()=>{const cards=(await api('cards')).items;return cards.length===1&&!cards[0].loading;}).toBe(true);
   await expect(page.locator('#cards .card-kind')).toHaveCount(0);
   const before=frames.length;
   // A complete card can precede the final Runtime startup/status transition.
@@ -25,7 +25,7 @@ test('unchanged reading checks transmit versions and opening bypasses the poll',
   }).toBe(true);
   const quiet=frames.slice(-2);
   for(const frame of quiet){assert.equal(frame.state,'current');if(frame.state==='current')assert.ok(frame.resources.every(resource=>resource.state==='unchanged'));}
-  assert.ok(!paths.includes('/api/v3/cards'));
+  assert.ok(paths.includes('/api/v3/cards'));
   assert.ok(!paths.includes('/api/v3/reading-composition'));
   // A hung periodic request must not delay a direct open or its first paint.
   let release:(()=>void)|undefined;
@@ -50,7 +50,7 @@ test('tabs recover missed reading changes and reconcile a local viewed action', 
   await expect(page.locator('#text')).toContainText('Открылась библиотека');
   await page.route('**/api/v3/reading/check',route=>route.abort('failed'));
   await expect(page.locator('#collection-progress')).toContainText('Нет связи');
-  const cards=await api('cards');
+  const cards=(await api('cards')).items;
   await api('materials/'+cards[0].id+'/viewed','POST');
   const remaining=catalog.feeds.find(feed=>feed.id===cards[1].feed_id)!;
   await api('feeds/'+remaining.id,'PATCH',{title:'Renamed during disconnect'});

@@ -1,4 +1,5 @@
 """Observe database traffic at the HTTP boundary without replacing database behavior."""
+from tests.support.cards import read_all_cards
 import pytest
 import psycopg
 from fastapi.testclient import TestClient
@@ -39,13 +40,13 @@ def test_reading_does_not_write_trigger_clocks(postgres_url, tmp_path, monkeypat
                     database_url=postgres_url, **clock.options()), headers=HEADERS) as client:
         assert client.get('/api/v3/status').status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters': 'Synthetic prompt'}).status_code == 200
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         queries.clear()
         for _ in range(4):
             response = client.get('/api/v3/settings/oko/global')
             assert response.status_code == 200
             assert response.json()['effective']['prompt_filters']['value'] == 'Synthetic prompt'
-            assert client.get('/api/v3/cards').json() == []
+            assert read_all_cards(client, '/api/v3/cards') == []
         assert not [query for query in queries if "set_config('oko.clock'" in query]
 
 
@@ -115,12 +116,13 @@ def test_compact_cards_batch_links_and_processing_permissions(postgres_url, tmp_
     with TestClient(app, headers=HEADERS) as client:
         assert client.get('/api/v3/status').status_code == 200
         queries.clear()
-        response = client.post('/api/v3/reading/check', json=dict(storage_id=None, resources=[dict(kind='list', known_version=None, known_cards={}, options=dict(target=dict(scope='all'),sort='newest',show_hidden=False))]))
+        response = client.get('/api/v3/cards')
         assert response.status_code == 200
-        cards = [r for r in response.json()['resources'] if r['kind'] == 'card']
-        assert len(cards) == count
-        assert all(r['state'] == 'changed' and r['data']['snippet'] == 'Useful text' for r in cards)
-        assert len(queries) < 20 + 8 * ((count + 399) // 400), len(queries)
+        cards = response.json()['items']
+        assert len(cards) == min(count,40)
+        assert all('snippet' not in card and 'text' not in card for card in cards)
+        assert len(queries) < 28, len(queries)
+
 
 
 @pytest.mark.parametrize('linked_count', [10, 100, 1000])
@@ -159,8 +161,12 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
         queries.clear()
         response = client.get('/api/v3/cards')
         assert response.status_code == 200
-        assert len(response.json()) == 1
-        assert len(response.json()[0]['theses']['result']['points'][0]['references']) == linked_count
+        assert len(response.json()['items']) == 1
+        assert 'theses' not in response.json()['items'][0]
+        queries.clear()
+        opened=client.get('/api/v3/reading/materials/'+parent)
+        summary=next(r['data']['theses'] for r in opened.json()['resources'] if r['kind']=='theses')
+        assert len(summary['result']['points'][0]['references']) == linked_count
         assert len(queries) < 25, len(queries)
         queries.clear()
         preview = client.post('/api/v3/folders/demo/completion/preview')
@@ -210,9 +216,13 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
         queries.clear()
         response = client.get('/api/v3/cards')
         assert response.status_code == 200
-        assert len(response.json()) == count
-        assert all('Synthetic captions' in card['snippet'] for card in response.json())
-        assert len(queries) < 20 + 8 * ((count + 399) // 400), len(queries)
+        assert len(response.json()['items']) == min(count,40)
+        assert response.json()['total'] == count
+        assert all('snippet' not in card for card in response.json()['items'])
+        assert len(queries) < 28, len(queries)
+        opened=client.get('/api/v3/reading/materials/'+parent)
+        content=next(resource['data'] for resource in opened.json()['resources'] if resource['kind']=='material')
+        assert 'Synthetic captions' in content['content']['text']
         (tmp_path / 'media' / f'{10000:032x}').unlink()
         response = client.get('/api/v3/reading/materials/'+parent)
         material = next(resource['data'] for resource in response.json()['resources'] if resource['kind'] == 'material')

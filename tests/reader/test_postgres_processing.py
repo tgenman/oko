@@ -1,4 +1,5 @@
 """Worker invariants on PostgreSQL: accepted output, restart and late completion."""
+from tests.support.cards import read_all_cards
 import asyncio
 import json
 
@@ -41,15 +42,15 @@ def test_folder_completion_includes_hidden_materials_and_is_repeatable(postgres_
     finally:
         store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
-        assert client.get('/api/v3/cards').json() == []
-        assert [card['id'] for card in client.get('/api/v3/cards?show_hidden=true').json()] == [item]
+        assert read_all_cards(client, '/api/v3/cards') == []
+        assert [card['id'] for card in read_all_cards(client, '/api/v3/cards?show_hidden=true')] == [item]
         preview = client.post('/api/v3/folders/demo/completion/preview')
         assert preview.status_code == 200, preview.text
         assert preview.json()['publications_count'] == 1
         for _ in range(2):
             result = client.post('/api/v3/folders/demo/completion', json={'token': preview.json()['token']})
             assert result.status_code == 200, result.text
-        assert client.get('/api/v3/cards?show_hidden=true').json() == []
+        assert read_all_cards(client, '/api/v3/cards?show_hidden=true') == []
         assert client.get('/api/v3/materials/' + item).status_code == 404
 
 
@@ -81,7 +82,7 @@ def test_codex_choice_changes_only_future_work_on_postgres(postgres_url, tmp_pat
         assert client.put('/api/v3/processors/codex', json=configuration('test-small')).status_code == 200
         assert client.patch('/api/v3/feeds/demo', json={'public_ai': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'processor': 'codex', 'theses': True}).status_code == 200
-        wait_for(client, lambda: all(card['theses']['result'] for card in client.get('/api/v3/cards').json()))
+        wait_for(client, lambda: all(client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
         count = len(service.inputs)
         assert client.put('/api/v3/processors/codex', json=configuration('test-large', 'high', True)).status_code == 200
         material = client.get('/api/v3/materials/' + item).json()

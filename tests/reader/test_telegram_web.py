@@ -1,4 +1,5 @@
 """Public web collection through the reader, without any Telegram configuration."""
+from tests.support.cards import read_all_cards
 from tests.support.telegram import configure_fast_web
 from oko.collection.contracts import DiscoveryResult, FetchResult
 import time
@@ -63,7 +64,7 @@ def test_web_catchup_keeps_old_frontier_and_resumes_remaining_pages_after_restar
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
         configure_fast_web(client)
         cards = settled(client,5)
-        assert {m for c in cards for m in [int(identity) for identity in c['source']['message_ids']]} == {2,3,4,5,6}
+        assert {m for c in cards for m in [int(identity) for identity in client.get('/api/v3/materials/'+c['id']).json()['source']['message_ids']]} == {2,3,4,5,6}
         assert len({c['id'] for c in cards}) == 5
         assert client.get('/api/v3/materials/'+old).status_code == 404
         assert (2,5) in calls and (2,3) in calls
@@ -92,10 +93,10 @@ def test_recorded_album_anchors_are_one_web_publication(tmp_path):
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@durov',folder='Inbox',initial_history={'mode':'count','count':'1'}))
         assert result.status_code == 200, result.text
         cards = settled(client,1,timeout=10)
-        albums = [c for c in cards if 373 in [int(identity) for identity in c['source']['message_ids']]]
+        albums = [c for c in cards if 373 in [int(identity) for identity in client.get('/api/v3/materials/'+c['id']).json()['source']['message_ids']]]
         assert len(albums) == 1
-        assert [int(identity) for identity in albums[0]['source']['message_ids']] == list(range(373,382))
-        assert not any([int(identity) for identity in c['source']['message_ids']]==[i] for c in cards for i in range(374,382))
+        assert [int(identity) for identity in client.get('/api/v3/materials/'+albums[0]['id']).json()['source']['message_ids']] == list(range(373,382))
+        assert not any([int(identity) for identity in client.get('/api/v3/materials/'+c['id']).json()['source']['message_ids']]==[i] for c in cards for i in range(374,382))
         material = client.get('/api/v3/materials/'+albums[0]['id']).json()
         assert (material['content']['completeness']['state']=='complete') is True
         assert sum(a['kind']=='video' for a in material['content']['attachments']) == 9
@@ -138,7 +139,7 @@ def test_media_completion_is_not_author_edit_but_changed_known_bytes_are(tmp_pat
         deadline = time.monotonic()+2
         failed = None
         while time.monotonic()<deadline:
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             if cards:
                 failed = client.get('/api/v3/materials/'+cards[0]['id']).json()
                 if 'Не удалось загрузить' in failed['content'].get('completeness',{}).get('message',''):
@@ -207,7 +208,7 @@ def test_stream_without_length_stops_at_200_mib_without_automatic_retry(tmp_path
         deadline = time.monotonic()+5
         material = None
         while time.monotonic()<deadline:
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             if cards:
                 material = client.get('/api/v3/materials/'+cards[0]['id']).json()
                 if '200 МиБ' in material['content'].get('completeness',{}).get('message',''):
@@ -304,22 +305,22 @@ def test_album_first_part_deletion_and_new_url_keep_one_card_and_tombstone(tmp_p
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',initial_history={'mode':'count','count':'1'}))
         original = settled(client)[0]
-        assert [int(identity) for identity in original['source']['message_ids']] == [11,12]
+        assert [int(identity) for identity in client.get('/api/v3/materials/'+original['id']).json()['source']['message_ids']] == [11,12]
         phase[0] = 1
         client.post('/api/v3/collect')
         client.post('/api/v3/materials/'+original['id']+'/retry')
         deadline = time.monotonic()+4
         while time.monotonic()<deadline:
-            cards = client.get('/api/v3/cards').json()
-            if len(cards)==1 and [int(identity) for identity in cards[0]['source']['message_ids']]==[12,13] and not cards[0].get('loading'):
+            cards = read_all_cards(client, '/api/v3/cards')
+            if len(cards)==1 and [int(identity) for identity in client.get('/api/v3/materials/'+cards[0]['id']).json()['source']['message_ids']]==[12,13] and not cards[0].get('loading'):
                 break
             time.sleep(.02)
-        assert len(cards)==1 and cards[0]['id']==original['id'] and [int(identity) for identity in cards[0]['source']['message_ids']]==[12,13]
+        assert len(cards)==1 and cards[0]['id']==original['id'] and [int(identity) for identity in client.get('/api/v3/materials/'+cards[0]['id']).json()['source']['message_ids']]==[12,13]
         assert client.get('/api/v3/materials/'+original['id']).json()['source_url']=='https://t.me/fixture/12'
         client.post('/api/v3/materials/'+original['id']+'/viewed')
         client.post('/api/v3/collect')
         time.sleep(.1)
-        assert client.get('/api/v3/cards').json()==[]
+        assert read_all_cards(client, '/api/v3/cards')==[]
 
 
 

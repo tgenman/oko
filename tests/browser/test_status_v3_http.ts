@@ -49,6 +49,7 @@ test('confirmed command failure is retained until its actual draft is discarded'
  await expect(page.locator('#status-toggle')).toHaveText('Problems · 1');
  await page.locator('#codex-discard').click();
  await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await expect.poll(async()=>(await api('v3/status')).problems.count).toBe(0);
  const snapshot=await api('v3/status');
  expect(snapshot).toHaveProperty('problems.count',0);
  expect(snapshot).toHaveProperty('problems.recent.0.outcome','irrelevant');
@@ -109,4 +110,20 @@ test('a status reply started before YouTube save cannot overwrite the saved conn
  await page.locator('#settings-dialog .settings-back').click();
  await expect(page.locator('#youtube-short-status')).toHaveText('Via Proxy');
  for(const route of waiting)await route.abort('aborted');
+});
+
+test('discard waits for the pending failure observation before clearing it',{timeout:30000},async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ const config={filter:{model:'synthetic',reasoning_effort:'low',fast:false},theses:{model:'synthetic',reasoning_effort:'low',fast:false}};
+ await page.goto(origin+'/#token='+token);
+ await expect.poll(async()=>(await api('v3/status')).work_allowed).toBe(true);
+ await api('v3/processors/codex','PUT',config);
+ await page.locator('#settings-open').click();await page.locator('#settings-dialog [data-settings-target="models"]').click();await page.locator('#settings-dialog [data-settings-target="codex"]').click();
+ await page.route('**/api/v3/processors/codex',route=>route.request().method()==='PUT'?route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'processor_unavailable',message:'Rejected',details:{retry_at:null},diagnostic_id:null,command_id:null})}):route.continue());
+ let release:(()=>void)|undefined;
+ await page.route('**/api/v3/command-observations',async route=>{await new Promise<void>(resolve=>{release=resolve;});await route.continue();});
+ await page.locator('#codex-save').click();await expect.poll(()=>!!release).toBe(true);
+ await page.locator('#codex-discard').click();release?.();
+ await expect.poll(async()=>(await api('v3/status')).problems.count).toBe(0);
+ await expect.poll(async()=>(await api('v3/status')).problems.recent[0]?.outcome).toBe('irrelevant');
 });

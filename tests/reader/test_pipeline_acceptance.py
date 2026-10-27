@@ -1,4 +1,5 @@
 """Runtime invariants retained after removing the obsolete file migration tools."""
+from tests.support.cards import read_all_cards
 import asyncio
 import json
 import httpx
@@ -39,7 +40,7 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     with TestClient(app,headers={'Authorization':'Bearer test'}) as client:
         presence(client)
         assert client.post('/api/v3/collect').status_code==200
-        cards=wait_for(client,lambda: rows if len(rows:=client.get('/api/v3/cards').json())==2 and all(row['theses']['result'] for row in rows) else None)
+        cards=wait_for(client,lambda: rows if len(rows:=read_all_cards(client, '/api/v3/cards'))==2 and all(client.get('/api/v3/materials/'+row['id']).json()['theses']['result'] for row in rows) else None)
         newest=next(card for card in cards if card['id']!=item)
         material=wait_for(client,lambda: value if (value:=client.get('/api/v3/materials/'+newest['id']).json())['content']['attachments'] else None)
         assert 'New useful text' in material['content']['text']
@@ -53,9 +54,9 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     generated=len(calls)
     # Reopen the same accepted copy, with no source/model activity admitted.
     with TestClient(create_app(target,token='test',api_only=True,ai_transport=httpx.MockTransport(model)),headers={'Authorization':'Bearer test'}) as client:
-        restored=client.get('/api/v3/cards').json()
+        restored=read_all_cards(client, '/api/v3/cards')
         assert {card['id'] for card in restored}=={card['id'] for card in cards}
-        assert all(card['theses']['result'] for card in restored)
+        assert all(client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] for card in restored)
         reopened=client.get('/api/v3/materials/'+newest['id']).json()
         assert client.get(reopened['content']['attachments'][0]['url']).content==b'synthetic-image'
     assert len(calls)==generated

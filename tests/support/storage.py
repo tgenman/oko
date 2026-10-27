@@ -58,7 +58,7 @@ class Store(ProductionStore):
 @contextmanager
 def database(root: Path) -> Iterator[PostgresConnection]:
     db = PostgresConnection(database_url(root))
-    db.before_commit = lambda: ReaderVersions.flush_reading_lists(db)
+    db.before_commit = lambda: ReaderVersions.flush_reading_state(db)
     try:
         with db:
             yield db

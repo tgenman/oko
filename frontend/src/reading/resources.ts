@@ -1,9 +1,10 @@
 import {checkReading} from '../api/generated/sdk.gen';
-import type {CompactReadingCard, SubscriptionFeed, ReadingCheck, ReadingCheckResponse, ReadingListOptions, ReadingListData, ReadingIndex, RuntimeStatus} from '../api/generated/types.gen';
+import type {CardListItem, SubscriptionFeed, ReadingCheck, ReadingCheckResponse, CollectionTarget, ReadingIndex, RuntimeStatus} from '../api/generated/types.gen';
 import type {ReaderApi} from '../api/reader';
 import type {Navigation} from './tree';
 
-export type CardView = CompactReadingCard & Pick<SubscriptionFeed,'folder_id'|'importance'> & {feed_title:string};
+export type ReadingListOptions = {target:CollectionTarget;sort:'newest'|'oldest';show_hidden:boolean};
+export type CardView = CardListItem & Pick<SubscriptionFeed,'folder_id'> & {feed_title:string};
 type Value = {version:string; data:unknown};
 const key = (kind:string,id:string) => kind+'/'+id;
 export const listIdentity = (options:ReadingListOptions) => JSON.stringify([options.target.scope,options.target.scope==='feed'?options.target.feed_id:options.target.scope==='folder'?options.target.folder_id:'',options.sort,options.show_hidden]);
@@ -15,19 +16,12 @@ export function createReadingResources(api:ReaderApi) {
   const values=new Map<string,Value>();
   const version=(kind:string,id:string) => values.get(key(kind,id))?.version??null;
   function data<T>(kind:string,id:string):T|undefined {return values.get(key(kind,id))?.data as T|undefined;}
-  function forget(ids:string[]) {for(const id of ids)values.delete(key('card',id));}
-  function plan(options:ReadingListOptions, extra:ReadingCheck[]=[],listOnly=false):ReadingCheck[] {
-    const known:Record<string,string|null>={};
-    const previous=data<ReadingListData>('list',listIdentity(options));
-    for(const id of previous?.ids??[])known[id]=version('card',id);
-    // Cached cards from another area can be reused when the composition changes.
-    if(!previous)for(const [identity,value] of values)if(identity.startsWith('card/'))known[identity.slice(5)]=value.version;
-    const listing:ReadingCheck={kind:'list',options,known_version:version('list',listIdentity(options)),known_cards:known};
-    if(listOnly)return [listing];
+  function plan(extra:ReadingCheck[]=[]):ReadingCheck[] {
     const index=data<ReadingIndex>('navigation','navigation');
+
     return [{kind:'status',known_version:version('status','runtime')},{kind:'navigation',known_version:version('navigation','navigation')},
       ...(index?.feeds??[]).map(feed=>({kind:'feed' as const,id:feed.id,known_version:version('feed',feed.id)})),
-      listing,...extra];
+      ...extra];
   }
   async function check(resources:ReadingCheck[],signal:AbortSignal) {return (await checkReading({client:api.client,body:{storage_id:storageId,resources},signal})).data;}
   function accept(frame:ReadingCheckResponse) {
@@ -37,18 +31,13 @@ export function createReadingResources(api:ReaderApi) {
     storageId=frame.storage_id;
     if(frame.state==='reset')return {reset:true,changed};
     for(const resource of frame.resources) {
-      if(!['status','navigation','feed','card','list'].includes(resource.kind))continue;
+      if(!['status','navigation','feed'].includes(resource.kind))continue;
       const identity=key(resource.kind,resource.id),previous=values.get(identity);
       if(resource.state==='changed'&&(!previous||BigInt(resource.version)>BigInt(previous.version))) {
         values.set(identity,{version:resource.version,data:resource.data});changed.add(resource.kind);
       } else if(resource.state==='unavailable') {if(values.delete(identity))changed.add(resource.kind);}
     }
-    const index=data<ReadingIndex>('navigation','navigation');
-    if(index)for(const [identity,value] of values)if(identity.startsWith('feed/')&&!index.feeds.some(feed=>feed.id===identity.slice(5))) {
-      values.delete(identity);const id=(value.data as SubscriptionFeed).id;
-      for(const [cardKey,card] of values)if(cardKey.startsWith('card/')&&(card.data as CompactReadingCard).feed_id===id)values.delete(cardKey);
-    }
-    const status=data<RuntimeStatus>('status','runtime');if(status&&changed.has('status'))forget(status.viewed_ids);
+
     return {reset,changed};
   }
   function navigation():Navigation|undefined {
@@ -56,12 +45,5 @@ export function createReadingResources(api:ReaderApi) {
     const feeds=index.feeds.flatMap(ref=>{const feed=data<SubscriptionFeed>('feed',ref.id);return feed?[{...feed,...ref}]:[];});
     return {...index,feeds};
   }
-  function cards(options:ReadingListOptions):CardView[]|undefined {
-    const list=data<ReadingListData>('list',listIdentity(options));if(!list)return;
-    return list.ids.flatMap(id=>{
-      const card=data<CompactReadingCard>('card',id),feed=card&&data<SubscriptionFeed>('feed',card.feed_id);
-      return card&&feed?[{...card,feed_title:feed.title,folder_id:feed.folder_id,importance:feed.importance}]:[];
-    });
-  }
-  return {plan,check,accept,forget,navigation,cards,get storageId(){return storageId;},get status(){return data<RuntimeStatus>('status','runtime');}};
+  return {plan,check,accept,navigation,get storageId(){return storageId;},get status(){return data<RuntimeStatus>('status','runtime');}};
 }

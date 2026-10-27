@@ -264,6 +264,20 @@ class ReaderApplication:
             await self._drain_deletions(current)
 
 
+    async def viewed_many(self, identities: list[str]) -> None:
+        """Atomically mark existing cards viewed; repeated or missing IDs are harmless."""
+        async with self._actions:
+            current = self.require_store()
+            with transaction(current.db):
+                members = self.reading.viewed_many(identities)
+                if members:
+                    self.jobs.reconcile_cleanup()
+            if self.diagnostics and members:
+                self.diagnostics.forget_materials(members)
+            if members:
+                await self._drain_deletions(current)
+
+
     def _completion_preview(self, folder: str, current: Store, scope: Literal['folder', 'feed'] = 'folder') -> dict[str, Any]:
         return self.reading.preview(folder, scope)
 
