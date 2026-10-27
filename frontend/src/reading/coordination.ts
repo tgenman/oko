@@ -83,7 +83,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   });
   const newsActions = createNewsActions({
     readerApi, isStopped: () => stopped,
-    onViewed: id => viewed(id, true),
+    onViewed: id => {if(opened.selection?.id===id)opened.clear();viewed(id, true);},
     onRefresh: changed,
     onPreview: ids => list.preview(ids),
   });

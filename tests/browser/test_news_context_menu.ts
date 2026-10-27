@@ -21,6 +21,19 @@ test('news menu uses original links and marks only above/below in the displayed 
  await row(target.id).click({button:'right'});await page.getByRole('menuitem',{name:'Mark as Read',exact:true}).click();await expect.poll(async()=>(await api('cards')).length).toBe(0);expect(errors).toEqual([]);
 });
 
+test('mark above clears the opened material only when it is in the range',async()=>{
+ const r=await reader();try{
+  await r.start(['a','b','c'].map(id=>material(id)));
+  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/a/viewed',{body:{ok:true}}));
+  await r.page.locator('[data-card="a"]').click();await expect(r.page.locator('#text')).toContainText('Текст a');
+  await r.page.locator('[data-card="b"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();
+  await r.page.evaluate(()=>{const t=readerTransport;const rows=t.replies.get('/api/v3/cards')!.body!;t.replies.set('/api/v3/cards',{body:rows.filter(c=>c.id!=='a')});});
+  await r.page.locator('#news-read-confirm').click();
+  await expect(r.page.locator('[data-card="a"]')).toHaveCount(0);await expect(r.page.locator('#material')).toBeHidden();await expect(r.page.locator('#empty')).toBeVisible();await expect(r.page.locator('#empty')).toHaveText('Select an item');await r.page.screenshot({path:artifactPath('news-range-cleared.png')});
+  await r.page.locator('[data-card="c"]').click();await expect(r.page.locator('#text')).toContainText('Текст c');expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});
+
 test('range confirmation captures IDs before new arrivals and preserves target',async()=>{
  const r=await reader();try{
   await r.start(['a','b','c','d'].map(id=>material(id)));
@@ -36,6 +49,7 @@ test('range confirmation captures IDs before new arrivals and preserves target',
 test('stop a range during a held request prevents remaining commands and late UI changes',async()=>{
  const r=await reader();try{
   await r.start(['a','b','c'].map(id=>material(id)));
+  await r.page.locator('[data-card="a"]').click();await expect(r.page.locator('#text')).toContainText('Текст a');
   await r.page.evaluate(()=>readerTransport.held.set('/api/v3/materials/a/viewed',true));
   await r.page.locator('[data-card="c"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();await r.page.locator('#news-read-confirm').click();await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/materials/a/viewed'));
   await r.page.locator('#news-read-cancel').click();await r.page.locator('[data-card="c"]').click();await r.page.locator('[data-card="c"]').click({button:'right'});
