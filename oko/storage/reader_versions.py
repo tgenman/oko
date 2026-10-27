@@ -27,8 +27,8 @@ class ReaderVersions:
                 self.db.execute('INSERT INTO reader_entities VALUES ( %s , %s , 1 , %s ) ON CONFLICT DO NOTHING', (kind, identity, store.wall_clock()))
             for kind, table in [('feed','feeds'),('folder','folders'),('card','items'),('material','items'),('filter','items'),('theses','items'),('media','items')]:
                 self.db.execute(f'INSERT INTO reader_entities SELECT %s , id , 1 , %s FROM {table} ON CONFLICT DO NOTHING', (kind, store.wall_clock()))
-            self.db.execute('INSERT INTO reader_visibility SELECT id , 0 FROM items ON CONFLICT DO NOTHING')
-            self.db.execute('INSERT INTO reader_feed_counts SELECT f . id , count ( i . id ) , coalesce ( sum ( CASE WHEN i . id IS NOT NULL AND coalesce ( v . hidden , 0 ) = 0 THEN 1 ELSE 0 END ) , 0 ) FROM feeds f LEFT JOIN reading_memberships m ON m . feed_id = f . id LEFT JOIN items i ON i . id = m . publication_id AND i . viewed = 0 LEFT JOIN reader_visibility v ON v . item = i . id GROUP BY f . id ON CONFLICT ( feed ) DO UPDATE SET unviewed = excluded . unviewed , visible = excluded . visible WHERE reader_feed_counts . unviewed IS DISTINCT FROM excluded . unviewed OR reader_feed_counts . visible IS DISTINCT FROM excluded . visible')
+            self.db.execute('INSERT INTO reader_visibility SELECT id , 0 FROM items_read ON CONFLICT DO NOTHING')
+            self.db.execute('INSERT INTO reader_feed_counts SELECT f . id , count ( i . id ) , coalesce ( sum ( CASE WHEN i . id IS NOT NULL AND coalesce ( v . hidden , 0 ) = 0 THEN 1 ELSE 0 END ) , 0 ) FROM feeds f LEFT JOIN reading_memberships m ON m . feed_id = f . id LEFT JOIN unviewed_items_by_feed i ON i . id = m . publication_id AND i . viewed = 0 LEFT JOIN reader_visibility v ON v . item = i . id GROUP BY f . id ON CONFLICT ( feed ) DO UPDATE SET unviewed = excluded . unviewed , visible = excluded . visible WHERE reader_feed_counts . unviewed IS DISTINCT FROM excluded . unviewed OR reader_feed_counts . visible IS DISTINCT FROM excluded . visible')
             # SUM's synthetic LEFT JOIN row is not an actual publication.
             self.db.execute('UPDATE reader_feed_counts SET visible = 0 WHERE unviewed = 0 AND visible != 0')
             self.db.execute('INSERT INTO reader_folder_counts SELECT f . id , coalesce ( sum ( c . visible ) , 0 ) FROM folders f LEFT JOIN feeds s ON s . folder_id = f . id LEFT JOIN reader_feed_counts c ON c . feed = s . id GROUP BY f . id ON CONFLICT ( folder ) DO UPDATE SET visible = excluded . visible WHERE reader_folder_counts . visible IS DISTINCT FROM excluded . visible')
@@ -60,13 +60,13 @@ class ReaderVersions:
         db.membership_feeds=set()
         db.membership_folders=set()
         for feed in feeds:
-            db.execute('UPDATE reader_feed_counts SET unviewed = ( SELECT count ( * ) FROM reading_memberships m JOIN items i ON i . id = m . publication_id WHERE m . feed_id = feed AND i . viewed = 0 ) , visible = ( SELECT count ( * ) FROM reading_memberships m JOIN items i ON i . id = m . publication_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE m . feed_id = feed AND i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 ) WHERE feed = %s',(feed,))
+            db.execute('UPDATE reader_feed_counts SET unviewed = ( SELECT count ( * ) FROM reading_memberships m JOIN items_read i ON i . id = m . publication_id WHERE m . feed_id = feed AND i . viewed = 0 ) , visible = ( SELECT count ( * ) FROM reading_memberships m JOIN items_read i ON i . id = m . publication_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE m . feed_id = feed AND i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 ) WHERE feed = %s',(feed,))
             row=db.execute('SELECT folder_id FROM feeds WHERE id = %s',(feed,)).fetchone()
             if row:
                 folders.add(row[0])
             db.execute("UPDATE reader_lists SET pending = 1 WHERE scope = 'all' OR ( scope = 'feed' AND owner = %s )",(feed,))
         for folder in folders:
-            db.execute('UPDATE reader_folder_counts SET visible = ( SELECT count ( DISTINCT m . publication_id ) FROM reading_memberships m JOIN feeds f ON f . id = m . feed_id JOIN items i ON i . id = m . publication_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE f . folder_id = folder AND i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 ) WHERE folder = %s',(folder,))
+            db.execute('UPDATE reader_folder_counts SET visible = ( SELECT count ( DISTINCT m . publication_id ) FROM reading_memberships m JOIN feeds f ON f . id = m . feed_id JOIN items_read i ON i . id = m . publication_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE f . folder_id = folder AND i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 ) WHERE folder = %s',(folder,))
             db.execute("UPDATE reader_lists SET pending = 1 WHERE scope = 'folder' AND owner = %s",(folder,))
 
 
@@ -93,7 +93,7 @@ class ReaderVersions:
             'feed': f'i.id IN (SELECT m.publication_id FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.feed_id={owner})',
             'folder': f'i.id IN (SELECT m.publication_id FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE owner_feed.folder_id={owner})',
         }[scope]
-        return f"SELECT i . id FROM items i JOIN feeds f ON f . id = i . feed_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE i . viewed = 0 AND ( {hidden} = 1 OR coalesce ( v . hidden , 0 ) = 0 ) AND {membership} ORDER BY CASE WHEN {sort} = 'importance' THEN CASE f . importance WHEN 'high' THEN - 2 WHEN 'elevated' THEN - 1 ELSE 0 END ELSE 0 END , CASE WHEN {sort} != 'importance' THEN CAST ( i . published_known = 0 AS INTEGER ) ELSE 0 END , CASE WHEN {sort} = 'importance' THEN - i . published WHEN i . published_known = 0 THEN 0 WHEN {sort} = 'oldest' THEN i . published ELSE - i . published END , CASE WHEN {sort} != 'importance' THEN i . feed_id ELSE '' END , CASE WHEN {sort} = 'importance' THEN 0 WHEN {sort} = 'oldest' THEN - coalesce ( i . source_order , 0 ) ELSE coalesce ( i . source_order , 0 ) END , i . id"
+        return f"SELECT i . id FROM items_read i JOIN feeds f ON f . id = i . feed_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE i . viewed = 0 AND ( {hidden} = 1 OR coalesce ( v . hidden , 0 ) = 0 ) AND {membership} ORDER BY CASE WHEN {sort} = 'importance' THEN CASE f . importance WHEN 'high' THEN - 2 WHEN 'elevated' THEN - 1 ELSE 0 END ELSE 0 END , CASE WHEN {sort} != 'importance' THEN CAST ( i . published_known = 0 AS INTEGER ) ELSE 0 END , CASE WHEN {sort} = 'importance' THEN - i . published WHEN i . published_known = 0 THEN 0 WHEN {sort} = 'oldest' THEN i . published ELSE - i . published END , CASE WHEN {sort} != 'importance' THEN i . feed_id ELSE '' END , CASE WHEN {sort} = 'importance' THEN 0 WHEN {sort} = 'oldest' THEN - coalesce ( i . source_order , 0 ) ELSE coalesce ( i . source_order , 0 ) END , i . id"
 
 
 
@@ -115,7 +115,7 @@ class ReaderVersions:
         for start in range(0,len(ordered),499):
             batch=ordered[start:start+499]
             marks=','.join('(%s,%s)' for _ in batch)
-            rows=self.db.execute(f"WITH wanted ( kind , identity ) AS ( VALUES {marks} ) SELECT e . * , i . id AS item_exists , i . viewed , f . id AS feed_exists FROM wanted w JOIN reader_entities e ON e . kind = w . kind AND e . identity = w . identity LEFT JOIN items i ON e . kind IN ( 'card' , 'material' , 'filter' , 'theses' , 'media' ) AND i . id = e . identity LEFT JOIN feeds f ON e . kind = 'feed' AND f . id = e . identity", [v for pair in batch for v in pair])
+            rows=self.db.execute(f"WITH wanted ( kind , identity ) AS ( VALUES {marks} ) SELECT e . * , i . id AS item_exists , i . viewed , f . id AS feed_exists FROM wanted w JOIN reader_entities e ON e . kind = w . kind AND e . identity = w . identity LEFT JOIN items_read i ON e . kind IN ( 'card' , 'material' , 'filter' , 'theses' , 'media' ) AND i . id = e . identity LEFT JOIN feeds f ON e . kind = 'feed' AND f . id = e . identity", [v for pair in batch for v in pair])
             result.update({(r['kind'],r['identity']):r for r in rows})
         return result
 

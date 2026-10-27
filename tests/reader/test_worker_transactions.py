@@ -14,6 +14,21 @@ from tests.support.filters import transport
 from tests.support.source import StructuredSource
 
 
+def test_rediscovery_clears_old_cleanup_owner_without_discarding_other_job_data(tmp_path):
+    from oko.domain.collection import CollectionEffects
+    store,item,_,_=worker_library(tmp_path)
+    try:
+        with store.jobs.transaction(lambda:True):
+            store.db.execute("INSERT INTO jobs(kind,item,payload) VALUES ('delete',%s,%s)",
+                             (item,json.dumps({'cleanup_feed':'old-feed','other':'preserved'})))
+            store.jobs.apply_collection(CollectionEffects(fetch={item:False}))
+        row=store.db.execute("SELECT status,payload FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone()
+        assert row['status']=='cancelled'
+        assert json.loads(row['payload'])=={'other':'preserved'}
+    finally:
+        store.db.close()
+
+
 @pytest.mark.parametrize('phase',['processing_after_result','processing_after_finish','processing_after_commit'])
 def test_result_and_done_survive_or_rollback_together(tmp_path,phase):
     def fail(point):

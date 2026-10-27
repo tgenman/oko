@@ -108,12 +108,12 @@ class CollectionState:
 
     def startup(self, injected: bool, source_feed: str) -> float:
         store=self.store
-        if injected and source_feed=='demo' or store.db.execute("SELECT 1 FROM items WHERE feed_id = 'demo' AND viewed = 0 LIMIT 1").fetchone():
+        if injected and source_feed=='demo' or store.db.execute("SELECT 1 FROM unviewed_items_by_feed WHERE feed_id = 'demo' AND viewed = 0 LIMIT 1").fetchone():
             store.subscriptions.ensure_demo()
         if injected:store.subscriptions.check_owner('feed',source_feed)
         return store.subscriptions.feed_refresh_minutes()*60
 
     def publication_revision(self, item: str) -> str:
         from oko.storage.processing_input import digest
-        row=self.store.db.execute("SELECT i . platform , i . external_id , i . url , i . members , i . feed_id , f . adapter , coalesce ( oko_json_extract ( i . content , '$.extra._collection_revision' ) , oko_json_extract ( i . content , '$.extra._input_hash' ) ) FROM items i LEFT JOIN feeds f ON f . id = i . feed_id WHERE i . id = %s AND i . viewed = 0",(item,)).fetchone()
+        row=self.store.db.execute("SELECT i . platform , i . external_id , i . url , i . members , i . feed_id , f . adapter , coalesce ( oko_json_extract ( i . content , '$.extra._collection_revision' ) , oko_json_extract ( i . content , '$.extra._input_hash' ) ) FROM items_read i LEFT JOIN feeds f ON f . id = i . feed_id WHERE i . id = %s AND i . viewed = 0",(item,)).fetchone()
         return digest(list(row) if row else None)

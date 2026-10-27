@@ -46,7 +46,7 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
         for _ in range(10):
             queries.clear()
             time.sleep(.65)
-            if len(queries) < 1000 and not any('SELECT id FROM items WHERE viewed=0' in q and 'feed_id=ANY(' not in q for q in queries):
+            if len(queries) < 1000 and not any(any(f'SELECT id FROM {table} WHERE viewed=0' in q for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed')) and 'feed_id=ANY(' not in q for q in queries):
                 break
         else:
             raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries; {[q for q in queries if "SELECT id FROM items WHERE viewed=0" in q]}')
@@ -55,7 +55,7 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
         # Include background dispatch/presence work, independently of content size.
         assert len(queries) < 1000, len(queries)
-        assert not any('SELECT id FROM items WHERE viewed=0' in q and 'feed_id=ANY(' not in q for q in queries)
+        assert not any(any(f'SELECT id FROM {table} WHERE viewed=0' in q for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed')) and 'feed_id=ANY(' not in q for q in queries)
 
 
 def test_feed_settings_preserve_other_accepted_filters(tmp_path):

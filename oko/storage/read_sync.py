@@ -43,6 +43,9 @@ class ReadSync:
         if selection.scan_complete and selection.oldest:
             db.execute('UPDATE telegram_read_state SET initial = %s WHERE feed = %s AND initial IS NULL', (selection.oldest - 1, feed))
         db.execute('UPDATE telegram_read_state SET signature = NULL WHERE feed = %s', (feed,))
+        # Re-observing an unchanged page still requires checking the remote
+        # read frontier. Member upserts alone may not change any row.
+        db.execute('INSERT INTO telegram_read_dirty (feed) VALUES (%s) ON CONFLICT DO NOTHING', (feed,))
         db.executemany('INSERT INTO telegram_read_members ( feed , member ) VALUES ( %s , %s ) ON CONFLICT ( feed , member ) DO UPDATE SET missing = 0',
                        [(feed, member) for member in members])
 

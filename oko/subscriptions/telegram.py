@@ -120,7 +120,6 @@ class TelegramAccess:
         return sorted({row[0] for kind, value in claims for row in self.db.execute('SELECT feed FROM telegram_claim_owners WHERE kind = %s AND value = %s', (kind, value))})
 
     def claim(self, feed: str, claim: tuple[str, str], evidence: str) -> None:
-        self.db.execute('INSERT INTO telegram_source_claims VALUES ( %s , %s ) ON CONFLICT DO NOTHING', claim)
         self.db.execute('INSERT INTO telegram_claim_owners VALUES ( %s , %s , %s , %s ) ON CONFLICT DO NOTHING', (*claim, feed, evidence))
 
     def conflicts(self, claims: list[tuple[str, str]], peer: int | None = None) -> list[str]:
@@ -238,5 +237,4 @@ class TelegramAccess:
     def release(self, feed: str) -> None:
         self.db.execute('DELETE FROM telegram_avatars WHERE feed = %s', (feed,))
         self.db.execute('DELETE FROM telegram_claim_owners WHERE feed = %s', (feed,))
-        self.db.execute('DELETE FROM telegram_source_claims WHERE NOT EXISTS ( SELECT 1 FROM telegram_claim_owners o WHERE o . kind = telegram_source_claims . kind AND o . value = telegram_source_claims . value )')
         self.db.execute('DELETE FROM telegram_bindings WHERE feed = %s', (feed,))

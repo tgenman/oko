@@ -61,6 +61,20 @@ def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
     assert client.get(media).content==PNG
 
 
+def test_deleting_secondary_feed_preserves_primary_and_shared_media(shared):
+    client,feeds,_,_=shared
+    item=client.get('/api/v3/cards').json()[0]['id']
+    material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+    primary=next(f for f in feeds if f['id']==material['feed_id'])
+    secondary=next(f for f in feeds if f['id']!=primary['id'])
+    media=material['content']['attachments'][0]['url']
+    assert client.delete('/api/v3/feeds/'+secondary['id']).status_code==200
+    wait_for(client,lambda:not any(f['id']==secondary['id'] for f in client.get('/api/v3/subscriptions').json()['feeds']))
+    assert [card['id'] for card in client.get('/api/v3/cards',params={'feed':primary['id']}).json()]==[item]
+    assert client.get('/api/v3/materials/'+item).json()['feed_id']==primary['id']
+    assert client.get(media).content==PNG
+
+
 def test_viewed_native_publication_can_be_collected_again_from_explicit_history(tmp_path):
     from tests.support.telegram import Telegram,connect_request
     root=publication_root(tmp_path)
@@ -223,7 +237,7 @@ def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(
     try:
         with store.db:
             for identity in ('cycle-a','cycle-b'):
-                store.db.execute("INSERT INTO items ( id , source_id , url , feed_id , platform , external_id ) VALUES ( %s , %s , %s , NULL , 'other_web' , %s )",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
+                store.db.execute("INSERT INTO items ( id , source_id , url , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
             store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s )',[(item,'cycle-a'),('cycle-a','cycle-b'),('cycle-b','cycle-a')])
     finally:
         store.db.close()

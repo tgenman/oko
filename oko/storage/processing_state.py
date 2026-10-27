@@ -17,7 +17,7 @@ class ProcessingRepository:
         self.store=store
 
     def candidates(self, kind: Kind, *, limit: int | None = None, item: str | None = None) -> list[tuple[str,str | None]]:
-        query='SELECT i . id FROM processing_stage_dirty d JOIN items i ON i . id = d . item WHERE d . kind = %s AND i . viewed = 0 AND i . platform IS NOT NULL AND i . feed_id IS NOT NULL AND i . complete = 1 AND NOT EXISTS ( SELECT 1 FROM processing_dirty p WHERE p . item = i . id )'
+        query='SELECT i . id FROM processing_stage_dirty d JOIN items_read i ON i . id = d . item WHERE d . kind = %s AND i . viewed = 0 AND i . platform IS NOT NULL AND i . feed_id IS NOT NULL AND i . complete = 1 AND NOT EXISTS ( SELECT 1 FROM processing_dirty p WHERE p . item = i . id )'
         parameters: tuple[str | int, ...] = (kind,)
         if item is not None:
             query += ' AND i . id = %s'
@@ -30,7 +30,7 @@ class ProcessingRepository:
         return [(row[0],operation.signature(row[0])) for row in rows]
 
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
-        row=self.store.db.execute('SELECT * FROM items WHERE id = %s AND viewed = 0',(item,)).fetchone()
+        row=self.store.db.execute('SELECT * FROM items_read WHERE id = %s AND viewed = 0',(item,)).fetchone()
         if row is None or row['feed_id'] is None:return ProcessingPreparation('disabled',reason='not_eligible')
         rules=publication_input.live_settings(self.store,item)
         values=rules['values']
@@ -77,7 +77,7 @@ class ProcessingRepository:
         self.store.publications.status(item)
 
     def regenerate(self, item: str, kind: Kind) -> bool:
-        row=self.store.db.execute('SELECT processing_metadata FROM items WHERE id = %s',(item,)).fetchone()
+        row=self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone()
         if row and json.loads(row[0]).get('filter' if kind=='filter' else 'summary',{}).get('reason')=='no_input':return False
         self.store.db.execute('UPDATE items SET status = %s WHERE id = %s',('pending_filtering' if kind=='filter' else 'pending_summary',item))
         return True

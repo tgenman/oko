@@ -75,20 +75,28 @@ def test_selected_scope_sql_does_not_grow_with_other_materials(tmp_path):
 
 def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     store = Store(tmp_path, lambda _: None)
+    store.subscriptions.ensure_demo()
     # Current archive fixture: only 100 records are still unviewed.
     with store.db:
-        store.db.executemany("INSERT INTO items ( id , published , viewed , feed_id , platform , external_id ) VALUES ( %s , %s , %s , %s , 'other_web' , %s )",
-            [(f'archive-{n:05}', n, int(n >= 100), 'demo',f'archive-{n:05}') for n in range(20000)])
+        # Keep the membership statistics stale, as immediately after a bulk import.
+        store.db._db.execute('ALTER TABLE feed_publications SET (autovacuum_enabled=false)')
+        store.db.executemany("INSERT INTO items ( id , published , viewed , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",
+            [(f'archive-{n:05}', n, int(n >= 100), f'archive-{n:05}') for n in range(20000)])
+        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('demo',%s)", [(f'archive-{n:05}',) for n in range(20000)])
         assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='items_unviewed_order'").fetchone()
         store.db._db.execute('ANALYZE items')
     store.db.close()
     for _ in range(2):
         store = Store(tmp_path, lambda _: None)
         with measure_reads(store.db) as work:
-            rows = store.db.execute('SELECT id,feed_id FROM items WHERE viewed=0 ORDER BY published DESC').fetchall()
+            rows = store.db.execute('SELECT id,feed_id FROM items_read WHERE viewed=0 ORDER BY published DESC').fetchall()
         assert len(rows) == 100
         assert rows[0]['id'] == 'archive-00099'
         assert work.rows < 2000, work
+        with measure_reads(store.db) as feed_work:
+            feed_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='demo' AND viewed=0 ORDER BY published DESC").fetchall()
+        assert len(feed_rows) == 100
+        assert feed_work.rows < 2000, feed_work
         # Include transactional entity versions and navigation counts, as well as
         # the index and processing markers; this fixed cost does not scan the archive.
         with store.db:
@@ -98,4 +106,21 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
                     (viewed, 'archive-00000')).fetchone()[0][0]['Plan']
                 assert scan_rows(plan) < 10, plan
                 assert plan.get('Shared Hit Blocks', 0) + plan.get('Shared Read Blocks', 0) < 1600, plan
+        store.db.close()
+
+    # A small feed must also stay bounded when many other publications are active.
+    store = Store(tmp_path, lambda _: None)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id) VALUES ('foreign'),('small')")
+            store.db.execute("INSERT INTO items(id,viewed) SELECT 'foreign-' || n,0 FROM generate_series(1,1500) AS n")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id) SELECT 'foreign',id FROM items WHERE id LIKE 'foreign-%'")
+            store.db.execute("INSERT INTO items(id,viewed) SELECT 'small-' || n,0 FROM generate_series(1,10) AS n")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id) SELECT 'small',id FROM items WHERE id LIKE 'small-%'")
+            store.db._db.execute('ANALYZE items')
+        with measure_reads(store.db) as small_work:
+            small_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='small'").fetchall()
+        assert len(small_rows) == 10
+        assert small_work.rows < 200, small_work
+    finally:
         store.db.close()

@@ -46,7 +46,7 @@ def test_runtime_auto_read_batches_eligibility_and_keeps_http_responsive(tmp_pat
             assert any(row['pending'] == 32 for row in client.get('/api/v3/status').json()['telegram_reads'])
         finally:
             client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
-        member_points = [q for q in queries if q.startswith('SELECT members FROM items WHERE id=')]
+        member_points = [q for q in queries if any(q.startswith(f'SELECT members FROM {table} WHERE id=') for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed'))]
         eligibility_batches = [q for q in queries if q.startswith('SELECT member FROM telegram_read_members') and ' AND member IN (' in q]
         assert member_points == []
         assert 1 <= len(eligibility_batches) <= 8, len(eligibility_batches)
@@ -173,6 +173,26 @@ def test_old_history_blocks_until_separate_permission_and_external_reads_do_not_
         client.post('/api/v3/collect')
         wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s.get('telegram_reads', [])))
         assert client.get('/api/v3/materials/' + later).status_code == 200
+
+
+def test_reobserving_unchanged_page_schedules_read_frontier_check(tmp_path):
+    network = ReadTelegram()
+    app = create_app(tmp_path, token='test', telegram_client=network)
+    with TestClient(app, headers=H) as client:
+        presence(client, 'test')
+        feed = connect(client,count=2)['id']
+        settled(client, 2)
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+
+        def observe():
+            store = app.state.host.require_store()
+            with store.db:
+                cursor = store.db.execute('SELECT cursor FROM feeds WHERE id = %s', (feed,)).fetchone()[0]
+                store.db.execute('DELETE FROM telegram_read_dirty WHERE feed = %s', (feed,))
+                store.read_sync.observed(feed, (), cursor)
+                return store.db.execute('SELECT 1 FROM telegram_read_dirty WHERE feed = %s', (feed,)).fetchone() is not None
+
+        assert client.portal.call(observe)
 
 
 def test_unknown_ack_result_recovers_without_content_after_restart(tmp_path):

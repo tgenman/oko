@@ -38,7 +38,7 @@ def current(db: Database) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = 'SELECT i . * , d . item AS source_deleted FROM items i LEFT JOIN source_deleted d ON d . item = i . id'
+_ITEM = 'SELECT i . * , d . item AS source_deleted FROM items_read i LEFT JOIN source_deleted d ON d . item = i . id'
 _FEED = 'SELECT f . * , b . binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b . feed = f . id'
 
 
@@ -50,7 +50,7 @@ def item(db: Database, identity: str) -> Row | None:
             return value.items[identity]
         if identity in value.related_items:
             return value.related_items[identity]
-    return db.execute('SELECT * FROM items WHERE id = %s', (identity,)).fetchone()
+    return db.execute('SELECT * FROM items_read WHERE id = %s', (identity,)).fetchone()
 
 
 
@@ -98,7 +98,7 @@ def material_inputs(db: Database, identities: set[str]) -> Iterator[None]:
             else:
                 value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
         value.children.update({identity: [] for identity in batch})
-        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , j . error AS fetch_error FROM publication_links l JOIN items i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id IN ( {marks} ) AND i . viewed = 0 ORDER BY l . rowid", batch):
+        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , j . error AS fetch_error FROM publication_links l JOIN items_read i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id IN ( {marks} ) AND i . viewed = 0 ORDER BY l . rowid", batch):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
         value.owners.update({identity: set() for identity in batch})

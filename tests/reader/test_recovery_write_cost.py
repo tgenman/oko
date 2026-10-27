@@ -80,7 +80,7 @@ def test_recovery_reuses_material_reads_within_each_read_phase(postgres_url, tmp
     original_execute = psycopg.Connection.execute
     reads = []
     def execute(connection, query, parameters=None, **kwargs):
-        if (isinstance(query, str) and re.search(r'^SELECT\s+\*\s+FROM\s+items\s+WHERE\s+id\s*=', query, re.IGNORECASE)
+        if (isinstance(query, str) and re.search(r'^SELECT\s+\*\s+FROM\s+items(?:_read)?\s+WHERE\s+id\s*=', query, re.IGNORECASE)
                 and parameters and parameters[0] == item):
             reads.append(query)
         return original_execute(connection, query, parameters, **kwargs)

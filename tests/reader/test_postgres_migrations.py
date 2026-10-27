@@ -103,3 +103,60 @@ def test_native_library_constraints_and_persistent_job_identity(connections):
         assert restarted.execute("SELECT published FROM items WHERE id='article'").fetchone()[0] == 1792870000.123456
         assert restarted.execute("SELECT size_bytes FROM media_files WHERE id='media'").fetchone()[0] == 5000000000
         assert restarted.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 2
+
+
+def test_telegram_claim_migration_preserves_owners(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:4])
+        db.execute("INSERT INTO telegram_source_claims VALUES ('username','example')")
+        db.execute("INSERT INTO telegram_claim_owners VALUES ('username','example','feed','verified')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('telegram_source_claims')").fetchone() == (None,)
+        assert db.execute('SELECT kind,value,feed,evidence FROM telegram_claim_owners').fetchall() == [
+            ('username', 'example', 'feed', 'verified')
+        ]
+        verify(db, MIGRATIONS)
+
+
+def test_membership_upgrade_preserves_primary_and_pending_cleanup(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:5])
+        db.execute("INSERT INTO feeds(id) VALUES ('first'),('second')")
+        db.execute("INSERT INTO items(id,feed_id,platform,external_id) VALUES ('shared','second','youtube','video')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('first','shared'),('second','shared')")
+        db.execute("INSERT INTO items(id,feed_id,viewed,platform,external_id) VALUES ('cleaning','first',1,'youtube','old')")
+        db.execute("INSERT INTO jobs(kind,item,payload) VALUES ('delete','cleaning','{\"other\":\"preserved\"}')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT feed_id FROM items_read WHERE id='shared'").fetchone() == ('second',)
+        assert db.execute("SELECT feed_id FROM items_read WHERE id='cleaning'").fetchone() == ('first',)
+        assert db.execute("SELECT payload::jsonb->>'other' FROM jobs WHERE kind='delete' AND item='cleaning'").fetchone() == ('preserved',)
+        assert db.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='items' AND column_name='feed_id'").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (2,)
+        db.execute("UPDATE items SET viewed=1 WHERE id='shared'")
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM unviewed_items_by_feed WHERE id='shared'").fetchone() == (0,)
+        db.execute("UPDATE items SET viewed=0 WHERE id='shared'")
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (2,)
+        with pytest.raises(ValueError, match='rollback'), db.transaction():
+            db.execute("UPDATE items SET viewed=1 WHERE id='shared'")
+            assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (0,)
+            raise ValueError('rollback')
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (2,)
+        before = db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
+        db.execute("DELETE FROM feed_publications WHERE feed_id='second' AND publication_id='shared'")
+        assert db.execute("SELECT feed_id FROM items_read WHERE id='shared'").fetchone() == ('first',)
+        assert db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0] > before
+
+
+def test_membership_upgrade_rejects_missing_old_owner_atomically(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:5])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        db.execute("INSERT INTO items(id,feed_id) VALUES ('missing','feed')")
+        with pytest.raises(psycopg.errors.RaiseException, match='owner is missing'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT feed_id FROM items WHERE id='missing'").fetchone() == ('feed',)
+        verify(db, MIGRATIONS[:5])

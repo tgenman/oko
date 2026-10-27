@@ -37,7 +37,7 @@ def content(store: 'Store', item: str) -> dict[str, Any]:
 
 def selected_content(store: 'Store', item: str, kind: str) -> dict[str, Any]:
     selected=content(store,item)
-    row=store.db.execute('SELECT filtered_content FROM items WHERE id = %s',(item,)).fetchone()
+    row=store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone()
     if kind=='theses' and row and row[0]!='{}' and 'youtube' not in selected.get('extra',{}):
         selected=json.loads(row[0])
     return selected
@@ -52,7 +52,7 @@ def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
         groups.setdefault(block.get('source_publication_id',item),[]).append(block)
     result=[]
     for identity,parts in groups.items():
-        record=expect_row(store.db.execute('SELECT title , url , published FROM items WHERE id = %s',(identity,)).fetchone())
+        record=expect_row(store.db.execute('SELECT title , url , published FROM items_read WHERE id = %s',(identity,)).fetchone())
         text='\n\n'.join(part['text'] for part in parts if part['type']=='text')
         quotes=[part for part in parts if part['type']=='quote']
         quote=ReplyPreview(text='\n\n'.join(part['text'] for part in quotes),
@@ -127,7 +127,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
 
 
 def snapshot(store: 'Store', item: str) -> None:
-    row=expect_row(store.db.execute('SELECT processing_metadata FROM items WHERE id = %s',(item,)).fetchone())
+    row=expect_row(store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone())
     metadata=json.loads(row[0])
     rules=live_settings(store,item)
     current_revision=revision(store,item)
