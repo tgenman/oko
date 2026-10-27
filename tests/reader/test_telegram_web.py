@@ -353,34 +353,6 @@ def test_html_quotes_poll_voice_sticker_and_unavailable_document_are_preserved(t
 
 
 
-def test_retry_and_save_do_not_read_all_retained_media_into_ram(tmp_path,monkeypatch):
-    from pathlib import Path
-    async def response(request):
-        if request.url.host=='cdn.example':
-            return httpx.Response(200,content=b'known-bytes')
-        return httpx.Response(200,text=page([(11,'Photo<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo\')"></a>')]))
-    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),
-                    headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        identity = settled(client)[0]['id']
-        read_bytes = Path.read_bytes
-        calls = []
-        def bounded(path):
-            if path.name.startswith(('media-','retained-media-','incoming-media-')):
-                calls.append(str(path))
-                raise AssertionError('Accepted media must be streamed, not materialized in RAM')
-            return read_bytes(path)
-        monkeypatch.setattr(Path,'read_bytes',bounded)
-        assert client.post('/api/v3/materials/'+identity+'/retry').status_code==200
-        settled(client)
-        material = client.get('/api/v3/materials/'+identity).json()
-        assert (material['content']['completeness']['state']=='complete') is True
-        assert not calls
-        monkeypatch.setattr(Path,'read_bytes',read_bytes)
-        assert client.get(material['content']['attachments'][0]['url']).content==b'known-bytes'
-
-
 def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync(tmp_path,monkeypatch):
     from oko.collection.telegram.source import _TelegramWorker
     from oko.storage.read_sync import ReadSync

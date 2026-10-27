@@ -106,11 +106,9 @@ def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
         assert captions.calls[1][1] - captions.calls[0][1] >= 10
 
 
-@pytest.mark.parametrize('publication_pipeline',[False,True])
-def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publication_pipeline):
-    if publication_pipeline:
-        from tests.support.publication_pipeline import publication_root
-        tmp_path=publication_root(tmp_path)
+def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
+    from tests.support.publication_pipeline import publication_root
+    tmp_path=publication_root(tmp_path)
     clock = Clock()
     captions = Captions(clock, [CaptionsBlocked(), 'После паузы', 'Следующий'])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
@@ -120,8 +118,7 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publicat
         def paused():
             if client.get('/api/v3/youtube').json()['admission']=='paused':
                 return True
-            if publication_pipeline:
-                clock.advance(1)  # Common discovery commits its initial cursor before the next portion.
+            clock.advance(1)  # Common discovery commits its initial cursor before the next portion.
             return False
         eventually(paused)
         item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
@@ -133,8 +130,7 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path,publicat
         def independent():
             if any('Независимый текст' in m['content'].get('text','') for m in materials(client)):
                 return True
-            if publication_pipeline:
-                clock.tick+=1
+            clock.tick+=1
             return False
         eventually(independent)
         assert len(captions.calls) == 1

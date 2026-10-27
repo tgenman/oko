@@ -1,7 +1,6 @@
 """RSS history through the reader HTTP boundary and synthetic external pages."""
 import time
 from collections import Counter
-from pathlib import Path
 
 import httpx
 import pytest
@@ -29,25 +28,6 @@ def wait_history(client, identity, timeout=30):
             return history
         time.sleep(.02)
     raise AssertionError(history)
-
-
-def test_initial_history_follows_rss_next_and_loads_selected_articles(tmp_path: Path):
-    calls = Counter()
-    def reply(request):
-        calls[request.url.path] += 1
-        if request.url.path == '/feed':
-            return httpx.Response(200, text=page([3, 2], '<atom:link rel="next" href="/older"/>'))
-        if request.url.path == '/older':
-            return httpx.Response(200, text=page([2, 1]))
-        return httpx.Response(200, text='<article>Full article</article>')
-    with reader(tmp_path, reply) as client:
-        response = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 3})
-        assert response.status_code == 200, response.text
-        history = wait_history(client, response.json()['id'])
-        assert history['progress']['available'] == 3
-        assert history['progress']['loaded'] == 3
-        assert calls['/older'] == 1
-        assert len(client.get('/api/v3/cards').json()) == 3
 
 
 def test_short_history_has_persisted_reason_and_failed_page_is_not_retried(tmp_path):

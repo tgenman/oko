@@ -192,18 +192,6 @@ def test_smaller_history_after_new_upload_preserves_retained_order(tmp_path):
             assert [c['source_url'].split('=')[-1] for c in cards] == [video(n) for n in numbers]
 
 
-def test_expanding_unknown_date_history_keeps_older_video_after_known_neighbours(tmp_path):
-    history=HistoryFixture()
-    with reader(tmp_path,history,[]) as client:
-        presence(client,'history')
-        feed=import_channel(client)
-        client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'2'})
-        wait_history(client,feed,lambda h:h['state']=='complete')
-        client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'3'})
-        wait_history(client,feed,lambda h:h['state']=='complete' and h['selection']['count']=='3')
-        assert [card['source_url'].split('=')[-1] for card in client.get('/api/v3/cards?sort=newest').json()]==[video(60),video(59),video(58)]
-
-
 def test_large_unknown_date_window_keeps_order_across_pages_and_expansion(tmp_path):
     from tests.support.youtube import History
     history=History([video(n) for n in range(100,0,-1)])

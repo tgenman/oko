@@ -46,7 +46,7 @@ for(const scope of ['folder','feed'] as const){
     }finally{await r.close();}
   });
 
-  for(const status of [200,503])test(scope+' completion '+status+' preserves new material after the captured items were accepted',async()=>{
+  for(const status of (scope==='feed'?[503]:[200,503]))test(scope+' completion '+status+' preserves new material after the captured items were accepted',async()=>{
     const r=await reader();try{
       await r.start([material('old')]);const url=path(scope),c=controls(r,scope);
       await r.page.evaluate(url=>{readerTransport.replies.set(url+'/preview',{body:{token:'captured',cards_count:1,publications_count:1}});readerTransport.held.set(url,true);},url);

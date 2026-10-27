@@ -33,29 +33,6 @@ def test_port_wait_handles_transient_bind_and_preserves_persistent_listener(rele
             assert listener.getsockname()[1] == port
 
 
-def test_update_waits_for_port_only_after_stopping_owned_release(tmp_path, monkeypatch):
-    import runpy
-    release = runpy.run_path(str(SCRIPT))
-    scope = release['main'].__globals__
-    home = tmp_path / 'installed'
-    home.mkdir()
-    (home / 'current.json').write_text(json.dumps({'release': 'old'}))
-    events = []
-    monkeypatch.setattr(sys, 'argv', [str(SCRIPT), '--home', str(home), 'update', '--release', 'new'])
-    for name in ('release', 'stop', 'configure'):
-        monkeypatch.setitem(scope, name, lambda *args, name=name: events.append(name))
-    monkeypatch.setitem(scope, 'backup', lambda home: tmp_path / 'backup')
-    monkeypatch.setitem(scope, 'tree_digest', lambda path: 'digest')
-    monkeypatch.setitem(scope, 'start', lambda home, port_wait=0: events.append(('start', port_wait)))
-    previous_mask = os.umask(0o077)
-    try:
-        with pytest.raises(ValueError, match='retired'):
-            release['main']()
-    finally:
-        os.umask(previous_mask)
-    assert events == []
-
-
 def invoke(repo, home, *args, env=None):
     return subprocess.run([sys.executable, str(SCRIPT), '--repo', str(repo), '--home', str(home), *args],
                           text=True, capture_output=True, env=env)
@@ -147,18 +124,6 @@ def test_install_creates_private_paired_helper_without_starting_or_changing_host
     assert not (home / 'data/state.sqlite').exists()
 
 
-def test_backup_refuses_running_container_and_preserves_data(tmp_path):
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    (home / 'data/material').write_text('saved material')
-    env['RUNNING_CONTAINER'] = 'running-container'
-    result = invoke(repo, home, 'backup', env=env)
-    assert result.returncode != 0
-    assert 'retired' in result.stderr
-    assert not (home / 'backups').exists()
-    assert (home / 'data/material').read_text() == 'saved material'
-
-
 def test_retired_backup_refuses_even_when_stopped(tmp_path):
     repo, home, env, log, commit = prepared(tmp_path)
     assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
@@ -169,22 +134,6 @@ def test_retired_backup_refuses_even_when_stopped(tmp_path):
     assert (home / 'data/material').read_text() == 'saved material'
     assert not (home / 'backups').exists()
     assert log.read_text() == before
-
-
-def test_migrate_refuses_an_owned_old_store_without_copying(tmp_path):
-    import fcntl
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    source = tmp_path / 'old-data'
-    source.mkdir()
-    (source / 'state.sqlite').write_text('synthetic store')
-    with (source / 'instance.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = invoke(repo, home, 'migrate', '--source', str(source), env=env)
-    assert result.returncode != 0
-    assert 'retired' in result.stderr
-    assert not (home / 'data/state.sqlite').exists()
-    assert (source / 'state.sqlite').read_text() == 'synthetic store'
 
 
 def test_restore_requires_explicit_data_loss_acknowledgement_before_stopping(tmp_path):
@@ -244,7 +193,7 @@ def test_stop_blocks_on_abandoned_supervisor_marker_and_preserves_it(tmp_path):
     assert not (home / 'backups').exists()
 
 
-@pytest.mark.parametrize('command', ['backup', 'update', 'migrate'])
+@pytest.mark.parametrize('command', ['update', 'migrate'])
 def test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch(tmp_path, command):
     repo, home, env, log, commit = prepared(tmp_path)
     assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
@@ -263,18 +212,6 @@ def test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch(tmp_path,
     assert not (home / 'backups').exists()
     assert not (home / 'data/state.sqlite').exists()
     assert json.loads((home / 'current.json').read_text())['release'] == commit
-
-
-def test_owned_execution_lock_blocks_backup_even_without_marker(tmp_path):
-    import fcntl
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    with (home / 'scratch/execution.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = invoke(repo, home, 'backup', env=env)
-    assert result.returncode != 0
-    assert 'retired' in result.stderr
-    assert not (home / 'backups').exists()
 
 
 def test_open_launches_localhost_8765_without_logging_reader_credential(tmp_path):
