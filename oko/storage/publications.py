@@ -105,9 +105,9 @@ class Publications:
         """Invalidate old opaque descriptions atomically with a binding change."""
         db=self.store.db
         db.execute("UPDATE feeds SET cursor = '' WHERE id = %s",(feed,))
-        db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT id FROM items_by_feed WHERE feed_id = %s AND viewed = 0 )",(feed,))
+        db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0 )",(feed,))
         db.execute('DELETE FROM source_deleted WHERE item IN ( SELECT id FROM items_by_feed WHERE feed_id = %s )',(feed,))
-        db.execute("UPDATE items SET status = 'pending_collection' WHERE id IN (SELECT id FROM items_by_feed WHERE feed_id = %s AND viewed = 0)",(feed,))
+        db.execute("UPDATE items SET status = 'pending_collection' WHERE id IN (SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0)",(feed,))
         db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,))
 
     def plan(self, feed: str, publications: list[Publication]) -> dict[str, DiscoveryProjection]:

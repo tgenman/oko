@@ -1,5 +1,6 @@
 -- A membership is the only persisted source of publication ownership.
 ALTER TABLE feed_publications ADD COLUMN is_primary boolean NOT NULL DEFAULT false;
+ALTER TABLE feed_publications ADD COLUMN is_unviewed boolean NOT NULL DEFAULT true;
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM items i WHERE i.viewed=0 AND i.feed_id IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.feed_id=i.feed_id)) THEN
@@ -18,6 +19,8 @@ INSERT INTO jobs(kind,item,payload)
 -- The previous owner is authoritative when the membership exists.
 UPDATE feed_publications m SET is_primary=true FROM items i
  WHERE i.id=m.publication_id AND i.feed_id=m.feed_id;
+UPDATE feed_publications m SET is_unviewed=coalesce(i.viewed=0,false)
+ FROM items i WHERE i.id=m.publication_id;
 -- Preserve a stable owner even for older data whose pointer was absent.
 UPDATE feed_publications m SET is_primary=true WHERE (m.feed_id,m.publication_id) IN (
  SELECT min(feed_id),publication_id FROM feed_publications f
@@ -25,10 +28,12 @@ UPDATE feed_publications m SET is_primary=true WHERE (m.feed_id,m.publication_id
  GROUP BY publication_id);
 CREATE UNIQUE INDEX feed_publications_one_primary ON feed_publications(publication_id) WHERE is_primary;
 CREATE INDEX feed_publications_primary_feed ON feed_publications(feed_id,publication_id) WHERE is_primary;
+CREATE INDEX feed_publications_primary_unviewed_feed ON feed_publications(feed_id,publication_id) WHERE is_primary AND is_unviewed;
 CREATE INDEX jobs_cleanup_feed ON jobs ((payload::jsonb->>'cleanup_feed'),item) WHERE kind='delete';
 CREATE FUNCTION oko_membership_primary_insert() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF NOT EXISTS (SELECT 1 FROM feed_publications WHERE publication_id=NEW.publication_id AND is_primary) THEN NEW.is_primary=true; END IF;
+ NEW.is_unviewed=coalesce((SELECT viewed=0 FROM items WHERE id=NEW.publication_id),false);
  RETURN NEW;
 END $$;
 CREATE TRIGGER membership_primary_insert BEFORE INSERT ON feed_publications FOR EACH ROW EXECUTE FUNCTION oko_membership_primary_insert();
@@ -40,6 +45,15 @@ BEGIN
  RETURN NULL;
 END $$;
 CREATE TRIGGER membership_primary_delete AFTER DELETE ON feed_publications FOR EACH ROW EXECUTE FUNCTION oko_membership_primary_delete();
+CREATE FUNCTION oko_membership_viewed_changed() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.viewed IS DISTINCT FROM OLD.viewed THEN
+  UPDATE feed_publications SET is_unviewed=coalesce(NEW.viewed=0,false)
+   WHERE publication_id=NEW.id AND is_unviewed IS DISTINCT FROM coalesce(NEW.viewed=0,false);
+ END IF;
+ RETURN NULL;
+END $$;
+CREATE TRIGGER membership_viewed_changed AFTER UPDATE OF viewed ON items FOR EACH ROW EXECUTE FUNCTION oko_membership_viewed_changed();
 DROP TRIGGER processing_item_changed ON items;
 ALTER TABLE items DROP COLUMN feed_id;
 CREATE INDEX items_unviewed_order ON items(published DESC,id) WHERE viewed=0;
@@ -49,6 +63,9 @@ CREATE VIEW items_by_feed AS
  SELECT i.*,j.payload::jsonb->>'cleanup_feed' AS feed_id
  FROM items i LEFT JOIN jobs j ON j.kind='delete' AND j.item=i.id AND i.viewed=1
  WHERE NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary);
+CREATE VIEW unviewed_items_by_feed AS
+ SELECT i.*,m.feed_id FROM feed_publications m JOIN items i ON i.id=m.publication_id
+ WHERE m.is_primary AND m.is_unviewed AND i.viewed=0;
 CREATE VIEW items_read AS SELECT i.*,coalesce(
  (SELECT m.feed_id FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary),
  (SELECT j.payload::jsonb->>'cleanup_feed' FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND i.viewed=1)
@@ -67,7 +84,7 @@ CREATE OR REPLACE FUNCTION oko_trigger_reader_v_feed_material() RETURNS trigger
 LANGUAGE plpgsql AS $oko$
 BEGIN
     IF NEW . kind IS DISTINCT FROM OLD . kind OR NEW . transport IS DISTINCT FROM OLD . transport THEN
-        INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM items_by_feed WHERE feed_id = NEW . id AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
+        INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM unviewed_items_by_feed WHERE feed_id = NEW . id AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
     END IF;
     RETURN NULL;
 END
@@ -208,7 +225,7 @@ CREATE OR REPLACE FUNCTION oko_trigger_reader_v_originals_changed() RETURNS trig
 LANGUAGE plpgsql AS $oko$
 BEGIN
     IF NEW . value IS DISTINCT FROM OLD . value THEN
-        INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM items_by_feed WHERE feed_id = NEW . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
+        INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM unviewed_items_by_feed WHERE feed_id = NEW . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
     END IF;
     RETURN NULL;
 END
@@ -219,7 +236,7 @@ LANGUAGE plpgsql AS $oko$
 BEGIN
     INSERT INTO reader_entities VALUES ( 'feed' , OLD . feed , 1 , oko_reader_time ( ) ) ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
     INSERT INTO reader_entities VALUES ( 'status' , 'runtime' , 1 , oko_reader_time ( ) ) ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
-    INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM items_by_feed WHERE feed_id = OLD . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
+    INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM unviewed_items_by_feed WHERE feed_id = OLD . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
     RETURN NULL;
 END
 $oko$;
@@ -229,7 +246,7 @@ LANGUAGE plpgsql AS $oko$
 BEGIN
     INSERT INTO reader_entities VALUES ( 'feed' , NEW . feed , 1 , oko_reader_time ( ) ) ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
     INSERT INTO reader_entities VALUES ( 'status' , 'runtime' , 1 , oko_reader_time ( ) ) ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
-    INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM items_by_feed WHERE feed_id = NEW . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
+    INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM unviewed_items_by_feed WHERE feed_id = NEW . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
     RETURN NULL;
 END
 $oko$;
@@ -240,7 +257,7 @@ BEGIN
     IF NEW . binding IS DISTINCT FROM OLD . binding THEN
         INSERT INTO reader_entities VALUES ( 'feed' , NEW . feed , 1 , oko_reader_time ( ) ) ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
         INSERT INTO reader_entities VALUES ( 'status' , 'runtime' , 1 , oko_reader_time ( ) ) ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
-        INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM items_by_feed WHERE feed_id = NEW . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
+        INSERT INTO reader_entities SELECT 'material' , id , 1 , oko_reader_time ( ) FROM unviewed_items_by_feed WHERE feed_id = NEW . feed AND viewed = 0 ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed;
     END IF;
     RETURN NULL;
 END

@@ -133,6 +133,17 @@ def test_membership_upgrade_preserves_primary_and_pending_cleanup(connections):
         assert db.execute("SELECT feed_id FROM items_read WHERE id='cleaning'").fetchone() == ('first',)
         assert db.execute("SELECT payload::jsonb->>'other' FROM jobs WHERE kind='delete' AND item='cleaning'").fetchone() == ('preserved',)
         assert db.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='items' AND column_name='feed_id'").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (2,)
+        db.execute("UPDATE items SET viewed=1 WHERE id='shared'")
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM unviewed_items_by_feed WHERE id='shared'").fetchone() == (0,)
+        db.execute("UPDATE items SET viewed=0 WHERE id='shared'")
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (2,)
+        with pytest.raises(ValueError, match='rollback'), db.transaction():
+            db.execute("UPDATE items SET viewed=1 WHERE id='shared'")
+            assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (0,)
+            raise ValueError('rollback')
+        assert db.execute("SELECT count(*) FROM feed_publications WHERE publication_id='shared' AND is_unviewed").fetchone() == (2,)
         before = db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
         db.execute("DELETE FROM feed_publications WHERE feed_id='second' AND publication_id='shared'")
         assert db.execute("SELECT feed_id FROM items_read WHERE id='shared'").fetchone() == ('first',)

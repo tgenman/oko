@@ -46,7 +46,7 @@ def test_runtime_auto_read_batches_eligibility_and_keeps_http_responsive(tmp_pat
             assert any(row['pending'] == 32 for row in client.get('/api/v3/status').json()['telegram_reads'])
         finally:
             client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
-        member_points = [q for q in queries if any(q.startswith(f'SELECT members FROM {table} WHERE id=') for table in ('items', 'items_read', 'items_by_feed'))]
+        member_points = [q for q in queries if any(q.startswith(f'SELECT members FROM {table} WHERE id=') for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed'))]
         eligibility_batches = [q for q in queries if q.startswith('SELECT member FROM telegram_read_members') and ' AND member IN (' in q]
         assert member_points == []
         assert 1 <= len(eligibility_batches) <= 8, len(eligibility_batches)

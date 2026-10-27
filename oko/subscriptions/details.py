@@ -23,5 +23,5 @@ class FeedDetails:
     def snapshot(self, feed: str) -> dict[str, Any]:
         row = self.db.execute('SELECT * FROM feed_details WHERE feed = %s', (feed,)).fetchone()
         result = {field: row[field] if row else None for field in ('created', 'modified', 'updated', 'marked_read', 'description')}
-        result['unread'] = expect_row(self.db.execute('SELECT COUNT ( * ) FROM items_by_feed WHERE feed_id = %s AND viewed = 0', (feed,)).fetchone())[0]
+        result['unread'] = expect_row(self.db.execute('SELECT COUNT ( * ) FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0', (feed,)).fetchone())[0]
         return result
