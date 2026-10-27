@@ -52,7 +52,7 @@ def test_viewing_cards_does_not_rebuild_obsolete_list_versions(tmp_path):
 
 def test_corrupt_source_url_becomes_placeholder_without_breaking_page(tmp_path):
     import time
-    from tests.reader.test_completion_query_cost import library as seed
+    from tests.support.completion_library import library as seed
     seed(tmp_path, None, 3)
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
@@ -66,7 +66,7 @@ def test_corrupt_source_url_becomes_placeholder_without_breaking_page(tmp_path):
         previous=next(card for card in first.json()['items'] if card['id']==identity)
         def damage():
             with store.db:
-                store.db.execute("UPDATE items SET url='not-a-url' WHERE id=%s", (identity,))
+                store.db.execute("UPDATE items SET url='javascript:alert(1)' WHERE id=%s", (identity,))
         client.portal.call(damage)
         response = client.get('/api/v3/cards', headers={'If-None-Match': first.headers['etag']})
         assert response.status_code == 200
@@ -80,7 +80,7 @@ def test_corrupt_source_url_becomes_placeholder_without_breaking_page(tmp_path):
 
 def test_corrupt_content_invalidates_page_etag(tmp_path):
     import time
-    from tests.reader.test_completion_query_cost import library as seed
+    from tests.support.completion_library import library as seed
     seed(tmp_path, None, 3)
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
@@ -102,7 +102,7 @@ def test_corrupt_content_invalidates_page_etag(tmp_path):
 
 def test_corrupt_timestamp_becomes_placeholder_without_breaking_page(tmp_path):
     import time
-    from tests.reader.test_completion_query_cost import library as seed
+    from tests.support.completion_library import library as seed
     seed(tmp_path, None, 3)
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
@@ -126,7 +126,7 @@ def test_corrupt_timestamp_becomes_placeholder_without_breaking_page(tmp_path):
 def test_corrupt_preview_url_becomes_placeholder_without_breaking_page(tmp_path):
     import json
     import time
-    from tests.reader.test_completion_query_cost import library as seed
+    from tests.support.completion_library import library as seed
     seed(tmp_path, None, 3)
     app=traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:

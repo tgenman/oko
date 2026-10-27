@@ -25,6 +25,12 @@ def media_url(value: str) -> wire.MediaUrl:
     return wire.MediaUrl(value)
 
 
+def card_source_url(value: object) -> object:
+    if not isinstance(value,str) or len(value)>4000 or not value.startswith(('http://','https://','tg://')):
+        raise ValueError('invalid source URL')
+    return wire.SourceUrl(value).root
+
+
 def completeness(full: bool, reason: str, external_only: bool = False, post_web_unavailable: bool = False) -> wire.ContentCompleteness:
     return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='post_web_unavailable' if post_web_unavailable and not reason else 'external_attachment' if external_only else 'source_incomplete', message=reason))
 
@@ -234,6 +240,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
                     card_data=current.card(item)
                     if card_data is None:continue
                     try:
+                        card_source_url(card_data['source_url'])
                         if card_data['published_at'] is not None:
                             card_data['published_at']=project.timestamp(card_data['published_at']).root
                         projected=wire.CardListItem.model_validate(card_data)
@@ -241,7 +248,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
                         from oko.diagnostics import record_caught
                         record_caught('reader.card')
                         try:
-                            source=wire.SourceUrl(card_data['source_url']).root
+                            source=card_source_url(card_data['source_url'])
                         except (ValueError,TypeError):
                             source=None
                         published=card_data['published_at']

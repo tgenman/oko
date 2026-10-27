@@ -206,3 +206,25 @@ test('newest arrivals are detected when an unseen card disappears at the same ti
   await expect(r.page.locator('#cards-new')).toBeInViewport();await expect(r.page.locator('#count')).toHaveText('60');expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });
+
+test('failed newest probe does not cache an unaccepted oldest page',{timeout:90000},async t=>{
+ const r=await productionReader(t,{collection:false,library:{perFeed:26,active:false}});
+ let failProbe=false;let failed=false;const oldestEtags:(string|undefined)[]=[];
+ await r.page.route('**/api/v3/cards?*',async route=>{
+  const query=new URL(route.request().url()).searchParams;
+  if(failProbe&&query.get('sort')==='oldest'&&!query.has('cursor'))oldestEtags.push(route.request().headers()['if-none-match']);
+  if(failProbe&&!failed&&query.get('sort')==='newest'&&!query.has('cursor')){
+   failed=true;await new Promise(resolve=>setTimeout(resolve,500));
+   await route.fulfill({status:503,contentType:'application/json',body:'{"detail":"unavailable"}'});return;
+  }
+  await route.continue().catch(()=>{});
+ });
+ await r.page.goto(r.origin+'/#token='+r.token);
+ await expect(r.page.locator('#cards [data-card]')).toHaveCount(40);
+ failProbe=true;
+ await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('oldest');
+ await expect.poll(()=>failed,{timeout:15000}).toBe(true);
+ await expect.poll(()=>oldestEtags.length,{timeout:15000}).toBeGreaterThan(1);
+ expect(oldestEtags[0]).toBeUndefined();expect(oldestEtags[1]).toBeUndefined();
+ await expect(r.page.locator('#cards [data-card]')).toHaveCount(40);
+});

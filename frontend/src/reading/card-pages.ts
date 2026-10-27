@@ -10,7 +10,7 @@ type Window={cursor:string;limit:number}|null;
 export function createCardPages(api:ReaderApi) {
  const states=new Map<string,PageState>();
  function get(options:ReadingListOptions){const key=listIdentity(options);let state=states.get(key);if(!state){state={items:[],total:0,next:null,etags:new Map(),head:[],recent:null,newItems:false,changed:false};states.set(key,state);}return state;}
- async function request(options:ReadingListOptions,cursor:string|null,limit:number,signal:AbortSignal,sort:ReadingListOptions['sort']=options.sort):Promise<CardPage|null>{
+ async function request(options:ReadingListOptions,cursor:string|null,limit:number,signal:AbortSignal,sort:ReadingListOptions['sort']=options.sort,pending?:Map<string,string>):Promise<CardPage|null>{
   const state=get(options),key=JSON.stringify([sort,cursor,limit]);
   const query:NonNullable<CardsData['query']>={sort,show_hidden:options.show_hidden,limit,...(cursor?{cursor}:{}),...(options.target.scope==='folder'?{folder:options.target.folder_id}:options.target.scope==='feed'?{feed:options.target.feed_id}:{})};
   const etag=state.etags.get(key);
@@ -20,15 +20,18 @@ export function createCardPages(api:ReaderApi) {
   if(reply.response?.status===409||(reply.error instanceof ReaderError&&reply.error.code==='cursor_expired')){states.delete(listIdentity(options));throw new Error('cursor_expired');}
   if(reply.error)throw reply.error;
   if(!reply.data)throw new Error('Reading page unavailable');
-  const next=reply.response?.headers.get('etag');if(next)state.etags.set(key,next);
+  const next=reply.response?.headers.get('etag');if(next)(pending??state.etags).set(key,next);
   return reply.data;
  }
  async function poll(options:ReadingListOptions,visible:Window,atTop:boolean,signal:AbortSignal){
   const state=get(options),initial=!state.head.length&&!state.items.length;
+  const pending=new Map<string,string>();
   const [head,recent]=await Promise.all([
-   request(options,null,40,signal),
-   options.sort==='oldest'?request(options,null,40,signal,'newest'):Promise.resolve(null),
-  ]);signal.throwIfAborted();
+   request(options,null,40,signal,options.sort,pending),
+   options.sort==='oldest'?request(options,null,40,signal,'newest',pending):Promise.resolve(null),
+  ]);
+  signal.throwIfAborted();
+  for(const [key,etag] of pending)state.etags.set(key,etag);
   let recentArrival=false;
   if(recent){
    const ids=recent.items.map(card=>card.id),previous=state.recent;

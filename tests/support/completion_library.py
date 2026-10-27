@@ -1,0 +1,16 @@
+from tests.support.worker_library import worker_library
+
+def library(root, database_url, count):
+    store, original, _, _ = worker_library(root, database_url=database_url)
+    store.set_work_enabled(False)
+    store.processing.background = True
+    with store.db:
+        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (original,)).fetchone())
+        fields = list(template)
+        for number in range(1, count):
+            identity = f'{number:032x}'
+            row = dict(template, id=identity, source_id='completion:'+identity, external_id='completion:'+identity)
+            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[field] for field in fields))
+            store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
+    store.db.close()
+
