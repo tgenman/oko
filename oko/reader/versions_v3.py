@@ -12,7 +12,6 @@ from oko.reader import projection_v3 as project, snapshots as facts
 from oko.reader.api_v3 import ApiError, invalid, no_query
 from oko.storage.composition import telegram_title
 from oko.application.reader import ReaderApplication
-from oko.storage.reader_versions import ReaderVersions
 from oko.storage.reading import reading_snapshot, stable_reader_time, reader_now
 
 
@@ -21,12 +20,6 @@ class VersionedReading:
                  material: Callable[[str], wire.ReadableMaterial], metadata: Callable[[], dict[str, Any]]) -> None:
         self.runtime, self.status, self.material, self.metadata = runtime, status, material, metadata
         self.final: dict[str, Any] | None = None
-
-    def compact(self, identity: str) -> dict[str, Any] | None:
-        card = self.runtime.queries.card(identity)
-        if card is not None and card['published_at'] is not None:
-            card['published_at'] = project.timestamp(card['published_at'])
-        return card
 
     def text(self, identity: str) -> dict[str, Any]:
         store=self.runtime.queries
@@ -94,7 +87,7 @@ class VersionedReading:
             status=final['resources'][0]
             for request in body['resources']:
                 kind=request['kind']
-                identity='runtime' if kind=='status' else 'navigation' if kind=='navigation' else ReaderVersions.list_identity(request['options']) if kind=='list' else request.get('id','list')
+                identity='runtime' if kind=='status' else 'navigation' if kind=='navigation' else request.get('id','')
                 if kind=='status':
                     if request['known_version'] and int(request['known_version'])>int(status['version']):
                         return dict(state='reset',storage_id=final['storage_id'])
@@ -108,32 +101,13 @@ class VersionedReading:
             if body['storage_id'] is not None and body['storage_id']!=owner.identity:
                 return dict(state='reset',storage_id=owner.identity)
             requested: dict[tuple[str,str], dict[str,Any]]={}
-            lists: dict[str, tuple[dict[str,Any], Any, list[str] | None]]={}
             row: dict[str, Any] | None = None
             for request in body['resources']:
                 kind=request['kind']
-                if kind=='list':
-                    options=request['options']
-                    identity=owner.list_identity(options)
-                    target=options['target']
-                    scope=target['scope']
-                    key=target.get('feed_id',target.get('folder_id',''))
-                    exists=store.scope_exists(scope, key)
-                    if not exists:
-                        lists[identity]=(request,None,None)
-                    else:
-                        row=owner.list_version(options)
-                        if request['known_version'] and int(request['known_version'])>row['version']:
-                            return dict(state='reset',storage_id=owner.identity)
-                        ids=owner.ids(options) if request['known_version']!=str(row['version']) else None
-                        lists[identity]=(request,row,ids)
-                        for item in ids if ids is not None else request['known_cards']:
-                            requested.setdefault(('card',item),dict(kind='card',id=item,known_version=request['known_cards'].get(item)))
-                else:
-                    identity='runtime' if kind=='status' else 'navigation' if kind=='navigation' else request['id']
-                    if (kind,identity) in requested:
-                        raise ApiError(422,invalid('body','resources'))
-                    requested[kind,identity]=request
+                identity='runtime' if kind=='status' else 'navigation' if kind=='navigation' else request['id']
+                if (kind,identity) in requested:
+                    raise ApiError(422,invalid('body','resources'))
+                requested[kind,identity]=request
             versions=owner.batch(set(requested))
             if any(r.get('known_version') and ((kind,identity) not in versions or int(r['known_version'])>versions[kind,identity]['version']) for (kind,identity),r in requested.items()):
                 return dict(state='reset',storage_id=owner.identity)
@@ -161,7 +135,7 @@ class VersionedReading:
                         if kind == 'feed' and (kind, identity) in versions and versions[kind, identity]['feed_exists'] is not None
                         and request['known_version'] != str(versions[kind, identity]['version'])})
                     changed_items={identity for (kind,identity),request in requested.items()
-                        if kind in ('card','material','filter','theses','media') and (kind,identity) in versions
+                        if kind in ('material','filter','theses','media') and (kind,identity) in versions
                         and request['known_version']!=str(versions[kind,identity]['version'])
                         and versions[kind,identity]['item_exists'] is not None and not versions[kind,identity]['viewed']}
                     from contextlib import nullcontext
@@ -169,7 +143,7 @@ class VersionedReading:
                         for (kind,identity),request in requested.items():
                             row=versions.get((kind,identity))
                             resource: dict[str,Any]=dict(kind=kind,id=identity)
-                            if row is None or kind in ('card','material','filter','theses','media') and (row['item_exists'] is None or row['viewed']) or kind=='feed' and row['feed_exists'] is None:
+                            if row is None or kind in ('material','filter','theses','media') and (row['item_exists'] is None or row['viewed']) or kind=='feed' and row['feed_exists'] is None:
                                 resources.append(dict(resource,state='unavailable',version=str(row['version']) if row else None,reason='viewed' if row and row['viewed'] else 'not_found'))
                                 continue
                             if request['known_version']==str(row['version']):
@@ -181,7 +155,6 @@ class VersionedReading:
                                 elif kind=='feed':
                                     feed, binding = feed_resources[identity]
                                     data=project.subscription(facts.SubscriptionFeed.model_validate(feed),binding).model_dump(mode='json')
-                                elif kind=='card':data=self.compact(identity)
                                 elif kind=='media':data=self.media(identity)
                                 elif kind in ('filter','theses'):
                                     from oko.reader.reading_v3 import saved_filter, theses_parts
@@ -203,11 +176,6 @@ class VersionedReading:
                                     resources.append(dict(resource,state='changed',version=str(row['version']),data=data))
                             except (OSError,ValueError,KeyError,ApiError):
                                 resources.append(dict(resource,state='failed',message='Reading entity temporarily unavailable'))
-            for identity,(request,row,ids) in lists.items():
-                resource=dict(kind='list',id=identity)
-                if row is None:resources.append(dict(resource,state='unavailable',version=None,reason='scope_removed'))
-                elif request['known_version']==str(row['version']):resources.append(dict(resource,state='unchanged',version=str(row['version'])))
-                else:resources.append(dict(resource,state='changed',version=str(row['version']),data=dict(ids=ids,options=request['options'])))
             return dict(state='current',storage_id=owner.identity,resources=resources)
 
 

@@ -1,5 +1,6 @@
 import {createReadingResources,listIdentity} from './resources';
-import type {ReadingListOptions} from '../api/generated/types.gen';
+import type {ReadingListOptions} from './resources';
+import {createCardPages} from './card-pages';
 import {createNewsActions} from './news-actions';
 import {createMaterialList} from './list';
 import {createReadingTree, type Navigation} from './tree';
@@ -34,10 +35,12 @@ type Options = {
 // and media; the session alone owns polling, presence and browser resources.
 export function createReadingCoordination({readerApi, fetchMedia, debug, menus, statusPanel, actions, progress, onCollectionPoll, onStopped, onPowerState}: Options) {
   const resources=createReadingResources(readerApi);
+  const pages=createCardPages(readerApi);
+  let currentOptions:ReadingListOptions|undefined;
+  let moreLoading:{key:string;controller:AbortController;promise:Promise<void>}|undefined;
   let checking:AbortController|undefined;
   let unavailable=false;
   let displayedList:string|undefined;
-  let listOnly=false;
   let settingsAppliedRevision:number|undefined;
   let contentEpoch = 0;
   let refreshSequence = 0;
@@ -56,7 +59,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
 
   function viewed(id: string, broadcast: boolean) {
     contentEpoch++;
-    resources.forget([id]);
+    pages.forget([id]);
     debug.forgetMaterials([id]);
     statusPanel.forgetMaterials([id]);
     opened.viewed(id);
@@ -80,6 +83,21 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onContext: (card, context, x, y, trigger) => {folderMenu.close(false);feedActions.close(false);newsActions.open(card, context, x, y, trigger);},
     onOpen: card => opened.open(card),
     onRetry: refresh,
+    onMore: () => {
+      if(!currentOptions)return Promise.resolve();
+      const options=currentOptions,key=listIdentity(options);
+      if(moreLoading?.key===key)return moreLoading.promise;
+      moreLoading?.controller.abort();
+      const epoch=contentEpoch,controller=new AbortController();
+      const operation={key,controller,promise:Promise.resolve()};
+      operation.promise=(async()=>{
+        try {await pages.more(options,controller.signal);if(epoch===contentEpoch)await refresh();}
+        catch(error){if(epoch===contentEpoch&&!controller.signal.aborted){if(error instanceof Error&&error.message==='cursor_expired'){pages.reset(options);list.clear();await refresh();}else{reportError(error,'Loading items');list.error(errorMessage(error));}}}
+      })().finally(()=>{if(moreLoading===operation)moreLoading=undefined;});
+      moreLoading=operation;
+      return operation.promise;
+    },
+    onNew: () => {if(currentOptions){pages.reset(currentOptions);list.top();void changed();}},
   });
   const newsActions = createNewsActions({
     readerApi, isStopped: () => stopped,
@@ -127,7 +145,6 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       contentEpoch++;
       if(reason==='user')opened.clear();
       list.setArea(selection, readingCatalog);
-      listOnly=true;
       void refresh();
     },
     onFeedMenu: (feed, folders, x, y, trigger) => {folderMenu.close(false);newsActions.close(false);feedActions.open(feed, folders, x, y, trigger);},
@@ -180,13 +197,15 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     try {
       const selection=tree.selection;
       const sort=input('sort').value;
-      const options:ReadingListOptions={target:selection.kind==='feed'?{scope:'feed',feed_id:selection.id!}:selection.kind==='folder'?{scope:'folder',folder_id:selection.id!}:{scope:'all'},sort:sort==='oldest'||sort==='importance'?sort:'newest',show_hidden:input('show-hidden').checked};
+      const options:ReadingListOptions={target:selection.kind==='feed'?{scope:'feed',feed_id:selection.id!}:selection.kind==='folder'?{scope:'folder',folder_id:selection.id!}:{scope:'all'},sort:sort==='oldest'?sort:'newest',show_hidden:input('show-hidden').checked};
+      currentOptions=options;
       const openedCheck=opened.poll();
-      const selectedOnly=listOnly;listOnly=false;
-      const frame=await resources.check(resources.plan(options,openedCheck.resources,selectedOnly),controller.signal);
+      const pageResult=pages.poll(options,list.visible(),list.atTop(),controller.signal)
+        .then(page=>({page}),error=>({error}));
+      const frame=await resources.check(resources.plan(openedCheck.resources),controller.signal);
       if(!active())return;
       const accepted=resources.accept(frame);
-      if(accepted.reset){opened.reset();void refresh();return;}
+      if(accepted.reset){pages.clear();list.clear();opened.reset();void refresh();return;}
       if(frame.state!=='current')return;
       opened.connected();
       if(openedCheck.session)opened.apply(frame.resources,openedCheck.session);
@@ -230,17 +249,21 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
         list.setArea(tree.selection,navigation);
       } else if(accepted.changed.has('status'))tree.update(navigation,state.sources||[]);
       if(state.runtime_state==='unavailable'){opened.disconnected();list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable');return;}
-      const cards=resources.cards(options);
-      if(!cards)throw new Error('Reading list temporarily unavailable');
-      if(recovered||displayedList!==listIdentity(options)||navigationChanged||accepted.changed.has('list')||accepted.changed.has('card')){
-        displayedList=listIdentity(options);
+      const result=await pageResult;
+      if(!active())return;
+      if('error' in result)throw result.error;
+      const page=result.page;
+      const cards=page.items.flatMap(card=>{const feed=navigation.feeds.find(feed=>feed.id===card.feed_id);return feed?[{...card,feed_title:feed.title,folder_id:feed.folder_id}]:[];});
+      if(recovered||displayedList!==listIdentity(options)||navigationChanged||page.changed){
+        displayedList=listIdentity(options);page.changed=false;
         opened.reconcile(cards);
-        list.update(cards,opened.selection?.id);
+        list.update(cards,opened.selection?.id,page.total,page.next!==null,page.newItems);
         newsActions.update(list.context());
       }
 
     } catch (error) {
       if(controller.signal.aborted)return;
+      if(error instanceof Error&&error.message==='cursor_expired'&&currentOptions){pages.reset(currentOptions);list.clear();void refresh();return;}
       unavailable=true;
       reportError(error, 'Oko interface');
       if (!active()) return;

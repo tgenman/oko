@@ -41,7 +41,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         keepalive:request.keepalive,
           ...(body === undefined ? {} : {body}),
         });
-        if(!response.ok || !isBinaryOperation(url.pathname,request.method))await decodeJson(response.clone());
+        if(response.status!==304&&response.status!==204&&(!response.ok || !isBinaryOperation(url.pathname,request.method)))await decodeJson(response.clone());
         return response;
       } catch(error) {
         if (onError && !['/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {

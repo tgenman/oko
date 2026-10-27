@@ -69,8 +69,8 @@ test('reader card appearance preserves the compact layout, metadata and real pre
     const shot=artifactPath('reader-cards.png');
     await r.page.screenshot({path:shot}); console.info('Cards screenshot:',shot);
     expect(await row.evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(231, 241, 255)');
-    await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('importance');
-    await expect(r.page.locator('.date-group')).toHaveCount(0);await expect(row.locator('.card-date')).not.toHaveText('');
+    await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('oldest');
+    await expect(r.page.locator('.date-group')).toHaveCount(3);await expect(row.locator('.card-date')).toHaveCount(0);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });

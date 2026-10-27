@@ -2,9 +2,7 @@ openapi: 3.1.0
 info:
   title: Око API
   version: 3.0.0
-  description: Canonical client-independent contract. API major determines independent-client compatibility; contract digests
-    check only integrity of artifacts delivered together. Client abort does not roll back committed writes. Closed response
-    changes require semantic compatibility review.
+  description: Canonical HTTP contract. The cards response changed incompatibly within v3 by explicit user decision; old cards clients are not supported. Contract digests check integrity of artifacts delivered together. Client abort does not roll back committed writes.
 paths:
   /api/v3/collection-status:
     get:
@@ -7747,11 +7745,7 @@ paths:
     get:
       summary: Cards
       operationId: cards
-      description: Read ordered publication cards for optional folder/feed filters. Preserve hidden-material and sort semantics;
-        no grouped events or digests. All operations require bearer or persistent browser session authorization, allowed Host
-        and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting,
-        not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying.
-        Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+      description: Read a page of cards by folder or feed, with a cursor and conditional ETag.
       tags:
       - cards
       parameters:
@@ -7775,7 +7769,6 @@ paths:
           enum:
           - newest
           - oldest
-          - importance
           default: newest
         description: Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
       - name: show_hidden
@@ -7785,17 +7778,47 @@ paths:
           type: boolean
           default: false
         description: Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 40
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/MaterialId'
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         '200':
-          description: Read ordered publication cards for optional folder/feed filters. Preserve hidden-material and sort
-            semantics; no grouped events or digests.
+          description: Read ordered publication cards for optional folder/feed filters. Preserve hidden-material and
+            sort semantics; no grouped events or digests.
           content:
             application/json:
               schema:
-                type: array
+                $ref: '#/components/schemas/CardPage'
+              example:
                 items:
-                  $ref: '#/components/schemas/ReadingCard'
-              example: []
+                - id: example
+                  title: Publication
+                  feed_id: example
+                  published_at: null
+                  source_url: https://example.test/post/1
+                  preview_url: null
+                  loading: false
+                  changed: false
+                  hidden: false
+                  post_web_unavailable: false
+                  external_attachment_kinds: []
+                total: 1
+                next_cursor: null
           headers:
             Cache-Control:
               schema:
@@ -7805,8 +7828,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
+            ETag:
+              schema:
+                type: string
+              description: Validator for this exact page.
         '403':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -7844,7 +7872,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '422':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -7873,7 +7902,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '500':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -7897,7 +7927,158 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '503':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '304':
+          description: Page has not changed.
+        '409':
+          description: The cursor is no longer in the selected list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CursorExpired'
+              example:
+                code: cursor_expired
+  /api/v3/cards/read:
+    post:
+      summary: Mark cards viewed
+      operationId: read_cards
+      description: Atomically mark the supplied IDs viewed. Missing IDs are ignored; repeating the command is safe.
+      tags:
+      - cards
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardReadRequest'
+            example:
+              ids:
+              - example
+      responses:
+        '204':
+          description: The selected cards have been marked viewed.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -21000,50 +21181,18 @@ components:
       format: uuid
       examples:
       - 3f003741-d0c7-4e62-8d12-55fb652f404a
-    ReadingListTarget:
-      oneOf:
-      - $ref: '#/components/schemas/AllCollectionTarget'
-      - $ref: '#/components/schemas/FeedCollectionTarget'
-      - $ref: '#/components/schemas/FolderCollectionTarget'
-      examples:
-      - scope: all
-    ReadingListOptions:
-      type: object
-      additionalProperties: false
-      properties:
-        target:
-          $ref: '#/components/schemas/ReadingListTarget'
-        sort:
-          type: string
-          enum:
-          - newest
-          - oldest
-          - importance
-        show_hidden:
-          type: boolean
-      required:
-      - target
-      - sort
-      - show_hidden
-      examples:
-      - target:
-          scope: all
-        sort: newest
-        show_hidden: false
     ReadingResourceKind:
       type: string
       enum:
       - status
       - navigation
       - feed
-      - card
       - material
-      - list
       - filter
       - theses
       - media
       examples:
-      - card
+      - status
     CheckStatus:
       type: object
       additionalProperties: false
@@ -21097,27 +21246,6 @@ components:
       - known_version
       examples:
       - kind: feed
-        id: example
-        known_version: null
-    CheckCard:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: card
-          examples:
-          - card
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - id
-      - known_version
-      examples:
-      - kind: card
         id: example
         known_version: null
     CheckMaterial:
@@ -21204,70 +21332,28 @@ components:
       - kind: media
         id: example
         known_version: null
-    CheckList:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: list
-          examples:
-          - list
-        options:
-          $ref: '#/components/schemas/ReadingListOptions'
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-        known_cards:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/ReadingKnownVersion'
-          maxProperties: 50000
-      required:
-      - kind
-      - options
-      - known_version
-      - known_cards
-      examples:
-      - kind: list
-        options:
-          target:
-            scope: all
-          sort: newest
-          show_hidden: false
-        known_version: null
-        known_cards: {}
     ReadingCheck:
       oneOf:
       - $ref: '#/components/schemas/CheckStatus'
       - $ref: '#/components/schemas/CheckNavigation'
       - $ref: '#/components/schemas/CheckFeed'
-      - $ref: '#/components/schemas/CheckCard'
       - $ref: '#/components/schemas/CheckMaterial'
       - $ref: '#/components/schemas/CheckFilter'
       - $ref: '#/components/schemas/CheckTheses'
       - $ref: '#/components/schemas/CheckMedia'
-      - $ref: '#/components/schemas/CheckList'
       discriminator:
         propertyName: kind
         mapping:
           status: '#/components/schemas/CheckStatus'
           navigation: '#/components/schemas/CheckNavigation'
           feed: '#/components/schemas/CheckFeed'
-          card: '#/components/schemas/CheckCard'
           material: '#/components/schemas/CheckMaterial'
           filter: '#/components/schemas/CheckFilter'
           theses: '#/components/schemas/CheckTheses'
           media: '#/components/schemas/CheckMedia'
-          list: '#/components/schemas/CheckList'
       examples:
-      - kind: list
-        options:
-          target:
-            scope: all
-          sort: newest
-          show_hidden: false
+      - kind: status
         known_version: null
-        known_cards: {}
     ReadingCheckRequest:
       type: object
       additionalProperties: false
@@ -21288,18 +21374,34 @@ components:
       examples:
       - storage_id: null
         resources:
-        - kind: list
-          options:
-            target:
-              scope: all
-            sort: newest
-            show_hidden: false
+        - kind: status
           known_version: null
-          known_cards: {}
-    CompactReadingCard:
+    CardListItem:
       type: object
       additionalProperties: false
       properties:
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        title:
+          type: string
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+        published_at:
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        source_url:
+          $ref: '#/components/schemas/SourceUrl'
+        preview_url:
+          anyOf:
+          - $ref: '#/components/schemas/MediaUrl'
+          - type: 'null'
+        loading:
+          type: boolean
+        changed:
+          type: boolean
+        hidden:
+          type: boolean
         post_web_unavailable:
           type: boolean
           default: false
@@ -21316,87 +21418,88 @@ components:
             - image
             - document
             - unsupported
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        feed_id:
-          $ref: '#/components/schemas/FeedId'
-        title:
-          type: string
-        published_at:
-          anyOf:
-          - $ref: '#/components/schemas/Timestamp'
-          - type: 'null'
-        source_url:
-          $ref: '#/components/schemas/SourceUrl'
-        snippet:
-          type: string
-        availability:
-          type: string
-          enum:
-          - pending
-          - available
-        loading:
-          type: boolean
-        changed:
-          type: boolean
-        revision_id:
-          anyOf:
-          - $ref: '#/components/schemas/RevisionId'
-          - type: 'null'
-        preview_url:
-          anyOf:
-          - $ref: '#/components/schemas/MediaUrl'
-          - type: 'null'
-        hidden:
-          type: boolean
-        filter_state:
-          type: string
-          enum:
-          - disabled
-          - queued
-          - running
-          - ready
-          - waiting
-          - cancelled
-        theses_state:
-          type: string
-          enum:
-          - disabled
-          - queued
-          - running
-          - ready
-          - waiting
-          - cancelled
       required:
       - id
-      - feed_id
       - title
+      - feed_id
       - published_at
       - source_url
-      - snippet
-      - availability
+      - preview_url
       - loading
       - changed
-      - revision_id
-      - preview_url
       - hidden
-      - filter_state
-      - theses_state
+      - post_web_unavailable
+      - external_attachment_kinds
       examples:
       - id: example
-        feed_id: example
         title: Publication
+        feed_id: example
         published_at: null
-        source_url: https://example.org/item
-        snippet: Preview
-        availability: available
+        source_url: https://example.test/post/1
+        preview_url: null
         loading: false
         changed: false
-        revision_id: '1'
-        preview_url: null
         hidden: false
-        filter_state: disabled
-        theses_state: disabled
+        post_web_unavailable: false
+        external_attachment_kinds: []
+    CardPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CardListItem'
+        total:
+          type: integer
+          minimum: 0
+        next_cursor:
+          anyOf:
+          - $ref: '#/components/schemas/MaterialId'
+          - type: 'null'
+      required:
+      - items
+      - total
+      - next_cursor
+      examples:
+      - items:
+        - id: example
+          title: Publication
+          feed_id: example
+          published_at: null
+          source_url: https://example.test/post/1
+          preview_url: null
+          loading: false
+          changed: false
+          hidden: false
+          post_web_unavailable: false
+          external_attachment_kinds: []
+        total: 1
+        next_cursor: null
+    CardReadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/MaterialId'
+      required:
+      - ids
+      examples:
+      - ids:
+        - example
+    CursorExpired:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          const: cursor_expired
+      required:
+      - code
+      examples:
+      - code: cursor_expired
     ReadingFolderEntity:
       type: object
       properties:
@@ -21470,26 +21573,6 @@ components:
       - folders: []
         feeds: []
         count: 0
-    ReadingListData:
-      type: object
-      additionalProperties: false
-      properties:
-        ids:
-          type: array
-          items:
-            $ref: '#/components/schemas/MaterialId'
-        options:
-          $ref: '#/components/schemas/ReadingListOptions'
-      required:
-      - ids
-      - options
-      examples:
-      - ids: []
-        options:
-          target:
-            scope: all
-          sort: newest
-          show_hidden: false
     ReadingTextContent:
       type: object
       properties:
@@ -21941,53 +22024,6 @@ components:
           kind: demo
           connection: ready
           transport: null
-    ChangedCardResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: card
-          examples:
-          - card
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/CompactReadingCard'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: card
-        id: example
-        state: changed
-        version: '1'
-        data:
-          id: example
-          feed_id: example
-          title: Publication
-          published_at: null
-          source_url: https://example.org/item
-          snippet: Preview
-          availability: available
-          loading: false
-          changed: false
-          revision_id: '1'
-          preview_url: null
-          hidden: false
-          filter_state: disabled
-          theses_state: disabled
     ChangedMaterialResource:
       type: object
       additionalProperties: false
@@ -22169,45 +22205,6 @@ components:
           revision_id: '1'
           images: []
           attachments: []
-    ChangedListResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: list
-          examples:
-          - list
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/ReadingListData'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: list
-        id: '["all","","newest",false]'
-        state: changed
-        version: '1'
-        data:
-          ids: []
-          options:
-            target:
-              scope: all
-            sort: newest
-            show_hidden: false
     UnchangedReadingResource:
       type: object
       additionalProperties: false
@@ -22301,12 +22298,10 @@ components:
       - $ref: '#/components/schemas/ChangedStatusResource'
       - $ref: '#/components/schemas/ChangedNavigationResource'
       - $ref: '#/components/schemas/ChangedFeedResource'
-      - $ref: '#/components/schemas/ChangedCardResource'
       - $ref: '#/components/schemas/ChangedMaterialResource'
       - $ref: '#/components/schemas/ChangedFilterResource'
       - $ref: '#/components/schemas/ChangedThesesResource'
       - $ref: '#/components/schemas/ChangedMediaResource'
-      - $ref: '#/components/schemas/ChangedListResource'
       - $ref: '#/components/schemas/UnchangedReadingResource'
       - $ref: '#/components/schemas/UnavailableReadingResource'
       - $ref: '#/components/schemas/FailedReadingResource'

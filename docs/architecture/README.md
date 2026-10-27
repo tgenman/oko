@@ -142,6 +142,7 @@ The deeper documents are currently in Russian:
 | Actions, cancellation, admission, and shutdown | [Reader work](reader-work.md) |
 | Opened content and delayed browser responses | [Opened material](opened-material.md) |
 | Menus, settings, and drafts | [UI settings](ui-settings.md) |
+| Card pagination, visible updates, and viewing selected IDs | [Cards HTTP contract](cards-http-design.md) |
 | Cards, hidden material, and folder completion | [Reading composition](reading-composition.md) |
 | React, generated clients, and asset delivery | [Frontend/backend](frontend-backend.md) |
 | Actual checks and integration limits | [Verification reports](../verification/) |

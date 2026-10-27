@@ -22,7 +22,7 @@ test('production HTTP saves choices, reads provenance and recreates material fro
   await page.locator('#settings-close').click();
   await api('feeds/'+feed.id,'PATCH',{public_ai:true});
   await api('settings/oko/global','PATCH',{theses:true});
-  await expect.poll(async()=>(await api('cards')).some(c=>c.theses.result),{timeout:10000}).toBe(true);
+  await expect.poll(async()=>(await Promise.all((await api('cards')).items.map(c=>api(`materials/${c.id}`)))).some(c=>c.theses.result),{timeout:10000}).toBe(true);
   await page.locator('#cards button').click();
   await page.locator('#processing-details summary').click();
   await expect(page.locator('#processing-provenance')).toContainText('synthetic');

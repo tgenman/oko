@@ -362,7 +362,8 @@ test('storage replacement rejects old media replies and stages the replacement b
         return new Response(JSON.stringify({...frame,storage_id}),{headers:{'Content-Type':'application/json'}});
       };
     });
-    await r.start([material('A',{version:'old',images:[url]})]);
+    await r.start([material('A',{version:'old',images:[]})]);
+    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/api/v3/materials/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,images:[url]};},url);
     await r.page.evaluate(url=>readerTransport.held.set(url,true),url);
     await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
     await r.page.evaluate(()=>{

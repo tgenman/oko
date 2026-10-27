@@ -14,7 +14,7 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
  await addSources(r.api,[['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa','Synthetic YouTube','Inbox']]);
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
  await r.page.locator('[data-card]').click();
- const card=(await r.api('cards'))[0];
+ const card=((await r.api('cards')).items)[0];
  expect(card.source_url).toBe('https://www.youtube.com/watch?v=abcdefghijk');
  if(initial==='error'){
   await expect(r.page.locator('#completeness')).toContainText('Synthetic caption error');

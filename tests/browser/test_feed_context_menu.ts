@@ -27,7 +27,7 @@ test('feed context menu supports settings, nested folder move, read all and conf
  await expect(row(beta.id)).toHaveAttribute('aria-pressed','true');await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await row(alpha.id).click({button:'right'});await page.getByRole('menuitem',{name:'Mark All as Read',exact:true}).click();await expect(page.locator('#feed-action-confirm')).toBeEnabled();
  await page.locator('#feed-action-confirm').click();await expect(page.locator('#feed-action-dialog')).toHaveCount(0);
- await expect.poll(async()=>(await api('cards')).length).toBe(2);await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await expect.poll(async()=>((await api('cards')).items).length).toBe(2);await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await page.locator('#read-feeds-toggle').click();await row(alpha.id).click({button:'right'});await expect(page.getByRole('menuitem',{name:'Mark All as Read',exact:true})).toBeDisabled();await page.keyboard.press('Escape');
  await row(beta.id).click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await page.locator('#feed-action-cancel').click();expect((await api('subscriptions')).feeds.some(f=>f.id===beta.id)).toBe(true);
  await row(beta.id).click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await page.locator('#feed-action-confirm').click();

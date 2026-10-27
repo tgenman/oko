@@ -1,10 +1,9 @@
 """Persisted versions of reader entities and their derived membership.
 
-Versions are updated by the same database transaction as their inputs. There is
-no database cursor or event history. Lists retain only a digest of service IDs.
+Versions are updated by the same database transaction as their inputs.
+The current card list is read directly and does not maintain list digests.
 """
 from oko.storage.database import expect_row, Connection, Row
-import hashlib
 import json
 from oko.storage.transaction import begin_write
 import uuid
@@ -20,7 +19,7 @@ class ReaderVersions:
         self.store, self.db = store, store.db
         self.offset = store.wall_clock() - store.clock()
         self._next_action_cleanup = float('-inf')
-        self.db.before_commit=lambda: self.flush_reading_lists(self.db)
+        self.db.before_commit=lambda: self.flush_reading_state(self.db)
         with self.db:
             self.db.execute('INSERT INTO reader_identity VALUES ( 1 , %s ) ON CONFLICT DO NOTHING', (str(uuid.uuid4()),))
             for kind, identity in [('status', 'runtime'), ('navigation', 'navigation')]:
@@ -40,19 +39,12 @@ class ReaderVersions:
             self.refresh_memberships(self.db)
 
     @staticmethod
-    def flush_reading_lists(db: Connection) -> None:
+    def flush_reading_state(db: Connection) -> None:
         for row in db.execute('SELECT kind , identity FROM reader_membership_dirty'):
             (db.membership_feeds if row['kind']=='feed' else db.membership_folders).add(row['identity'])
         db.execute('DELETE FROM reader_membership_dirty')
         if getattr(db,'membership_feeds',None) or getattr(db,'membership_folders',None):
             ReaderVersions.refresh_memberships(db)
-        rows=db.execute('SELECT identity , scope , owner , sort , hidden , digest FROM reader_lists WHERE pending = 1').fetchall()
-        for identity,scope,owner,sort,hidden,previous in rows:
-            ids=[row[0] for row in db.execute(ReaderVersions._ids(scope,'%(owner)s','%(sort)s','%(hidden)s'),dict(scope=scope,owner=owner,sort=sort,hidden=hidden))]
-            digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
-            db.execute('UPDATE reader_lists SET version = version + %s , changed = CASE WHEN %s = 1 THEN oko_reader_time ( ) ELSE changed END , digest = %s , pending = 0 WHERE identity = %s',
-                         (int(digest!=previous),int(digest!=previous),digest,identity))
-
     @staticmethod
     def refresh_memberships(db: Connection) -> None:
         feeds: set[str]=getattr(db,'membership_feeds',set())
@@ -64,10 +56,8 @@ class ReaderVersions:
             row=db.execute('SELECT folder_id FROM feeds WHERE id = %s',(feed,)).fetchone()
             if row:
                 folders.add(row[0])
-            db.execute("UPDATE reader_lists SET pending = 1 WHERE scope = 'all' OR ( scope = 'feed' AND owner = %s )",(feed,))
         for folder in folders:
             db.execute('UPDATE reader_folder_counts SET visible = ( SELECT count ( DISTINCT m . publication_id ) FROM reading_memberships m JOIN feeds f ON f . id = m . feed_id JOIN items_read i ON i . id = m . publication_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE f . folder_id = folder AND i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 ) WHERE folder = %s',(folder,))
-            db.execute("UPDATE reader_lists SET pending = 1 WHERE scope = 'folder' AND owner = %s",(folder,))
 
 
     @staticmethod
@@ -82,19 +72,6 @@ class ReaderVersions:
         self.media_changed(item)
         for kind in ('filter','theses'):
             self.db.execute(self._bump(kind,'%s'),(item,))
-
-
-
-
-    @staticmethod
-    def _ids(scope: str, owner: str, sort: str, hidden: str) -> str:
-        membership = {
-            'all': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id)',
-            'feed': f'i.id IN (SELECT m.publication_id FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.feed_id={owner})',
-            'folder': f'i.id IN (SELECT m.publication_id FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE owner_feed.folder_id={owner})',
-        }[scope]
-        return f"SELECT i . id FROM items_read i JOIN feeds f ON f . id = i . feed_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE i . viewed = 0 AND ( {hidden} = 1 OR coalesce ( v . hidden , 0 ) = 0 ) AND {membership} ORDER BY CASE WHEN {sort} = 'importance' THEN CASE f . importance WHEN 'high' THEN - 2 WHEN 'elevated' THEN - 1 ELSE 0 END ELSE 0 END , CASE WHEN {sort} != 'importance' THEN CAST ( i . published_known = 0 AS INTEGER ) ELSE 0 END , CASE WHEN {sort} = 'importance' THEN - i . published WHEN i . published_known = 0 THEN 0 WHEN {sort} = 'oldest' THEN i . published ELSE - i . published END , CASE WHEN {sort} != 'importance' THEN i . feed_id ELSE '' END , CASE WHEN {sort} = 'importance' THEN 0 WHEN {sort} = 'oldest' THEN - coalesce ( i . source_order , 0 ) ELSE coalesce ( i . source_order , 0 ) END , i . id"
-
 
 
 
@@ -118,31 +95,6 @@ class ReaderVersions:
             rows=self.db.execute(f"WITH wanted ( kind , identity ) AS ( VALUES {marks} ) SELECT e . * , i . id AS item_exists , i . viewed , f . id AS feed_exists FROM wanted w JOIN reader_entities e ON e . kind = w . kind AND e . identity = w . identity LEFT JOIN items_read i ON e . kind IN ( 'card' , 'material' , 'filter' , 'theses' , 'media' ) AND i . id = e . identity LEFT JOIN feeds f ON e . kind = 'feed' AND f . id = e . identity", [v for pair in batch for v in pair])
             result.update({(r['kind'],r['identity']):r for r in rows})
         return result
-
-    @staticmethod
-    def list_identity(options: dict[str, Any]) -> str:
-        target = options['target']
-        return json.dumps([target['scope'],target.get('feed_id',target.get('folder_id','')),options['sort'],options['show_hidden']],ensure_ascii=False,separators=(',',':'))
-
-    def ids(self, options: dict[str, Any]) -> list[str]:
-        target=options['target']
-        sql=self._ids(target['scope'],'%(owner)s','%(sort)s','%(hidden)s')
-        return [r[0] for r in self.db.execute(sql,dict(scope=target['scope'],owner=target.get('feed_id',target.get('folder_id','')),sort=options['sort'],hidden=int(options['show_hidden'])))]
-
-    def list_version(self, options: dict[str, Any]) -> Row:
-        identity=self.list_identity(options)
-        self.db.flush()
-        row=self.db.execute('SELECT version , changed FROM reader_lists WHERE identity = %s',(identity,)).fetchone()
-        if row:return row
-        ids=self.ids(options)
-        # Use the canonical compact JSON array used by write-side list maintenance.
-        digest=hashlib.sha256(json.dumps(ids,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
-        target=options['target']
-        with self.db:
-            self.db.execute('INSERT INTO reader_lists ( identity , scope , owner , sort , hidden , version , changed , digest ) VALUES ( %s , %s , %s , %s , %s , 1 , %s , %s )',(identity,target['scope'],target.get('feed_id',target.get('folder_id','')),options['sort'],int(options['show_hidden']),self.store.wall_clock(),digest))
-        row=self.db.execute('SELECT version , changed FROM reader_lists WHERE identity = %s',(identity,)).fetchone()
-        assert row is not None
-        return row
 
     def advance(self, metadata: dict[str, Any], now: float | None = None, wall: float | None = None) -> None:
         now=self.store.clock() if now is None else now

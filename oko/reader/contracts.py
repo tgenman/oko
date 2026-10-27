@@ -3,10 +3,10 @@ import json
 from pathlib import Path
 from typing import Any
 from pydantic import TypeAdapter
-from oko.reader.generated.models import ReadingComposition, ReadingCard, ReadableMaterial, RuntimeStatus
+from oko.reader.generated.models import ReadingComposition, CardPage, ReadableMaterial, RuntimeStatus
 
 CONTRACTS: dict[str, TypeAdapter[Any]] = {
-    'navigation': TypeAdapter(ReadingComposition), 'cards': TypeAdapter(list[ReadingCard]),
+    'navigation': TypeAdapter(ReadingComposition), 'cards': TypeAdapter(CardPage),
     'material': TypeAdapter(ReadableMaterial),
     'status': TypeAdapter(RuntimeStatus),
 }

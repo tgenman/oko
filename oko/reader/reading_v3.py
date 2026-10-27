@@ -192,34 +192,56 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
         with reading_snapshot():
             return composition().folders
 
-    @app.get('/api/v3/cards', response_model=list[wire.ReadingCard])
+    @app.get('/api/v3/cards', response_model=wire.CardPage)
     @read_locked(runtime.execution)
-    async def cards(request: Request) -> list[wire.ReadingCard]:
+    async def cards(request: Request) -> Response:
+        import hashlib
+        import json
+        from fastapi.responses import JSONResponse
+        allowed={'folder','feed','sort','show_hidden','cursor','limit'}
+        for key in request.query_params:
+            if key not in allowed or len(request.query_params.getlist(key)) != 1:
+                raise ApiError(422, invalid('query',key))
+        folder,feed=request.query_params.get('folder'),request.query_params.get('feed')
+        if folder is not None and feed is not None:raise ApiError(422,invalid('query','folder'))
+        for key,value in (('folder',folder),('feed',feed),('cursor',request.query_params.get('cursor'))):
+            if value is not None:
+                try:
+                    wire.FolderId(value) if key=='folder' else wire.FeedId(value) if key=='feed' else wire.MaterialId(value)
+                except ValueError:raise ApiError(422,invalid('query',key)) from None
+        sort=request.query_params.get('sort','newest')
+        if sort not in ('newest','oldest'):raise ApiError(422,invalid('query','sort'))
+        raw_limit=request.query_params.get('limit','40')
+        if len(raw_limit)>3 or not raw_limit.isascii() or not raw_limit.isdecimal() or not 1<=int(raw_limit)<=200:
+            raise ApiError(422,invalid('query','limit'))
+        limit=int(raw_limit)
+        target=dict(scope='folder',folder_id=folder) if folder is not None else dict(scope='feed',feed_id=feed) if feed is not None else dict(scope='all')
+        options=dict(target=target,sort=sort,show_hidden=scalar_boolean(request,'show_hidden'))
+        current=runtime.queries
         with reading_snapshot():
-            allowed = {'folder', 'feed', 'sort', 'show_hidden'}
-            for key in request.query_params:
-                if key not in allowed or len(request.query_params.getlist(key)) != 1:
-                    raise ApiError(422, invalid('query', key))
-            sort = request.query_params.get('sort', 'newest')
-            if sort not in ('newest', 'oldest', 'importance'):
-                raise ApiError(422, invalid('query', 'sort'))
-            folder, feed = request.query_params.get('folder'), request.query_params.get('feed')
-            for key, value in (('folder', folder), ('feed', feed)):
-                if value is not None:
-                    try:
-                        wire.FolderId(value) if key == 'folder' else wire.FeedId(value)
-                    except ValueError:
-                        raise ApiError(422, invalid('query', key)) from None
-            current = runtime.queries
-            values = [facts.Card.model_validate(v) for v in current.cards(scalar_boolean(request, 'show_hidden'), folder, feed)]
-            if sort == 'importance':
-                values.sort(key=lambda c: (-{'normal':0, 'elevated':1, 'high':2}[c.importance], -c.published, c.id))
-            else:
-                values.sort(key=lambda c: (not c.published_known, c.published if c.published_known and sort == 'oldest' else -c.published if c.published_known else 0, c.feed_id, (-1 if sort == 'oldest' else 1) * (c.source_order if isinstance(c.source_order, int) else 0), c.id))
-            owners = {}
-            for owner_id in {value.feed_id for value in values}:
-                owners.update(feeds(owner_id))
-            return [card(runtime, value, owners[value.feed_id]) for value in values]
+            page=current.page(options,request.query_params.get('cursor'),limit)
+            if page is None:return JSONResponse({'code':'cursor_expired'},status_code=409)
+            identities,total=page
+            shown=identities[:limit]
+            versions=current.versions.batch({('card',item) for item in shown})
+            signature=[current.versions.identity,options,request.query_params.get('cursor'),limit,total,identities,[(item,versions.get(('card',item),{}).get('version')) for item in shown]]
+            tag='"'+hashlib.sha256(json.dumps(signature,sort_keys=True,ensure_ascii=False).encode()).hexdigest()+'"'
+            headers={'ETag':tag,'Cache-Control':'private, no-cache'}
+            if request.headers.get('if-none-match')==tag:return Response(status_code=304,headers=headers)
+            items=[]
+            with current.inputs(set(shown),include_subtitles=False):
+                for item in shown:
+                    card_data=current.card(item)
+                    if card_data is None:continue
+                    if card_data['published_at'] is not None:card_data['published_at']=project.timestamp(card_data['published_at']).root
+                    keys=('id','title','feed_id','published_at','source_url','preview_url','loading','changed','hidden','post_web_unavailable','external_attachment_kinds')
+                    items.append({key:card_data[key] for key in keys})
+            return JSONResponse(wire.CardPage.model_validate(dict(items=items,total=total,next_cursor=identities[limit] if len(identities)>limit else None)).model_dump(mode='json'),headers=headers)
+
+    @app.post('/api/v3/cards/read', status_code=204, dependencies=[Depends(no_query)])
+    async def read_cards(body: wire.CardReadRequest) -> Response:
+        await runtime.viewed_many([item.root for item in body.ids])
+        return Response(status_code=204)
 
     @router.get('/api/v3/materials/{item}', response_model=wire.ReadableMaterial)
     @read_locked(runtime.execution)

@@ -17,7 +17,7 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await r.page.locator('[data-card]').click();
  const own=kind==='rss'?'Own announcement.':'Own Telegram post.';
  await expect(r.page.locator('#text')).toContainText(own);
- await expect.poll(async()=>{const cards=await r.api('cards');return cards[0]?.theses.result!==null;}).toBe(true);
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&(await r.api(`materials/${cards[0].id}`)).theses.result!==null;}).toBe(true);
  await expect(r.page.locator('#theses')).toContainText(own);
  await expect(r.page.locator('#theses')).not.toContainText('Article text arrived.');
  await r.setArticleState('error');
@@ -34,9 +34,10 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await expect(r.page.locator('#theses')).toContainText('Article text arrived.');
  await expect(r.page.locator('#theses')).toContainText(own);
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
- const cards=await r.api('cards');
- if(cards[0].availability!=='available'||!cards[0].theses.result) throw new Error('Missing accepted theses');
- const refs=cards[0].theses.result.points.flatMap(p=>p.references);
+ const cards=(await r.api('cards')).items;
+ const material=await r.api(`materials/${cards[0].id}`);
+ if(material.availability!=='available'||!material.theses.result) throw new Error('Missing accepted theses');
+ const refs=material.theses.result.points.flatMap(p=>p.references);
  expect(refs.some(ref=>ref.material_id!==cards[0].id&&ref.source_url.includes(kind==='rss'?'linked.example':'telegra.ph'))).toBe(true);
  await r.setMediaState('error');
  await expect(r.page.locator('#completeness')).toContainText('Не удалось загрузить вложение');

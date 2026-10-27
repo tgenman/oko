@@ -21,6 +21,20 @@ class ReadingService:
             raise ActionError('missing', 'Материал не найден')
         return members
 
+    @repository_access
+    def viewed_many(self, identities: list[str]) -> set[str]:
+        repository = self._storage()
+        selected = sorted(set(identities))
+        members: set[str] = set()
+        for start in range(0, len(selected), 400):
+            batch = selected[start:start+400]
+            marks = ','.join('%s' for _ in batch)
+            members.update(row[0] for row in repository.db.execute(
+                f'SELECT id FROM items_read WHERE viewed = 0 AND id IN ( {marks} )', batch))
+        if members and not repository.viewed_set(sorted(members)):
+            raise RuntimeError('Selected material disappeared during viewing')
+        return members
+
     def _contents(self, owner: str, scope: Literal['folder', 'feed']) -> FolderContents:
         repository = self._storage()
         try:

@@ -12,7 +12,7 @@ test('one publication belongs to both feeds and survives deleting its first feed
  await addSources(r.api,[['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa','First','One'],['https://www.youtube.com/feeds/videos.xml?channel_id=UCbbbbbbbbbbbbbbbbbbbbbb','Second','Two']]);
  const feeds=(await r.api('subscriptions')).feeds;
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
- const item=(await r.api('cards'))[0]!.id;
+ const item=((await r.api('cards')).items)[0]!.id;
  await expect.poll(async()=>(await r.api('reading-composition')).feeds.map(f=>f.count)).toEqual([1,1]);
  for(const feed of feeds){
   await r.page.locator(`[data-feed="${feed.id}"]`).click();
@@ -28,7 +28,7 @@ test('one publication belongs to both feeds and survives deleting its first feed
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
- expect((await r.api('cards')).map(c=>c.id)).toEqual([item]);
+ expect(((await r.api('cards')).items).map(c=>c.id)).toEqual([item]);
  await r.page.screenshot({path:artifactPath('shared-publication-survives.png')});
  await r.page.getByRole('button',{name:'Mark as Read',exact:true}).click();
  await expect(r.page.locator('[data-card]')).toHaveCount(0);
