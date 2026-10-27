@@ -10,17 +10,10 @@ from pydantic import TypeAdapter
 from oko.reader.generated import models as wire
 from oko.reader import projection_v3 as project, snapshots as facts
 from oko.reader.api_v3 import ApiError, invalid, no_query
-from oko.storage.composition import snippet, telegram_title
+from oko.storage.composition import telegram_title
 from oko.application.reader import ReaderApplication
 from oko.storage.reader_versions import ReaderVersions
-from oko.storage import material_read, publication_links
 from oko.storage.reading import reading_snapshot, stable_reader_time, reader_now
-
-
-def _state(status: str | None, error: str | None = None) -> str:
-    if error and status != 'running':
-        return 'waiting'
-    return {'done':'ready','pending':'queued','off':'disabled',None:'disabled'}.get(status, status or 'disabled')
 
 
 class VersionedReading:
@@ -30,46 +23,10 @@ class VersionedReading:
         self.final: dict[str, Any] | None = None
 
     def compact(self, identity: str) -> dict[str, Any] | None:
-        store = self.runtime.queries
-        row = store.item(identity)
-        if row is None or row['viewed']:
-            return None
-        result: dict[str, Any] = dict(id=identity,feed_id=row['feed_id'],title='Материал загружается',
-            published_at=project.timestamp(row['published']) if row['published_known'] else None,
-            source_url=row['url'],snippet='',availability='pending',loading=False,changed=False,
-            revision_id=None,preview_url=None,hidden=False,filter_state='disabled',theses_state='disabled')
-        if not row['complete']:
-            job = store.jobs(identity).get('fetch')
-            result['loading'] = bool(job and job['status'] in ('pending', 'running'))
-            return result
-        header,text=store.original(identity)
-        filtered=store.filter(identity)
-        description=header.get('description','')
-        preview=description or text
-        if filtered['status']=='done':
-            for _ in range(1 if description else 2):
-                for fragment in filtered['removed']:
-                    preview=preview.replace(fragment,'')
-        settings=store.effective('feed',row['feed_id'], details=False)
-        title=header['title']
-        if settings['feed']['kind']=='telegram' and settings['feed'].get('transport')!='rss':
-            title=telegram_title(header,text)
-        image=None
-        attachment=next((a for a in header.get('attachments',[]) if a['kind']=='image'),None)
-        jobs = store.jobs(identity)
-        fetch = jobs.get('fetch')
-        theses=jobs.get('theses')
-        theses_state=_state(theses['status'] if theses else 'pending',theses['error'] if theses else None) if store.theses_signature(identity) else 'disabled'
-        result.update(title=title,snippet=snippet(preview),availability='available',hidden=bool(filtered['hidden']),
-            filter_state=_state(filtered['status'],filtered.get('error')),theses_state=theses_state,
-            changed=bool(header.get('changed')),revision_id=store.content_version(identity),
-            loading=bool(fetch and (fetch['status']=='running' or fetch['status']=='pending' and fetch['next']<=reader_now(store.clock()))),
-            preview_url=header.get('_media_urls',{}).get(image.name,f'/api/v3/materials/{identity}/images/{image.name}') if image else header.get('_media_urls',{}).get(attachment['name'],f"/api/v3/materials/{identity}/media/{attachment.get('media_id',attachment['name'])}") if attachment else None)
-        result['loading'] = result['loading'] or row['platform'] is not None and store.media_loading(identity)
-        external = saved_external(header,f'/api/v3/materials/{identity}')
-        result['post_web_unavailable'] = external['post_web_unavailable']
-        result['external_attachment_kinds'] = list(dict.fromkeys(a['kind'] for a in external['external_attachments']))
-        return result
+        card = self.runtime.queries.card(identity)
+        if card is not None and card['published_at'] is not None:
+            card['published_at'] = project.timestamp(card['published_at'])
+        return card
 
     def text(self, identity: str) -> dict[str, Any]:
         store=self.runtime.queries

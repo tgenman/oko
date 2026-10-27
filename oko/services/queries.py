@@ -159,6 +159,11 @@ class ReadingQueries:
         return self._storage().reading.navigation()
 
     @repository_access
+    def card(self, identity: str) -> dict[str, Any] | None:
+        from oko.storage.card_read import card
+        return card(self._storage(), identity)
+
+    @repository_access
     def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
         return self._storage().reading.cards(show_hidden=show_hidden, folder=folder, feed=feed)
 
