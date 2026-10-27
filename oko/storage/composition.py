@@ -165,3 +165,13 @@ class ReadingComposition:
 
     def members(self, identity: str) -> list[str]:
         return [identity]
+
+    def unviewed(self, identities: list[str]) -> set[str]:
+        selected = sorted(set(identities))
+        members: set[str] = set()
+        for start in range(0, len(selected), 400):
+            batch = selected[start:start+400]
+            marks = ','.join('%s' for _ in batch)
+            members.update(row[0] for row in self._store.db.execute(
+                f'SELECT id FROM items_read WHERE viewed = 0 AND id IN ( {marks} )', batch))
+        return members
