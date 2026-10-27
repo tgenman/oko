@@ -1,4 +1,5 @@
 """Reader readiness, responsiveness and stop do not wait for full-library recovery."""
+from tests.support.cards import read_all_cards
 import json
 from contextlib import closing
 import os
@@ -147,7 +148,7 @@ def test_settings_and_viewed_during_recovery_survive_an_early_stop_and_restart(p
         with closing(ready(root, process)) as client:
             assert client.get('/api/v3/settings/oko/global').json()['effective']['prompt_filters']['value'] == 'Keep useful text'
             assert client.get('/api/v3/materials/'+cards[0]['id']).status_code == 404
-            assert len(client.get('/api/v3/cards').json()) == len(cards)-1
+            assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)-1
             assert client.get('/api/v3/status').json()['runtime_state'] == 'disabled'
             assert client.post('/api/v3/stop').status_code == 200
             assert process.wait(timeout=3) == 0
@@ -168,17 +169,17 @@ def test_enabled_work_waits_for_recovery_then_runs_without_a_second_start(postgr
             # Demo collection is queued during initialization but must wait for
             # recovery; settings/external checks still have ordinary admission.
             time.sleep(.8)
-            assert len(client.get('/api/v3/cards').json()) == len(cards)
+            assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)
             # Remove the external latency before testing ordinary collection;
             # the fixture targets recovery, not normal publication writes.
             with psycopg.connect(postgres_url, autocommit=True) as db:
                 db.execute('DROP TRIGGER slow_recovery ON items')
             deadline = time.monotonic()+20
             while time.monotonic() < deadline:
-                if len(client.get('/api/v3/cards').json()) == len(cards)+3:
+                if len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3:
                     break
                 time.sleep(.05)
-            assert len(client.get('/api/v3/cards').json()) == len(cards)+3
+            assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3
             assert client.post('/api/v3/stop').status_code == 200
             assert process.wait(timeout=3) == 0
     finally:
@@ -195,9 +196,9 @@ def test_global_settings_after_startup_queue_slow_reconciliation_without_blockin
         with closing(ready(root, process)) as client:
             assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
             deadline = time.monotonic()+20
-            while len(client.get('/api/v3/cards').json()) != len(cards)+3 and time.monotonic() < deadline:
+            while len(read_all_cards(client, '/api/v3/cards')) != len(cards)+3 and time.monotonic() < deadline:
                 time.sleep(.05)
-            assert len(client.get('/api/v3/cards').json()) == len(cards)+3
+            assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3
             # Collection proves the initial recovery finished and crons started.
             assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
             with psycopg.connect(postgres_url, autocommit=True) as db:
@@ -242,9 +243,9 @@ def test_background_reconciliation_failure_closes_work_admission_and_can_stop(po
         with closing(ready(root, process)) as client:
             assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
             deadline = time.monotonic()+10
-            while len(client.get('/api/v3/cards').json()) != len(cards)+3 and time.monotonic() < deadline:
+            while len(read_all_cards(client, '/api/v3/cards')) != len(cards)+3 and time.monotonic() < deadline:
                 time.sleep(.05)
-            assert len(client.get('/api/v3/cards').json()) == len(cards)+3
+            assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3
             with psycopg.connect(postgres_url, autocommit=True) as db:
                 db.execute('''CREATE FUNCTION failed_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
                     BEGIN RAISE EXCEPTION 'synthetic private recovery failure'; END $$''')

@@ -1,4 +1,5 @@
 """Independent collection progress through the reader HTTP interface."""
+from tests.support.cards import read_all_cards
 import asyncio
 import threading
 import time
@@ -72,8 +73,8 @@ def test_blocked_personal_download_keeps_web_and_collection_live_until_stop(tmp_
             assert telegram.downloading.wait(2)
             deadline = time.monotonic()+2
             while time.monotonic() < deadline:
-                cards = client.get('/api/v3/cards').json()
-                if all(any(c['feed_id']==feed and (c['availability'] == 'available') for c in cards) for feed in feeds[1:]):
+                cards = read_all_cards(client, '/api/v3/cards')
+                if all(any(c['feed_id']==feed and (client.get('/api/v3/materials/'+c['id']).json()['availability'] == 'available') for c in cards) for feed in feeds[1:]):
                     break
                 time.sleep(.02)
             else:
@@ -171,11 +172,11 @@ def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_acc
                     access={'kind':'client','profile':role})).status_code == 200
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            if telegram.calls == 1 and any((c['availability'] == 'available') for c in client.get('/api/v3/cards').json()):
+            if telegram.calls == 1 and any((client.get('/api/v3/materials/'+c['id']).json()['availability'] == 'available') for c in read_all_cards(client, '/api/v3/cards')):
                 break
             time.sleep(.02)
         assert telegram.calls == 1
-        assert any((c['availability'] == 'available') for c in client.get('/api/v3/cards').json())
+        assert any((client.get('/api/v3/materials/'+c['id']).json()['availability'] == 'available') for c in read_all_cards(client, '/api/v3/cards'))
     mono[0] = 10
     wall[0] += 30
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:

@@ -1,4 +1,5 @@
 """Linked articles remain independent publications at the reader HTTP boundary."""
+from tests.support.cards import read_all_cards, read_materials_for_cards
 import httpx
 
 from tests.support.publication_pipeline import publication_root
@@ -41,7 +42,7 @@ def test_two_rss_records_with_one_url_keep_distinct_guid_identities(tmp_path):
         # Explicit replay opens the whole currently available RSS window.
         wait_cards(client)
         client.post('/api/v3/collect')
-        cards=wait_for(client,lambda:(cards if len(cards:=client.get('/api/v3/cards').json())==2 else None))
+        cards=wait_for(client,lambda:(cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==2 else None))
         assert len({card['id'] for card in cards})==2
 
 
@@ -72,7 +73,8 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             import_feed(client)
             presence(client,'rss')
             card=wait_cards(client,idle=False)[0]
-            assert client.get('/api/v3/materials/'+card['id']).json()['content']['text']=='Own excerpt'
+            initial=client.get('/api/v3/materials/'+card['id']).json()
+            assert initial['content']['text']=='Own excerpt'
             assert started.wait(3)
             release.set()
             value=wait_for(client,lambda:(value if 'Article body' in (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['text'] else None))
@@ -80,8 +82,8 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             assert client.get('/api/v3/status').status_code==200
             assert client.get('/api/v3/reading/materials/'+card['id']).status_code==200
             assert 'Own excerpt' in value['content']['text']
-            assert value['content']['revision_id']!=card['revision_id']
-            assert len(client.get('/api/v3/cards').json())==1
+            assert value['content']['revision_id']!=initial['content']['revision_id']
+            assert len(read_all_cards(client, '/api/v3/cards'))==1
             with database(root) as db:
                 linked=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(card['id'],)).fetchone()[0]
                 row=db.execute('SELECT feed_id , platform , status , content FROM items_read WHERE id = %s',(linked,)).fetchone()
@@ -129,7 +131,7 @@ def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp
             client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True})
             import_feed(client)
             presence(client,'rss')
-            card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result']),None))
+            card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
             assert len(calls)==1 and calls[0]['sources'][0]['text']=='Own excerpt'
             release.set()
             updated=wait_for(client,lambda:(value if (value:=client.get('/api/v3/materials/'+card['id']).json())['theses']['result'] and len(value['theses']['result']['points'])==2 else None))
@@ -171,7 +173,7 @@ def test_filter_uses_article_with_context_but_only_changes_roots_derived_content
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'Убери рекламу.'})
         import_feed(client)
         presence(client,'rss')
-        card=wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if c['theses']['result'] and len(c['theses']['result']['points'])==2),None))
+        card=wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if c['theses']['result'] and len(c['theses']['result']['points'])==2),None))
         filters=[task for task in calls if task['operation']=='filter' and len(task['sources'])==2]
         assert filters and filters[-1]['sources'][0]['text']=='Own context'
         article=filters[-1]['sources'][1]['id']
@@ -291,7 +293,7 @@ def test_empty_rss_excerpt_waits_for_article_then_processes_its_actual_input(tmp
             import_feed(client)
             presence(client,'rss')
             card=wait_cards(client,idle=False)[0]
-            assert not calls and card['theses']['result'] is None
+            assert not calls and client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] is None
             release.set()
             updated=wait_for(client,lambda:(value if (value:=client.get('/api/v3/materials/'+card['id']).json())['theses']['result'] and value['theses']['result']['points'] else None))
             assert updated['theses']['result']['points'][0]['text']=='Actual article text'
@@ -312,7 +314,7 @@ def test_explicit_rss_replay_can_collect_a_previously_read_record_again(tmp_path
         card=wait_cards(client)[0]
         client.post('/api/v3/materials/'+card['id']+'/viewed')
         wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
-        assert client.get('/api/v3/cards').json()==[]
+        assert read_all_cards(client, '/api/v3/cards')==[]
         client.post('/api/v3/collect')
         replayed=wait_cards(client)[0]
         assert replayed['id']!=card['id']
@@ -375,7 +377,7 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
             release.set()
             assert returned.wait(3)
             wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
-            assert client.get('/api/v3/cards').json()==[]
+            assert read_all_cards(client, '/api/v3/cards')==[]
             with database(root) as db:
                 assert not db.execute('SELECT 1 FROM publication_links').fetchone()
                 assert not db.execute("SELECT 1 FROM items WHERE content LIKE '%Late article must not survive%'").fetchone()
@@ -407,14 +409,14 @@ def test_article_host_wait_blocks_new_jobs_across_restart_but_not_other_hosts(tm
         add_source(client,'https://feeds.example/second','Second','News')
         add_source(client,'https://feeds.example/other','Other','News')
         cards=wait_cards(client,3)
-        other=next(card for card in cards if card['feed_title']=='Other')
+        other=next(card for card in cards if client.get('/api/v3/materials/'+card['id']).json()['feed_title']=='Other')
         wait_for(client,lambda:'Other host works' in client.get('/api/v3/materials/'+other['id']).json()['content']['text'])
         assert calls==['https://blocked.example/first','https://other.example/other']
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         add_source(client,'https://feeds.example/third','Third','News')
         presence(client,'rss')
         wait_cards(client,4)
-        third=next(card for card in client.get('/api/v3/cards').json() if card['feed_title']=='Third')
+        third=next(card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['feed_title']=='Third')
         wait_for(client,lambda:'недоступна' in client.get('/api/v3/materials/'+third['id']).json()['content']['completeness'].get('message',''))
         assert [url for url in calls if url.startswith('https://blocked.example/')]==['https://blocked.example/first']
         assert 'https://other.example/other' in calls

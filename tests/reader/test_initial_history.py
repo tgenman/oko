@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 import time
 import pytest
@@ -38,12 +39,12 @@ def test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count(tm
                 break
             time.sleep(.02)
         assert history['progress']['loaded'] == 2
-        assert {card['source_url'] for card in client.get('/api/v3/cards').json()} == {'https://source.test/post/5', 'https://source.test/post/4'}
+        assert {card['source_url'] for card in read_all_cards(client, '/api/v3/cards')} == {'https://source.test/post/5', 'https://source.test/post/4'}
     posts.insert(0, 6)
     with open_reader() as client:
         presence(client, 'reader')
         for _ in range(100):
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             if len(cards) == 6:
                 break
             time.sleep(.02)
@@ -103,7 +104,7 @@ def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
         assert history['progress']['available'] == 4
         assert history['state'] == 'complete'
         from tests.support.reader import wait_for
-        assert len(wait_for(client,lambda: cards if len(cards:=client.get('/api/v3/cards').json())==5 else None)) == 5
+        assert len(wait_for(client,lambda: cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==5 else None)) == 5
 
 
 
@@ -136,7 +137,7 @@ def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_pa
             time.sleep(.02)
         assert history['progress']['loaded'] == 2
         assert history['state'] == 'complete'
-        assert {c['source_url'] for c in client.get('/api/v3/cards').json()} == {'https://www.youtube.com/watch?v=lmnopqrstuv', 'https://www.youtube.com/watch?v=wxyzabcdefg'}
+        assert {c['source_url'] for c in read_all_cards(client, '/api/v3/cards')} == {'https://www.youtube.com/watch?v=lmnopqrstuv', 'https://www.youtube.com/watch?v=wxyzabcdefg'}
 
 
 def test_count_has_no_product_limit_and_preserves_large_integer(tmp_path):
@@ -165,7 +166,7 @@ def test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed
             if history['progress']['loaded'] == 2:
                 break
             time.sleep(.02)
-        assert {c['source_url'] for c in client.get('/api/v3/cards').json()} == {'https://source.test/first', 'https://source.test/second'}
+        assert {c['source_url'] for c in read_all_cards(client, '/api/v3/cards')} == {'https://source.test/first', 'https://source.test/second'}
         assert ('точность выбора последних N не подтверждена' in ' '.join(history['progress']['warnings'])) is warning
 
 

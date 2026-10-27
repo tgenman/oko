@@ -1,4 +1,5 @@
 """Persistent work power, distinct from terminating the reader process."""
+from tests.support.cards import read_all_cards
 from fastapi.testclient import TestClient
 
 from oko.collection.demo import DemoSource
@@ -13,22 +14,22 @@ def test_disabled_oko_keeps_reading_and_local_actions_and_survives_restart(tmp_p
     options = dict(token='test', source=DemoSource(), shutdown=lambda: exits.append(True))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
-        cards = client.get('/api/v3/cards').json()
+        cards = read_all_cards(client, '/api/v3/cards')
         response = client.put('/api/v3/power', json={'enabled': False})
         assert response.status_code == 200, response.text
         state = client.get('/api/v3/status').json()
         assert state['runtime_state'] == 'disabled'
         assert state['work_allowed'] is False
         assert exits == []
-        assert client.get('/api/v3/cards').json() == cards
+        assert read_all_cards(client, '/api/v3/cards') == cards
         assert client.get('/api/v3/materials/' + item).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters': 'later'}).status_code == 200
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         assert client.get('/api/v3/materials/' + item).status_code == 404
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/status').json()['runtime_state'] == 'disabled'
-        assert len(client.get('/api/v3/cards').json()) == 2
+        assert len(read_all_cards(client, '/api/v3/cards')) == 2
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         assert client.get('/api/v3/status').json()['runtime_state'] == 'running'
 
@@ -105,13 +106,13 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
         finally:
             release.set()
         time.sleep(.08)
-        cards = client.get('/api/v3/cards').json()
+        cards = read_all_cards(client, '/api/v3/cards')
         assert source.attempts == 1
-        assert all(card['availability'] != 'available' for card in cards)
+        assert all(client.get('/api/v3/materials/' + card['id']).json()['availability'] != 'available' for card in cards)
         assert 'Must never be accepted' not in client.get('/api/v3/materials/' + cards[0]['id']).text
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         client.post('/api/v3/collect')  # Explicit retry advances the interrupted fetch deadline.
-        ready = wait_for(client, lambda: [c for c in client.get('/api/v3/cards').json() if c['availability'] == 'available'])
+        ready = wait_for(client, lambda: [c for c in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available'])
         assert ready[0]['title'] == 'Fresh result'
 
 
@@ -135,7 +136,7 @@ def test_viewed_while_disabled_defers_telegram_acknowledgement_until_start(tmp_p
         item = settled(client)[0]['id']
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         time.sleep(.08)
         assert telegram.acknowledgements == []
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200

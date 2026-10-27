@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 from oko.processing.codex import LocalCodex
 from tests.support.codex import CodexService, configure_codex
@@ -188,7 +189,7 @@ def test_completed_codex_theses_survive_restart_without_another_call(tmp_path):
         item=setup_reader(client, theses=True)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True})
-        wait_for(client,lambda: all(c['theses']['result'] for c in client.get('/api/v3/cards').json()))
+        wait_for(client,lambda: all(client.get('/api/v3/materials/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
         count=len(service.inputs)
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
         presence(client, 'reader')

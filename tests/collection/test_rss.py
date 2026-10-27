@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards, read_materials_for_cards
 from tests.support.presence import presence, close_presence
 from tests.support.rss import rss, import_feed, wait_cards
 from tests.support.subscriptions import configured_sources
@@ -107,7 +108,7 @@ def test_duplicate_rss_guids_are_reported_without_fabricating_other_ids(tmp_path
             return status if any(source.get('message') and 'внешний ID' in source['message'] for source in status['sources']) else None
         status=wait_for(client,failed)
         assert status['sources'][0]['state']=='unavailable'
-        assert client.get('/api/v3/cards').json()==[]
+        assert read_all_cards(client, '/api/v3/cards')==[]
 
 
 def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path: Path):
@@ -124,14 +125,14 @@ def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path
         import_feed(client)
         presence(client, 'test')
         wait_cards(client)
-        card = wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if len([m for m in c['attachments'] if m['kind']=='image'])==1),None))
-        assert (card['completeness']['state']=='complete') is False and len([media for media in card['attachments'] if media['kind']=='image']) == 1
+        card = wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if len([m for m in c['content']['attachments'] if m['kind']=='image'])==1),None))
+        assert (card['content']['completeness']['state']=='complete') is False and len([media for media in card['content']['attachments'] if media['kind']=='image']) == 1
         available = True
         client.post('/api/v3/materials/' + card['id'] + '/retry')
-        card = wait_for(client,lambda:next((c for c in client.get('/api/v3/cards').json() if len([m for m in c['attachments'] if m['kind']=='image'])==2),None))
-        assert (card['completeness']['state']=='complete') is True and len([media for media in card['attachments'] if media['kind']=='image']) == 2
+        card = wait_for(client,lambda:next((c for c in read_materials_for_cards(client, '/api/v3/cards') if len([m for m in c['content']['attachments'] if m['kind']=='image'])==2),None))
+        assert (card['content']['completeness']['state']=='complete') is True and len([media for media in card['content']['attachments'] if media['kind']=='image']) == 2
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
-        assert all(client.get(url).status_code == 404 for url in [media['url'] for media in card['attachments'] if media['kind']=='image'])
+        assert all(client.get(url).status_code == 404 for url in [media['url'] for media in card['content']['attachments'] if media['kind']=='image'])
 
 
 def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
@@ -174,9 +175,9 @@ def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
         assert failed
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
-        cards=wait_for(client,lambda:(cards if len(cards:=client.get('/api/v3/cards').json())==1 and cards[0]['completeness']['state']=='complete' else None))
+        cards=wait_for(client,lambda:(cards if len(cards:=read_materials_for_cards(client, '/api/v3/cards'))==1 and cards[0]['content']['completeness']['state']=='complete' else None))
         assert len(cards)==1
-        assert client.get([media['url'] for media in cards[0]['attachments'] if media['kind']=='image'][0]).content == PNG
+        assert client.get([media['url'] for media in cards[0]['content']['attachments'] if media['kind']=='image'][0]).content == PNG
         client.post('/api/v3/materials/' + cards[0]['id'] + '/viewed')
         assert not [path for path in (tmp_path/'staging').rglob('*') if path.is_file()]
 
@@ -202,7 +203,7 @@ def test_rss_viewed_during_image_download_blocks_late_result(tmp_path: Path):
         import_feed(client)
         presence(client, 'test')
         assert downloading.wait(2)
-        item = client.get('/api/v3/cards').json()[0]['id']
+        item = read_all_cards(client, '/api/v3/cards')[0]['id']
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         released.set()
         time.sleep(.1)
@@ -237,8 +238,9 @@ def test_atom_xhtml_keeps_text_images_and_xml_base(tmp_path: Path):
         presence(client, 'test')
         card = wait_cards(client)[0]
         assert card['source_url'] == 'https://source.test/news/article'
-        assert (card['completeness']['state']=='complete') is False
-        assert len([media for media in card['attachments'] if media['kind']=='image']) == 1
+        material=client.get('/api/v3/materials/'+card['id']).json()
+        assert (material['content']['completeness']['state']=='complete') is False
+        assert len([media for media in material['content']['attachments'] if media['kind']=='image']) == 1
         assert client.get('/api/v3/materials/' + card['id']).json()['content']['text'] == 'Полный анонс'
 
 

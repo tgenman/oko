@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 import time
 import httpx
@@ -78,7 +79,7 @@ def test_terminal_unavailability_finishes_and_is_not_retried_on_rediscovery(tmp_
         assert history['progress']['loaded'] == 1
         assert history['progress']['unavailable'] == 0
         wait_for(client,lambda:calls==1)
-        assert client.get('/api/v3/materials/' + client.get('/api/v3/cards').json()[0]['id']).json()['content']['text'] == 'Сохранившийся анонс'
+        assert client.get('/api/v3/materials/' + read_all_cards(client, '/api/v3/cards')[0]['id']).json()['content']['text'] == 'Сохранившийся анонс'
     with reader() as client:
         presence(client, 'reader')
         time.sleep(.3)

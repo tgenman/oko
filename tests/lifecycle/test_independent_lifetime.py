@@ -1,4 +1,5 @@
 """Independent execution observed through the reader HTTP interface."""
+from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 import time
 
@@ -16,7 +17,7 @@ def test_explicit_execution_collects_without_presence_until_stop(tmp_path):
     exits = []
     with TestClient(create_app(tmp_path, token='test', source=DemoSource(), clock=clock,
                                api_only=True, shutdown=lambda: exits.append(True)), headers=HEADERS) as client:
-        cards = wait_for(client, lambda: client.get('/api/v3/cards').json())
+        cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
         assert len(cards) == 3
         clock.now += 100
         time.sleep(.05)
@@ -142,8 +143,8 @@ def test_neutral_last_close_cancels_resistant_external_wait_and_prevents_late_co
         finally:
             release.set()
         time.sleep(.05)
-        cards = client.get('/api/v3/cards').json()
-        assert all(not (card['availability'] == 'available') for card in cards)
+        cards = read_all_cards(client, '/api/v3/cards')
+        assert all(not (client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available') for card in cards)
         assert 'Must never be committed' not in client.get('/api/v3/cards').text
 
 

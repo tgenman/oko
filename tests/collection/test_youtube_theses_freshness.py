@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 import json
@@ -25,7 +26,7 @@ class Captions:
 
 def wait(client, predicate):
     def ready():
-        cards = client.get('/api/v3/cards').json()
+        cards = read_all_cards(client, '/api/v3/cards')
         if len(cards) == 1:
             material = client.get('/api/v3/materials/' + cards[0]['id']).json()
             if predicate(material):

@@ -1,4 +1,5 @@
 """HTTP failures must not expose half of a settings/job transition."""
+from tests.support.cards import read_all_cards
 from tests.support.storage import database
 import pytest
 from fastapi.testclient import TestClient
@@ -26,7 +27,7 @@ def test_failed_settings_change_rolls_back_values_versions_and_jobs(tmp_path, po
             )
 
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource(), fault=fault), headers=HEADERS) as client:
-        cards = wait_for(client, lambda: client.get('/api/v3/cards').json() or None)
+        cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards') or None)
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         identity = cards[0]['id']
         with database(tmp_path) as db:

@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
 """Feed information through HTTP and atomic storage lifecycle boundaries."""
@@ -105,8 +106,8 @@ def test_unread_includes_hidden_and_viewed_dates_follow_actual_scope(tmp_path):
         activity = lambda: client.get(path).json()['activity']
         assert activity()['unread'] == 3
         assert activity()['created'] == stamp(clock[0])
-        wait_for(client, lambda: len(client.get('/api/v3/cards').json()) == 2)
-        card = client.get('/api/v3/cards').json()[0]
+        wait_for(client, lambda: len(read_all_cards(client, '/api/v3/cards')) == 2)
+        card = read_all_cards(client, '/api/v3/cards')[0]
         clock[0] += 10
         assert client.get('/api/v3/materials/' + card['id']).status_code == 200
         assert activity()['marked_read'] is None

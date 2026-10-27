@@ -1,4 +1,5 @@
 """Collection progress and original request diagnostics through the reader HTTP interface."""
+from tests.support.cards import read_all_cards
 import threading
 import asyncio
 from fastapi.testclient import TestClient
@@ -138,7 +139,7 @@ def test_confirmed_publication_unavailability_is_terminal_and_visible(tmp_path):
             raise SourceDeleted()
 
     with TestClient(create_app(tmp_path,token='test',source=RemovedSource(),api_only=True),headers=HEADERS) as client:
-        wait_for(client,lambda: len(client.get('/api/v3/cards').json()) == 3)
+        wait_for(client,lambda: len(read_all_cards(client, '/api/v3/cards')) == 3)
         def complete():
             value = client.get('/api/v3/collection-status').json()
             return value if all(s['state']=='error' for s in value['sources']) else None

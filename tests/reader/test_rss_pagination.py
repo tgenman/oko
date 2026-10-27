@@ -1,4 +1,5 @@
 """RSS history through the reader HTTP boundary and synthetic external pages."""
+from tests.support.cards import read_all_cards
 import time
 from collections import Counter
 
@@ -62,7 +63,7 @@ def test_existing_rss_can_select_count_again_and_date_is_rejected(tmp_path):
     with reader(tmp_path, reply) as client:
         feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode':'count','count':1}).json()['id']
         wait_history(client, feed)
-        card = client.get('/api/v3/cards').json()[0]
+        card = read_all_cards(client, '/api/v3/cards')[0]
         assert client.post('/api/v3/materials/'+card['id']+'/viewed').status_code == 200
         response = client.post('/api/v3/feeds/'+feed+'/history', json={'mode':'count','count':'3'})
         assert response.status_code == 200, response.text
@@ -70,7 +71,7 @@ def test_existing_rss_can_select_count_again_and_date_is_rejected(tmp_path):
         assert progress['available'] == 3
         assert progress['viewed'] == 0
         assert progress['loaded'] == 3
-        assert len(client.get('/api/v3/cards').json()) == 3
+        assert len(read_all_cards(client, '/api/v3/cards')) == 3
         response = client.post('/api/v3/feeds/'+feed+'/history', json={'mode':'date','date':'2025-10-01','timezone':'UTC'})
         assert response.status_code == 422, response.text
         assert wait_history(client, feed)['progress']['available'] == 3
@@ -102,7 +103,7 @@ def test_rss_atom_pages_persist_selected_articles_through_http(tmp_path, atom):
         assert progress['available'] == progress['loaded'] == 6
         assert progress['stop_reason'] == 'count_reached'
         assert calls['/pages/empty'] == calls['/pages/second'] == calls['/archive/first'] == 1
-        assert len(client.get('/api/v3/cards').json()) == 6
+        assert len(read_all_cards(client, '/api/v3/cards')) == 6
 
 
 
@@ -187,7 +188,7 @@ def test_cancel_rejects_late_page_and_requires_new_selection(tmp_path):
         assert history['state'] == 'cancelled'
         assert history['progress']['stop_reason'] == 'cancelled'
         assert history['progress']['available'] == 0  # No discoveries commit until cursor_before fixes the window.
-        assert all(not c['source_url'].endswith('/2') for c in client.get('/api/v3/cards').json())
+        assert all(not c['source_url'].endswith('/2') for c in read_all_cards(client, '/api/v3/cards'))
 
 
 def test_same_publication_with_changed_guid_does_not_consume_history_count(tmp_path):
@@ -216,7 +217,7 @@ def test_new_arrivals_do_not_consume_fixed_history_count(tmp_path):
         progress = wait_history(client, feed)['progress']
         assert progress['available'] == 2
         assert progress['loaded'] == 2
-        cards=client.get('/api/v3/cards').json()
+        cards=read_all_cards(client, '/api/v3/cards')
         assert {c['source_url'] for c in cards} == {'https://source.test/post/3','https://source.test/post/2'}
 
 

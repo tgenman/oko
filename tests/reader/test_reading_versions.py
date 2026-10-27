@@ -232,41 +232,25 @@ def test_linked_feed_move_updates_lists_without_retransmitting_cards(tmp_path):
         assert changed.status_code==200 and changed.json()['items']==[]
 
 
-def test_registered_list_batches_work_and_versions_in_the_write_transaction(tmp_path):
-    from tests.support.storage import Store
-    import pytest
+def test_card_pages_follow_batched_writes_and_survive_restart(tmp_path):
     for count in [100,200,400]:
         root=tmp_path/str(count)
-        store=Store(root,lambda _:None)
-        store.subscriptions.ensure_demo()
-        options={'target':{'scope':'all'},'sort':'newest','show_hidden':False}
-        before=store.read_versions.list_version(options)['version']
-        statements=[]
-        store.db.set_trace_callback(statements.append)
-        with store.db:
-            store.db.executemany("INSERT INTO items(id,published,platform,external_id) VALUES (%s,%s,'other_web',%s)",[(f'item-{n}',n,f'item-{n}') for n in range(count)])
-            store.db.executemany("INSERT INTO feed_publications VALUES ('demo',%s)",[(f'item-{n}',) for n in range(count)])
-        store.db.set_trace_callback(None)
-        # PostgreSQL batches round trips and publishes one list version per
-        # transaction. SQL plan tests separately measure database scan work.
-        assert len(statements)<20, statements
-        assert store.read_versions.list_version(options)['version']==before+1
-        assert len(store.read_versions.ids(options))==count
-        # Net-zero changes do not advance a list, and failed writes roll back
-        # both membership and the transaction's pending list maintenance.
-        with store.db:
-            store.db.execute("UPDATE items SET viewed=1 WHERE id='item-0'")
-            store.db.execute("UPDATE items SET viewed=0 WHERE id='item-0'")
-        assert store.read_versions.list_version(options)['version']==before+1
-        with pytest.raises(ValueError):
-            with store.db:
-                store.db.execute("UPDATE items SET viewed=1 WHERE id='item-0'")
-                raise ValueError('rollback')
-        store.db.close()
-        reopened=Store(root,lambda _:None)
-        assert reopened.read_versions.list_version(options)['version']==before+1
-        assert len(reopened.read_versions.ids(options))==count
-        reopened.db.close()
+        library(root,[count])
+        app=traced_app(root)
+        with TestClient(app,headers=HEADERS) as client:
+            page=client.get('/api/v3/cards',params={'limit':40})
+            assert page.status_code==200
+            first=page.json()
+            assert first['total']==count and len(first['items'])==40
+            assert client.get('/api/v3/cards',params={'limit':40},headers={'If-None-Match':page.headers['ETag']}).status_code==304
+            selected=[card['id'] for card in first['items'][:10]]
+            assert client.post('/api/v3/cards/read',json={'ids':selected}).status_code==204
+            current=client.get('/api/v3/cards',params={'limit':40})
+            assert current.json()['total']==count-10
+            assert not set(selected)&{card['id'] for card in current.json()['items']}
+        with TestClient(traced_app(root),headers=HEADERS) as reopened:
+            assert reopened.get('/api/v3/cards').json()['total']==count-10
+
 
 
 def test_filter_resource_keeps_saved_provenance_across_restart(tmp_path):
@@ -287,30 +271,26 @@ def test_filter_resource_keeps_saved_provenance_across_restart(tmp_path):
             assert actual==expected=={'kind':'local','processor_id':'llamacpp','model':{'name':'local:latest','state':'known'}}
 
 
-def test_list_maintenance_failure_rolls_back_data_and_versions(tmp_path,monkeypatch):
-    from tests.support.storage import Store
-    import pytest
-    store=Store(tmp_path,lambda _:None)
-    store.subscriptions.ensure_demo()
-    options={'target':{'scope':'all'},'sort':'newest','show_hidden':False}
-    before=store.read_versions.list_version(options)['version']
-    def fail():
-        raise OSError('Synthetic commit failure')
-    for explicit in [False,True]:
-        with monkeypatch.context() as patch:
-            patch.setattr(store.db,'before_commit',fail)
-            with pytest.raises(OSError,match='Synthetic commit failure'):
-                if explicit:
-                    store.db.execute("INSERT INTO items(id,published) VALUES ('rejected',1)")
-                    store.db.commit()
-                else:
-                    with store.db:
-                        store.db.execute("INSERT INTO items(id,published) VALUES ('rejected',1)")
-        assert store.read_versions.ids(options)==[]
-        assert store.read_versions.list_version(options)['version']==before
-    store.db.execute("INSERT INTO items(id,published) VALUES ('uncommitted',1)")
-    store.db.close()
-    reopened=Store(tmp_path,lambda _:None)
-    assert reopened.read_versions.ids(options)==[]
-    assert reopened.read_versions.list_version(options)['version']==before
-    reopened.db.close()
+def test_failed_viewed_write_keeps_the_card_page_unchanged(tmp_path):
+    library(tmp_path,[2])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        initial=client.get('/api/v3/cards')
+        identity=initial.json()['items'][0]['id']
+        def install():
+            db=app.state.host.require_store().db
+            with db.access_lock:
+                db._db.execute("CREATE FUNCTION pg_temp.reject_page_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic write failure'; END $$")
+                db._db.execute('CREATE TRIGGER synthetic_page_failure BEFORE DELETE ON feed_publications FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_page_delete()')
+        def remove():
+            db=app.state.host.require_store().db
+            with db.access_lock:
+                db._db.execute('DROP TRIGGER synthetic_page_failure ON feed_publications')
+        client.portal.call(install)
+        try:
+            assert client.post('/api/v3/cards/read',json={'ids':[identity]}).status_code==500
+        finally:
+            client.portal.call(remove)
+        after=client.get('/api/v3/cards',headers={'If-None-Match':initial.headers['ETag']})
+        assert after.status_code==304
+        assert client.get('/api/v3/cards').json()==initial.json()

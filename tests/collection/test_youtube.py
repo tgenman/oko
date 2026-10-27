@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 from oko.collection.youtube.source import LocalCaptions
 from tests.support.youtube import VIDEO, PNG, subscribe, feed_xml
@@ -44,7 +45,7 @@ class YouTubeTranscriptApi:
         material = wait(client, lambda m: m['source'].get('captions') == 'available')
         assert material['content']['text'] == 'Текст через настоящий worker.'
         client.post('/api/v3/materials/' + material['id'] + '/viewed')
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
 
 
 def transport(calls):
@@ -62,7 +63,7 @@ def wait(client, predicate, *, keep_alive=False):
     for _ in range(200):
         if keep_alive:
             assert presence(client, 'reader').status_code==200
-        cards = client.get('/api/v3/cards').json()
+        cards = read_all_cards(client, '/api/v3/cards')
         if len(cards) == 1:
             material = client.get('/api/v3/materials/' + cards[0]['id']).json()
             if predicate(material):
@@ -246,7 +247,7 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             assert presence(client, 'reader').status_code == 201
             subscribe(client)
             assert captions.started.wait(3)
-            item = client.get('/api/v3/cards').json()[0]['id']
+            item = read_all_cards(client, '/api/v3/cards')[0]['id']
             material = wait_for(client, lambda: value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None)
             assert client.get(material['content']['attachments'][0]['url']).content == PNG
             before_files = media_files()
@@ -288,7 +289,7 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
         assert all(late_text.encode() not in data for data in files.values())
         assert files == ({} if action == 'viewed' else before_files)
         if action == 'viewed':
-            assert client.get('/api/v3/cards').json() == []
+            assert read_all_cards(client, '/api/v3/cards') == []
             assert client.get('/api/v3/materials/' + item).status_code == 404
         elif action == 'stop':
             assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
@@ -380,7 +381,7 @@ class YouTubeTranscriptApi:
         for _ in range(200):
             # A live browser renews its lease while an SDK worker is pending.
             assert presence(client, 'reader').status_code==200
-            if calls.exists() and client.get('/api/v3/cards').json() == []:
+            if calls.exists() and read_all_cards(client, '/api/v3/cards') == []:
                 break
             time.sleep(.02)
         else:

@@ -1,4 +1,5 @@
 """One Telegraph enrichment path shared by web and verified client collection."""
+from tests.support.cards import read_all_cards
 from tests.support.telegram import configure_fast_web
 import httpx
 import pytest
@@ -103,7 +104,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         deadline = time.monotonic()+2
         pending = None
         while time.monotonic()<deadline:
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             if cards:
                 pending = client.get('/api/v3/materials/'+cards[0]['id']).json()
                 if 'Статья Telegraph недоступна' in pending['content'].get('completeness',{}).get('message',''):
@@ -193,7 +194,7 @@ def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_p
             while time.monotonic()<deadline and (client.get('/api/v3/subscriptions').json()['feeds'] or list((tmp_path/'staging').rglob('incoming-*'))):
                 time.sleep(.02)
             time.sleep(.05)
-            assert not client.get('/api/v3/cards').json()
+            assert not read_all_cards(client, '/api/v3/cards')
             assert not assets
         finally:
             release.set()
@@ -364,7 +365,7 @@ def test_failed_article_and_image_keep_inline_links_and_http_reasons(tmp_path, a
         import time
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             if cards:
                 material = client.get('/api/v3/materials/' + cards[0]['id']).json()
                 linked = material.get('content', {}).get('linked_content')
@@ -408,7 +409,7 @@ def test_article_error_preserves_original_markdown_destination(tmp_path, url):
         import time
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            cards = client.get('/api/v3/cards').json()
+            cards = read_all_cards(client, '/api/v3/cards')
             if cards:
                 material = client.get('/api/v3/materials/' + cards[0]['id']).json()
                 linked = material.get('content', {}).get('linked_content')

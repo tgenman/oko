@@ -45,8 +45,9 @@ assert send('PATCH','/api/v3/settings/oko/global',{'theses':'false'})[0]==422
 assert send('GET','/api/v3/settings/oko/global')[1]==settings
 assert send('POST','/api/v3/collect',{'scope':'all'},'independent-collect')[0]==200
 for _ in range(100):
-    code,cards=send('GET','/api/v3/cards')
-    if cards and all(card['availability']=='available' for card in cards):
+    code,page=send('GET','/api/v3/cards')
+    cards=page['items']
+    if cards and all(not card['loading'] for card in cards):
         break
     time.sleep(.02)
 else:
@@ -54,7 +55,7 @@ else:
 item=cards[0]['id']
 code,material=send('GET','/api/v3/materials/'+item)
 assert code==200 and material['content']['text']
-assert len(send('GET','/api/v3/cards')[1])==len(cards)
+assert len(send('GET','/api/v3/cards')[1]['items'])==len(cards)
 # Commit a request, then lose its response body before the client decodes it.
 url=urlsplit(origin)
 connection=http.client.HTTPConnection(url.hostname,url.port,timeout=3)

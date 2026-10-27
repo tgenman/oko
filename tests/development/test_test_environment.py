@@ -1,4 +1,5 @@
 """Public test factory and CLI contract checking, without external services."""
+from tests.support.cards import read_all_cards, read_materials_for_cards
 from tests.support.presence import presence, close_presence
 import asyncio
 from pathlib import Path
@@ -54,7 +55,7 @@ def test_factory_collects_youtube_without_starting_a_real_caption_worker(tmp_pat
         client.patch('/api/v3/settings/oko/global', json={'theses':True})
         subscribe(client)
         presence(client, 'reader')
-        card = wait_for(client, lambda: (c[0] if len(c:=client.get('/api/v3/cards').json())==1 and c[0]['availability']=='available' and not c[0].get('loading') and c[0]['theses']['attempt']['state']=='ready' else None))
+        card = wait_for(client, lambda: (c[0] if len(c:=read_materials_for_cards(client, '/api/v3/cards'))==1 and c[0]['availability']=='available' and not c[0].get('loading') and c[0]['theses']['attempt']['state']=='ready' else None))
         assert card['source']['captions']=='unavailable'
         assert card['theses']['result']['points']==[]
 
@@ -175,4 +176,4 @@ def test_factory_default_empty_history_completes_without_a_real_history_worker(t
         feed=connected.json()['id']
         history=wait_for(client,lambda: (h if (h:=client.get('/api/v3/settings/feed/'+feed).json()['feed']['history']) and h['state']=='complete' and h['selection']['mode']=='count' else None))
         assert history['progress']['loaded']==0
-        assert not client.get('/api/v3/cards').json()
+        assert not read_all_cards(client, '/api/v3/cards')

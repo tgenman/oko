@@ -1,4 +1,5 @@
 """Completion behavior and database work observed through the reader HTTP seam."""
+from tests.support.cards import read_all_cards
 import contextvars
 import time
 import json
@@ -64,7 +65,7 @@ def test_completion_removes_captured_library_with_one_reachability_pass(postgres
         assert completed.status_code == 200, completed.text
         passes = sum('WITH RECURSIVE needed' in query for query in queries)
         completion_calls = len(queries)
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert client.post('/api/v3/folders/demo/completion', json={'token': preview.json()['token']}).status_code == 200
         assert passes == 1
         assert completion_calls <= 350
@@ -106,7 +107,9 @@ def test_completion_preserves_unreadable_and_pending_members(tmp_path, corruptio
             if store is not None and not store.processing.recovering:
                 break
             time.sleep(.01)
-        assert len(client.get('/api/v3/cards').json()) == 3
+        initial=client.get('/api/v3/cards').json()
+        assert initial['total']==3 and len(initial['items'])==3
+        original={card['id']:card for card in initial['items']}
         # Model an unreadable saved copy and a discovered, not-yet-loaded
         # publication; fixture writes precede all observations under test.
         def damage_fixture():
@@ -122,10 +125,26 @@ def test_completion_preserves_unreadable_and_pending_members(tmp_path, corruptio
                     store.db.execute("UPDATE items SET content = '{}' WHERE id = %s", (identity,))
                 store.db.execute('UPDATE items SET complete = 0 WHERE id = %s', (f'{2:032x}',))
         client.portal.call(damage_fixture)
-        assert len(client.get('/api/v3/cards').json()) == 2
+        result=client.get('/api/v3/cards')
+        assert result.status_code==200, result.text
+        page=result.json()
+        assert page['total']==3 and len(page['items'])==3
+        cards={card['id']:card for card in page['items']}
+        damaged=f'{1:032x}'
+        pending=f'{2:032x}'
+        placeholder=cards[damaged]
+        assert placeholder['title']=='Публикация недоступна'
+        assert all(placeholder[key]==original[damaged][key] for key in ('id','feed_id','published_at','source_url'))
+        assert placeholder['preview_url'] is None and not placeholder['loading'] and not placeholder['changed']
+        assert not placeholder['post_web_unavailable'] and placeholder['external_attachment_kinds']==[]
+        assert cards[pending]['loading']
+        healthy=next(card for identity,card in cards.items() if identity not in (damaged,pending))
+        assert healthy['title']!='Публикация недоступна'
+        opened=client.get('/api/v3/reading/materials/'+healthy['id']).json()
+        assert next(r['data'] for r in opened['resources'] if r['kind']=='material')['content']['text']
         preview = client.post('/api/v3/feeds/demo/completion/preview').json()
-        assert preview['cards_count'] == 2
+        assert preview['cards_count'] == 3
         assert preview['publications_count'] == 3
         assert client.post('/api/v3/feeds/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert client.get('/api/v3/cards').json() == []
+        assert read_all_cards(client, '/api/v3/cards') == []
         assert client.post('/api/v3/feeds/demo/completion/preview').json()['publications_count'] == 0

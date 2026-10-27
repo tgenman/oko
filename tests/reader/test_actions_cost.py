@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.storage import analyze
 from tests.support.postgres_work import measure_reads
 """Scoped actions and status keep bounded work through the reader HTTP interface."""
@@ -44,7 +45,7 @@ def test_status_and_viewed_work_budgets(tmp_path, count):
         # PostgreSQL tracing counts statements issued by the application.
         assert int(response.headers['X-Test-SQL']) < 240
         assert client.get('/api/v3/materials/' + items[0]).status_code == 404
-        assert len(client.get('/api/v3/cards').json()) == count * 4 - 1
+        assert len(read_all_cards(client, '/api/v3/cards')) == count * 4 - 1
 
 
 def test_unchanged_status_does_not_rewrite_problems(tmp_path):

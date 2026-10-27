@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 from tests.support.telegram import connected_feed
 from tests.support.presence import presence, close_presence
 from tests.support.telegram import connect_request
@@ -23,13 +24,13 @@ def test_count_selects_whole_album_and_resumes_without_live_count(tmp_path):
             if h and h['state']=='complete': break
             time.sleep(.02)
         assert h['progress']['loaded']==2
-        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()}=={4,6}
+        assert {[int(identity) for identity in client.get('/api/v3/materials/'+c['id']).json()['source']['message_ids']][0] for c in read_all_cards(client, '/api/v3/cards')}=={4,6}
     archive.rows.append(dict(id=7,date=1759350007,text='new',group=None,media=None))
     with open_reader() as client:
         presence(client, 'reader')
         presence(client, 'reader')
         for _ in range(200):
-            cards=client.get('/api/v3/cards').json()
+            cards=read_all_cards(client, '/api/v3/cards')
             if len(cards)==3: break
             time.sleep(.02)
         assert len(cards)==3
@@ -90,9 +91,9 @@ def test_archive_error_and_fixed_boundary_survive_restart_before_the_next_window
         archive.broken=False
         client.post('/api/v3/collect')
         wait_for(client,lambda:history()['state']=='complete')
-        assert all(card['source']['message_ids']!=['7'] for card in client.get('/api/v3/cards').json())
+        assert all(client.get('/api/v3/materials/'+card['id']).json()['source']['message_ids']!=['7'] for card in read_all_cards(client, '/api/v3/cards'))
         client.post('/api/v3/collect')
-        wait_for(client,lambda:any(card['source']['message_ids']==['7'] for card in client.get('/api/v3/cards').json()))
+        wait_for(client,lambda:any(client.get('/api/v3/materials/'+card['id']).json()['source']['message_ids']==['7'] for card in read_all_cards(client, '/api/v3/cards')))
 
 
 def test_count_discovery_accepts_ready_content_without_refetching_each_message(tmp_path):
@@ -123,7 +124,7 @@ def test_count_discovery_accepts_ready_content_without_refetching_each_message(t
         assert history['progress']['available'] == 3
         assert history['progress']['unavailable'] == 0
         assert archive.content == []
-        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()} == {2,3,4}
+        assert {[int(identity) for identity in client.get('/api/v3/materials/'+c['id']).json()['source']['message_ids']][0] for c in read_all_cards(client, '/api/v3/cards')} == {2,3,4}
 
 
 def test_count_skips_service_actions_but_keeps_empty_media_posts(tmp_path):
@@ -145,7 +146,7 @@ def test_count_skips_service_actions_but_keeps_empty_media_posts(tmp_path):
             if history['state'] == 'complete': break
             time.sleep(.02)
         assert history['progress']['loaded'] == 2
-        assert {[int(identity) for identity in c['source']['message_ids']][0] for c in client.get('/api/v3/cards').json()} == {3,6}
+        assert {[int(identity) for identity in client.get('/api/v3/materials/'+c['id']).json()['source']['message_ids']][0] for c in read_all_cards(client, '/api/v3/cards')} == {3,6}
 
 
 def test_service_ids_in_selected_span_still_block_unsafe_read_acknowledgment(tmp_path):

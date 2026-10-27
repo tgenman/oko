@@ -1,4 +1,5 @@
 """YouTube media and processing through the target reader HTTP pipeline."""
+from tests.support.cards import read_all_cards
 import asyncio
 import json
 import threading
@@ -44,7 +45,7 @@ def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path,high
                 assert client.patch('/api/v3/feeds/'+feed,json={'importance':'high'}).status_code==200
             presence(client,'reader')
             assert started.wait(3)
-            card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result']),None))
+            card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['theses']['result']),None))
             material=client.get('/api/v3/materials/'+card['id']).json()
             assert material['content']['text']=='Original raw captions.'
             assert captions_calls==[VIDEO] and material['content']['attachments']
@@ -76,7 +77,7 @@ def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tm
             client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
             subscribe(client)
             presence(client,'reader')
-            card=wait_for(client,lambda:(cards[0] if (cards:=client.get('/api/v3/cards').json()) else None))
+            card=wait_for(client,lambda:(cards[0] if (cards:=read_all_cards(client, '/api/v3/cards')) else None))
             if missing:
                 value=wait_for(client,lambda:(value if (value:=client.get('/api/v3/materials/'+card['id']).json())['theses']['result'] is not None else None))
                 assert value['theses']['result']['points']==[]
@@ -117,7 +118,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'Remove advertising'})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result']),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['theses']['result']),None))
         assert any(call['operation']=='filter' for call in calls)
         summary=next(call for call in calls if call['operation']=='theses')
         assert summary['sources'][0]['text']=='Useful words. Ad text.'
@@ -155,7 +156,7 @@ def test_youtube_metadata_refresh_keeps_caption_file_and_accepted_processing(tmp
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result'] and any(a['kind']=='image' for a in card['attachments'])),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] and any(a['kind']=='image' for a in client.get('/api/v3/materials/'+card['id']).json()['content'].get('attachments',[]))),None))
         original=client.get('/api/v3/materials/'+card['id']).json()
         caption_url=next(a['url'] for a in original['content']['attachments'] if a['kind']=='file')
         count=sum(request.url.path=='/v1/chat/completions' for request in models)
@@ -190,7 +191,7 @@ def test_manual_caption_revalidation_rotates_only_changed_file_and_results(tmp_p
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result']),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['theses']['result']),None))
         old=client.get('/api/v3/materials/'+card['id']).json()
         old_file=next(a['url'] for a in old['content']['attachments'] if a['kind']=='file')
         text[0]='Updated captions.'
@@ -241,7 +242,7 @@ def test_failed_caption_revalidation_keeps_verified_file_and_results(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result']),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['theses']['result']),None))
         old=client.get('/api/v3/materials/'+card['id']).json()
         url=next(a['url'] for a in old['content']['attachments'] if a['kind']=='file')
         broken[0]=True
@@ -271,7 +272,7 @@ def test_caption_absence_then_reappearance_never_reuses_a_previous_file_url(tmp_
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in client.get('/api/v3/cards').json() if card['theses']['result']),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['theses']['result']),None))
         old=client.get('/api/v3/materials/'+card['id']).json()
         old_file=next(a['url'] for a in old['content']['attachments'] if a['kind']=='file')
         text[0]=None

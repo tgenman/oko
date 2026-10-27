@@ -1,3 +1,4 @@
+from tests.support.cards import read_all_cards
 import time
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -13,7 +14,7 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         item = setup_reader(client, theses=True)
         configure_codex(client)
         clock.now+=1
-        items = [card['id'] for card in client.get('/api/v3/cards').json()]
+        items = [card['id'] for card in read_all_cards(client, '/api/v3/cards')]
 
         def blocked_materials():
             materials = [client.get('/api/v3/materials/'+identity).json() for identity in items]
