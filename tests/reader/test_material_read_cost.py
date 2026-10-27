@@ -82,6 +82,15 @@ def test_open_read_budget_and_parity(tmp_path,count,processed):
         assert cost['writes']==0,statements
         assert cost['selects']<=8,statements
         assert cost['max_file_reads']<=1,files
+        if processed:
+            attachment=legacy['content']['attachments'][0]
+            media,media_cost=measure.request('media','GET',attachment['url'])
+            assert media.content==b'fixture'
+            assert media_cost['content_opens']==1
+            assert media_cost['content_stats']>=1
+            assert media_cost['read_bytes']==len(media.content)
+            assert sum(measure.files.values())==1
+            assert all(Path(path).is_relative_to(tmp_path/'media') for path in measure.files)
 
 
 def source_library(root, kind, complete):

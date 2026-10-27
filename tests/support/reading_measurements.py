@@ -1,4 +1,4 @@
-"""Request-scoped SQL/PostgreSQL-plan/content/JSON measurements."""
+"""Request-scoped SQL/PostgreSQL-plan/publication-file/JSON measurements."""
 from contextlib import ExitStack
 from collections import Counter
 import json
@@ -44,18 +44,23 @@ class ReadingMeasurements:
     def __enter__(self):
         tracing(self.client,self.app)
         original_open,original_stat,loads,dumps=Path.open,Path.stat,json.loads,json.dumps
+        # Keep the existing report keys; file totals include current media and
+        # legacy content paths so either kind of unexpected I/O is visible.
+        directories=(self.root/'media',self.root/'content')
+        def publication_file(path):
+            return any(path.is_relative_to(directory) for directory in directories)
         def record(value):
             if request_sql.get() is not None:
                 self.counts['read_bytes']+=len(value.encode() if isinstance(value,str) else value)
         def open_file(path,*args,**kwargs):
             file=original_open(path,*args,**kwargs)
             mode=kwargs.get('mode',args[0] if args else 'r')
-            if request_sql.get() is not None and path.is_relative_to(self.root/'content') and not any(c in mode for c in 'wa+'):
+            if request_sql.get() is not None and publication_file(path) and mode.startswith('r') and '+' not in mode:
                 self.counts['content_opens']+=1;self.files[str(path)]+=1
                 return CountedFile(file,record)
             return file
         def stat(path,*args,**kwargs):
-            if request_sql.get() is not None and path.is_relative_to(self.root/'content'):
+            if request_sql.get() is not None and publication_file(path):
                 self.counts['content_stats']+=1
             return original_stat(path,*args,**kwargs)
         def load(value,*args,**kwargs):
