@@ -219,3 +219,115 @@ def test_successful_logins_remain_in_global_rate_limit(tmp_path, credentials):
     with TestClient(app) as client:
         assert login(client).status_code == 303
         assert login(client).status_code == 429
+
+
+def test_two_simultaneous_logins_wait_instead_of_rejecting(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    import httpx
+    from fastapi import FastAPI
+    from oko.reader.password_auth import install_login
+
+    entered, release = threading.Event(), threading.Event()
+    access = PasswordAccess(tmp_path)
+    def controlled_login(name, password):
+        entered.set()
+        assert release.wait(3)
+        return 'synthetic-session', 200
+    monkeypatch.setattr(access, 'login', controlled_login)
+    app = FastAPI()
+    install_login(app, access, None)
+
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+            def submit():
+                return client.post('/login', data={'username': 'alice', 'password': PASSWORD},
+                                   headers={'Origin': 'http://testserver'}, follow_redirects=False)
+            first = asyncio.create_task(submit())
+            assert await asyncio.to_thread(entered.wait, 3)
+            second = asyncio.create_task(submit())
+            await asyncio.sleep(.1)
+            release.set()
+            return await asyncio.gather(first, second)
+    assert [response.status_code for response in asyncio.run(exercise())] == [303, 303]
+
+
+def test_cancelled_login_finishes_before_next_and_revokes_its_session(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    import httpx
+    from fastapi import FastAPI
+    from oko.reader.password_auth import install_login
+
+    first_started, second_started, release = threading.Event(), threading.Event(), threading.Event()
+    access = PasswordAccess(tmp_path)
+    revoked = []
+    def controlled_login(name, password):
+        if not first_started.is_set():
+            first_started.set()
+            assert release.wait(3)
+            return 'first-session', 200
+        second_started.set()
+        return 'second-session', 200
+    monkeypatch.setattr(access, 'login', controlled_login)
+    monkeypatch.setattr(access, 'revoke', revoked.append)
+    app = FastAPI()
+    install_login(app, access, None)
+
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+            def submit():
+                return client.post('/login', data={'username': 'alice', 'password': PASSWORD},
+                                   headers={'Origin': 'http://testserver'}, follow_redirects=False)
+            first = asyncio.create_task(submit())
+            assert await asyncio.to_thread(first_started.wait, 3)
+            first.cancel()
+            second = asyncio.create_task(submit())
+            await asyncio.sleep(.1)
+            overlapped = second_started.is_set()
+            release.set()
+            results = await asyncio.gather(first, second, return_exceptions=True)
+            return overlapped, results
+    overlapped, results = asyncio.run(exercise())
+    assert not overlapped
+    assert isinstance(results[0], asyncio.CancelledError)
+    assert results[1].status_code == 303
+    assert 'first-session' in revoked
+
+
+def test_cancelled_queued_login_is_removed_before_verifying_password(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    import httpx
+    from fastapi import FastAPI
+    from oko.reader.password_auth import install_login
+
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    access = PasswordAccess(tmp_path)
+    def controlled_login(name, password):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(3)
+        return 'synthetic-session', 200
+    monkeypatch.setattr(access, 'login', controlled_login)
+    app = FastAPI()
+    install_login(app, access, None)
+
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+            def submit():
+                return client.post('/login', data={'username': 'alice', 'password': PASSWORD},
+                                   headers={'Origin': 'http://testserver'}, follow_redirects=False)
+            first = asyncio.create_task(submit())
+            assert await asyncio.to_thread(entered.wait, 3)
+            queued = asyncio.create_task(submit())
+            await asyncio.sleep(.1)
+            queued.cancel()
+            await asyncio.gather(queued, return_exceptions=True)
+            next_login = asyncio.create_task(submit())
+            release.set()
+            return await asyncio.gather(first, next_login)
+    assert [response.status_code for response in asyncio.run(exercise())] == [303, 303]
+    assert len(calls) == 2
