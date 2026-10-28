@@ -210,11 +210,8 @@ def register(app: FastAPI, runtime: ReaderApplication, status: Callable[[], wire
         summary=summarized.get('result')
         attachments=content.get('attachments',[])
         images=content.get('images',[])
-        media=[dict(id=url.rsplit('/',1)[-1],kind='image',url=url) for url in images]
-        media.extend(dict(id=a['url'].rsplit('/',1)[-1],kind=a['kind'],url=a['url']) for a in attachments)
-        for entry in media:
-            entry['mime']=next((a['mime'] for a in attachments if a['url']==entry['url']),None)
-            entry['role']='image' if entry['url'] in images else 'attachment'
+        media=[dict(id=url.rsplit('/',1)[-1],kind='image',url=url,mime=None,role='image') for url in images]
+        media.extend(dict(id=a['url'].rsplit('/',1)[-1],kind=a['kind'],url=a['url'],mime=a['mime'],role='attachment') for a in attachments)
         body=dict(id=value['id'],title=value['title'],feed_id=value['feed_id'],published_at=value['published_at'],
             source_url=value['source_url'],text=original,source=value['source'],source_position=value['source_position'],
             originals=value['originals'],availability=value['availability'],
