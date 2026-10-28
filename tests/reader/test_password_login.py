@@ -170,3 +170,52 @@ def test_unicode_password_roundtrip_through_urlencoded_form(tmp_path, credential
                                headers={'Origin': 'http://testserver'}, follow_redirects=False)
         assert response.status_code == 303
         assert client.get('/api/v3/status').status_code == 200
+
+
+@pytest.mark.parametrize(('owner', 'count'), [('alice', 16), ('bob', 128)])
+def test_new_login_preserves_existing_sessions(tmp_path, credentials, owner, count):
+    import hashlib
+    now = 1000.0
+    data = json.loads(json.dumps(credentials))
+    revision = data['users'][owner]['revision']
+    for number in range(count):
+        cookie = f'old-{number}'
+        data['sessions'][hashlib.sha256(cookie.encode()).hexdigest()] = {
+            'user': owner, 'revision': revision, 'expires': now + 100 + number,
+        }
+    app = setup(tmp_path, data, wall_clock=lambda: now)
+    with TestClient(app) as client:
+        assert login(client).status_code == 303
+        assert client.get('/login/session').status_code == 204
+        client.cookies.set('oko_access', 'old-0')
+        assert client.get('/login/session').status_code == 204
+
+
+def test_repeated_successful_login_in_same_browser_is_not_throttled(tmp_path, credentials):
+    app = setup(tmp_path, credentials, wall_clock=lambda: 1000.0)
+    with TestClient(app) as client:
+        for _ in range(6):
+            assert login(client).status_code == 303
+        assert client.get('/login/session').status_code == 204
+        assert len(json.loads((tmp_path / 'access.json').read_text())['sessions']) == 1
+
+
+def test_successful_login_does_not_erase_failed_attempts(tmp_path, credentials):
+    app = setup(tmp_path, credentials, wall_clock=lambda: 1000.0)
+    with TestClient(app) as client:
+        for _ in range(4):
+            assert client.post('/login', data={'username': 'alice', 'password': 'wrong'},
+                               headers={'Origin': 'http://testserver'}).status_code == 401
+        assert login(client).status_code == 303
+        assert client.post('/login', data={'username': 'alice', 'password': 'wrong'},
+                           headers={'Origin': 'http://testserver'}).status_code == 401
+        assert login(client).status_code == 429
+
+
+def test_successful_logins_remain_in_global_rate_limit(tmp_path, credentials):
+    data = json.loads(json.dumps(credentials))
+    data['attempts'] = [{'name': 'alice', 'at': 999.0, 'success': True} for _ in range(29)]
+    app = setup(tmp_path, data, wall_clock=lambda: 1000.0)
+    with TestClient(app) as client:
+        assert login(client).status_code == 303
+        assert login(client).status_code == 429

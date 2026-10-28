@@ -112,9 +112,10 @@ class PasswordAccess:
         try:
             with self.state(write=True) as state:
                 attempts = [a for a in state['attempts'] if a['at'] > self.clock() - 60]
-                if len(attempts) >= 30 or sum(a['name'] == name for a in attempts) >= 5:
+                if len(attempts) >= 30 or sum(a['name'] == name and not a.get('success', False) for a in attempts) >= 5:
                     return None, 429
-                state['attempts'] = attempts + [{'name': name[:64], 'at': self.clock()}]
+                attempt = {'name': name[:64], 'at': self.clock(), 'id': secrets.token_hex(16)}
+                state['attempts'] = attempts + [attempt]
                 user = state['users'].get(name)
             # Unknown logins cost the same work; only one derivation runs at a time.
             digest = password_hash(password, user['salt'] if user else '0' * 32)
@@ -124,9 +125,11 @@ class PasswordAccess:
             with self.state(write=True) as state:
                 if state['users'].get(name) != user:
                     return None, 401
+                for saved in state['attempts']:
+                    if saved.get('id') == attempt['id']:
+                        saved['success'] = True
+                        break
                 sessions = {k: v for k, v in state['sessions'].items() if v['expires'] > self.clock()}
-                if len(sessions) >= 128 or sum(v['user'] == name for v in sessions.values()) >= 16:
-                    return None, 429
                 sessions[hashlib.sha256(credential.encode()).hexdigest()] = {
                     'user': name, 'revision': user['revision'], 'expires': self.clock() + MAX_AGE}
                 state['sessions'] = sessions
