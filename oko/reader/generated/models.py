@@ -798,6 +798,20 @@ class ProcessorSelection(RootModel[Literal["codex", "llamacpp"] | ProcessorSelec
     )
 
 
+class MediaItem(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    id: StrictStr
+    kind: Literal["image", "video", "audio", "circle", "file"]
+    mime: StrictStr | None
+    role: Literal["image", "attachment"]
+    url: MediaUrl
+
+
+class SourcePosition6(RootModel[StrictInt]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictInt = Field(..., ge=0)
+
+
 class ReadingEntityVersion(RootModel[StrictStr]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictStr = Field(..., examples=["1"], max_length=20, pattern="^[1-9][0-9]*$")
@@ -1120,6 +1134,15 @@ class SourceLocator(RootModel[StrictStr]):
 class SourceUrl(RootModel[AnyUrl]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: AnyUrl = Field(..., examples=["https://example.test/post/1"])
+
+
+class StorageChangedError(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    code: Literal["storage_changed"]
+    command_id: None
+    details: None
+    diagnostic_id: None
+    message: StrictStr
 
 
 class StoredProcessorSelection(RootModel[ProcessorSelection]):
@@ -2181,6 +2204,36 @@ class PublicationReference(WireModel):
     model_config = ConfigDict(extra="forbid")
     material_id: MaterialId
     source_url: SourceUrl
+
+
+class Result(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    hidden: StrictBool
+    provenance: Provenance
+    reason: StrictStr
+    removed: list[StrictStr]
+    text: StrictStr
+
+
+class Filter(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    error: StrictStr | None
+    result: Result | None
+    state: Literal["disabled", "pending", "processing", "ready", "error"]
+
+
+class Result1(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    points: list[StrictStr]
+    provenance: Provenance
+    references: list[list[PublicationReference]]
+
+
+class Theses(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    error: StrictStr | None
+    result: Result1 | None
+    state: Literal["disabled", "pending", "processing", "ready", "error"]
 
 
 class QuotaWindow(WireModel):
@@ -4141,6 +4194,33 @@ class ProblemSnapshot(WireModel):
     current: list[CurrentProblem | RetryingProblem]
     recent: list[FinishedProblem]
     updated_at: Timestamp
+
+
+class PublicationResponse(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    availability: Literal["available", "pending"]
+    changed: StrictBool
+    completeness: ContentCompleteness | None
+    description: StrictStr
+    external_attachments: list[ExternalAttachment]
+    feed_id: FeedId
+    filter: Filter
+    id: MaterialId
+    linked_content: LinkedContent | None
+    loading: StrictBool
+    media: list[MediaItem]
+    originals: StrictBool
+    post_web_unavailable: StrictBool
+    published_at: Timestamp | None
+    reply_preview: ReplyPreview | None
+    revision_id: RevisionId | None
+    source: SourceReference
+    source_deleted: StrictBool
+    source_position: SourcePosition6 | None
+    source_url: SourceUrl
+    text: StrictStr
+    theses: Theses
+    title: StrictStr
 
 
 class ReadableMaterial(RootModel[PendingReadableMaterial | AvailableReadableMaterial]):

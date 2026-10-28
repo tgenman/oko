@@ -4,6 +4,265 @@ info:
   version: 3.0.0
   description: Canonical HTTP contract. The cards response changed incompatibly within v3 by explicit user decision; old cards clients are not supported. Contract digests check integrity of artifacts delivered together. Client abort does not roll back committed writes.
 paths:
+  /api/v3/publication/{item}:
+    get:
+      summary: Publication
+      operationId: publication
+      description: Read a publication, its processing results and media references in one representation. Conditional requests
+        return 304 when unchanged.
+      tags:
+      - materials
+      parameters:
+      - name: item
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Previously received ETag for this publication.
+      - name: X-Oko-Storage-Id
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/ReadingStorageId'
+        description: Optional storage precondition. A different current identity returns 409 before reading the publication.
+      responses:
+        '200':
+          description: Read one publication and its typed pending/available content. Fetch retries do not hide saved incomplete
+            text; caption state belongs only to YouTube and provenance belongs to results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicationResponse'
+              example:
+                id: example
+                title: Publication
+                feed_id: example
+                published_at: null
+                source_url: https://example.test/post/1
+                text: Original
+                filter:
+                  state: ready
+                  result:
+                    hidden: false
+                    reason: ''
+                    text: Original
+                    removed: []
+                    provenance:
+                      kind: unknown
+                      reason: not_recorded
+                  error: null
+                theses:
+                  state: ready
+                  result:
+                    points:
+                    - Summary
+                    references:
+                    - []
+                    provenance:
+                      kind: unknown
+                      reason: not_recorded
+                  error: null
+                media: []
+                source:
+                  kind: demo
+                  feed_id: example
+                  source_url: https://example.test/post/1
+                source_position: null
+                originals: true
+                availability: available
+                description: ''
+                revision_id: '1'
+                completeness:
+                  state: complete
+                loading: false
+                changed: false
+                source_deleted: false
+                linked_content: null
+                reply_preview: null
+                post_web_unavailable: false
+                external_attachments: []
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+            ETag:
+              schema:
+                type: string
+              description: Version of the complete representation.
+        '404':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceNotFoundError'
+              examples:
+                ResourceNotFoundError:
+                  value:
+                    code: resource_not_found
+                    message: example
+                    details:
+                      resource:
+                        kind: material
+                        material_id: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '304':
+          description: The publication has not changed.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Unchanged representation version.
+        '409':
+          description: The current storage identity differs from the supplied precondition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageChangedError'
+              example:
+                code: storage_changed
+                message: Storage changed
+                details: null
+                diagnostic_id: null
+                command_id: null
   /api/v3/collection-status:
     get:
       summary: Collection progress and request diagnostics
@@ -12337,6 +12596,286 @@ paths:
               description: Command correlation identity when known.
 components:
   schemas:
+    StorageChangedError:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          const: storage_changed
+        message:
+          type: string
+        details:
+          type: 'null'
+        diagnostic_id:
+          type: 'null'
+        command_id:
+          type: 'null'
+      required:
+      - code
+      - message
+      - details
+      - diagnostic_id
+      - command_id
+      examples:
+      - code: storage_changed
+        message: Storage changed
+        details: null
+        diagnostic_id: null
+        command_id: null
+    PublicationResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/MaterialId'
+        title:
+          type: string
+        feed_id:
+          $ref: '#/components/schemas/FeedId'
+        published_at:
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+        source_url:
+          $ref: '#/components/schemas/SourceUrl'
+        text:
+          type: string
+        filter:
+          type: object
+          additionalProperties: false
+          properties:
+            state:
+              type: string
+              enum:
+              - disabled
+              - pending
+              - processing
+              - ready
+              - error
+            result:
+              anyOf:
+              - type: object
+                additionalProperties: false
+                properties:
+                  hidden:
+                    type: boolean
+                  reason:
+                    type: string
+                  text:
+                    type: string
+                  removed:
+                    type: array
+                    items:
+                      type: string
+                  provenance:
+                    $ref: '#/components/schemas/Provenance'
+                required:
+                - hidden
+                - reason
+                - text
+                - removed
+                - provenance
+              - type: 'null'
+            error:
+              anyOf:
+              - type: string
+              - type: 'null'
+          required:
+          - state
+          - result
+          - error
+        theses:
+          type: object
+          additionalProperties: false
+          properties:
+            state:
+              type: string
+              enum:
+              - disabled
+              - pending
+              - processing
+              - ready
+              - error
+            result:
+              anyOf:
+              - type: object
+                additionalProperties: false
+                properties:
+                  points:
+                    type: array
+                    items:
+                      type: string
+                  references:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/PublicationReference'
+                  provenance:
+                    $ref: '#/components/schemas/Provenance'
+                required:
+                - points
+                - references
+                - provenance
+              - type: 'null'
+            error:
+              anyOf:
+              - type: string
+              - type: 'null'
+          required:
+          - state
+          - result
+          - error
+        media:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              id:
+                type: string
+              kind:
+                type: string
+                enum:
+                - image
+                - video
+                - audio
+                - circle
+                - file
+              url:
+                $ref: '#/components/schemas/MediaUrl'
+              mime:
+                anyOf:
+                - type: string
+                - type: 'null'
+              role:
+                type: string
+                enum:
+                - image
+                - attachment
+            required:
+            - id
+            - kind
+            - url
+            - mime
+            - role
+        source:
+          $ref: '#/components/schemas/SourceReference'
+        source_position:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+        originals:
+          type: boolean
+        availability:
+          type: string
+          enum:
+          - available
+          - pending
+        description:
+          type: string
+        revision_id:
+          anyOf:
+          - $ref: '#/components/schemas/RevisionId'
+          - type: 'null'
+        completeness:
+          anyOf:
+          - $ref: '#/components/schemas/ContentCompleteness'
+          - type: 'null'
+        loading:
+          type: boolean
+        changed:
+          type: boolean
+        source_deleted:
+          type: boolean
+        linked_content:
+          anyOf:
+          - $ref: '#/components/schemas/LinkedContent'
+          - type: 'null'
+        reply_preview:
+          anyOf:
+          - $ref: '#/components/schemas/ReplyPreview'
+          - type: 'null'
+        post_web_unavailable:
+          type: boolean
+        external_attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalAttachment'
+      required:
+      - id
+      - title
+      - feed_id
+      - published_at
+      - source_url
+      - text
+      - filter
+      - theses
+      - media
+      - source
+      - source_position
+      - originals
+      - availability
+      - description
+      - revision_id
+      - completeness
+      - loading
+      - changed
+      - source_deleted
+      - linked_content
+      - reply_preview
+      - post_web_unavailable
+      - external_attachments
+      examples:
+      - id: example
+        title: Publication
+        feed_id: example
+        published_at: null
+        source_url: https://example.test/post/1
+        text: Original
+        filter:
+          state: ready
+          result:
+            hidden: false
+            reason: ''
+            text: Original
+            removed: []
+            provenance:
+              kind: unknown
+              reason: not_recorded
+          error: null
+        theses:
+          state: ready
+          result:
+            points:
+            - Summary
+            references:
+            - []
+            provenance:
+              kind: unknown
+              reason: not_recorded
+          error: null
+        media: []
+        source:
+          kind: demo
+          feed_id: example
+          source_url: https://example.test/post/1
+        source_position: null
+        originals: true
+        availability: available
+        description: ''
+        revision_id: '1'
+        completeness:
+          state: complete
+        loading: false
+        changed: false
+        source_deleted: false
+        linked_content: null
+        reply_preview: null
+        post_web_unavailable: false
+        external_attachments: []
     BrowserSessionRevoked:
       type: object
       properties:
