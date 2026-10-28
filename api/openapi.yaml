@@ -26,6 +26,12 @@ paths:
         schema:
           type: string
         description: Previously received ETag for this publication.
+      - name: X-Oko-Storage-Id
+        in: header
+        required: false
+        schema:
+          $ref: '#/components/schemas/ReadingStorageId'
+        description: Optional storage precondition. A different current identity returns 409 before reading the publication.
       responses:
         '200':
           description: Read one publication and its typed pending/available content. Fetch retries do not hide saved incomplete
@@ -245,6 +251,18 @@ paths:
               schema:
                 type: string
               description: Unchanged representation version.
+        '409':
+          description: The current storage identity differs from the supplied precondition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageChangedError'
+              example:
+                code: storage_changed
+                message: Storage changed
+                details: null
+                diagnostic_id: null
+                command_id: null
   /api/v3/collection-status:
     get:
       summary: Collection progress and request diagnostics
@@ -12578,6 +12596,33 @@ paths:
               description: Command correlation identity when known.
 components:
   schemas:
+    StorageChangedError:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          const: storage_changed
+        message:
+          type: string
+        details:
+          type: 'null'
+        diagnostic_id:
+          type: 'null'
+        command_id:
+          type: 'null'
+      required:
+      - code
+      - message
+      - details
+      - diagnostic_id
+      - command_id
+      examples:
+      - code: storage_changed
+        message: Storage changed
+        details: null
+        diagnostic_id: null
+        command_id: null
     PublicationResponse:
       type: object
       additionalProperties: false

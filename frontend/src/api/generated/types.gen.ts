@@ -2709,6 +2709,14 @@ export type SourceUnavailableErrorDetails = {
 
 export type SourceUrl = string;
 
+export type StorageChangedError = {
+    code: 'storage_changed';
+    command_id: null;
+    details: null;
+    diagnostic_id: null;
+    message: string;
+};
+
 export type StorageUnavailableError = {
     code: 'storage_unavailable';
     command_id: CommandId | null;
@@ -5476,6 +5484,10 @@ export type PublicationData = {
          * Previously received ETag for this publication.
          */
         'If-None-Match'?: string;
+        /**
+         * Optional storage precondition. A different current identity returns 409 before reading the publication.
+         */
+        'X-Oko-Storage-Id'?: ReadingStorageId;
     };
     path: {
         /**
@@ -5496,6 +5508,10 @@ export type PublicationErrors = {
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */
     404: ResourceNotFoundError;
+    /**
+     * The current storage identity differs from the supplied precondition.
+     */
+    409: StorageChangedError;
     /**
      * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
      */

@@ -197,6 +197,10 @@ def register(app: FastAPI, runtime: ReaderApplication, status: Callable[[], wire
     async def publication(item: str, request: Request) -> Response:
         from oko.reader.reading_v3 import identity
         identity(item)
+        storage=runtime.queries.versions.identity
+        expected=request.headers.get('X-Oko-Storage-Id')
+        if expected is not None and expected!=storage:
+            return JSONResponse(dict(code='storage_changed',message='Storage changed',details=None,diagnostic_id=None,command_id=None),status_code=409)
         value=material(item).model_dump(mode='json')
         content=value.get('content',{})
         original=content.get('text','')
@@ -204,6 +208,7 @@ def register(app: FastAPI, runtime: ReaderApplication, status: Callable[[], wire
         summarized=value['theses']
         def state(part: dict[str, Any]) -> str:
             attempt=part['attempt']['state']
+            if attempt=='running':return 'processing'
             if part.get('diagnostic_message') and attempt!='ready':return 'error'
             return {'disabled':'disabled','queued':'pending','cancelled':'pending','waiting':'pending','running':'processing','ready':'ready'}[attempt]
         f=filtered.get('result')
@@ -220,12 +225,12 @@ def register(app: FastAPI, runtime: ReaderApplication, status: Callable[[], wire
             changed=content.get('changed',False),source_deleted=content.get('source_deleted',False),
             linked_content=content.get('linked_content'),reply_preview=content.get('reply_preview'),
             post_web_unavailable=content.get('post_web_unavailable',False),external_attachments=content.get('external_attachments',[]),
-            filter=dict(state=state(filtered),result=dict(hidden=f['hidden'],reason=f['reason'],text=content.get('display_text',original),removed=f['removed'],provenance=f['provenance']) if f else None,error=filtered.get('diagnostic_message')),
-            theses=dict(state=state(summarized),result=dict(points=[p['text'] for p in summary['points']],references=[p['references'] for p in summary['points']],provenance=summary['provenance']) if summary else None,error=summarized.get('diagnostic_message')),
+            filter=dict(state=state(filtered),result=dict(hidden=f['hidden'],reason=f['reason'],text=content.get('display_text',original),removed=f['removed'],provenance=f['provenance']) if f else None,error=filtered.get('diagnostic_message') if state(filtered)=='error' else None),
+            theses=dict(state=state(summarized),result=dict(points=[p['text'] for p in summary['points']],references=[p['references'] for p in summary['points']],provenance=summary['provenance']) if summary else None,error=summarized.get('diagnostic_message') if state(summarized)=='error' else None),
             media=media)
         body=wire.PublicationResponse.model_validate(body).model_dump(mode='json')
         encoded=json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-        etag='"'+hashlib.sha256(encoded).hexdigest()+'"'
+        etag='"'+hashlib.sha256(storage.encode()+b'\0'+encoded).hexdigest()+'"'
         if request.headers.get('if-none-match')==etag:return Response(status_code=304,headers={'ETag':etag})
         return JSONResponse(body,headers={'ETag':etag})
 

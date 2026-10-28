@@ -1136,6 +1136,15 @@ class SourceUrl(RootModel[AnyUrl]):
     root: AnyUrl = Field(..., examples=["https://example.test/post/1"])
 
 
+class StorageChangedError(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    code: Literal["storage_changed"]
+    command_id: None
+    details: None
+    diagnostic_id: None
+    message: StrictStr
+
+
 class StoredProcessorSelection(RootModel[ProcessorSelection]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: ProcessorSelection = Field(..., examples=["codex"])

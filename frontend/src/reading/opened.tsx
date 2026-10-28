@@ -79,7 +79,7 @@ function availableContent(material:Material):AvailablePublicationContent|null {
   }
 }
 
-export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed}:{getFeed:(id:string)=>SubscriptionFeed|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
+export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed,getStorage}:{getStorage:()=>string|null;getFeed:(id:string)=>SubscriptionFeed|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
   const store=createStore({session:null as Session|null,material:null as Material|null,empty:'Select an item',message:'',processingOpen:false,workAllowed:true,pending:null as Material|null,retained:false,generation:0});
   const active=(session:Session)=>store.get().session===session&&!session.controller.signal.aborted;
   function clear(empty='Select an item') {store.get().session?.controller.abort();store.set({session:null,material:null,empty,message:'',processingOpen:false,workAllowed:store.get().workAllowed,pending:null,retained:false,generation:0});}
@@ -95,7 +95,7 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
   function materialFromPublication(value:PublicationResponse):Material {
     const attempt=(state:PublicationResponse['filter']['state']):UnfinishedProcessingAttempt|{state:'ready'}=>
       state==='ready'?{state:'ready'}:state==='disabled'?{state:'disabled'}:state==='processing'?{state:'running'}:
-      state==='error'?{state:'waiting',reason:'retry_scheduled',retry_at:null}:{state:'queued'};
+      {state:'queued'};
     const f=value.filter.result,t=value.theses.result;
     const filter:ReadingFilterData['filter']=f&&value.filter.state==='ready'
       ?{attempt:{state:'ready'},diagnostic_message:value.filter.error,result:{hidden:f.hidden,reason:f.reason,removed:f.removed,provenance:f.provenance}}
@@ -120,18 +120,19 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
   }
   async function load(session:Session) {
     if(session.loading||session.detached||!active(session))return;
+    const storage=getStorage();if(!storage)return;
     session.loading=true;
     const epoch=session.assetEpoch;
     try {
-      const reply=await publication({client:readerApi.client,path:{item:session.id},signal:session.controller.signal,throwOnError:false,...(session.etag?{headers:{'If-None-Match':session.etag}}:{})});
-      if(!active(session)||epoch!==session.assetEpoch)return;
+      const reply=await publication({client:readerApi.client,path:{item:session.id},signal:session.controller.signal,throwOnError:false,headers:{'X-Oko-Storage-Id':storage,...(session.etag?{'If-None-Match':session.etag}:{})}});
+      if(!active(session)||epoch!==session.assetEpoch||storage!==getStorage())return;
       if(reply.response?.status===304)return;
       if(reply.response?.status===404){retain();return;}
       if(reply.error)throw reply.error;
       if(!reply.data)throw new Error('Publication temporarily unavailable');
       acceptPublication(reply.data,session);
       session.etag=reply.response?.headers.get('etag')??null;
-    }catch(error){if(active(session)){if(error instanceof ReaderError&&error.code==='resource_not_found'){retain();return;}reportError(error,'Opened item');if(store.get().material)update({...store.get(),message:errorMessage(error)});else clear(errorMessage(error));}}
+    }catch(error){if(active(session)&&epoch===session.assetEpoch&&storage===getStorage()){if(error instanceof ReaderError&&error.code==='storage_changed')return;if(error instanceof ReaderError&&error.code==='resource_not_found'){retain();return;}reportError(error,'Opened item');if(store.get().material)update({...store.get(),message:errorMessage(error)});else clear(errorMessage(error));}}
     finally{session.loading=false;}
   }
   async function open(card:OpenCard) {

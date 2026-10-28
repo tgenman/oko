@@ -44,6 +44,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         if(response.status!==304&&response.status!==204&&(!response.ok || !isBinaryOperation(url.pathname,request.method)))await decodeJson(response.clone());
         return response;
       } catch(error) {
+        if (error instanceof ReaderError && error.code==='storage_changed' && url.pathname.startsWith('/api/v3/publication/')) throw error;
         if (onError && !['/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {
           if (error instanceof Error) {
             Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : url.pathname.startsWith('/api/v3/reading/materials/') ? [url.pathname.split('/')[5]] : []});

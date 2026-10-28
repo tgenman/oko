@@ -488,3 +488,96 @@ test('reply context stays with its revision and historical previews use their ow
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
 });
+
+test('a replacement library cannot update the shown publication before its status is accepted',async()=>{
+ const r=await reader();try{
+  await r.page.addInitScript(()=>{
+   const original=window.fetch.bind(window),state={enabled:false,checkHeld:false,publicationSeen:false,release:undefined as undefined|(()=>void)};
+   Object.assign(window,{publicationRestoreRace:state});
+   window.fetch=async(url,options)=>{
+    const path=String(url);
+    if(state.enabled&&path==='/api/v3/reading/check'){
+     const response=await original(url,options);
+     if(!state.checkHeld){state.checkHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});}
+     return response;
+    }
+    if(state.enabled&&path==='/api/v3/publication/A'){
+     state.publicationSeen=true;
+     const headers=new Headers(options?.headers);headers.delete('If-None-Match');
+     const response=await original(url,{...options,headers}),body=await response.json();
+     const newStorage='2d879353-68a3-4919-831c-32cb82c3d55f';
+     if(new Headers(options?.headers).get('X-Oko-Storage-Id'))return new Response(JSON.stringify({code:'storage_changed',message:'Storage changed',details:null,diagnostic_id:null,command_id:null}),{status:409,headers:{'Content-Type':'application/json'}});
+     body.filter={state:'ready',result:{hidden:true,reason:'NEW LIBRARY',text:'Original text',removed:[],provenance:{kind:'unknown',reason:'not_recorded'}},error:null};
+     return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"new-library"','X-Oko-Storage-Id':newStorage}});
+    }
+    return original(url,options);
+   };
+  });
+  await r.start([material('A',{version:'same',text:'Original text'})]);
+  await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Original text');
+  await r.page.evaluate(()=>{(window as unknown as {publicationRestoreRace:{enabled:boolean}}).publicationRestoreRace.enabled=true;});
+  await r.page.waitForFunction(()=>{const r=(window as unknown as {publicationRestoreRace:{checkHeld:boolean;publicationSeen:boolean}}).publicationRestoreRace;return r.checkHeld&&r.publicationSeen;});
+  await expect(r.page.locator('#text')).toHaveText('Original text');
+  await expect(r.page.locator('#filter-status')).not.toContainText('NEW LIBRARY');
+  await r.page.evaluate(()=>{const r=(window as unknown as {publicationRestoreRace:{release?:()=>void}}).publicationRestoreRace;r.release?.();});
+ }finally{await r.close();}
+});
+
+test('a late old-library publication response cannot cross an accepted storage reset',async()=>{
+ const r=await reader();try{
+  await r.page.addInitScript(()=>{
+   const original=window.fetch.bind(window),state={enabled:false,reset:false,oldHeld:false,release:undefined as undefined|(()=>void)};
+   Object.assign(window,{publicationLateRestore:state});
+   const replacement='2d879353-68a3-4919-831c-32cb82c3d55f';
+   window.fetch=async(url,options)=>{
+    const path=String(url);
+    if(state.enabled&&path==='/api/v3/reading/check'){
+     if(!state.reset){state.reset=true;return new Response(JSON.stringify({state:'reset',storage_id:replacement}),{headers:{'Content-Type':'application/json'}});}
+     const request=JSON.parse(String(options!.body));request.storage_id=null;
+     const reply=await original(url,{...options,body:JSON.stringify(request)}),frame=await reply.json();
+     return new Response(JSON.stringify({...frame,storage_id:replacement}),{headers:{'Content-Type':'application/json'}});
+    }
+    if(state.enabled&&path==='/api/v3/publication/A'){
+     const identity=new Headers(options?.headers).get('X-Oko-Storage-Id'),headers=new Headers(options?.headers);headers.delete('If-None-Match');
+     const response=await original(url,{...options,headers}),body=await response.json();
+     const reason=identity===replacement?'NEW LIBRARY':'OLD LIBRARY';
+     body.filter={state:'ready',result:{hidden:true,reason,text:'Original text',removed:[],provenance:{kind:'unknown',reason:'not_recorded'}},error:null};
+     if(identity!==replacement&&!state.oldHeld){state.oldHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});}
+     return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"'+reason+'"'}});
+    }
+    return original(url,options);
+   };
+  });
+  await r.start([material('A',{version:'same',text:'Original text'})]);
+  await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Original text');
+  await r.page.evaluate(()=>{(window as unknown as {publicationLateRestore:{enabled:boolean}}).publicationLateRestore.enabled=true;});
+  await r.page.waitForFunction(()=>{const r=(window as unknown as {publicationLateRestore:{reset:boolean;oldHeld:boolean}}).publicationLateRestore;return r.reset&&r.oldHeld;});
+  await r.page.evaluate(()=>{(window as unknown as {publicationLateRestore:{release?:()=>void}}).publicationLateRestore.release?.();});
+  await expect(r.page.locator('#material-update-button')).toBeVisible();
+  await expect(r.page.locator('#filter-status')).not.toContainText('OLD LIBRARY');
+  await expect(r.page.locator('#text')).toHaveText('Original text');
+  await r.page.locator('#material-update-button').click();
+  await expect(r.page.locator('#filter-status')).toContainText('NEW LIBRARY');
+ }finally{await r.close();}
+});
+
+test('processing and error states show the current attempt without inventing a retry schedule',async()=>{
+ const r=await reader();try{
+  await r.page.addInitScript(()=>{
+   const original=window.fetch.bind(window),state={mode:'processing'};Object.assign(window,{publicationProcessingState:state});
+   window.fetch=async(url,options)=>{
+    if(String(url)!=='/api/v3/publication/A')return original(url,options);
+    const headers=new Headers(options?.headers);headers.delete('If-None-Match');
+    const response=await original(url,{...options,headers}),body=await response.json();
+    body.theses={state:state.mode,result:null,error:state.mode==='error'?'Processor unavailable':null};
+    return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"'+state.mode+'"'}});
+   };
+  });
+  await r.start([material('A')]);await r.page.locator('[data-card="A"]').click();
+  await expect(r.page.locator('#ai-status')).toHaveText('Generating summary');
+  await expect(r.page.locator('#theses-retry')).toBeHidden();
+  await r.page.evaluate(()=>{(window as unknown as {publicationProcessingState:{mode:string}}).publicationProcessingState.mode='error';});
+  await expect(r.page.locator('#ai-status')).toHaveText('Processor unavailable');
+  await expect(r.page.locator('#theses-retry')).toBeVisible();
+ }finally{await r.close();}
+});
