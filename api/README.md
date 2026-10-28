@@ -110,3 +110,9 @@ Description относится к внешнему источнику. Откр�
 
 Для карточек используются [GET /api/v3/cards и POST /api/v3/cards/read](../docs/architecture/cards-http-design.md). Список выдаётся порциями и проверяется по ETag; просмотр принимает явные ID. `POST /api/v3/reading/check` остаётся для статуса, навигации и частей открытого материала; открытие использует `GET /api/v3/reading/materials/{item}`.
 [Доставка, частичные ответы и восстановление](../docs/architecture/selective-reading.md).
+
+## Единый ответ открытой публикации
+
+`GET /api/v3/publication/{id}` возвращает исходный текст, фильтрацию, тезисы
+и сведения о медиа одним ответом с ETag. Подробности и состояния обработки:
+[контракт публикации](../docs/architecture/publication-http-design.md).

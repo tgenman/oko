@@ -140,6 +140,7 @@ The deeper documents are currently in Russian:
 | Current data model, adapters, jobs, and stages | [Latest publication state](latest-publication.md) |
 | Layers, services, and transactions | [Application layers](application-layers.md) |
 | Actions, cancellation, admission, and shutdown | [Reader work](reader-work.md) |
+| Publication HTTP contract | [Publication response](publication-http-design.md) |
 | Opened content and delayed browser responses | [Opened material](opened-material.md) |
 | Menus, settings, and drafts | [UI settings](ui-settings.md) |
 | Card pagination, visible updates, and viewing selected IDs | [Cards HTTP contract](cards-http-design.md) |
