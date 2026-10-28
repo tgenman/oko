@@ -46,6 +46,7 @@ class PasswordAccess:
         self.path = root / 'access.json'
         self.lock = threading.RLock()
         self.hash_slots = asyncio.Semaphore(1)
+        self.pending_logins = 0
 
     @contextmanager
     def state(self, *, write: bool = False) -> Iterator[dict[str, Any]]:
@@ -174,11 +175,33 @@ def install_login(app: FastAPI, access: PasswordAccess, public_url: str | None) 
                 return login_page(401)
         except (ValueError, KeyError, UnicodeError):
             return login_page(401)
-        # Bound work before entering the thread pool; queued requests are rejected.
-        if access.hash_slots.locked():
+        # Bound waiting requests while allowing ordinary concurrent logins to wait.
+        if access.pending_logins >= 16:
             return login_page(429)
-        async with access.hash_slots:
-            credential, status = await asyncio.to_thread(access.login, name, password)
+        access.pending_logins += 1
+        started = False
+        async def authenticate() -> tuple[str | None, int]:
+            nonlocal started
+            async with access.hash_slots:
+                started = True
+                return await asyncio.to_thread(access.login, name, password)
+        worker = asyncio.create_task(authenticate())
+        worker.add_done_callback(lambda _: setattr(access, 'pending_logins', access.pending_logins - 1))
+        try:
+            credential, status = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            if not started:
+                worker.cancel()
+                raise
+            async def revoke_abandoned() -> None:
+                try:
+                    credential, _ = await worker
+                    if credential:
+                        await asyncio.to_thread(access.revoke, credential)
+                except Exception:
+                    pass
+            asyncio.create_task(revoke_abandoned())
+            raise
         if credential is None:
             return login_page(status)
         access.revoke(request.cookies.get(access.cookie, ''))
