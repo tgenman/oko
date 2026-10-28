@@ -3,9 +3,7 @@ import {test} from 'node:test';
 import {artifactPath} from './artifacts';
 import {reader, material, expect} from './support.ts';
 import assert from 'node:assert/strict';
-import type {ReadingCheckResponse} from '../../frontend/src/api/generated/types.gen';
 
-declare global {interface Window {replyVersions:Record<string,string>;}}
 
 test('opened publication shows variant B with avatar and wrapping long feed and publication titles', async () => {
  const r=await reader();try {
@@ -372,7 +370,7 @@ test('storage replacement rejects old media replies and stages the replacement b
     });
     // Wait for the request after reset: the already in-flight pre-reset poll
     // can discover the new text before the injected reset is accepted.
-    await r.page.waitForFunction(()=>readerTransport.requests.some(request=>request.url==='/api/v3/reading/check'&&Array.isArray(request.body?.resources)&&request.body.resources.some(resource=>resource.kind==='material'&&resource.known_version===null)));
+    await r.page.waitForFunction(()=>readerTransport.requests.filter(request=>request.url==='/api/v3/publication/A').length>=2);
     await expect(r.page.locator('#material-update-button')).toBeVisible();
     await r.page.evaluate(({url,png})=>{readerTransport.release(url,'late old asset');readerTransport.replies.set(url,{base64:png,mime:'image/png'});},{url,png});
     await settle(r.page);await expect(r.page.locator('#text')).toHaveText('Текст A');await expect(r.page.locator('#images img')).toHaveCount(0);assert.deepEqual(await r.page.evaluate(()=>browserResources.created),[]);
@@ -410,19 +408,6 @@ test('reply context is a compact separate card with safe navigation and local ex
   const excerpt='Цитируемый фрагмент другого автора. '.repeat(20)+'Последние слова фрагмента.';
   try {
     await r.start([material('A',{reply_preview:{author:'Другой автор',text:excerpt,source_url:'https://t.me/fixture/10'}}),material('B')]);
-    await r.page.evaluate(()=>{
-      const validate=window.validateReaderReply;window.replyVersions={};
-      window.validateReaderReply=async(url,method,status,body,alias,record)=>{
-        await validate(url,method,status,body,alias,record);
-        if(url==='/api/v3/reading/materials/A'){
-          // The binding above has validated the delivered wire contract.
-          const frame=body as ReadingCheckResponse;
-          if(frame.state==='current')for(const resource of frame.resources){
-            if(resource.id==='A'&&'version'in resource&&typeof resource.version==='string')window.replyVersions[resource.kind]=resource.version;
-          }
-        }
-      };
-    });
     await r.page.locator('#cards').getByRole('button',{name:/^A/}).click();
     const card=r.page.locator('#material .reply-preview');
     await expect(card).toBeVisible();
@@ -437,9 +422,9 @@ test('reply context is a compact separate card with safe navigation and local ex
     // independent of the card, as is renewing the browser presence lease.
     const heartbeat=await r.api('client-sessions','POST');
     const requests=await r.page.evaluate(()=>readerTransport.requests);
-    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||['/api/v3/status','/api/v3/collection-status'].includes(q.url)));
-    const start=await r.page.evaluate(()=>readerTransport.requests.length),versions=await r.page.evaluate(()=>window.replyVersions);
-    assert.deepEqual(Object.keys(versions).sort(),['filter','material','media','theses']);
+    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||q.url.startsWith('/api/v3/publication/')||['/api/v3/status','/api/v3/collection-status'].includes(q.url)));
+    const start=await r.page.evaluate(()=>readerTransport.requests.length);
+    assert.ok(requests.some(q=>q.url==='/api/v3/publication/A'&&q.method==='GET'));
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();
     await r.page.keyboard.press('Enter');
     await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
@@ -460,7 +445,7 @@ test('reply context is a compact separate card with safe navigation and local ex
       assert.ok(Array.isArray(request.body?.resources));
       for(const resource of request.body.resources){
         if(['material','filter','theses','media'].includes(resource.kind)){
-          assert.equal(resource.id,'A');assert.equal(resource.known_version,versions[resource.kind]);
+          assert.fail('Publication parts must not use the universal check');
         }
       }
     }

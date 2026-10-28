@@ -181,6 +181,19 @@ async function reader() {
           for(const [route,next] of updates)replies.set(route,next);
           return new Response(null,{status:204});
         }
+        if(/^\/api\/v3\/publication\/[^/]+$/.test(key)){
+          const id=key.split('/')[4],m=await fixtureRead('/api/v3/materials/'+id) as import('../../frontend/src/api/generated/types.gen').ReadableMaterial;
+          const c=m.availability==='available'?m.content:null,f=m.filter.result,t=m.theses.result;
+          const state=(part:typeof m.filter|typeof m.theses)=>part.diagnostic_message&&part.attempt.state!=='ready'?'error':({disabled:'disabled',queued:'pending',cancelled:'pending',waiting:'pending',running:'processing',ready:'ready'} as const)[part.attempt.state];
+          const attachments=c?.attachments||[],images=c?.images||[];
+          const body={id:m.id,title:m.title,feed_id:m.feed_id,published_at:m.published_at,source_url:m.source_url,text:c?.text||'',source:m.source,source_position:m.source_position,originals:m.originals,availability:m.availability,description:c?.description||'',revision_id:c?.revision_id||null,completeness:c?.completeness||null,loading:c?.loading??m.content.loading,changed:c?.changed||false,source_deleted:c?.source_deleted||false,linked_content:c?.linked_content||null,reply_preview:c?.reply_preview||null,post_web_unavailable:c?.post_web_unavailable||false,external_attachments:c?.external_attachments||[],
+           filter:{state:state(m.filter),result:f?{hidden:f.hidden,reason:f.reason,text:c?.display_text||c?.text||'',removed:f.removed,provenance:f.provenance}:null,error:m.filter.diagnostic_message},
+           theses:{state:state(m.theses),result:t?{points:t.points.map(p=>p.text),references:t.points.map(p=>p.references),provenance:t.provenance}:null,error:m.theses.diagnostic_message},
+           media:[...images.map(url=>({id:url.split('/').at(-1)!,kind:'image' as const,url,mime:null,role:'image' as const})),...attachments.map(a=>({id:a.url.split('/').at(-1)!,kind:a.kind,url:a.url,mime:a.mime,role:'attachment' as const}))]};
+          const json=JSON.stringify(body),old=entityVersions.get('publication/'+id),version=old?(old.json===json?old.version:old.version+1):1;entityVersions.set('publication/'+id,{version,json});
+          const etag='"'+version+'"';if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag}});
+          const result=await response(key,'GET',body);result.headers.set('ETag',etag);return result;
+        }
         if(key==='/api/v3/reading/check')return response(key,'POST',await selective(JSON.parse(String(options?.body))));
         if(key.startsWith('/api/v3/reading/materials/')){const id=key.split('/')[5];return response(key,'GET',await selective({storage_id:null,resources:(['material','filter','theses','media'] as const).map(kind=>({kind,id,known_version:null}))}));}
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));

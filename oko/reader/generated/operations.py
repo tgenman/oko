@@ -45,6 +45,7 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('GET', '/api/v3/processors/llamacpp'): models.LocalProcessorState,
     ('PUT', '/api/v3/processors/llamacpp'): models.LocalProcessorState,
     ('POST', '/api/v3/processors/llamacpp/check'): models.LocalProcessorCheck,
+    ('GET', '/api/v3/publication/{item}'): models.PublicationResponse,
     ('GET', '/api/v3/reading-composition'): models.ReadingComposition,
     ('POST', '/api/v3/reading/check'): models.ReadingCheckResponse,
     ('GET', '/api/v3/reading/materials/{item}'): models.ReadingCheckResponse,

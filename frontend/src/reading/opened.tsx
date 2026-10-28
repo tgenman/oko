@@ -9,20 +9,19 @@ import {readingPosition} from './position';
 import {newsTitle} from './title';
 import {copyText} from '../browser-platform';
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
-import {readingMaterial,regenerate,retryMaterial,retryTheses,retryFilter,viewed} from '../api/generated/sdk.gen';
+import {publication,regenerate,retryMaterial,retryTheses,retryFilter,viewed} from '../api/generated/sdk.gen';
 import type {ThesesPoint as Point,Attachment,AvailablePublicationContent,ReplyPreview as ReplyContext} from '../api/generated/types.gen';
-import type {ReadingCheck,ReadingResource,ReadingEntityMaterial,ReadingFilterData,ReadingThesesData,ReadingMediaData} from '../api/generated/types.gen';
+import type {PublicationResponse,ReadingEntityMaterial,ReadingFilterData,ReadingThesesData,UnfinishedProcessingAttempt} from '../api/generated/types.gen';
 import type {CardView as Card} from './resources';
-import type {ReaderApi} from '../api/reader';
+import {ReaderError,type ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {reportError} from '../status/debug';
 import {createStore,useStore,host,errorMessage} from './store';
 
 type MediaFetch=(path:string,signal?:AbortSignal,cache?:RequestCache)=>Promise<Response>;
 type Material = (ReadingEntityMaterial & {filter:ReadingFilterData['filter'];theses:ReadingThesesData['theses']}) & {content:AvailablePublicationContent|{availability:'pending'}};
-type Part='material'|'filter'|'theses'|'media';
 type OpenCard=Pick<Card,'id'>&Partial<Card>;
-type Session={id:string;sourceTitle?:string;sourceFeed?:SubscriptionFeed;folder_id:string|undefined;parts:Map<Part,{version:string;data:unknown}>;loading:boolean;detached:boolean;reset:boolean;assetsPaused:boolean;assetEpoch:number;assets:AbortController;controller:AbortController};
+type Session={id:string;sourceTitle?:string;sourceFeed?:SubscriptionFeed;folder_id:string|undefined;etag:string|null;loading:boolean;detached:boolean;reset:boolean;assetsPaused:boolean;assetEpoch:number;assets:AbortController;controller:AbortController};
 type Resource={url:string;kind:Attachment['kind'];name:string;failed?:boolean};
 function Media({material,fetchMedia,session,id,className,imageAlt='Publication image',optional=false}:{material:Pick<AvailablePublicationContent,'images'|'attachments'|'external_attachments'>;fetchMedia:MediaFetch;session:Session;id?:string;className?:string;imageAlt?:string;optional?:boolean}) {
   const ref=useRef<HTMLDivElement>(null),[resources,setResources]=useState<Resource[]>([]);
@@ -80,7 +79,7 @@ function availableContent(material:Material):AvailablePublicationContent|null {
   }
 }
 
-export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,acceptStorage,getFeed}:{getFeed:(id:string)=>SubscriptionFeed|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void;acceptStorage:(identity:string)=>boolean}) {
+export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed}:{getFeed:(id:string)=>SubscriptionFeed|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
   const store=createStore({session:null as Session|null,material:null as Material|null,empty:'Select an item',message:'',processingOpen:false,workAllowed:true,pending:null as Material|null,retained:false,generation:0});
   const active=(session:Session)=>store.get().session===session&&!session.controller.signal.aborted;
   function clear(empty='Select an item') {store.get().session?.controller.abort();store.set({session:null,material:null,empty,message:'',processingOpen:false,workAllowed:store.get().workAllowed,pending:null,retained:false,generation:0});}
@@ -89,65 +88,61 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ac
     const state=store.get(),session=state.session;
     if(!session)return;
     if(!state.material){clear();return;}
-    session.detached=true;session.controller.abort();session.parts.clear();
+    session.detached=true;session.controller.abort();
     update({...state,retained:true,pending:null,message});
   }
-  function apply(resources:ReadingResource[],session:Session) {
-    if(!active(session))return;
-    let changed=false;
-    for(const resource of resources) {
-      if(resource.id!==session.id||!['material','filter','theses','media'].includes(resource.kind))continue;
-      if(resource.state==='unavailable'){retain();return;}
-      if(resource.state==='failed'){update({...store.get(),message:resource.message});continue;}
-      if(resource.state!=='changed')continue;
-      const kind=resource.kind as Part,previous=session.parts.get(kind);
-      if(previous&&BigInt(previous.version)>=BigInt(resource.version))continue;
-      session.parts.set(kind,{version:resource.version,data:resource.data});changed=true;
-    }
-    if(!changed)return;
-    const text=session.parts.get('material')?.data as ReadingEntityMaterial|undefined;
-    if(!text)return;
-    const sourceFeed=getFeed(text.feed_id);if(sourceFeed){session.sourceFeed=sourceFeed;session.sourceTitle=sourceFeed.title;}
-    const revision=text.availability==='available'?text.content.revision_id:null;
-    const filter=session.parts.get('filter')?.data as ReadingFilterData|undefined;
-    const theses=session.parts.get('theses')?.data as ReadingThesesData|undefined;
-    const media=session.parts.get('media')?.data as ReadingMediaData|undefined;
-    const state=store.get(),shown=state.material;
-    const shownRevision=shown?.availability==='available'?shown.content.revision_id:null;
-    const newText=shown?.availability==='available'&&(session.reset||text.availability!=='available'||revision!==shownRevision||text.content.text!==shown.content.text||text.content.description!==shown.content.description||text.title!==shown.title);
-    // A new source revision remains staged. Each visible part can otherwise
-    // update independently; mismatched replies never borrow another revision.
-    const base=newText?shown:text;
-    if(!base)return;
-    const baseRevision=base.availability==='available'?base.content.revision_id:null;
-    const shownFilter=newText?shown.filter:filter?.revision_id===baseRevision?filter.filter:shownRevision===baseRevision?shown?.filter:undefined;
-    const shownTheses=newText?shown.theses:theses?.revision_id===baseRevision?theses.theses:shownRevision===baseRevision?shown?.theses:undefined;
-    const shownMedia=newText&&shown.availability==='available'?shown.content:media?.revision_id===baseRevision?media:shown?.availability==='available'&&shownRevision===baseRevision?shown.content:undefined;
-    function compose(source:ReadingEntityMaterial,f:ReadingFilterData['filter'],t:ReadingThesesData['theses'],m:ReadingMediaData|AvailablePublicationContent):Material {
-      if(source.availability!=='available')return {...source,filter:f,theses:t};
-      let display=source.content.text;
-      if(f.result)for(const fragment of f.result.removed)display=display.split(fragment).join('');
-      return {...source,filter:f,theses:t,content:{...source.content,images:m.images,attachments:m.attachments,external_attachments:m.external_attachments,display_text:display}};
-    }
-    if(!shownFilter||!shownTheses||!shownMedia)return;
-    const material=compose(base,shownFilter,shownTheses,shownMedia);
-    const pending=newText&&filter?.revision_id===revision&&theses?.revision_id===revision&&media?.revision_id===revision?compose(text,filter.filter,theses.theses,media):null;
-    update({...state,material,pending,message:newText?'A new version is available. Updates for the displayed version may be unavailable.':''});
-  }
   function showLatest(){const state=store.get();if(state.pending&&!state.retained){state.session!.reset=false;state.session!.assetsPaused=false;update({...state,material:state.pending,pending:null,message:'',generation:state.generation+1});}}
-  async function open(card:OpenCard) {
-    clear('Loading item…');
-    const session:Session={id:card.id,sourceTitle:card.feed_title,folder_id:card.folder_id,parts:new Map(),loading:true,detached:false,reset:false,assetsPaused:false,assetEpoch:0,assets:new AbortController(),controller:new AbortController()};
-    store.set({...store.get(),session});
+  function materialFromPublication(value:PublicationResponse):Material {
+    const attempt=(state:PublicationResponse['filter']['state']):UnfinishedProcessingAttempt|{state:'ready'}=>
+      state==='ready'?{state:'ready'}:state==='disabled'?{state:'disabled'}:state==='processing'?{state:'running'}:
+      state==='error'?{state:'waiting',reason:'retry_scheduled',retry_at:null}:{state:'queued'};
+    const f=value.filter.result,t=value.theses.result;
+    const filter:ReadingFilterData['filter']=f&&value.filter.state==='ready'
+      ?{attempt:{state:'ready'},diagnostic_message:value.filter.error,result:{hidden:f.hidden,reason:f.reason,removed:f.removed,provenance:f.provenance}}
+      :{attempt:attempt(value.filter.state) as UnfinishedProcessingAttempt,diagnostic_message:value.filter.error,result:f?{hidden:f.hidden,reason:f.reason,removed:f.removed,provenance:f.provenance}:null};
+    const summary=t?{points:t.points.map((text,index)=>({text,references:t.references[index]||[]})),provenance:t.provenance}:null;
+    const theses:ReadingThesesData['theses']=summary&&value.theses.state==='ready'
+      ?{attempt:{state:'ready'},diagnostic_message:value.theses.error,result:summary}
+      :{attempt:attempt(value.theses.state) as UnfinishedProcessingAttempt,diagnostic_message:value.theses.error,result:summary};
+    const common={id:value.id,title:value.title,feed_id:value.feed_id,published_at:value.published_at,source_url:value.source_url,source_position:value.source_position,source:value.source,originals:value.originals};
+    const revision=value.availability==='available'?value.revision_id:null;
+    if(value.availability==='available'&&(!revision||!value.completeness))throw new Error('Publication revision unavailable');
+    if(value.availability==='pending')return {...common,availability:'pending',content:{availability:'pending',loading:value.loading},filter,theses};
+    const content:AvailablePublicationContent={availability:'available',text:value.text,display_text:f?.text??value.text,description:value.description,revision_id:revision!,version:1,completeness:value.completeness!,loading:value.loading,changed:value.changed,source_deleted:value.source_deleted,linked_content:value.linked_content,reply_preview:value.reply_preview,post_web_unavailable:value.post_web_unavailable,external_attachments:value.external_attachments,images:value.media.filter(m=>m.role==='image').map(m=>m.url),attachments:value.media.filter(m=>m.role==='attachment').map(m=>({kind:m.kind,url:m.url,mime:m.mime||'application/octet-stream'}))};
+    return {...common,availability:'available',content,filter,theses};
+  }
+  function acceptPublication(value:PublicationResponse,session:Session) {
+    const next=materialFromPublication(value),state=store.get(),shown=state.material;
+    const feed=getFeed(next.feed_id);if(feed){session.sourceFeed=feed;session.sourceTitle=feed.title;}
+    const changed=shown?.availability==='available'&&(session.reset||next.availability!=='available'||next.content.revision_id!==shown.content.revision_id||next.content.text!==shown.content.text||next.content.description!==shown.content.description||next.title!==shown.title);
+    if(changed)update({...state,pending:next,message:'A new version is available. Updates for the displayed version may be unavailable.'});
+    else update({...state,material:next,pending:null,message:''});
+  }
+  async function load(session:Session) {
+    if(session.loading||session.detached||!active(session))return;
+    session.loading=true;
+    const epoch=session.assetEpoch;
     try {
-      const frame=(await readingMaterial({client:readerApi.client,path:{item:card.id},signal:session.controller.signal})).data;
-      if(active(session)&&frame.state==='current'){if(acceptStorage(frame.storage_id))apply(frame.resources,session);else{clear('Storage changed · refreshing items');onChanged(false);}}
-    }catch(error){if(active(session)){reportError(error,'Opened item');clear(errorMessage(error));}}
+      const reply=await publication({client:readerApi.client,path:{item:session.id},signal:session.controller.signal,throwOnError:false,...(session.etag?{headers:{'If-None-Match':session.etag}}:{})});
+      if(!active(session)||epoch!==session.assetEpoch)return;
+      if(reply.response?.status===304)return;
+      if(reply.response?.status===404){retain();return;}
+      if(reply.error)throw reply.error;
+      if(!reply.data)throw new Error('Publication temporarily unavailable');
+      acceptPublication(reply.data,session);
+      session.etag=reply.response?.headers.get('etag')??null;
+    }catch(error){if(active(session)){if(error instanceof ReaderError&&error.code==='resource_not_found'){retain();return;}reportError(error,'Opened item');if(store.get().material)update({...store.get(),message:errorMessage(error)});else clear(errorMessage(error));}}
     finally{session.loading=false;}
   }
-  function poll():{session:Session|null;resources:ReadingCheck[]} {
+  async function open(card:OpenCard) {
+    clear('Loading item…');
+    const session:Session={id:card.id,sourceTitle:card.feed_title,folder_id:card.folder_id,etag:null,loading:false,detached:false,reset:false,assetsPaused:false,assetEpoch:0,assets:new AbortController(),controller:new AbortController()};
+    store.set({...store.get(),session});
+    await load(session);
+  }
+  function refresh() {
     const session=store.get().session;
-    return {session,resources:!session||session.loading||session.detached?[]:(['material','filter','theses','media'] as const).map(kind=>({kind,id:session.id,known_version:session.parts.get(kind)?.version??null}))};
+    if(session)void load(session);
   }
   const operations={regenerate,retryMaterial,retryTheses,retryFilter};
   const intents={regenerate:'regenerate',retryMaterial:'retry_material',retryTheses:'retry_theses',retryFilter:'retry_filter'} as const;
@@ -171,11 +166,11 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ac
   mountSurface(host('material').parentElement!,<Surface/>);
   return {
     workAllowed(allowed:boolean){if(store.get().workAllowed!==allowed)store.set({...store.get(),workAllowed:allowed});},
-    get selection(){const session=store.get().session;return session?{id:session.id,folder_id:session.folder_id}:null;},open,clear,poll,apply,
+    get selection(){const session=store.get().session;return session?{id:session.id,folder_id:session.folder_id}:null;},open,clear,refresh,
     reconcile(_cards:Card[]){/* Feed presentation may change without closing the material. */const state=store.get();if(state.material){const feed=getFeed(state.material.feed_id);if(feed&&state.session){state.session.sourceFeed=feed;state.session.sourceTitle=feed.title;}store.set({...state});}},
     viewed(id:string){if(store.get().session?.id===id)retain();},
     disconnected(){const state=store.get();if(!state.material){clear();return;}const session=state.session!;session.assetEpoch++;session.assets.abort();session.assets=new AbortController();session.assetsPaused=true;},
     connected(){const state=store.get(),session=state.session;if(session?.assetsPaused&&!session.reset&&!session.detached){session.assetsPaused=false;store.set({...state});}},
-    reset(){const state=store.get();if(!state.material){clear();return;}const session=state.session!;session.assetEpoch++;session.assets.abort();session.assets=new AbortController();session.assetsPaused=true;session.reset=true;session.parts.clear();update({...state,pending:null});},
+    reset(){const state=store.get();if(!state.material){clear();return;}const session=state.session!;session.assetEpoch++;session.assets.abort();session.assets=new AbortController();session.assetsPaused=true;session.reset=true;session.etag=null;update({...state,pending:null});},
   };
 }

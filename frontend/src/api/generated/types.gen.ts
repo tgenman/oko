@@ -2140,6 +2140,56 @@ export type PublicationReference = {
     source_url: SourceUrl;
 };
 
+export type PublicationResponse = {
+    availability: 'available' | 'pending';
+    changed: boolean;
+    completeness: ContentCompleteness | null;
+    description: string;
+    external_attachments: Array<ExternalAttachment>;
+    feed_id: FeedId;
+    filter: {
+        error: string | null;
+        result: {
+            hidden: boolean;
+            provenance: Provenance;
+            reason: string;
+            removed: Array<string>;
+            text: string;
+        } | null;
+        state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
+    };
+    id: MaterialId;
+    linked_content: LinkedContent | null;
+    loading: boolean;
+    media: Array<{
+        id: string;
+        kind: 'image' | 'video' | 'audio' | 'circle' | 'file';
+        mime: string | null;
+        role: 'image' | 'attachment';
+        url: MediaUrl;
+    }>;
+    originals: boolean;
+    post_web_unavailable: boolean;
+    published_at: Timestamp | null;
+    reply_preview: ReplyPreview | null;
+    revision_id: RevisionId | null;
+    source: SourceReference;
+    source_deleted: boolean;
+    source_position: number | null;
+    source_url: SourceUrl;
+    text: string;
+    theses: {
+        error: string | null;
+        result: {
+            points: Array<string>;
+            provenance: Provenance;
+            references: Array<Array<PublicationReference>>;
+        } | null;
+        state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
+    };
+    title: string;
+};
+
 export type PublicationTheses = {
     points: Array<ThesesPoint>;
     provenance: Provenance;
@@ -5418,6 +5468,58 @@ export type ProcessorCheckResponses = {
 };
 
 export type ProcessorCheckResponse = ProcessorCheckResponses[keyof ProcessorCheckResponses];
+
+export type PublicationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Previously received ETag for this publication.
+         */
+        'If-None-Match'?: string;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        item: string;
+    };
+    query?: never;
+    url: '/api/v3/publication/{item}';
+};
+
+export type PublicationErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type PublicationError = PublicationErrors[keyof PublicationErrors];
+
+export type PublicationResponses = {
+    /**
+     * Read one publication and its typed pending/available content. Fetch retries do not hide saved incomplete text; caption state belongs only to YouTube and provenance belongs to results.
+     */
+    200: PublicationResponse;
+};
+
+export type PublicationResponse2 = PublicationResponses[keyof PublicationResponses];
 
 export type ReadingCompositionData = {
     body?: never;

@@ -79,7 +79,6 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   const opened = createOpenedMaterial({
     readerApi,
     getFeed:id=>readingCatalog.feeds.find(feed=>feed.id===id),
-    acceptStorage:identity=>resources.storageId===null||resources.storageId===identity,
     fetchMedia: (path, signal) => fetchMedia(path, signal, 'no-store'),
     onViewed: id => { viewed(id, true); void refresh(); },
     onChanged: contentChanged => {if (contentChanged) invalidate(); void refresh();},
@@ -205,16 +204,15 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       const sort=input('sort').value;
       const options:ReadingListOptions={target:selection.kind==='feed'?{scope:'feed',feed_id:selection.id!}:selection.kind==='folder'?{scope:'folder',folder_id:selection.id!}:{scope:'all'},sort:sort==='oldest'?sort:'newest',show_hidden:input('show-hidden').checked};
       currentOptions=options;
-      const openedCheck=opened.poll();
+      opened.refresh();
       const pageResult=pages.poll(options,list.visible(),list.atTop(),controller.signal)
         .then(page=>({page}),error=>({error}));
-      const frame=await resources.check(resources.plan(openedCheck.resources),controller.signal);
+      const frame=await resources.check(resources.plan(),controller.signal);
       if(!active())return;
       const accepted=resources.accept(frame);
       if(accepted.reset){pages.clear();list.clear();opened.reset();void refresh();return;}
       if(frame.state!=='current')return;
       opened.connected();
-      if(openedCheck.session)opened.apply(frame.resources,openedCheck.session);
       const state=resources.status;
       if(!state)throw new Error('Reading status temporarily unavailable');
       const recovered=unavailable;unavailable=false;

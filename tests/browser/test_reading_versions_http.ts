@@ -33,7 +33,7 @@ test('unchanged reading checks transmit versions and opening bypasses the poll',
   await expect.poll(()=>!!release).toBe(true);
   await page.locator('#cards button').click();
   await expect(page.locator('#text')).toContainText('Открылась библиотека');
-  assert.equal(paths.filter(path=>/^\/api\/v3\/reading\/materials\/[^/]+$/.test(path)).length,1);
+  assert.equal(paths.filter(path=>/^\/api\/v3\/publication\/[^/]+$/.test(path)).length,1);
   release?.();
   await page.unroute('**/api/v3/reading/check');
 });
