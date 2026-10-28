@@ -584,3 +584,24 @@ test('processing and error states show the current attempt without inventing a r
   await expect(r.page.locator('#theses-retry')).toBeHidden();
  }finally{await r.close();}
 });
+
+test('active processing takes precedence over a previous diagnostic in the synthetic source',async()=>{
+ const r=await reader();try{
+  await r.start([material('A',{ai:{status:'running',error:'Previous failure'}})]);
+  await r.page.locator('[data-card="A"]').click();
+  await expect(r.page.locator('#ai-status')).toHaveText('Generating summary');
+  await expect(r.page.locator('#theses-retry')).toBeHidden();
+  assert.deepEqual(r.errors,[]);
+ }finally{await r.close();}
+});
+
+test('a ready summary does not surface a previous diagnostic as an error',async()=>{
+ const r=await reader();try{
+  await r.start([material('A',{ai:{status:'done',error:'Previous failure'},theses:{points:[{text:'Ready summary',sources:[]}]}})]);
+  await r.page.locator('[data-card="A"]').click();
+  await expect(r.page.locator('#ai-status')).toHaveText('Summary ready');
+  await expect(r.page.locator('#theses')).toHaveText('Ready summary');
+  await expect(r.page.locator('#theses-retry')).toBeHidden();
+  assert.deepEqual(r.errors,[]);
+ }finally{await r.close();}
+});
