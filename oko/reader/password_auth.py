@@ -180,7 +180,7 @@ def install_login(app: FastAPI, access: PasswordAccess, public_url: str | None) 
             return login_page(429)
         access.pending_logins += 1
         started = False
-        async def authenticate():
+        async def authenticate() -> tuple[str | None, int]:
             nonlocal started
             async with access.hash_slots:
                 started = True
@@ -193,7 +193,7 @@ def install_login(app: FastAPI, access: PasswordAccess, public_url: str | None) 
             if not started:
                 worker.cancel()
                 raise
-            async def revoke_abandoned():
+            async def revoke_abandoned() -> None:
                 try:
                     credential, _ = await worker
                     if credential:
