@@ -579,5 +579,8 @@ test('processing and error states show the current attempt without inventing a r
   await r.page.evaluate(()=>{(window as unknown as {publicationProcessingState:{mode:string}}).publicationProcessingState.mode='error';});
   await expect(r.page.locator('#ai-status')).toHaveText('Processor unavailable');
   await expect(r.page.locator('#theses-retry')).toBeVisible();
+  await r.page.evaluate(()=>{(window as unknown as {publicationProcessingState:{mode:string}}).publicationProcessingState.mode='pending';});
+  await expect(r.page.locator('#ai-status')).toHaveText('Waiting for processor');
+  await expect(r.page.locator('#theses-retry')).toBeHidden();
  }finally{await r.close();}
 });
