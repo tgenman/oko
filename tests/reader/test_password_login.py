@@ -170,3 +170,22 @@ def test_unicode_password_roundtrip_through_urlencoded_form(tmp_path, credential
                                headers={'Origin': 'http://testserver'}, follow_redirects=False)
         assert response.status_code == 303
         assert client.get('/api/v3/status').status_code == 200
+
+
+@pytest.mark.parametrize(('owner', 'count'), [('alice', 16), ('bob', 128)])
+def test_new_login_preserves_existing_sessions(tmp_path, credentials, owner, count):
+    import hashlib
+    now = 1000.0
+    data = json.loads(json.dumps(credentials))
+    revision = data['users'][owner]['revision']
+    for number in range(count):
+        cookie = f'old-{number}'
+        data['sessions'][hashlib.sha256(cookie.encode()).hexdigest()] = {
+            'user': owner, 'revision': revision, 'expires': now + 100 + number,
+        }
+    app = setup(tmp_path, data, wall_clock=lambda: now)
+    with TestClient(app) as client:
+        assert login(client).status_code == 303
+        assert client.get('/login/session').status_code == 204
+        client.cookies.set('oko_access', 'old-0')
+        assert client.get('/login/session').status_code == 204

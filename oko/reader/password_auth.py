@@ -125,8 +125,6 @@ class PasswordAccess:
                 if state['users'].get(name) != user:
                     return None, 401
                 sessions = {k: v for k, v in state['sessions'].items() if v['expires'] > self.clock()}
-                if len(sessions) >= 128 or sum(v['user'] == name for v in sessions.values()) >= 16:
-                    return None, 429
                 sessions[hashlib.sha256(credential.encode()).hexdigest()] = {
                     'user': name, 'revision': user['revision'], 'expires': self.clock() + MAX_AGE}
                 state['sessions'] = sessions
