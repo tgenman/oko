@@ -363,7 +363,7 @@ class Publications:
             status = 'pending_filtering'
         elif filtered['hidden']:
             status = 'filter_out'
-        elif self.store.processing.theses.signature(item) and (self.store.processing.theses.read(item) is None or jobs.get('theses') in ('pending','running')) and json.loads(row['processing_metadata']).get('summary',{}).get('reason')!='no_input':
+        elif self.store.processing.theses.signature(item) and (publication_input.stage_enabled(self.store, item, 'theses') or jobs.get('theses') == 'running') and (self.store.processing.theses.read(item) is None or jobs.get('theses') in ('pending','running')) and json.loads(row['processing_metadata']).get('summary',{}).get('reason')!='no_input':
             status = 'pending_summary'
         else:
             status = 'ready'

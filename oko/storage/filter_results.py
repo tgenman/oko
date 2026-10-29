@@ -31,7 +31,10 @@ class FilterResults:
             return dict(status='done',hidden=result.get('hidden',False),
                         reason=result['reason'],removed=[part['text'] for part in result['removed']],error=None)
         job=material_read.jobs(self.store.db,item).get('filter')
-        return dict(status=job['status'] if job and job['status']!='done' else 'pending',error=job['error'] if job else None,
+        enabled = publication_input.stage_enabled(self.store, item, 'filter')
+        if not enabled and (not job or job['status'] != 'running'):
+            return dict(status='off', hidden=False, reason='', removed=[], error=job['error'] if job else None)
+        return dict(status=('off' if job and job['status']=='blocked' else job['status']) if job and job['status']!='done' else 'pending',error=job['error'] if job else None,
                     hidden=False,reason='',removed=[])
 
     def request(self,item: str) -> tuple[ProcessingRequest,str,bool] | None:

@@ -61,7 +61,10 @@ class ProcessingWorker:
                 prepared=self.service.prepare(job.item,self.kind)
                 work=prepared.input
                 if work is None:
-                    jobs.cancel(job)
+                    if prepared.reason == 'stage_disabled':
+                        jobs.block(job)
+                    else:
+                        jobs.cancel(job)
                     return True
                 # Snapshot and successful claim are committed together.
                 request=work.request.model_copy(update={'generation':job.generation})

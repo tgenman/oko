@@ -45,3 +45,25 @@ test('lost v3 settings response is reconciled without replay and keeps a newer d
   const response=await page.request.get(origin+'/api/v3/settings/oko/global',{headers:{Authorization:'Bearer '+token}});
   expect((await response.json()).effective.prompt_theses.value).toBe('Сохранённый текст');
 });
+
+test('filter switch saves independently from the filtering prompt', {timeout:20000}, async t=>{
+  const {page,origin,token}=await productionReader(t);
+  const headers={Authorization:'Bearer '+token};
+  const saved=await page.request.patch(origin+'/api/v3/settings/oko/global',{headers,data:{prompt_filters:'Keep useful text',filter_enabled:true}});
+  expect(saved.status()).toBe(200);
+  await page.goto(origin+'/#token='+token);
+  await page.locator('#settings-open').click();
+  await page.locator('[data-settings-target="filters"]').click();
+  await page.locator('[data-settings-target="field/filter_enabled"]').click();
+  await page.locator('#setting-filter_enabled').uncheck();
+  await page.locator('#setting-save-filter_enabled').click();
+  await expect.poll(async()=>{
+    const response=await page.request.get(origin+'/api/v3/settings/oko/global',{headers});
+    return (await response.json()).effective.filter_enabled.value;
+  }).toBe(false);
+  const screenshot=artifactPath('filter-switch-desktop.png');
+  await page.screenshot({path:screenshot,fullPage:true});
+  console.log('Filter switch screenshot: '+screenshot);
+  const result=await page.request.get(origin+'/api/v3/settings/oko/global',{headers});
+  expect((await result.json()).effective.prompt_filters.value).toBe('Keep useful text');
+});

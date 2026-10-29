@@ -1020,6 +1020,11 @@ export type EffectiveFeedRefreshMinutes = {
     value: number;
 };
 
+export type EffectiveFilterEnabled = {
+    origin: SettingOrigin;
+    value: boolean;
+};
+
 export type EffectiveOriginals = {
     origin: SettingOrigin;
     value: boolean;
@@ -1049,6 +1054,7 @@ export type EffectiveSettingsSnapshot = ({
 } & FeedSettingsSnapshot);
 
 export type EffectiveSettingsValues = {
+    filter_enabled: EffectiveFilterEnabled;
     originals: EffectiveOriginals;
     processor: EffectiveProcessor;
     prompt_filters: EffectivePromptFilters;
@@ -2308,7 +2314,7 @@ export type SessionRequiredError = {
     message: string;
 };
 
-export type SettingKey = 'originals' | 'theses' | 'prompt_theses' | 'prompt_filters' | 'processor';
+export type SettingKey = 'originals' | 'theses' | 'prompt_theses' | 'prompt_filters' | 'filter_enabled' | 'processor';
 
 export type SettingOrigin = ({
     scope: 'default';
@@ -2337,6 +2343,7 @@ export type SettingsPatch = {
      * Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.
      */
     feed_refresh_minutes?: number | null;
+    filter_enabled?: boolean | null;
     originals?: boolean | null;
     processor?: ProcessorSelection | null;
     prompt_filters?: string | null;
@@ -2489,6 +2496,7 @@ export type StorageUnavailableErrorDetails = {
 export type StoredCommandContext = CommandContext;
 
 export type StoredOverrides = {
+    filter_enabled?: boolean;
     originals?: boolean;
     processor?: StoredProcessorSelection;
     prompt_filters?: string;

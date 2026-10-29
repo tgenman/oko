@@ -32,9 +32,7 @@ class ProcessingRepository:
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
         row=self.store.db.execute('SELECT * FROM items_read WHERE id = %s AND viewed = 0',(item,)).fetchone()
         if row is None or row['feed_id'] is None:return ProcessingPreparation('disabled',reason='not_eligible')
-        rules=publication_input.live_settings(self.store,item)
-        values=rules['values']
-        enabled=bool(values['prompt_filters'].strip()) if kind=='filter' else bool(values['theses'] or row['platform']=='youtube' and rules['importance']=='high')
+        enabled = publication_input.stage_enabled(self.store, item, kind)
         if not enabled:return ProcessingPreparation('disabled',reason='stage_disabled')
         selected=publication_input.content(self.store,item)
         if not row['complete'] or row['content']=='{}' or publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):

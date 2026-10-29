@@ -973,12 +973,24 @@ class SessionRequiredError(WireModel):
 
 class SettingKey(
     RootModel[
-        Literal["originals", "theses", "prompt_theses", "prompt_filters", "processor"]
+        Literal[
+            "originals",
+            "theses",
+            "prompt_theses",
+            "prompt_filters",
+            "filter_enabled",
+            "processor",
+        ]
     ]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
-        "originals", "theses", "prompt_theses", "prompt_filters", "processor"
+        "originals",
+        "theses",
+        "prompt_theses",
+        "prompt_filters",
+        "filter_enabled",
+        "processor",
     ] = Field(..., examples=["originals"])
 
 
@@ -1060,6 +1072,7 @@ class SettingsPatch(WireModel):
         default=MISSING,
         description="Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.",
     )
+    filter_enabled: StrictBool | None | MISSING = MISSING
     originals: StrictBool | None | MISSING = MISSING
     processor: ProcessorSelection | None | MISSING = MISSING
     prompt_filters: PromptFilters | None | MISSING = MISSING
@@ -1764,6 +1777,12 @@ class EffectiveFeedRefreshMinutes(WireModel):
     value: StrictInt = Field(..., ge=1, le=1440)
 
 
+class EffectiveFilterEnabled(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    origin: SettingOrigin
+    value: StrictBool
+
+
 class EffectiveOriginals(WireModel):
     model_config = ConfigDict(extra="forbid")
     origin: SettingOrigin
@@ -2348,6 +2367,7 @@ class StorageUnavailableErrorDetails(WireModel):
 
 class StoredOverrides(WireModel):
     model_config = ConfigDict(extra="forbid")
+    filter_enabled: StrictBool | MISSING = MISSING
     originals: StrictBool | MISSING = MISSING
     processor: StoredProcessorSelection | MISSING = MISSING
     prompt_filters: StrictStr | MISSING = Field(default=MISSING, max_length=20000)
@@ -2883,6 +2903,7 @@ class DiagnosticReceipt(
 
 class EffectiveSettingsValues(WireModel):
     model_config = ConfigDict(extra="forbid")
+    filter_enabled: EffectiveFilterEnabled
     originals: EffectiveOriginals
     processor: EffectiveProcessor
     prompt_filters: EffectivePromptFilters
@@ -4045,6 +4066,7 @@ class EffectiveSettingsSnapshot(
         examples=[
             {
                 "effective": {
+                    "filter_enabled": {"origin": {"scope": "default"}, "value": False},
                     "originals": {"origin": {"scope": "default"}, "value": False},
                     "processor": {"origin": {"scope": "default"}, "value": "codex"},
                     "prompt_filters": {

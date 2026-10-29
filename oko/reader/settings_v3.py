@@ -26,6 +26,7 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.E
         theses=wire.EffectiveTheses(value=effective.theses.value, origin=origin(effective.theses.scope, effective.theses.owner)),
         prompt_theses=wire.EffectivePromptTheses(value=effective.prompt_theses.value, origin=origin(effective.prompt_theses.scope, effective.prompt_theses.owner)),
         prompt_filters=wire.EffectivePromptFilters(value=effective.prompt_filters.value, origin=origin(effective.prompt_filters.scope, effective.prompt_filters.owner)),
+        filter_enabled=wire.EffectiveFilterEnabled(value=effective.filter_enabled.value, origin=origin(effective.filter_enabled.scope, effective.filter_enabled.owner)),
         processor=wire.EffectiveProcessor(value=processor(effective.processor.value), origin=origin(effective.processor.scope, effective.processor.owner)),
     )
     saved = value.overrides.model_dump(exclude_unset=True)

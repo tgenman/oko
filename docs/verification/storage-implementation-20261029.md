@@ -59,3 +59,28 @@
   navigation/history suite passed 38 Python tests and 8 Playwright tests.
 - Existing `test_reading_cost.py` passed 5 tests, including its 20,000-row archive
   index case on the old schema; it does not measure the target-schema migration.
+- The `filter_enabled` switch is exposed in the OpenAPI settings contract and
+  built-in editor. HTTP tests cover inherited false, reset, prompt preservation,
+  and rejection/rollback of enabled filtering with an empty effective prompt.
+  The previous closed settings response schema rejects the added field; strict
+  external clients must update, as recorded in `api/README.md`.
+- On the current schema, synthetic worker/HTTP tests cover disabling either
+  stage before a call, accepting an in-flight success, retaining ready results,
+  blocking an in-flight failure with its error visible, re-enabling, and restarting
+  an interrupted disabled filter. High-importance YouTube now respects explicit
+  `theses=false`. These are transitional semantics; they do not establish removal
+  of the dirty tables or triggers, nor first-started-feed ownership.
+- An earlier processing run failed the old YouTube test that expected importance
+  to override explicit `false`; the scenario now tests enabled processing and a
+  separate HTTP test covers explicit disable. After the failure-visibility fix,
+  `./scripts/check python --files tests/reader/test_postgres_processing.py
+  tests/reader/test_worker_transactions.py tests/reader/test_v3_settings.py
+  tests/reader/test_youtube_publications.py tests/reader/test_v3_problems.py
+  tests/reader/test_status_problems.py tests/reader/test_material_read_cost.py
+  tests/api/test_contract.py` passed 114 tests on synthetic PostgreSQL.
+- `./scripts/check browser --files tests/browser/test_publication_processing_http.ts
+  tests/browser/test_status_v3_http.ts tests/browser/test_settings_v3_http.ts`
+  passed 9 Playwright tests. The filter switch screenshot was inspected. Mypy
+  passed 151 files; `npm run api:check` passed; settings-owner Node suite passed
+  109 tests. An earlier sandboxed Node attempt could not inspect processes and
+  did not run; the authorized retry passed.

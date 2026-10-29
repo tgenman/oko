@@ -237,6 +237,11 @@ class SubscriptionRepository:
                 values[field] = dict(value=value, scope=level, owner=identity)
                 if (level, identity) == (scope, owner):
                     overrides[field] = value
+        # Existing libraries have only prompt overrides. Derive the old setting
+        # until the migration writes explicit switches at each saved scope.
+        if values['filter_enabled']['scope'] == 'default' and values['prompt_filters']['scope'] != 'default':
+            prompt = values['prompt_filters']
+            values['filter_enabled'] = dict(value=bool(prompt['value'].strip()), scope=prompt['scope'], owner=prompt['owner'])
         result: dict[str,Any] = dict(effective=values, overrides=overrides)
         if scope == 'feed':
             assert feed is not None

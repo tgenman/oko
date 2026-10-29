@@ -95,6 +95,19 @@ def live_settings(store: 'Store', item: str) -> dict[str, Any]:
     return rules
 
 
+@reading_value
+def stage_enabled(store: 'Store', item: str, kind: str) -> bool:
+    row = material_read.item(store.db, item)
+    if row is None or row['feed_id'] is None:
+        return False
+    values = store.subscriptions.effective('feed', row['feed_id'], details=False)['effective']
+    if kind == 'filter':
+        return bool(values['filter_enabled']['value'] and values['prompt_filters']['value'].strip())
+    if kind == 'theses':
+        return bool(values['theses']['value'])
+    raise ValueError('Unknown processing stage')
+
+
 def settings(store: 'Store', item: str) -> dict[str, Any]:
     row=material_read.item(store.db,item)
     selected=json.loads(row['processing_metadata']).get('_pass',{}).get('settings') if row else None
@@ -108,8 +121,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     current=store.subscriptions.effective('feed',row['feed_id'],details=False)
     values={key:value['value'] for key,value in current['effective'].items()}
     youtube=row['platform']=='youtube'
-    summary=values['theses'] or youtube and current['feed']['importance']=='high'
-    if kind=='filter' and not values['prompt_filters'].strip() or kind=='theses' and not summary:
+    if kind=='filter' and not values['prompt_filters'].strip():
         return None
     rules=live_settings(store,item)
     selected_content=saved_content(row['content']) if youtube else _reading_content(store,item)
@@ -176,8 +188,19 @@ def input_hash(store: 'Store', item: str) -> str:
     selected=_reading_content(store,item)
     youtube=selected.get('extra',{}).get('youtube',{})
     row=material_read.item(store.db,item)
-    return digest([row['title'] if row and not youtube else None,
-        [youtube.get('captions'),youtube.get('captions_digest')] if youtube else blocks(selected),live_settings(store,item)])
+    rules = deepcopy(live_settings(store, item))
+    prefix = [row['title'] if row and not youtube else None,
+              [youtube.get('captions'),youtube.get('captions_digest')] if youtube else blocks(selected)]
+    current = digest([*prefix, rules])
+    # Old revisions included the theses switch. Preserve their revision when
+    # that switch alone changes, without accepting changes to any other input.
+    metadata = json.loads(row['processing_metadata']) if row else {}
+    previous = metadata.get('_revision_input')
+    if isinstance(rules['values'].get('theses'), bool):
+        rules['values']['theses'] = not rules['values']['theses']
+        if previous == digest([*prefix, rules]):
+            return str(previous)
+    return current
 
 
 def revision(store: 'Store', item: str) -> str:

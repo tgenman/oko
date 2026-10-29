@@ -14,7 +14,7 @@ from oko.reader.wire import WireModel, boolean_constant, integer_constant
 class AI(WireModel):
     model_config = ConfigDict(extra='forbid')
     error: StrictStr | None = Field(..., title='Error')
-    status: Literal['pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
+    status: Literal['off', 'pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
 
 class Attachment(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -102,6 +102,7 @@ class EffectiveValues(WireModel):
     feed_refresh_minutes: FeedRefreshMinutes | MISSING = MISSING
     processor: Processor
     prompt_filters: PromptFilters
+    filter_enabled: Theses
     prompt_theses: PromptTheses
     theses: Theses
 
@@ -187,6 +188,7 @@ class SettingOverrides(WireModel):
     originals: StrictBool | MISSING = MISSING
     processor: StrictStr | MISSING = MISSING
     prompt_filters: StrictStr | MISSING = MISSING
+    filter_enabled: StrictBool | MISSING = MISSING
     prompt_theses: StrictStr | MISSING = MISSING
     theses: StrictBool | MISSING = MISSING
 

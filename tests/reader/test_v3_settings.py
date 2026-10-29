@@ -277,20 +277,27 @@ def test_feed_refresh_interval_is_strict_and_global_only(tmp_path):
         assert client.get('/api/v3/settings/feed-refresh').json()['value'] == 1440
 
 
-def test_existing_closed_settings_response_stays_compatible_after_interval_save(tmp_path):
+def test_filter_switch_extends_previous_closed_settings_response(tmp_path):
     import json
     from pathlib import Path
     from jsonschema import Draft202012Validator
     pinned = json.loads((Path(__file__).parents[1] / 'fixtures/settings-v3-3.0.0.json').read_text())
     validator = Draft202012Validator(pinned['schema'])
+    def verify_extension(value):
+        # The old closed schema intentionally rejects the new field. All old
+        # fields must still conform once that explicitly added field is removed.
+        assert not validator.is_valid(value)
+        assert isinstance(value['effective'].pop('filter_enabled')['value'], bool)
+        value['overrides'].pop('filter_enabled', None)
+        validator.validate(value)
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
         path = '/api/v3/settings/oko/global'
-        validator.validate(client.get(path).json())
+        verify_extension(client.get(path).json())
         for patch in ({'feed_refresh_minutes': 25}, {'theses': True}, {'feed_refresh_minutes': None}):
             reply = client.patch(path, json=patch)
             assert reply.status_code == 200, reply.text
-            validator.validate(reply.json())
-            validator.validate(client.get(path).json())
+            verify_extension(reply.json())
+            verify_extension(client.get(path).json())
 
 
 def test_interval_command_outcomes_preserve_old_setting_keys(tmp_path):
@@ -317,3 +324,40 @@ def test_interval_command_outcomes_preserve_old_setting_keys(tmp_path):
         assert failed['outcome'] == 'failed'
         context_validator.validate(failed['context'])
         assert client.get('/api/v3/commands/interval-unknown').json()['outcome'] == 'unknown'
+
+
+def test_filter_switch_inherits_and_preserves_its_prompt(tmp_path):
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+        global_path = '/api/v3/settings/oko/global'
+        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]
+        folder_path = '/api/v3/settings/folder/' + feed['folder_id']
+        feed_path = '/api/v3/settings/feed/' + feed['id']
+        saved = client.patch(global_path, json={'prompt_filters': 'Keep useful text', 'filter_enabled': True})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()['effective']['filter_enabled']['value'] is True
+        disabled = client.patch(folder_path, json={'filter_enabled': False})
+        assert disabled.status_code == 200, disabled.text
+        effective = client.get(feed_path).json()['effective']
+        assert effective['filter_enabled'] == {'value': False, 'origin': {'scope': 'folder', 'owner': feed['folder_id']}}
+        assert effective['prompt_filters']['value'] == 'Keep useful text'
+        reset = client.patch(folder_path, json={'filter_enabled': None})
+        assert reset.status_code == 200, reset.text
+        assert client.get(feed_path).json()['effective']['filter_enabled']['value'] is True
+
+
+def test_enabling_filter_requires_effective_prompt_and_rolls_back_invalid_patch(tmp_path):
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+        path = '/api/v3/settings/oko/global'
+        rejected = client.patch(path, json={'filter_enabled': True})
+        assert rejected.status_code == 400, rejected.text
+        assert client.get(path).json()['effective']['filter_enabled']['value'] is False
+        valid = client.patch(path, json={'filter_enabled': True, 'prompt_filters': 'Keep useful text'})
+        assert valid.status_code == 200, valid.text
+        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]
+        folder_path = '/api/v3/settings/folder/' + feed['folder_id']
+        rejected = client.patch(folder_path, json={'prompt_filters': ''})
+        assert rejected.status_code == 400, rejected.text
+        effective = client.get('/api/v3/settings/feed/' + feed['id']).json()['effective']
+        assert effective['filter_enabled']['value'] is True
+        assert effective['prompt_filters']['value'] == 'Keep useful text'
+        assert client.patch(folder_path, json={'filter_enabled': False, 'prompt_filters': ''}).status_code == 200

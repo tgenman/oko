@@ -25,6 +25,14 @@ class SubscriptionService:
         repository = self._storage()
         previous = repository.subscriptions.effective(scope, owner)
         value = repository.subscriptions.update_settings(scope, owner, patch)
+        if patch.model_fields_set & {'filter_enabled', 'prompt_filters'}:
+            affected_feeds = repository.subscriptions.feeds(
+                owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)
+            candidates = [value] + [repository.subscriptions.effective('feed', feed['id'], details=False)
+                                    for feed in affected_feeds]
+            if any(settings['effective']['filter_enabled']['value'] and
+                   not settings['effective']['prompt_filters']['value'].strip() for settings in candidates):
+                raise ValueError('Для включённой фильтрации нужен непустой промпт')
         repository.fault('settings_after_values')
         changed = bool(patch.model_fields_set - GLOBAL_SERVICE_SETTINGS and value != previous)
         affected = None

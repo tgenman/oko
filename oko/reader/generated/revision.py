@@ -1,2 +1,2 @@
 # Generated; do not edit.
-CONTRACT_DIGEST = '84dae66fdc2ba4d8bda8dc62fe3de0caedd07fd58ce73ee9748cf4530b03bfd0'
+CONTRACT_DIGEST = '159981734e8a6218128e2b4181a8ef3f9679fdf3e2129f39d07f686df1f765ef'

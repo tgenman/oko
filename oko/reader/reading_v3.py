@@ -46,10 +46,10 @@ def attempt(status: str, error: str | None, waiting: ProcessingWait | None = Non
         return wire.UnfinishedProcessingAttempt(wire.ProcessingRunning(state='running'))
     if status == 'cancelled':
         return wire.UnfinishedProcessingAttempt(wire.ProcessingCancelled(state='cancelled'))
-    if error:
-        return wire.UnfinishedProcessingAttempt(wire.ProcessingWaiting(state='waiting', reason=wire.WaitingReason(waiting.reason if waiting else 'retry_scheduled'), retry_at=project.timestamp(waiting.retry_at) if waiting and waiting.retry_at is not None else None))
     if status == 'off':
         return wire.UnfinishedProcessingAttempt(wire.ProcessingDisabled(state='disabled'))
+    if error:
+        return wire.UnfinishedProcessingAttempt(wire.ProcessingWaiting(state='waiting', reason=wire.WaitingReason(waiting.reason if waiting else 'retry_scheduled'), retry_at=project.timestamp(waiting.retry_at) if waiting and waiting.retry_at is not None else None))
     return wire.UnfinishedProcessingAttempt(wire.ProcessingQueued(state='queued'))
 
 

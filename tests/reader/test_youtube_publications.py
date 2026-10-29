@@ -39,7 +39,7 @@ def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path,high
             youtube_history=History([VIDEO]),ai_transport=model_transport(models)),headers=HEADERS) as client:
         try:
             client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
-            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':not high_importance,'prompt_filters':''})
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
             feed=subscribe(client)
             if high_importance:
                 assert client.patch('/api/v3/feeds/'+feed,json={'importance':'high'}).status_code==200
@@ -291,3 +291,28 @@ def test_caption_absence_then_reappearance_never_reuses_a_previous_file_url(tmp_
         new_file=next(a['url'] for a in [media for media in fresh['media'] if media['role'] == 'attachment'] if a['kind']=='file')
         assert new_file!=old_file and client.get(old_file).status_code==404
         assert client.get(new_file).content==b'Reappeared captions.'
+
+
+def test_high_importance_youtube_respects_explicitly_disabled_theses(tmp_path):
+    root = publication_root(tmp_path)
+    class Captions:
+        async def fetch(self, video):
+            return 'Synthetic captions.'
+    def response(request):
+        if request.url.path == '/feeds/videos.xml':
+            return httpx.Response(200, text=feed_xml())
+        return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
+    models = []
+    with TestClient(create_app(root, token='test', api_only=True, rss_enabled=True,
+            rss_transport=httpx.MockTransport(response), youtube_captions=Captions(),
+            youtube_history=History([VIDEO]), ai_transport=model_transport(models)), headers=HEADERS) as client:
+        assert client.put('/api/v3/processors/llamacpp', json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True}).status_code == 200
+        assert client.patch('/api/v3/settings/oko/global', json={'processor':'llamacpp','theses':False,'prompt_filters':''}).status_code == 200
+        feed = subscribe(client)
+        assert client.patch('/api/v3/feeds/' + feed, json={'importance':'high'}).status_code == 200
+        presence(client, 'reader')
+        card = wait_for(client, lambda: (cards[0] if (cards := read_all_cards(client, '/api/v3/cards')) else None))
+        publication = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + card['id']).json())['text'] == 'Synthetic captions.' else None))
+        assert publication['theses']['state'] == 'disabled'
+        assert publication['theses']['result'] is None
+        assert not any(request.url.path == '/v1/chat/completions' for request in models)

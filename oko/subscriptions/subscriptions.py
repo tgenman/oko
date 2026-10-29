@@ -28,6 +28,7 @@ class Overrides(BaseModel):
     theses: bool | None = None
     prompt_theses: str | None = Field(default=None, max_length=20000)
     prompt_filters: str | None = Field(default=None, max_length=20000)
+    filter_enabled: bool | None = None
     processor: str | None = Field(default=None, min_length=1, max_length=200)
 
 
@@ -56,7 +57,7 @@ GLOBAL_SERVICE_SETTINGS = frozenset(('feed_refresh_minutes', 'telegram_http_rps'
 
 DEFAULTS: dict[str, Any] = dict(
     originals=True, theses=False, prompt_theses='Выдели основные тезисы публикации.',
-    prompt_filters='', processor='codex')
+    prompt_filters='', filter_enabled=False, processor='codex')
 
 
 def key(value: str) -> str:

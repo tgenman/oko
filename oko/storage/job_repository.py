@@ -9,7 +9,7 @@ from collections.abc import Callable,Iterator
 from contextlib import contextmanager
 from oko.storage.transaction import transaction
 from typing import TYPE_CHECKING
-from oko.storage import collection_jobs, material_read
+from oko.storage import collection_jobs, material_read, processing_input
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 from oko.collection.contracts import SourceManifest
 from oko.collection.external_media import expected_incomplete
@@ -48,8 +48,16 @@ class JobRepository:
             db.execute('DELETE FROM processing_stage_dirty WHERE kind = %s AND item = %s',(kind,item))
             previous=db.execute(f'SELECT signature FROM {table} WHERE item = %s',(item,)).fetchone()
             job=db.execute('SELECT status , payload FROM jobs WHERE kind = %s AND item = %s',(kind,item)).fetchone()
+            enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
             if previous and previous[0]==signature and job and json.loads(job['payload']).get('input_revision')==revision:
-                # Periodic passes never reopen terminal work with unchanged input.
+                # Reconsider blocked work only on an input/settings event. Running
+                # attempts are allowed to finish when the switch is turned off.
+                if job['status'] == 'blocked' and enabled:
+                    db.execute("UPDATE jobs SET status='pending' WHERE kind=%s AND item=%s AND status='blocked'", (kind, item))
+                    self.store.publications.status(item)
+                elif job['status'] == 'pending' and not enabled:
+                    db.execute("UPDATE jobs SET status='blocked' WHERE kind=%s AND item=%s AND status='pending'", (kind, item))
+                    self.store.publications.status(item)
                 continue
             if signature is None and previous is None and (job is None or job[0]=='cancelled'):
                 continue
@@ -59,7 +67,7 @@ class JobRepository:
             else:
                 db.execute(f'INSERT INTO {table} VALUES ( %s , %s ) ON CONFLICT ( item ) DO UPDATE SET signature = excluded . signature',(item,signature))
                 db.execute("INSERT INTO jobs ( kind , item , status , payload ) VALUES ( %s , %s , %s , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = excluded . status , payload = excluded . payload , generation = jobs . generation + 1 , next = CASE WHEN excluded . status = 'pending' AND jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , error = CASE WHEN excluded . status = 'pending' AND jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . error ELSE NULL END , problem_code = CASE WHEN excluded . status = 'pending' AND jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . problem_code ELSE NULL END",
-                    (kind,item,'done' if satisfied else 'pending',json.dumps(dict(input_revision=revision)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
+                    (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
 
     def claim_processing(self, kind: Kind, now: float) -> Job | None:
         # The common claim code retains monotonic generations and interrupted choices.
@@ -82,9 +90,15 @@ class JobRepository:
 
     def fail(self, job: Job, error: str, *, code: str) -> None:
         self.store.jobs.retry(job,self.store.clock(),error,30,code=code)
+        if not processing_input.stage_enabled(self.store, job.item, job.kind):
+            self.store.db.execute("UPDATE jobs SET status='blocked' WHERE id=%s AND generation=%s AND status='pending'", (job.id, job.generation))
+            self.store.publications.status(job.item)
 
     def cancel(self, job: Job) -> None:
         self.store.db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running'",(job.id,job.generation))
+
+    def block(self, job: Job) -> None:
+        self.store.db.execute("UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running'", (job.id, job.generation))
 
     def manual(self, job: Job) -> bool:
         row=self.store.db.execute('SELECT manual_once FROM jobs WHERE id = %s AND generation = %s',(job.id,job.generation)).fetchone()
