@@ -421,7 +421,7 @@ test('reply context is a compact separate card with safe navigation and local ex
     // independent of the card, as is renewing the browser presence lease.
     const heartbeat=await r.api('client-sessions','POST');
     const requests=await r.page.evaluate(()=>readerTransport.requests);
-    const foreground=(q:(typeof requests)[number])=>!(q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||q.url.startsWith('/api/v3/publication/')||['/api/v3/status','/api/v3/navigation'].includes(q.url)));
+    const foreground=(q:(typeof requests)[number])=>!(q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||q.url.startsWith('/api/v3/publication/')||['/api/v3/status','/api/v3/navigation','/api/v3/collection-status'].includes(q.url)));
     const start=await r.page.evaluate(()=>readerTransport.requests.length);
     assert.ok(requests.some(q=>q.url==='/api/v3/publication/A'&&q.method==='GET'));
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();
@@ -439,6 +439,7 @@ test('reply context is a compact separate card with safe navigation and local ex
     const observed=await r.page.evaluate(()=>readerTransport.requests);
     assert.ok(observed.some(q=>q.method==='PUT'&&q.url==='/api/v3/client-sessions/'+heartbeat.id));
     assert.deepEqual(observed.filter(foreground),requests.filter(foreground));
+    assert.ok(observed.slice(start).filter(q=>q.url.startsWith('/api/v3/publication/')).every(q=>q.method==='GET'&&q.url==='/api/v3/publication/A'));
     const polls=await r.page.evaluate(start=>readerTransport.requests.slice(start).filter(q=>['/api/v3/status','/api/v3/navigation'].includes(q.url)),start);
     assert.ok(polls.length>=2);
     assert.ok(polls.every(q=>q.method==='GET'&&!q.body));
