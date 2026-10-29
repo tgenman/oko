@@ -39,7 +39,7 @@ class FilterResults:
 
     def request(self,item: str) -> tuple[ProcessingRequest,str,bool] | None:
         signature=self.signature(item)
-        row=self.store.db.execute('SELECT signature FROM filter_inputs WHERE item = %s',(item,)).fetchone()
+        row=self.store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()
         if not signature or not row or row[0]!=signature:
             return None
         values,public_ai,version=publication_input.request_settings(self.store,item)
@@ -49,4 +49,4 @@ class FilterResults:
 
 
     def forget(self,item: str) -> None:
-        self.store.db.execute('DELETE FROM filter_inputs WHERE item = %s',(item,))
+        self.store.jobs.forget_input('filter', [item])

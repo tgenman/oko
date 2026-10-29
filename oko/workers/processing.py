@@ -67,6 +67,7 @@ class ProcessingWorker:
                         jobs.cancel(job)
                     return True
                 # Snapshot and successful claim are committed together.
+                jobs.save_input(job, work)
                 request=work.request.model_copy(update={'generation':job.generation})
                 origin=jobs.origin(job,work.signature)
                 if origin is None or request.processor!='codex':

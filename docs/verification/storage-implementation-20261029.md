@@ -160,3 +160,21 @@
   passed and the model settings screenshot was inspected.
 - Catalog measurement on an empty database migrated through version 12: 37 tables
   and 141 non-internal triggers. Schema replacement and trigger removal continue.
+- Migration 013 moves filter/thesis signatures from `filter_inputs` and
+  `thesis_inputs` into `jobs.input_snapshot`, removes both tables and three
+  filter-input triggers/functions, and rejects missing publications/jobs,
+  missing signatures and invalid/non-object job payloads. The existing views,
+  dirty queues and other reader projections remain transitional.
+- A started processing Job now records its generation, signature, selected feed,
+  rules, permission, no-input fact and source IDs/versions in the claim transaction;
+  it does not copy publication text. A rollback test confirms the claim and
+  snapshot revert together. Explicit Python updates reader freshness when filter
+  signatures change. Sparse backfill retains a partial index and passes the
+  existing 20,000-completed-job archive check.
+- The affected migration, worker, Codex, processing, review and background-cost
+  suites passed 134 Python tests; 2 Playwright processing/reader scenarios passed.
+  The initial synthetic application run failed on the removed table before its
+  consumers were moved; it passed after the implementation was connected.
+- Catalog measurement on an empty database migrated through version 13: 35 tables
+  and 138 non-internal triggers. Full target schema, direct event-driven Job
+  scheduling and first-started-feed selection remain unfinished.

@@ -507,7 +507,6 @@ def test_persisted_empty_job_completes_without_a_model_after_restart(tmp_path):
         db.execute("UPDATE items SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' , status = 'pending_filtering' WHERE id = %s",(item,))
         db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE kind = 'filter' AND item = %s",(item,))
         db.execute("DELETE FROM jobs WHERE kind = 'theses' AND item = %s",(item,))
-        db.execute('DELETE FROM thesis_inputs WHERE item = %s',(item,))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         row=wait_for(client,lambda:row if (row:=stored(root,item))['status']=='ready' else None)
         assert row['processing_metadata']['filter']['reason']=='no_input'

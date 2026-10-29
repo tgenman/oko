@@ -131,7 +131,7 @@ def test_processing_backfill_does_not_scan_unrelated_completed_archive(tmp_path,
             store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",
                                 [(f'old-{n}',) for n in range(20000)])
             if saved_inputs:
-                store.db.execute("INSERT INTO filter_inputs VALUES ('synthetic-saved-input','synthetic-signature')")
+                store.db.execute("INSERT INTO jobs(kind,item,status,input_snapshot) VALUES ('filter','synthetic-saved-input','done',%s::jsonb)", ('{\"signature\":\"synthetic-signature\"}',))
             analyze(store.db)
         with measure_reads(store.db) as work:
             store.jobs.backfill_processing_inputs()

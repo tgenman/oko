@@ -529,3 +529,30 @@ def test_retry_after_failure_uses_model_selected_for_next_attempt(postgres_url, 
         assert saved(store, item)['filtered_content']
     finally:
         store.db.close()
+
+
+def test_processing_input_snapshot_is_atomic_and_does_not_copy_publication_text(postgres_url, tmp_path):
+    store, item, execution, tasks = worker_library(tmp_path, text='Private synthetic publication text', database_url=postgres_url)
+    try:
+        worker = workers(execution, tasks)[0]
+        with store.jobs.transaction(lambda: True):
+            worker.service.reconcile()
+            store.jobs.reconcile('filter', worker.service.candidates('filter'))
+        before = store.db.execute("SELECT status,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+        with pytest.raises(RuntimeError, match='rollback'), store.jobs.transaction(lambda: True):
+            job = store.jobs.claim_processing('filter', store.clock())
+            assert job is not None
+            prepared = worker.service.prepare(item, 'filter')
+            assert prepared.input is not None
+            store.jobs.save_input(job, prepared.input)
+            snapshot = store.db.execute('SELECT input_snapshot FROM jobs WHERE id=%s', (job.id,)).fetchone()[0]
+            assert snapshot['generation'] == job.generation
+            assert snapshot['feed_id'] == 'demo'
+            assert snapshot['signature'] == prepared.input.signature
+            assert snapshot['sources'][0]['id'] == item
+            assert 'Private synthetic publication text' not in json.dumps(snapshot)
+            raise RuntimeError('rollback synthetic claim')
+        after = store.db.execute("SELECT status,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+        assert tuple(after) == tuple(before)
+    finally:
+        store.db.close()

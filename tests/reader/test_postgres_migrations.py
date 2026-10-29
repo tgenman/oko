@@ -378,3 +378,38 @@ def test_job_execution_settings_rejects_incomplete_snapshots(connections):
         migrate(db, MIGRATIONS)
         with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
             db.execute("INSERT INTO jobs(kind,item,execution_settings) VALUES ('filter','broken','{}')")
+
+
+def test_processing_input_migration_moves_signatures_to_jobs(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:12])
+        db.execute("INSERT INTO items(id) VALUES ('one')")
+        db.execute("INSERT INTO jobs(kind,item,status) VALUES ('filter','one','pending'),('theses','one','done')")
+        db.execute("INSERT INTO filter_inputs VALUES ('one','filter-signature')")
+        db.execute("INSERT INTO thesis_inputs VALUES ('one','summary-signature')")
+        migrate(db, MIGRATIONS)
+        rows = db.execute("SELECT kind,input_snapshot FROM jobs WHERE item='one' ORDER BY kind").fetchall()
+        assert rows == [('filter', {'signature':'filter-signature'}), ('theses', {'signature':'summary-signature'})]
+        assert db.execute("SELECT to_regclass('filter_inputs'),to_regclass('thesis_inputs')").fetchone() == (None, None)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'reader_v_filter_input_%'").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname IN ('oko_trigger_reader_v_filter_input_delete','oko_trigger_reader_v_filter_input_insert','oko_trigger_reader_v_filter_input_update')").fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+@pytest.mark.parametrize('invalid', ['orphan-filter', 'orphan-theses', 'orphan-item', 'null-signature', 'empty-signature', 'bad-payload', 'bad-payload-type'])
+def test_processing_input_migration_rejects_ambiguous_rows(connections, invalid):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:12])
+        if invalid != 'orphan-item':
+            db.execute("INSERT INTO items(id) VALUES ('one')")
+        kind = 'theses' if invalid == 'orphan-theses' else 'filter'
+        if invalid not in ('orphan-filter', 'orphan-theses'):
+            db.execute('INSERT INTO jobs(kind,item,payload) VALUES (%s,%s,%s)', (kind, 'one', '{' if invalid == 'bad-payload' else '[]' if invalid == 'bad-payload-type' else '{}'))
+        table = 'thesis_inputs' if kind == 'theses' else 'filter_inputs'
+        db.execute(f'INSERT INTO {table} VALUES (%s,%s)', ('one', None if invalid == 'null-signature' else '' if invalid == 'empty-signature' else 'signature'))
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid processing input'):
+            migrate(db, MIGRATIONS)
+        assert db.execute(f'SELECT item FROM {table}').fetchone() == ('one',)
+        verify(db, MIGRATIONS[:12])

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 from oko.storage.job_types import Job
 
-from oko.domain.processing import Kind
+from oko.domain.processing import Kind, ProcessingInput
 
 class JobRejected(Exception):
     pass
@@ -43,13 +43,12 @@ class JobRepository:
 
     def reconcile(self, kind: Kind, candidates: list[tuple[str, str | None, bool, str]]) -> None:
         db=self.store.db
-        table='filter_inputs' if kind=='filter' else 'thesis_inputs'
         for item,signature,satisfied,revision in candidates:
             db.execute('DELETE FROM processing_stage_dirty WHERE kind = %s AND item = %s',(kind,item))
-            previous=db.execute(f'SELECT signature FROM {table} WHERE item = %s',(item,)).fetchone()
-            job=db.execute('SELECT status , payload FROM jobs WHERE kind = %s AND item = %s',(kind,item)).fetchone()
+            job=db.execute("SELECT status,payload,input_snapshot->>'signature' AS signature FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
+            previous=job['signature'] if job else None
             enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
-            if previous and previous[0]==signature and job and json.loads(job['payload']).get('input_revision')==revision:
+            if previous is not None and previous==signature and job and json.loads(job['payload']).get('input_revision')==revision:
                 # Reconsider blocked work only on an input/settings event. Running
                 # attempts are allowed to finish when the switch is turned off.
                 if job['status'] == 'blocked' and enabled:
@@ -62,12 +61,38 @@ class JobRepository:
             if signature is None and previous is None and (job is None or job[0]=='cancelled'):
                 continue
             if signature is None:
-                db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = %s AND item = %s",(kind,item))
-                db.execute(f'DELETE FROM {table} WHERE item = %s',(item,))
+                db.execute("UPDATE jobs SET status='cancelled', generation=generation+1, error=NULL, problem_code=NULL, input_snapshot=NULL WHERE kind=%s AND item=%s",(kind,item))
+                if kind == 'filter' and previous is not None:
+                    self._processing_input_changed([item])
             else:
-                db.execute(f'INSERT INTO {table} VALUES ( %s , %s ) ON CONFLICT ( item ) DO UPDATE SET signature = excluded . signature',(item,signature))
-                db.execute("INSERT INTO jobs ( kind , item , status , payload ) VALUES ( %s , %s , %s , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = excluded . status , payload = excluded . payload , generation = jobs . generation + 1 , next = CASE WHEN excluded . status = 'pending' AND jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , error = CASE WHEN excluded . status = 'pending' AND jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . error ELSE NULL END , problem_code = CASE WHEN excluded . status = 'pending' AND jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . problem_code ELSE NULL END",
-                    (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
+                db.execute("INSERT INTO jobs (kind,item,status,payload,input_snapshot) VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT (kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,generation=jobs.generation+1,next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END",
+                    (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
+                if kind == 'filter' and previous != signature:
+                    self._processing_input_changed([item])
+
+    def _processing_input_changed(self, identities: list[str]) -> None:
+        if not identities:
+            return
+        now = self.store.wall_clock()
+        for kind in ('filter', 'theses', 'card'):
+            self.store.db.execute("INSERT INTO reader_entities SELECT %s,unnest(%s::text[]),1,%s ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed", (kind, identities, now))
+
+    def forget_input(self, kind: Kind, identities: list[str]) -> None:
+        ordered = sorted(set(identities))
+        for start in range(0, len(ordered), 400):
+            rows = self.store.db.execute("UPDATE jobs SET input_snapshot=NULL WHERE kind=%s AND item=ANY(%s) AND input_snapshot IS NOT NULL RETURNING item", (kind, ordered[start:start+400])).fetchall()
+            if kind == 'filter':
+                self._processing_input_changed([row[0] for row in rows])
+
+    def save_input(self, job: Job, work: ProcessingInput) -> None:
+        selected = processing_input.settings(self.store, job.item)
+        snapshot = dict(signature=work.signature, generation=job.generation, feed_id=selected['feed_id'],
+                        rules=selected['values'], public_ai=work.public_ai, no_input=work.no_input,
+                        sources=[dict(id=source.id, version=source.version) for source in work.request.sources])
+        changed = self.store.db.execute("UPDATE jobs SET input_snapshot=%s::jsonb WHERE id=%s AND generation=%s AND status='running' AND input_snapshot->>'signature'=%s",
+            (json.dumps(snapshot, ensure_ascii=False), job.id, job.generation, work.signature)).rowcount
+        if changed != 1:
+            raise JobRejected('Attempt no longer owns this input')
 
     def claim_processing(self, kind: Kind, now: float) -> Job | None:
         # The common claim code retains monotonic generations and interrupted choices.
@@ -75,8 +100,7 @@ class JobRepository:
 
     def retry_processing(self, item: str, kind: Kind) -> bool:
         db=self.store.db
-        table='filter_inputs' if kind=='filter' else 'thesis_inputs'
-        if db.execute(f'SELECT 1 FROM {table} WHERE item = %s',(item,)).fetchone() is None:
+        if db.execute("SELECT 1 FROM jobs WHERE kind=%s AND item=%s AND input_snapshot IS NOT NULL",(kind,item)).fetchone() is None:
             return False
         self.store.jobs.forget_execution(kind,item)
         db.execute("UPDATE jobs SET status = 'pending' , next = CASE WHEN wait_scope IS NOT NULL THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL THEN retry_at ELSE NULL END , error = CASE WHEN wait_scope IS NOT NULL THEN error ELSE NULL END , generation = generation + 1 WHERE kind = %s AND item = %s",(kind,item))
@@ -624,16 +648,15 @@ class JobRepository:
             pass
 
     def backfill_processing_steps(self) -> Iterator[None]:
-        from oko.storage import processing_input
-        for kind,table in (('filter','filter_inputs'),('theses','thesis_inputs')):
-            # Sparse saved inputs drive the lookup into the completed-job archive.
-            identities = [row[0] for row in self.store.db.execute(f"SELECT j . id FROM {table} i CROSS JOIN jobs j WHERE j . item = i . item AND j . kind = %s AND oko_json_extract ( j . payload , '$.input_revision' ) IS NULL",(kind,))]
+        for kind in ('filter', 'theses'):
+            # The partial index excludes unrelated completed work.
+            identities = [row[0] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (kind,))]
             for identity in identities:
                 with self.store.db:
-                    row = self.store.db.execute(f"SELECT j . id , j . item , i . signature FROM jobs j JOIN {table} i ON i . item = j . item WHERE j . id = %s AND j . kind = %s AND oko_json_extract ( j . payload , '$.input_revision' ) IS NULL",(identity,kind)).fetchone()
-                    if row is not None and row['signature'] is not None and row['signature']==processing_input.signature(self.store,row['item'],kind):
-                        payload=json.dumps(dict(input_revision=processing_input.revision(self.store,row['item'])))
-                        self.store.db.execute('UPDATE jobs SET payload = %s WHERE id = %s',(payload,row['id']))
+                    row = self.store.db.execute("SELECT id,item,input_snapshot->>'signature' AS signature FROM jobs WHERE id=%s AND kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (identity,kind)).fetchone()
+                    if row is not None and row['signature']==processing_input.signature(self.store,row['item'],kind):
+                        revision = processing_input.revision(self.store,row['item'])
+                        self.store.db.execute("UPDATE jobs SET payload=jsonb_set(payload::jsonb,'{input_revision}',to_jsonb(%s::text))::text WHERE id=%s", (revision,row['id']))
                 yield
 
     def replace_media_input(self, job: Job) -> None:

@@ -488,7 +488,7 @@ class Store:
                 self.publications.set_source_deleted([item], False)
                 if self.publications.owns(item):
                     self.publications.forget(item)
-                self.db.execute('DELETE FROM thesis_inputs WHERE item = %s', (item,))
+                self.jobs.forget_input('theses', [item])
                 # This is local cleanup, not viewed(): never create read eligibility.
                 self.db.execute('UPDATE items SET viewed = 1 , complete = 0 WHERE id = %s', (item,))
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
