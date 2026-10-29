@@ -241,3 +241,14 @@
   by four migration checks for valid and malformed legacy facts. One Playwright
   Telegram access scenario passed and its screenshot was inspected. The legacy
   saved-content scan still remains and must be replaced by event-owned facts.
+- Collection and media acceptance now record a full Telegram publication's
+  saved reason in the same transaction even when auto-read is off. Linked
+  publication changes re-evaluate their parents; an incomplete media download
+  does not create the fact. Unchanged reasons do not schedule another pass, and
+  repeated discovery checks only new or changed memberships/publications.
+- Tests initially exposed both the missing saved fact with auto-read off and an
+  unnecessary signal on an unchanged fact. The affected collection, Telegram,
+  shared-publication and transaction suites passed 57 tests after the fixes;
+  a separate media failure/retry test passed, as did two Playwright scenarios.
+  The partial-download screenshot was inspected. Legacy-data backfill and removal
+  of the old feed scan remain unfinished.

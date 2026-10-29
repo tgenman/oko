@@ -246,6 +246,65 @@ def test_saved_and_viewed_are_independent_read_reasons(tmp_path):
         assert 11 in eligible
 
 
+def test_complete_telegram_messages_are_saved_even_when_auto_read_is_off(tmp_path):
+    network = ReadTelegram()
+    app = create_app(tmp_path, token='test', telegram_client=network)
+    with TestClient(app, headers=H) as client:
+        presence(client, 'test')
+        feed = connect(client, count=2)['id']
+        settled(client, 2)
+        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
+
+        def saved():
+            store = app.state.host.require_store()
+            return [tuple(row) for row in store.db.execute('SELECT member,saved,viewed FROM telegram_read_members WHERE feed=%s ORDER BY member', (feed,))]
+
+        assert client.portal.call(saved) == [(11,True,False),(29,True,False)]
+
+        async def repeat_without_changes():
+            async with app.state.host.execution._actions:
+                store = app.state.host.require_store()
+                with store.db:
+                    store.db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed=%s', (feed,))
+                    store.read_sync.eligible(feed, [11,29], 'saved')
+                return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0]
+
+        assert not client.portal.call(repeat_without_changes)
+
+
+def test_saved_reason_waits_for_media_even_when_auto_read_is_off(tmp_path):
+    from oko.collection.contracts import SourceError
+    class Media(ReadTelegram):
+        broken = True
+        async def messages(self, account, peer, ids):
+            rows = await super().messages(account, peer, ids)
+            return [dict(m, media=dict(kind='image', mime='image/jpeg', extension='jpg')) if m['id'] == 11 else m for m in rows]
+        async def download(self, account, peer, id):
+            if self.broken:
+                raise SourceError('Synthetic media failure')
+            return b'complete-image'
+
+    network = Media()
+    app = create_app(tmp_path, token='test', telegram_client=network)
+    with TestClient(app, headers=H) as client:
+        presence(client, 'test')
+        feed = connect(client)['id']
+        cards = settled(client, 2)
+        item = next(c['id'] for c in cards if client.get('/api/v3/publication/'+c['id']).json()['source']['message_ids'] == ['11'])
+        def fact():
+            return client.portal.call(lambda: app.state.host.require_store().db.execute(
+                'SELECT saved FROM telegram_read_members WHERE feed=%s AND member=11', (feed,)).fetchone()[0])
+        assert not fact()
+        network.broken = False
+        client.post('/api/v3/materials/'+item+'/retry')
+        for _ in range(200):
+            if fact():
+                break
+            time.sleep(.02)
+        assert fact()
+        assert not network.acks
+
+
 def test_unknown_ack_result_recovers_without_content_after_restart(tmp_path):
     network = ReadTelegram()
     network.history = network.history[:1]

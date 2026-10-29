@@ -63,10 +63,35 @@ class ReadSync:
     def eligible(self, feed: str, members: list[int], reason: str) -> None:
         if reason not in ('saved', 'viewed'):
             raise ValueError('Invalid Telegram read reason')
-        self.store.db.executemany(f'INSERT INTO telegram_read_members (feed,member,{reason}) VALUES (%s,%s,true) ON CONFLICT (feed,member) DO UPDATE SET {reason}=true WHERE NOT telegram_read_members.{reason}',
-                                  [(feed, member) for member in members])
-        if members:
+        if not members:
+            return
+        changed = self.store.db.execute(f'''INSERT INTO telegram_read_members (feed,member,{reason})
+            SELECT %s,member,true FROM unnest(%s::bigint[]) AS member
+            ON CONFLICT (feed,member) DO UPDATE SET {reason}=true WHERE NOT telegram_read_members.{reason}
+            RETURNING member''', (feed, sorted(set(members)))).fetchone()
+        if changed:
             self.mark_feed(feed)
+
+    def saved_publication(self, item: str) -> None:
+        db = self.store.db
+        feeds = [r[0] for r in db.execute("""SELECT f.id FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id
+            WHERE m.publication_id=%s AND f.transport='telegram' AND f.connection IS DISTINCT FROM 'deleting'""", (item,))]
+        if not feeds:
+            return
+        row = db.execute('SELECT complete,members FROM items WHERE id=%s AND viewed=0', (item,)).fetchone()
+        if not row or not row['complete']:
+            return
+        members = json.loads(row['members'])
+        if not members:
+            return
+        try:
+            header, _ = self.store.original(item)
+        except (OSError, ValueError, KeyError):
+            return
+        if not isinstance(header.get('title'), str) or not header.get('full', True) or (header.get('members') and set(header['members']) != set(members)):
+            return
+        for feed in feeds:
+            self.eligible(feed, members, 'saved')
 
     def request(self, feed: str) -> dict[str, Any] | None:
         configs = self.store.subscriptions.feeds(feed, transport='telegram')

@@ -194,6 +194,7 @@ class MediaFiles:
             store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
             store.read_sync.mark_item(download.publication_id)
+            store.read_sync.saved_publication(download.publication_id)
             store.read_versions.media_changed(download.publication_id)
             if subtitles:
                 store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(download.publication_id,))

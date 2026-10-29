@@ -202,6 +202,7 @@ class Store:
         plans=self.publications.plan(feed,publications)
         with self.db:
             history_items=[]
+            saved_items: set[str] = set()
             envelope=HistoryEnvelope.decode(cursor,adapter='client' if namespace=='telegram' else 'web') if namespace in ('telegram','telegram-web') else None
             selection=json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
             enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
@@ -220,7 +221,9 @@ class Store:
                 item=plan.item
                 self.db.execute('INSERT INTO items ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known))
-                self.db.execute('INSERT INTO feed_publications (feed_id, publication_id) VALUES ( %s , %s ) ON CONFLICT DO NOTHING',(feed,item))
+                membership=self.db.execute('INSERT INTO feed_publications (feed_id, publication_id) VALUES ( %s , %s ) ON CONFLICT DO NOTHING RETURNING publication_id',(feed,item)).fetchone()
+                if membership:
+                    saved_items.add(item)
                 self.read_sync.mark_feed(feed)
                 if publication.adapter_reference is None:
                     raise ValueError('Adapter did not return a publication external key')
@@ -232,6 +235,7 @@ class Store:
                     assert plan.fingerprint is not None
                     self.publications.publish(item,plan.content,plan.fingerprint,effects)
                     self.db.execute('UPDATE items SET complete = 1 WHERE id = %s',(item,))
+                    saved_items.add(item)
                 row=expect_row(self.db.execute('SELECT * FROM items_read WHERE id = %s',(item,)).fetchone())
                 if publication.published_known and not row['published_known']:
                     self.db.execute('UPDATE items SET published = %s , published_known = 1 , published_at = %s WHERE id = %s',(publication.published,publication.published,item))
@@ -246,6 +250,7 @@ class Store:
                     members=sorted(set(json.loads(row['members']))|set(publication.members))
                     if members!=json.loads(row['members']):
                         self.db.execute('UPDATE items SET members = %s WHERE id = %s',(json.dumps(members),item))
+                        saved_items.add(item)
                         effects.fetch[item]=True
                     effects.fetch.setdefault(item,False)
             if envelope or 'history_enroll' in selection:
@@ -262,6 +267,8 @@ class Store:
                 self.subscriptions.history.discovery_state(feed,selection)
             if envelope and namespace=='telegram':
                 self.read_sync.observed(feed,tuple(member for publication in publications for member in publication.members),cursor)
+                for item in saved_items:
+                    self.read_sync.saved_publication(item)
             if successful:
                 self.subscriptions.details.record(feed,'updated')
             self.subscriptions.details.description(feed,description)
@@ -411,6 +418,8 @@ class Store:
             if material.members:
                 self.db.execute('UPDATE items SET members = %s WHERE id = %s',(json.dumps(material.members),item))
             self.read_sync.mark_item(item)
+            self.read_sync.saved_publication(item)
+            publication_links.notify_parents(self,item)
             for row in prepared[1]:
                 old=old_media.get(row['id'])
                 if row['status']=='ready' and old and not (row['resource_identity'] is not None and old['source_locator']!=row['source_locator']):
