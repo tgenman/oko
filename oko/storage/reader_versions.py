@@ -108,8 +108,7 @@ class ReaderVersions:
             self.db.execute('INSERT INTO reader_youtube_time SELECT 1 , CASE WHEN blocked_until > %s THEN 1 ELSE 0 END FROM youtube_access WHERE id = 1 ON CONFLICT ( id ) DO UPDATE SET paused = excluded . paused WHERE reader_youtube_time . paused IS DISTINCT FROM excluded . paused',(wall,))
             self.db.execute('DELETE FROM reader_problems WHERE rowid IN ( SELECT rowid FROM reader_problems WHERE finished <= %s ORDER BY finished LIMIT 200 )',(wall-86400,))
             if now >= self._next_action_cleanup:
-                from oko.storage.problem_links import cleanup
-                cleanup(self.db, wall - 86400)
+                self.store.problems.cleanup_receipts(wall - 86400)
                 self._next_action_cleanup=now+60
             body=json.dumps(metadata,sort_keys=True,separators=(',',':'))
             self.db.execute('INSERT INTO reader_runtime VALUES ( 1 , %s ) ON CONFLICT ( id ) DO UPDATE SET body = excluded . body WHERE reader_runtime . body IS DISTINCT FROM excluded . body',(body,))

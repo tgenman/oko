@@ -463,3 +463,34 @@ def test_journal_link_migration_rejects_unrepresentable_body(connections, invali
             migrate(db, MIGRATIONS)
         assert db.execute("SELECT body FROM reader_action_results WHERE id='action'").fetchone() == (body,)
         verify(db, MIGRATIONS[:13])
+
+
+def test_receipt_cleanup_migration_preserves_records_and_removes_projection(connections):
+    import json
+    from oko.storage.postgres_schema import MIGRATIONS
+    body = json.dumps({'objects':[]})
+    with connections() as db:
+        migrate(db, MIGRATIONS[:14])
+        for identity, completed in [('old',1),('new',2)]:
+            db.execute("INSERT INTO reader_action_results(id,identity,body,started,completed,result) VALUES (%s,'same',%s,0,%s,'succeeded')", (identity,body,completed))
+        assert db.execute('SELECT count(*) FROM reader_action_superseded').fetchone() == (1,)
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT id FROM reader_action_results ORDER BY sequence").fetchall() == [('old',),('new',)]
+        assert db.execute("SELECT to_regclass('reader_action_superseded')").fetchone() == (None,)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'journal_receipt_%'").fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+def test_receipt_cleanup_migration_rejects_inconsistent_projection(connections):
+    import json
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:14])
+        body = json.dumps({'objects':[]})
+        for identity in ('old','new'):
+            db.execute("INSERT INTO reader_action_results(id,identity,body,started,completed,result) VALUES (%s,'same',%s,0,1,'succeeded')", (identity,body))
+        db.execute('DELETE FROM reader_action_superseded')
+        with pytest.raises(psycopg.errors.RaiseException, match='inconsistent superseded receipts'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT count(*) FROM reader_action_results').fetchone() == (2,)
+        verify(db, MIGRATIONS[:14])

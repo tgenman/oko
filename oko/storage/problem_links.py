@@ -17,5 +17,14 @@ def material_records(db: Database, kind: str, members: set[str]) -> list[Row]:
     return list(rows.values())
 
 
-def cleanup(db: Database, cutoff: float, limit: int = 200) -> None:
-    db.execute('DELETE FROM reader_action_results WHERE sequence IN ( SELECT sequence FROM reader_action_superseded WHERE completed <= %s ORDER BY completed LIMIT %s )', (cutoff, limit))
+def cleanup(db: Database, cutoff: float, cursor: tuple[float, int] | None = None, limit: int = 200) -> tuple[float, int] | None:
+    """Visit at most one indexed page; never delete an identity's latest receipt."""
+    if cursor is None:
+        rows = db.execute("SELECT sequence,completed FROM reader_action_results WHERE completed<=%s ORDER BY completed,sequence LIMIT %s", (cutoff, limit)).fetchall()
+    else:
+        rows = db.execute("SELECT sequence,completed FROM reader_action_results WHERE completed<=%s AND (completed,sequence)>(%s,%s) ORDER BY completed,sequence LIMIT %s", (cutoff, *cursor, limit)).fetchall()
+    if rows:
+        db.execute("""DELETE FROM reader_action_results r WHERE r.sequence=ANY(%s) AND r.completed<=%s
+            AND EXISTS (SELECT 1 FROM reader_action_results newer WHERE newer.identity=r.identity AND newer.sequence>r.sequence)""",
+            ([row['sequence'] for row in rows], cutoff))
+    return (float(rows[-1]['completed']), int(rows[-1]['sequence'])) if len(rows) == limit else None

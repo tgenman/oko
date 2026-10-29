@@ -30,8 +30,17 @@ class Problems:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self.db = store.db
+        self._receipt_cleanup_cursor: tuple[float, int] | None = None
         # Recovery projection only: preserve the original service records for rollback.
         self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result = 'pending'")}
+
+    def cleanup_receipts(self, cutoff: float) -> None:
+        previous = self._receipt_cleanup_cursor
+        current = problem_links.cleanup(self.db, cutoff, previous)
+        if current != previous:
+            if self.db.in_transaction:
+                self.db.after_rollback(lambda: setattr(self, '_receipt_cleanup_cursor', previous))
+            self._receipt_cleanup_cursor = current
 
     def snapshot(self, now: float) -> dict[str, Any]:
         with reading_snapshot():
@@ -293,11 +302,9 @@ class Problems:
                 else:
                     self.db.execute('INSERT INTO reader_problems VALUES ( %s , %s , %s , %s , %s , NULL , NULL )',
                                     (uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', json.dumps(body), now))
-            self.db.execute('DELETE FROM reader_problems WHERE finished <= %s', (now - 86400,))
-            problem_links.cleanup(self.db, now - 86400)
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
-        for row in self.db.execute('SELECT * FROM reader_problems ORDER BY created DESC').fetchall():
+        for row in self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s ORDER BY created DESC', (now - 86400,)).fetchall():
             problem = json.loads(row['body'])
             if row['finished'] is None:
                 candidate = by_identity.get(row['identity'], {})

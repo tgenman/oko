@@ -19,4 +19,5 @@ MIGRATIONS = (
     Migration(12, 'job-execution-settings', (Path(__file__).parent / 'postgres' / '012-job-execution-settings.sql').read_text()),
     Migration(13, 'processing-inputs', (Path(__file__).parent / 'postgres' / '013-processing-inputs.sql').read_text()),
     Migration(14, 'journal-links', (Path(__file__).parent / 'postgres' / '014-journal-links.sql').read_text()),
+    Migration(15, 'receipt-cleanup', (Path(__file__).parent / 'postgres' / '015-receipt-cleanup.sql').read_text()),
 )

@@ -189,3 +189,17 @@
 - Catalog measurement on an empty database migrated through version 14: 34 tables
   and 132 non-internal triggers. Superseded-receipt cleanup and the remaining
   reader projections are not yet moved.
+- Migration 015 removes `reader_action_superseded` and its three triggers and
+  functions after checking that the projection agrees with receipt history.
+  Cleanup now walks the `(completed, sequence)` index in bounded pages and checks
+  for a newer sequence by identity; the Store cursor rolls back on transaction
+  failure and restarts from the beginning after a process restart.
+- Synthetic 5000-receipt tests verify bounded reads and the DELETE plan, latest
+  receipt retention, eventual cleanup and cursor rollback. Receipt/problem
+  retention no longer runs in GET status; expired problems are filtered from the
+  response and local housekeeping removes them even when work is disabled.
+  `Problems.reconcile` still performs other writes during GET and remains to move.
+- The affected migration, transaction, problem, receipt and query-cost suites passed
+  113 Python tests; 11 Playwright status/navigation scenarios passed.
+- Catalog measurement on an empty database migrated through version 15: 33 tables
+  and 129 non-internal triggers. The target remains 20 tables and zero triggers.
