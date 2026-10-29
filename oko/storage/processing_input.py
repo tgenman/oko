@@ -83,8 +83,22 @@ def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) ->
 
 
 @reading_value
+def processing_feed(store: 'Store', item: str) -> str:
+    row = material_read.item(store.db, item)
+    if row is None:
+        raise ValueError('Publication not found')
+    chosen = json.loads(row['processing_metadata']).get('_pass', {}).get('feed_id')
+    if isinstance(chosen, str):
+        belongs = chosen == row['feed_id'] or bool(store.db.execute(
+            'SELECT 1 FROM feed_publications WHERE feed_id=%s AND publication_id=%s', (chosen,item)).fetchone())
+        if belongs:
+            return chosen
+    return store.item_feed(item)
+
+
+@reading_value
 def live_settings(store: 'Store', item: str) -> dict[str, Any]:
-    feed=store.item_feed(item)
+    feed=processing_feed(store,item)
     current=store.subscriptions.effective('feed',feed,details=False)
     allowed=current['feed']['public_ai']
     inputs = material_read.current(store.db)
@@ -100,7 +114,7 @@ def stage_enabled(store: 'Store', item: str, kind: str) -> bool:
     row = material_read.item(store.db, item)
     if row is None or row['feed_id'] is None:
         return False
-    values = store.subscriptions.effective('feed', row['feed_id'], details=False)['effective']
+    values = store.subscriptions.effective('feed', processing_feed(store,item), details=False)['effective']
     if kind == 'filter':
         return bool(values['filter_enabled']['value'] and values['prompt_filters']['value'].strip())
     if kind == 'theses':
@@ -118,7 +132,7 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
     if not row or row['viewed'] or row['feed_id'] is None or not row['complete'] or row['content']=='{}':
         return None
-    current=store.subscriptions.effective('feed',row['feed_id'],details=False)
+    current=store.subscriptions.effective('feed',processing_feed(store,item),details=False)
     values={key:value['value'] for key,value in current['effective'].items()}
     youtube=row['platform']=='youtube'
     if kind=='filter' and not values['prompt_filters'].strip():

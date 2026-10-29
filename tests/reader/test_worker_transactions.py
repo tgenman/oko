@@ -194,6 +194,40 @@ def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_pat
     reopened.db.close()
 
 
+def test_saved_processing_feed_is_used_instead_of_display_owner(tmp_path):
+    from oko.storage import processing_input
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/second', title='Second', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed',second,Overrides(prompt_filters='Second feed rules',filter_enabled=False))
+            row = store.db.execute('SELECT processing_metadata FROM items WHERE id=%s', (item,)).fetchone()
+            metadata = json.loads(row[0])
+            metadata['_pass'] = {'feed_id':second}
+            store.db.execute('UPDATE items SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata),item))
+        assert store.item_feed(item) == 'demo'
+        assert processing_input.live_settings(store,item)['feed_id'] == second
+        assert processing_input.live_settings(store,item)['values']['prompt_filters'] == 'Second feed rules'
+        assert processing_input.stage_enabled(store,item,'filter') is False
+        with transaction(store.db):
+            processing_input.snapshot(store,item)
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+        signature = processing_input.signature(store,item,'filter')
+        with transaction(store.db):
+            store.subscriptions.update_settings('feed','demo',Overrides(prompt_filters='Different display feed rule'))
+            store.settings_changed('feed','demo')
+        assert processing_input.signature(store,item,'filter') == signature
+        assert processing_input.live_settings(store,item)['feed_id'] == second
+        store.db.close()
+        store = Store(tmp_path,lambda _:None)
+        assert processing_input.live_settings(store,item)['feed_id'] == second
+        assert processing_input.stage_enabled(store,item,'filter') is False
+    finally:
+        store.db.close()
+
+
 def test_disabled_admission_never_begins_and_next_transaction_is_usable(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     statements=[]

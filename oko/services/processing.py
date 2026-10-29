@@ -64,4 +64,5 @@ class ProcessingService:
 
     @repository_access
     def feed(self, item: str) -> str:
-        return self._storage().item_feed(item)
+        from oko.storage.processing_input import processing_feed
+        return processing_feed(self._storage(),item)

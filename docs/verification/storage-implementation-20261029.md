@@ -330,3 +330,10 @@
   demonstrated the missing Job and now checks both commit and rollback. The
   affected worker, collection, startup and reading/cost suites passed 108 tests;
   types and two Playwright scenarios passed, and a screenshot was inspected.
+- A previously saved processing feed now supplies settings, stage switches and
+  worker ownership even when the display's primary feed differs. A regression
+  test first showed the display feed taking precedence; it now covers independent
+  rules, changes to the other feed and Store restart. The affected suites passed
+  98 tests, types and two Playwright scenarios; a screenshot was inspected.
+  The initial candidate race and atomic selection by the first successful claim
+  are not implemented yet, so this is not completion of the first-started rule.
