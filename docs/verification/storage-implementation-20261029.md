@@ -29,3 +29,21 @@
 - `./scripts/check python --files tests/reader/test_storage_redesign_schema.py tests/reader/test_postgres_transactions.py`: contracts и 22 теста прошли на синтетическом PostgreSQL. Проверены сохранение `false`, сброс отдельного переопределения и видимость после commit/rollback с двух соединений. Новый компонент настроек пока не подключён к HTTP.
 - Повтор `python -m mypy oko tests/support/codex.py tests/support/app.py`: 151 файл, успешно.
 - Проверка native boolean сначала выявила `DatatypeMismatch`: адаптер передавал Python `True` как число. После исправления повтор двух целевых наборов прошёл: contracts и 23 теста.
+
+- Settings overrides, feed options and processor configuration no longer use a
+  Store-wide mutable cache. The settings GET uses a read-only repeatable-read
+  snapshot; two-connection tests cover commit, rollback and a concurrent update
+  during an HTTP response. Publication reads batch required settings in their
+  request-local input scope.
+- Initial targeted settings run: 29 passed, 2 failed because tests required
+  the removed memory cache; those assumptions were replaced with observable
+  committed-state and broken-connection checks. A later run found publication
+  open costs of 10–11 SELECTs against the existing limit of 8 and was interrupted.
+  After request-local batching, `./scripts/check python --files
+  tests/reader/test_settings_memory.py tests/reader/test_v3_settings.py
+  tests/reader/test_postgres_transactions.py tests/reader/test_material_read_cost.py
+  tests/reader/test_dispatch_cost.py` passed 76 tests, including unchanged cost
+  limits, on synthetic PostgreSQL. This does not establish 20,000-item performance.
+- `./scripts/check browser --files tests/browser/test_settings_v3_http.ts
+  tests/browser/test_settings_navigation.ts tests/browser/test_codex_settings_http.ts`:
+  6 Playwright tests passed; inspected generated settings/status and model screenshots.

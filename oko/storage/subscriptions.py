@@ -1,7 +1,7 @@
 from oko.storage.database import INTEGRITY_ERRORS
 from oko.storage.database import expect_row, Connection, Row
 from oko.storage.reading import reading_value
-from oko.storage.settings_cache import SettingsCache
+from oko.storage.settings_repository import SettingsRepository
 from oko.storage.feed_facts import feed_facts
 import json
 import re
@@ -23,7 +23,7 @@ class SubscriptionRepository:
         self.db = db
         self.history = History(db)
 
-        self.settings = SettingsCache(db)
+        self.settings = SettingsRepository(db)
         self.details = FeedDetails(db, wall_clock)
         self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
 
@@ -37,7 +37,6 @@ class SubscriptionRepository:
             self.db.execute("INSERT INTO folders VALUES ( 'demo' , 'Тестовый источник' , - 1 ) ON CONFLICT DO NOTHING")
             inserted = self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport ) VALUES ( 'demo' , 'demo' , 'Тестовый источник' , 'demo' , 'demo' , '[]' , 'connected' , 'demo' ) ON CONFLICT DO NOTHING")
             if inserted.rowcount:
-                self.settings.refresh_feed('demo')
                 self.details.created('demo')
 
     @reading_value
@@ -163,7 +162,6 @@ class SubscriptionRepository:
             folder = self.ensure_folder(body.folder)
             self.db.execute('INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , public_ai ) VALUES ( %s , %s , %s , %s , %s , %s , %s , %s , %s )',
                             (identity_id, identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
-            self.settings.refresh_feed(identity_id)
             self.details.created(identity_id)
             self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
@@ -301,8 +299,6 @@ class SubscriptionRepository:
             changed = any(feed.get(field) != value for field, value in values.items())
             for field, value in values.items():
                 self.db.execute(f'UPDATE feeds SET {field} = %s WHERE id = %s', (value, feed_id))
-            if {'folder_id', 'importance', 'public_ai', 'transport'}.intersection(values):
-                self.settings.refresh_feed(feed_id)
             if 'transport' in values and values['transport'] != feed['transport']:
                 connection = 'ambiguous' if feed['kind'] == 'unresolved' and transport is None else 'needs_connection'
                 self.db.execute('UPDATE feeds SET connection = %s WHERE id = %s', (connection, feed_id))

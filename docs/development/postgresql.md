@@ -58,15 +58,12 @@ The reader requires `--database-url-file` and does not create a local database.
 
 ## Transactions and SQL
 
-The Store owns an in-memory snapshot of global, folder and feed setting overrides,
-Codex/llama.cpp configuration, and the processing-related feed fields (kind,
-folder, importance, public-AI permission and transport). Each snapshot is loaded
-once when its owner opens. Configuration writes update SQL and memory together
-under the connection lock; rollback restores previous memory values in reverse
-order. A failed rollback discards the SQL connection before undoing memory. A
-new Store loads committed state again. Dynamic feed progress and description
-remain ordinary live data, and reader revision counters remain freshness facts.
-Maintenance that edits configuration directly in SQL must reopen the Store.
+Settings overrides, processor configuration and processing-related feed fields are
+read from the owning connection. They are not shared as a mutable Store-wide
+cache. The settings HTTP GET uses one PostgreSQL read-only snapshot. Publication
+reads batch their settings and processor inputs into the request-local material
+snapshot; these values do not survive the calculation. Configuration writes remain
+part of the caller's transaction and rollback leaves committed state unchanged.
 
 PostgreSQL trigger clocks are set once when a write transaction begins, including
 its derived projection flush. Plain reads do not send clock-setting SQL. This

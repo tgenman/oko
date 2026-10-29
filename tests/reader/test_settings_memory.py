@@ -1,6 +1,5 @@
-"""Settings stay in the reader's memory while HTTP edits retain SQL atomicity."""
+"""Settings reads and writes retain database transaction boundaries."""
 from tests.support.cards import read_all_cards
-import re
 import pytest
 
 from fastapi.testclient import TestClient
@@ -12,44 +11,6 @@ from tests.support.reader import HEADERS
 @pytest.fixture
 def settings_database(request):
     return request.getfixturevalue('postgres_url')
-
-
-def test_repeated_settings_reads_do_not_requery_settings_storage(tmp_path):
-    app = create_app(tmp_path, token='test', api_only=True)
-    with TestClient(app, headers=HEADERS) as client:
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-        assert client.patch('/api/v3/settings/oko/global', json={'theses': True}).status_code == 200
-        queries = []
-        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
-        try:
-            for _ in range(5):
-                response = client.get('/api/v3/settings/oko/global')
-                assert response.status_code == 200
-                assert response.json()['effective']['theses']['value'] is True
-        finally:
-            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
-        reads = [query for query in queries if query.lstrip().upper().startswith('SELECT')
-                 and re.search(r'\bFROM\s+settings\b', query, re.IGNORECASE)]
-        assert reads == [], reads
-
-
-def test_repeated_processor_reads_do_not_requery_configuration_state(tmp_path):
-    app = create_app(tmp_path, token='test', api_only=True)
-    with TestClient(app, headers=HEADERS) as client:
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-        queries = []
-        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
-        try:
-            for _ in range(5):
-                for processor in ('codex', 'llamacpp'):
-                    response = client.get('/api/v3/processors/'+processor)
-                    assert response.status_code == 200
-                    assert response.json()['configuration'] is None
-        finally:
-            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
-        reads = [query for query in queries if query.lstrip().upper().startswith('SELECT')
-                 and re.search(r'\bFROM\s+state\b', query, re.IGNORECASE) and 'processor:' in query]
-        assert reads == [], reads
 
 
 def test_reading_cards_reuses_feed_processing_options_without_point_reads(tmp_path):
@@ -296,7 +257,8 @@ def test_postgres_failed_rollback_discards_pending_memory_and_connection(tmp_pat
             with psycopg.connect(postgres_url, autocommit=True) as administrator:
                 assert administrator.execute('SELECT pg_terminate_backend(%s)', (identity,)).fetchone()[0]
             raise RuntimeError('abort owned synthetic transaction')
-        assert store.subscriptions.effective('oko', 'global')['effective']['prompt_filters']['value'] == 'Committed'
+        with pytest.raises(psycopg.Error):
+            store.subscriptions.effective('oko', 'global')
         with pytest.raises(psycopg.Error):
             store.db.execute('SELECT 1')
     finally:
@@ -306,3 +268,91 @@ def test_postgres_failed_rollback_discards_pending_memory_and_connection(tmp_pat
         assert reopened.subscriptions.effective('oko', 'global')['effective']['prompt_filters']['value'] == 'Committed'
     finally:
         reopened.db.close()
+
+
+def test_http_settings_reads_committed_changes_from_another_connection(tmp_path, settings_database):
+    import psycopg
+    from oko.collection.demo import DemoSource
+
+    app = create_app(tmp_path, token='test', api_only=True, source=DemoSource(), database_url=settings_database)
+    path = '/api/v3/settings/oko/global'
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        assert client.get(path).json()['effective']['theses']['value'] is False
+        writer.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('oko','global','theses','true')")
+        assert client.get(path).json()['effective']['theses']['value'] is False
+        writer.commit()
+        assert client.get(path).json()['effective']['theses']['value'] is True
+        writer.execute("UPDATE settings SET value='false' WHERE scope='oko' AND owner='global' AND field='theses'")
+        writer.rollback()
+        assert client.get(path).json()['effective']['theses']['value'] is True
+
+
+def test_http_inherited_settings_use_one_consistent_database_snapshot(tmp_path, settings_database):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    import psycopg
+    from oko.collection.demo import DemoSource
+
+    app = create_app(tmp_path, token='test', api_only=True, source=DemoSource(), database_url=settings_database)
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        folder = client.get('/api/v3/subscriptions').json()['feeds'][0]['folder_id']
+        assert client.patch('/api/v3/settings/oko/global', json={'theses': False}).status_code == 200
+        path = '/api/v3/settings/folder/' + folder
+        assert client.patch(path, json={'prompt_filters': 'before'}).status_code == 200
+        entered, release = threading.Event(), threading.Event()
+        def trace(query):
+            if 'SELECT field, value FROM settings' in query and not entered.is_set():
+                entered.set()
+                assert release.wait(5)
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))
+        try:
+            with ThreadPoolExecutor() as pool:
+                pending = pool.submit(client.get, path)
+                assert entered.wait(5)
+                writer.execute("UPDATE settings SET value='true' WHERE scope='oko' AND owner='global' AND field='theses'")
+                writer.execute("UPDATE settings SET value=%s WHERE scope='folder' AND owner=%s AND field='prompt_filters'", ('\"after\"', folder))
+                writer.commit()
+                release.set()
+                result = pending.result(5)
+            assert result.status_code == 200, result.text
+            assert result.json()['effective']['theses']['value'] is False
+            assert result.json()['effective']['prompt_filters']['value'] == 'before'
+        finally:
+            release.set()
+            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
+
+
+def test_http_processor_settings_follow_committed_storage(tmp_path, settings_database):
+    import json
+    import psycopg
+    from tests.reader.test_codex_settings import Models, configuration
+
+    app = create_app(tmp_path, token='test', api_only=True, codex_client=Models(), database_url=settings_database)
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        assert client.get('/api/v3/processors/codex').json()['configuration'] is None
+        config = configuration()
+        writer.execute('INSERT INTO state(key,value) VALUES (%s,%s)', ('processor:codex', json.dumps(config)))
+        assert client.get('/api/v3/processors/codex').json()['configuration'] is None
+        writer.commit()
+        assert client.get('/api/v3/processors/codex').json()['configuration'] == config
+
+
+def test_feed_processing_settings_follow_committed_storage(tmp_path, settings_database):
+    import psycopg
+    from tests.support.storage import Store
+    from oko.subscriptions.subscriptions import AddFeed
+
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        feed = store.subscriptions.add_feed(AddFeed(url='https://source.test/feed', title='Source', folder='Folder', verification='synthetic'))
+        identity = feed['id']
+        with psycopg.connect(settings_database) as writer:
+            writer.execute('UPDATE feeds SET public_ai=1 WHERE id=%s', (identity,))
+            assert store.subscriptions.effective('feed', identity, details=False)['feed']['public_ai'] is False
+            writer.commit()
+            assert store.subscriptions.effective('feed', identity, details=False)['feed']['public_ai'] is True
+    finally:
+        store.db.close()

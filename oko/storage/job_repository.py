@@ -581,7 +581,6 @@ class JobRepository:
             self.store.subscriptions.telegram.release(feed)
             self.store.db.execute('DELETE FROM feed_details WHERE feed = %s', (feed,))
             self.store.db.execute('DELETE FROM feeds WHERE id = %s', (feed,))
-            self.store.subscriptions.settings.refresh_feed(feed)
 
 
     def delete(self, job: Job) -> None:

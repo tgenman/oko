@@ -22,6 +22,7 @@ class Inputs:
     jobs: dict[str, dict[str, Row]] = field(default_factory=dict)
     media_jobs: dict[str,list[Row]] = field(default_factory=dict)
     feeds: dict[str, Row] = field(default_factory=dict)
+    settings: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
     subtitles: dict[str, str | None] = field(default_factory=dict)
@@ -40,7 +41,12 @@ def current(db: Database) -> Inputs | None:
 
 _ITEM = 'SELECT i . * , d . item AS source_deleted , coalesce ( v . hidden , 0 ) AS reader_hidden FROM items_read i LEFT JOIN source_deleted d ON d . item = i . id LEFT JOIN reader_visibility v ON v . item = i . id'
 _FEED = 'SELECT f . * , b . binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b . feed = f . id'
-
+_BATCH_FEED = '''SELECT f.*, b.binding AS reader_binding,
+    COALESCE((SELECT jsonb_agg(jsonb_build_array(s.scope, s.owner, s.field, s.value))
+              FROM settings s WHERE (s.scope = 'oko' AND s.owner = 'global')
+                 OR (s.scope = 'folder' AND s.owner = f.folder_id)
+                 OR (s.scope = 'feed' AND s.owner = f.id)), '[]'::jsonb) AS reader_settings
+    FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'''
 
 @reading_value
 def item(db: Database, identity: str) -> Row | None:
@@ -103,11 +109,18 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
         value.owners.update({identity: set() for identity in batch})
         for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM reading_memberships m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN reading_memberships m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])
-    feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None})
+    feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None}
+                   | {feed for owners in value.owners.values() for feed in owners})
     for start in range(0, len(feeds), 400):
         batch = feeds[start:start+400]
-        value.feeds.update({r['id']: r for r in db.execute(_FEED+' WHERE f.id = ANY(%s)', (batch,))})
-    keys = ['settings-version'] + ['settings-version:'+f for f in feeds]
+        for row in db.execute(_BATCH_FEED+' WHERE f.id = ANY(%s)', (batch,)):
+            value.feeds[row['id']] = row
+            value.settings.setdefault(('oko', 'global'), {})
+            value.settings.setdefault(('feed', row['id']), {})
+            value.settings.setdefault(('folder', row['folder_id']), {})
+            for scope, owner, field, serialized in row['reader_settings']:
+                value.settings.setdefault((scope, owner), {})[field] = json.loads(serialized)
+    keys = ['settings-version', 'processor:codex', 'processor:llamacpp'] + ['settings-version:'+f for f in feeds]
     value.state_keys=set(keys)
     for start in range(0,len(keys),400):
         batch = keys[start:start+400]
