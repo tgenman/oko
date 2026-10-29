@@ -10,6 +10,7 @@ test('fixture contracts reject missing ids, invalid counts and incomplete histor
   for (const name of ['navigation', 'navigation_v3']) {
     assert.throws(() => validate(name, {folders: [], feeds: [], count: '3'}), /count/);
   }
-  assert.throws(() => validate('status', {stage: 'Готово', errors: [], sources: [],
+  assert.throws(() => validate('navigation_subject', {folders: [], total: '3'}), /total/);
+  assert.throws(() => validate('status_details', {stage: 'Готово', errors: [], sources: [],
     ready_sources: 1, total_sources: 1, initial_histories: [{}]}), /initial_histories/);
 });

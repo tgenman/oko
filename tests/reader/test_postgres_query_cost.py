@@ -82,12 +82,11 @@ def test_navigation_batches_requested_feed_facts(postgres_url, tmp_path, monkeyp
     with TestClient(app, headers=HEADERS) as client:
         assert client.get('/api/v3/status').status_code == 200
         queries.clear()
-        response = client.post('/api/v3/reading/check', json=dict(storage_id=None, resources=[dict(kind='navigation', known_version=None)]))
+        response = client.get('/api/v3/navigation')
         assert response.status_code == 200
-        resources = response.json()['resources']
-        feeds = [r for r in resources if r['kind'] == 'feed']
+        feeds = [feed for folder in response.json()['folders'] for feed in folder['feeds']]
         assert len(feeds) == count
-        assert all(r['state'] == 'changed' for r in feeds)
+        assert all(r['id'] and r['title'] for r in feeds)
         assert len(queries) < 20 + 12 * ((count + 399) // 400), len(queries)
         queries.clear()
         assert len(client.get('/api/v3/subscriptions').json()['feeds']) == count
@@ -164,9 +163,9 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
         assert len(response.json()['items']) == 1
         assert 'theses' not in response.json()['items'][0]
         queries.clear()
-        opened=client.get('/api/v3/reading/materials/'+parent)
-        summary=next(r['data']['theses'] for r in opened.json()['resources'] if r['kind']=='theses')
-        assert len(summary['result']['points'][0]['references']) == linked_count
+        opened=client.get('/api/v3/publication/'+parent)
+        summary=opened.json()['theses']
+        assert len(summary['result']['references'][0]) == linked_count
         assert len(queries) < 25, len(queries)
         queries.clear()
         preview = client.post('/api/v3/folders/demo/completion/preview')
@@ -220,10 +219,10 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
         assert response.json()['total'] == count
         assert all('snippet' not in card for card in response.json()['items'])
         assert len(queries) < 28, len(queries)
-        opened=client.get('/api/v3/reading/materials/'+parent)
-        content=next(resource['data'] for resource in opened.json()['resources'] if resource['kind']=='material')
-        assert 'Synthetic captions' in content['content']['text']
+        opened=client.get('/api/v3/publication/'+parent)
+        content=opened.json()
+        assert 'Synthetic captions' in content['text']
         (tmp_path / 'media' / f'{10000:032x}').unlink()
-        response = client.get('/api/v3/reading/materials/'+parent)
-        material = next(resource['data'] for resource in response.json()['resources'] if resource['kind'] == 'material')
-        assert 'Synthetic captions' not in material['content']['text']
+        response = client.get('/api/v3/publication/'+parent)
+        material = response.json()
+        assert 'Synthetic captions' not in material['text']

@@ -101,14 +101,14 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
         assert all(b['media_id'] in ids for b in updated['filtered_content']['blocks'] if b['type']=='media')
         assert len(calls)==count
 
-        wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         saved=read_materials_for_cards(client, '/api/v3/cards')
         time.sleep(1.2)  # More than two periodic reconciliation passes.
         assert len(calls)==count
         assert [c['theses'] for c in read_materials_for_cards(client, '/api/v3/cards')]==[c['theses'] for c in saved]
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         presence(client,'reader')
-        wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         assert [c['theses'] for c in read_materials_for_cards(client, '/api/v3/cards')]==[c['theses'] for c in saved]
         assert stored(root,item)['processing_metadata']==accepted
         assert len(calls)==count
@@ -255,9 +255,9 @@ def test_permission_revoked_during_check_does_not_transfer_canonical_source(tmp_
             assert started.wait(3)
             client.patch('/api/v3/feeds/'+feed,json={'public_ai':False})
             release.set()
-            wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status').json()['work']))
+            wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
             assert calls==[]
-            assert client.get('/api/v3/status').json()['problems']['current']==[]
+            assert client.get('/api/v3/status/details').json()['problems']['current']==[]
             assert all(c['theses']['result'] is None for c in read_materials_for_cards(client, '/api/v3/cards'))
             item=read_materials_for_cards(client, '/api/v3/cards')[0]['id']
             assert stored(root,item)['filtered_content']=={}

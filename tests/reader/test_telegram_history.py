@@ -52,7 +52,7 @@ def test_count_history_keeps_safe_numeric_read_boundary(tmp_path):
         presence(client, 'reader')
         feed=connected_feed(client, connect_request(client,json=dict(account='fixture',peer='@fixture',folder='Telegram',auto_read=True,initial_history=dict(mode='count',count=2))))
         for _ in range(200):
-            reads=client.get('/api/v3/status').json()['telegram_reads']
+            reads=client.get('/api/v3/status/details').json()['telegram_reads']
             if reads and reads[0]['waiting']:break
             time.sleep(.02)
         assert reads[0]['initial']=='3' # Before oldest member of the chosen whole album (4,5).
@@ -164,7 +164,7 @@ def test_service_ids_in_selected_span_still_block_unsafe_read_acknowledgment(tmp
         feed = connected_feed(client, connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Telegram', auto_read=True, initial_history=dict(mode='count', count=2))))
         client.patch('/api/v3/feeds/' + feed['id'], json={'read_history': True})
         for _ in range(200):
-            reads = client.get('/api/v3/status').json()['telegram_reads']
+            reads = client.get('/api/v3/status/details').json()['telegram_reads']
             if reads and reads[0]['confirmed'] == '3' and reads[0]['waiting']: break
             time.sleep(.02)
         assert reads[0]['initial'] == '2'

@@ -37,7 +37,7 @@ def test_forwarded_fragment_is_incomplete_without_errors_or_automatic_retry(tmp_
         else:
             assert 'Metadata fragment' not in content['text'] and 'CHANNEL DESCRIPTION' not in content['text']
             assert '[!load-error]' in linked['post_text']
-        assert client.get('/api/v3/status').json()['problems']['count']==0
+        assert client.get('/api/v3/status/details').json()['problems']['count']==0
         assert client.get('/api/v3/collection-status/'+feed).json()['source']['state']=='complete'
         assert codex.inputs==[]
         count=sum('/fixture/11' in x for x in requests);advance[0]+=3600
@@ -64,19 +64,19 @@ def test_previous_fragment_survives_failed_manual_refresh_and_legacy_error_is_co
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
         path='/api/v3/materials/'+settled(client)[0]['id']
-        assert client.get('/api/v3/status').json()['problems']['count']>0
+        assert client.get('/api/v3/status/details').json()['problems']['count']>0
         confirmed[0]=True;client.post(path+'/retry');settled(client)
         content=client.get(path).json()['content']
         assert 'Saved short preview' in content['text']
         assert 'https://t.me/original/42' in content['linked_content']['post_text']
         assert 'previous_versions' not in content and not content['changed']
-        assert client.get('/api/v3/status').json()['problems']['count']==0
+        assert client.get('/api/v3/status/details').json()['problems']['count']==0
         broken[0]=True;client.post(path+'/retry');settled(client)
         failed=client.get(path).json()['content']
         assert failed['text']==content['text']
         assert 'HTTP 500' in failed['linked_content']['post_text']
         assert 'previous_versions' not in failed and not failed['changed']
-        assert client.get('/api/v3/status').json()['problems']['count']==0
+        assert client.get('/api/v3/status/details').json()['problems']['count']==0
         broken[0]=False;client.post(path+'/retry');settled(client)
         assert 'HTTP 500' not in client.get(path).json()['content']['linked_content']['post_text']
 

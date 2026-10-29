@@ -12,12 +12,12 @@ def test_navigation_and_status_cost_does_not_grow_with_publication_count(tmp_pat
         library(root,[count]*4)
         app=traced_app(root)
         with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,root) as measure:
-            response,navigation=measure.request('navigation','GET','/api/v3/reading-composition')
+            response,navigation=measure.request('navigation','GET','/api/v3/navigation')
             result=response.json()
-            assert result['count']==count*4
-            assert {feed['count'] for feed in result['feeds']}=={count}
+            assert result['total']==count*4
+            assert {feed['count'] for folder in result['folders'] for feed in folder['feeds']}=={count}
             assert {folder['count'] for folder in result['folders']}=={count}
-            response,status=measure.request('status','GET','/api/v3/status')
+            response,status=measure.request('status','GET','/api/v3/status/details')
             assert response.json()['problems']['count']==0
             costs.append((navigation,status))
     assert costs[1][0]['sql']<=costs[0][0]['sql']+5,costs
@@ -32,10 +32,10 @@ def test_navigation_and_status_batch_feed_metadata_settings_and_bindings(tmp_pat
         app=traced_app(root)
         with TestClient(app,headers=HEADERS) as client:
             tracing(client,app)
-            navigation=client.get('/api/v3/reading-composition')
+            navigation=client.get('/api/v3/navigation')
             assert navigation.status_code==200,navigation.text
-            assert len(navigation.json()['feeds'])==feeds and navigation.json()['count']==feeds
-            status=client.get('/api/v3/status')
+            assert sum(len(folder['feeds']) for folder in navigation.json()['folders'])==feeds and navigation.json()['total']==feeds
+            status=client.get('/api/v3/status/details')
             assert status.status_code==200,status.text
             assert len(status.json()['initial_histories'])==feeds
             costs.append((int(navigation.headers['X-Test-SQL']),int(status.headers['X-Test-SQL'])))
@@ -56,7 +56,7 @@ def test_status_does_not_read_unused_titles_for_affected_publications(tmp_path):
         app=traced_app(root)
         with TestClient(app,headers=HEADERS) as client:
             tracing(client,app)
-            response=client.get('/api/v3/status')
+            response=client.get('/api/v3/status/details')
             assert response.status_code==200,response.text
             objects=[obj for problem in response.json()['problems']['current'] for obj in problem['affected'] if obj['kind']=='material']
             assert len(objects)==count*4

@@ -86,7 +86,7 @@ def test_nonempty_folder_blocks_deletion_even_without_visible_items(tmp_path, co
         assert client.get('/api/v3/subscriptions').json() == catalog
         receipt = client.get('/api/v3/commands/delete-nonempty').json()
         assert receipt['outcome'] == 'failed' and receipt['context']['folder_id'] == folder
-        status = client.get('/api/v3/status')
+        status = client.get('/api/v3/status/details')
         assert status.status_code == 200, status.text
         assert any({'kind': 'folder', 'folder_id': folder} in p['affected'] for p in status.json()['problems']['current'])
 

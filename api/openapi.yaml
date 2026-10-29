@@ -1243,18 +1243,224 @@ paths:
     get:
       summary: Status
       operationId: status
-      description: Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client presence
-        or start external work. All operations require bearer or persistent browser session authorization, allowed Host and,
-        when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting,
-        not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying.
-        Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
+      description: Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client
+        presence or start external work. All operations require bearer or persistent browser session authorization,
+        allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation
+        ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands
+        instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query
+        parameters return 422.
       tags:
       - status
-      parameters: []
+      parameters:
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         '200':
-          description: Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client presence
-            or start external work.
+          description: Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client
+            presence or start external work.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusSummary'
+              example:
+                api_version: 3.0.0
+                runtime_state: running
+                lifetime:
+                  kind: explicit
+                work_allowed: true
+                active_client_sessions: 0
+                sources: []
+                diagnostic_count: 0
+                diagnostic_persistence_error: null
+                viewed_ids: []
+                enabled: true
+                collection:
+                  state: idle
+                  completed: 0
+                  total: 0
+                processing:
+                  state: idle
+                  completed: 0
+                  total: 0
+                problems: []
+          headers:
+            X-Oko-Instance:
+              description: Process identity; an open browser must reload before further commands when this changes.
+              schema:
+                type: string
+            X-Oko-Browser-Session:
+              description: Present as remembered in persistent web profile; bearer browser bootstrap requires explicit
+                X-Oko-Remember header set to 1.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+            ETag:
+              schema:
+                type: string
+            X-Oko-Storage-Id:
+              schema:
+                type: string
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '304':
+          description: Unchanged representation; no response body.
+          headers:
+            ETag:
+              schema:
+                type: string
+            X-Oko-Storage-Id:
+              schema:
+                type: string
+  /api/v3/status/details:
+    get:
+      summary: Status details on demand
+      operationId: status_details
+      description: Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client
+        presence or start external work. All operations require bearer or persistent browser session authorization,
+        allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation
+        ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands
+        instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query
+        parameters return 422.
+      tags:
+      - status
+      parameters:
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client
+            presence or start external work.
           content:
             application/json:
               schema:
@@ -1295,8 +1501,8 @@ paths:
               schema:
                 type: string
             X-Oko-Browser-Session:
-              description: Present as remembered in persistent web profile; bearer browser bootstrap requires explicit X-Oko-Remember
-                header set to 1.
+              description: Present as remembered in persistent web profile; bearer browser bootstrap requires explicit
+                X-Oko-Remember header set to 1.
               schema:
                 type: string
             Cache-Control:
@@ -1307,8 +1513,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Tracked mutation identity when applicable.
+            ETag:
+              schema:
+                type: string
+            X-Oko-Storage-Id:
+              schema:
+                type: string
         '403':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -1346,7 +1559,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '422':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -1375,7 +1589,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '500':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -1399,7 +1614,8 @@ paths:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
         '503':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
           content:
             application/json:
               schema:
@@ -1423,6 +1639,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+        '304':
+          description: Unchanged representation; no response body.
+          headers:
+            ETag:
+              schema:
+                type: string
+            X-Oko-Storage-Id:
+              schema:
+                type: string
+
   /api/v3/command-observations:
     post:
       summary: Observe command
@@ -7850,6 +8076,180 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
+  /api/v3/navigation:
+    get:
+      summary: Navigation folders and feeds
+      operationId: navigation
+      description: Read domain membership, counts and order for publication reading. This is a subject projection
+        with no layout or navigation commands. All operations require bearer or persistent browser session authorization,
+        allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation
+        ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands
+        instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query
+        parameters return 422.
+      tags:
+      - reading-composition
+      parameters:
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Read domain membership, counts and order for publication reading. This is a subject projection
+            with no layout or navigation commands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NavigationResponse'
+              example:
+                folders: []
+                total: 0
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Tracked mutation identity when applicable.
+            ETag:
+              schema:
+                type: string
+            X-Oko-Storage-Id:
+              schema:
+                type: string
+        '304':
+          description: Navigation has not changed.
+          headers:
+            ETag:
+              schema:
+                type: string
+            X-Oko-Storage-Id:
+              schema:
+                type: string
+        '403':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationErrors'
+              examples:
+                SessionRequiredError:
+                  value:
+                    code: session_required
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                HostNotAllowedError:
+                  value:
+                    code: host_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+                OriginNotAllowedError:
+                  value:
+                    code: origin_not_allowed
+                    message: example
+                    details: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '422':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestInvalidError'
+              examples:
+                RequestInvalidError:
+                  value:
+                    code: request_invalid
+                    message: example
+                    details:
+                      violations:
+                      - location: body
+                        segments: []
+                        code: required
+                        message: example
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '500':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorError'
+              examples:
+                InternalErrorError:
+                  value:
+                    code: internal_error
+                    message: example
+                    details: null
+                    diagnostic_id: example
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+        '503':
+          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are
+            returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageUnavailableError'
+              examples:
+                StorageUnavailableError:
+                  value:
+                    code: storage_unavailable
+                    message: example
+                    details:
+                      retry_at: null
+                    diagnostic_id: null
+                    command_id: null
+          headers:
+            X-Oko-Error:
+              schema:
+                type: string
+                minLength: 1
+              description: Diagnostic identity when recorded.
+            X-Oko-Action:
+              schema:
+                $ref: '#/components/schemas/CommandId'
+              description: Command correlation identity when known.
+
   /api/v3/reading-composition:
     get:
       summary: Reading composition
@@ -12244,358 +12644,196 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
-  /api/v3/reading/check:
-    post:
-      summary: Check persisted reading entity versions in one batch
-      operationId: check_reading
-      description: Compare persisted versions and return only changed requested entities. A reset discards all known versions;
-        failed entities retain their old client version.
-      parameters: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReadingCheckRequest'
-      responses:
-        '200':
-          description: Current per-entity data, unchanged markers or an explicit storage reset. Reading does not execute commands.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingCheckResponse'
-              example:
-                state: current
-                storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
-                resources: []
-        '403':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthorizationErrors'
-              examples:
-                SessionRequiredError:
-                  value:
-                    code: session_required
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                HostNotAllowedError:
-                  value:
-                    code: host_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                OriginNotAllowedError:
-                  value:
-                    code: origin_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '422':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RequestInvalidError'
-              examples:
-                RequestInvalidError:
-                  value:
-                    code: request_invalid
-                    message: example
-                    details:
-                      violations:
-                      - location: body
-                        segments: []
-                        code: required
-                        message: example
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '500':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InternalErrorError'
-              examples:
-                InternalErrorError:
-                  value:
-                    code: internal_error
-                    message: example
-                    details: null
-                    diagnostic_id: example
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '503':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StorageUnavailableError'
-              examples:
-                StorageUnavailableError:
-                  value:
-                    code: storage_unavailable
-                    message: example
-                    details:
-                      retry_at: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-  /api/v3/reading/materials/{item}:
-    get:
-      summary: Read one material with its persisted entity version
-      operationId: reading_material
-      description: Open one publication independently of polling. Text, filtering, theses and media carry separate persisted
-        versions and a shared source revision.
-      parameters:
-      - name: item
-        in: path
-        required: true
-        schema:
-          type: string
-          minLength: 1
-        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-      responses:
-        '200':
-          description: Current per-entity data, unchanged markers or an explicit storage reset. Reading does not execute commands.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingCheckResponse'
-              example:
-                state: current
-                storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
-                resources:
-                - kind: material
-                  id: example
-                  state: changed
-                  version: '1'
-                  data:
-                    id: example
-                    title: example
-                    feed_id: example
-                    source_url: https://example.test/post/1
-                    published_at: null
-                    source:
-                      kind: demo
-                      feed_id: example
-                      source_url: https://example.test/post/1
-                    source_position: null
-                    originals: false
-                    availability: available
-                    content:
-                      availability: available
-                      reply_preview: null
-                      text: example
-                      revision_id: example
-                      version: 1
-                      completeness:
-                        state: complete
-                      loading: false
-                      source_deleted: false
-                      changed: false
-                      description: example
-                - kind: filter
-                  id: '["all","","newest",false]'
-                  state: changed
-                  version: '1'
-                  data:
-                    revision_id: '1'
-                    filter:
-                      attempt:
-                        state: ready
-                      result:
-                        hidden: false
-                        reason: example
-                        removed: []
-                        provenance:
-                          kind: unknown
-                          reason: not_recorded
-                      diagnostic_message: null
-                - kind: theses
-                  id: '["all","","newest",false]'
-                  state: changed
-                  version: '1'
-                  data:
-                    revision_id: '1'
-                    theses:
-                      attempt:
-                        state: ready
-                      result:
-                        points: []
-                        provenance:
-                          kind: unknown
-                          reason: not_recorded
-                      diagnostic_message: null
-                - kind: media
-                  id: '["all","","newest",false]'
-                  state: changed
-                  version: '1'
-                  data:
-                    revision_id: '1'
-                    images: []
-                    attachments: []
-        '403':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthorizationErrors'
-              examples:
-                SessionRequiredError:
-                  value:
-                    code: session_required
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                HostNotAllowedError:
-                  value:
-                    code: host_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                OriginNotAllowedError:
-                  value:
-                    code: origin_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '422':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RequestInvalidError'
-              examples:
-                RequestInvalidError:
-                  value:
-                    code: request_invalid
-                    message: example
-                    details:
-                      violations:
-                      - location: body
-                        segments: []
-                        code: required
-                        message: example
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '500':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InternalErrorError'
-              examples:
-                InternalErrorError:
-                  value:
-                    code: internal_error
-                    message: example
-                    details: null
-                    diagnostic_id: example
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '503':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StorageUnavailableError'
-              examples:
-                StorageUnavailableError:
-                  value:
-                    code: storage_unavailable
-                    message: example
-                    details:
-                      retry_at: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
+
+
 components:
   schemas:
+    StatusSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        api_version:
+          type: string
+          pattern: ^\d+\.\d+\.\d+$
+        runtime_state:
+          type: string
+          enum:
+          - running
+          - disabled
+          - stopping
+          - stopped
+          - unavailable
+        lifetime:
+          $ref: '#/components/schemas/LifetimePolicy'
+        work_allowed:
+          type: boolean
+        active_client_sessions:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceState'
+        diagnostic_count:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        diagnostic_persistence_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+        viewed_ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/MaterialId'
+        enabled:
+          type: boolean
+        collection:
+          $ref: '#/components/schemas/StatusProgress'
+        processing:
+          $ref: '#/components/schemas/StatusProgress'
+        problems:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusProblem'
+      required:
+      - api_version
+      - runtime_state
+      - lifetime
+      - work_allowed
+      - active_client_sessions
+      - sources
+      - diagnostic_count
+      - diagnostic_persistence_error
+      - viewed_ids
+      - enabled
+      - collection
+      - processing
+      - problems
+      examples:
+      - api_version: 3.0.0
+        runtime_state: running
+        lifetime:
+          kind: explicit
+        work_allowed: true
+        active_client_sessions: 0
+        sources: []
+        diagnostic_count: 0
+        diagnostic_persistence_error: null
+        viewed_ids: []
+        enabled: true
+        collection:
+          state: idle
+          completed: 0
+          total: 0
+        processing:
+          state: idle
+          completed: 0
+          total: 0
+        problems: []
+    StatusProgress:
+      type: object
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum:
+          - idle
+          - running
+        completed:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        total:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+      required:
+      - state
+      - completed
+      - total
+      examples:
+      - state: idle
+        completed: 0
+        total: 0
+    StatusProblem:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        message:
+          type: string
+        feed_id:
+          anyOf:
+          - $ref: '#/components/schemas/FeedId'
+          - type: 'null'
+      required:
+      - id
+      - message
+      - feed_id
+      examples:
+      - id: example
+        message: Example
+        feed_id: null
+    NavigationResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        total: {type: integer, minimum: 0}
+        folders:
+          type: array
+          items: {$ref: '#/components/schemas/NavigationFolder'}
+      required: [total, folders]
+      examples:
+      - total: 0
+        folders: []
+    NavigationFolder:
+      type: object
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/FolderId'}
+        title: {type: string}
+        count: {type: integer, minimum: 0}
+        feeds:
+          type: array
+          items: {$ref: '#/components/schemas/NavigationEntry'}
+      required: [id, title, count, feeds]
+      examples:
+      - id: example
+        title: Folder
+        count: 0
+        feeds: []
+    NavigationEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/FeedId'}
+        title: {type: string}
+        avatar_url:
+          anyOf:
+          - {$ref: '#/components/schemas/FeedAvatarUrl'}
+          - {type: 'null'}
+        count: {type: integer, minimum: 0}
+        kind: {type: string}
+        has_unviewed: {type: boolean}
+        connection: {type: string}
+        telegram_access:
+          type: [string, 'null']
+          enum: [web, client, unconfigured, null]
+      required: [id, title, avatar_url, count, kind, has_unviewed, connection, telegram_access]
+      examples:
+      - id: example
+        title: Feed
+        avatar_url: null
+        count: 0
+        kind: rss
+        has_unviewed: false
+        connection: ready
+        telegram_access: null
     StorageChangedError:
       type: object
       additionalProperties: false
@@ -21702,219 +21940,11 @@ components:
       - value: 2
         origin:
           scope: default
-    ReadingEntityVersion:
-      type: string
-      pattern: ^[1-9][0-9]*$
-      maxLength: 20
-      examples:
-      - '1'
-    ReadingKnownVersion:
-      anyOf:
-      - $ref: '#/components/schemas/ReadingEntityVersion'
-      - type: 'null'
-      examples:
-      - null
-      - '1'
     ReadingStorageId:
       type: string
       format: uuid
       examples:
       - 3f003741-d0c7-4e62-8d12-55fb652f404a
-    ReadingResourceKind:
-      type: string
-      enum:
-      - status
-      - navigation
-      - feed
-      - material
-      - filter
-      - theses
-      - media
-      examples:
-      - status
-    CheckStatus:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: status
-          examples:
-          - status
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - known_version
-      examples:
-      - kind: status
-        known_version: null
-    CheckNavigation:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: navigation
-          examples:
-          - navigation
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - known_version
-      examples:
-      - kind: navigation
-        known_version: null
-    CheckFeed:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: feed
-          examples:
-          - feed
-        id:
-          $ref: '#/components/schemas/FeedId'
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - id
-      - known_version
-      examples:
-      - kind: feed
-        id: example
-        known_version: null
-    CheckMaterial:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: material
-          examples:
-          - material
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - id
-      - known_version
-      examples:
-      - kind: material
-        id: example
-        known_version: null
-    CheckFilter:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: filter
-          examples:
-          - filter
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - id
-      - known_version
-      examples:
-      - kind: filter
-        id: example
-        known_version: null
-    CheckTheses:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: theses
-          examples:
-          - theses
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - id
-      - known_version
-      examples:
-      - kind: theses
-        id: example
-        known_version: null
-    CheckMedia:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: media
-          examples:
-          - media
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        known_version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-      required:
-      - kind
-      - id
-      - known_version
-      examples:
-      - kind: media
-        id: example
-        known_version: null
-    ReadingCheck:
-      oneOf:
-      - $ref: '#/components/schemas/CheckStatus'
-      - $ref: '#/components/schemas/CheckNavigation'
-      - $ref: '#/components/schemas/CheckFeed'
-      - $ref: '#/components/schemas/CheckMaterial'
-      - $ref: '#/components/schemas/CheckFilter'
-      - $ref: '#/components/schemas/CheckTheses'
-      - $ref: '#/components/schemas/CheckMedia'
-      discriminator:
-        propertyName: kind
-        mapping:
-          status: '#/components/schemas/CheckStatus'
-          navigation: '#/components/schemas/CheckNavigation'
-          feed: '#/components/schemas/CheckFeed'
-          material: '#/components/schemas/CheckMaterial'
-          filter: '#/components/schemas/CheckFilter'
-          theses: '#/components/schemas/CheckTheses'
-          media: '#/components/schemas/CheckMedia'
-      examples:
-      - kind: status
-        known_version: null
-    ReadingCheckRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        storage_id:
-          anyOf:
-          - $ref: '#/components/schemas/ReadingStorageId'
-          - type: 'null'
-        resources:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReadingCheck'
-          minItems: 1
-          maxItems: 50000
-      required:
-      - storage_id
-      - resources
-      examples:
-      - storage_id: null
-        resources:
-        - kind: status
-          known_version: null
     CardListItem:
       type: object
       additionalProperties: false
@@ -22042,79 +22072,6 @@ components:
       - code
       examples:
       - code: cursor_expired
-    ReadingFolderEntity:
-      type: object
-      properties:
-        id:
-          $ref: '#/components/schemas/FolderId'
-        title:
-          type: string
-        position:
-          type: integer
-          minimum: -9007199254740991
-          maximum: 9007199254740991
-          description: Persisted ordering position; demo source legitimately uses -1.
-        count:
-          type: integer
-          minimum: 0
-          maximum: 9007199254740991
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-      required:
-      - id
-      - title
-      - position
-      - count
-      - version
-      additionalProperties: false
-      examples:
-      - id: example
-        title: example
-        position: 0
-        count: 0
-        version: '1'
-    ReadingFeedReference:
-      type: object
-      additionalProperties: false
-      properties:
-        id:
-          $ref: '#/components/schemas/FeedId'
-        count:
-          type: integer
-          minimum: 0
-        has_unviewed:
-          type: boolean
-      required:
-      - id
-      - count
-      - has_unviewed
-      examples:
-      - id: example
-        count: 1
-        has_unviewed: true
-    ReadingIndex:
-      type: object
-      additionalProperties: false
-      properties:
-        folders:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReadingFolderEntity'
-        feeds:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReadingFeedReference'
-        count:
-          type: integer
-          minimum: 0
-      required:
-      - folders
-      - feeds
-      - count
-      examples:
-      - folders: []
-        feeds: []
-        count: 0
     ReadingTextContent:
       type: object
       properties:
@@ -22180,89 +22137,6 @@ components:
         source_deleted: false
         changed: false
         description: example
-    ReadingFilterData:
-      type: object
-      additionalProperties: false
-      properties:
-        revision_id:
-          anyOf:
-          - $ref: '#/components/schemas/RevisionId'
-          - type: 'null'
-        filter:
-          $ref: '#/components/schemas/FilterState'
-      required:
-      - revision_id
-      - filter
-      examples:
-      - revision_id: '1'
-        filter:
-          attempt:
-            state: ready
-          result:
-            hidden: false
-            reason: example
-            removed: []
-            provenance:
-              kind: unknown
-              reason: not_recorded
-          diagnostic_message: null
-    ReadingThesesData:
-      type: object
-      additionalProperties: false
-      properties:
-        revision_id:
-          anyOf:
-          - $ref: '#/components/schemas/RevisionId'
-          - type: 'null'
-        theses:
-          $ref: '#/components/schemas/ThesesState'
-      required:
-      - revision_id
-      - theses
-      examples:
-      - revision_id: '1'
-        theses:
-          attempt:
-            state: ready
-          result:
-            points: []
-            provenance:
-              kind: unknown
-              reason: not_recorded
-          diagnostic_message: null
-    ReadingMediaData:
-      type: object
-      additionalProperties: false
-      properties:
-        post_web_unavailable:
-          type: boolean
-          default: false
-          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-        external_attachments:
-          type: array
-          default: []
-          items:
-            $ref: '#/components/schemas/ExternalAttachment'
-        revision_id:
-          anyOf:
-          - $ref: '#/components/schemas/RevisionId'
-          - type: 'null'
-        images:
-          type: array
-          items:
-            $ref: '#/components/schemas/MediaUrl'
-        attachments:
-          type: array
-          items:
-            $ref: '#/components/schemas/Attachment'
-      required:
-      - revision_id
-      - images
-      - attachments
-      examples:
-      - revision_id: '1'
-        images: []
-        attachments: []
     AvailableReadingEntityMaterial:
       type: object
       properties:
@@ -22422,489 +22296,6 @@ components:
           source_deleted: false
           changed: false
           description: example
-    ChangedStatusResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: status
-          examples:
-          - status
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/RuntimeStatus'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: status
-        id: runtime
-        state: changed
-        version: '1'
-        data:
-          api_version: 3.0.0
-          runtime_state: running
-          lifetime:
-            kind: explicit
-          work_allowed: true
-          active_client_sessions: 0
-          work: []
-          sources: []
-          ready_sources: 0
-          total_sources: 0
-          youtube:
-            mode: direct
-            address: example
-            has_password: false
-            has_username: false
-            admission: ready
-            retry_at: null
-            strikes: 0
-            reason: null
-          initial_histories: []
-          telegram_reads: []
-          problems:
-            current: []
-            recent: []
-            count: 0
-            updated_at: '2026-10-15T10:00:00Z'
-          diagnostic_count: 0
-          diagnostic_persistence_error: null
-          viewed_ids: []
-    ChangedNavigationResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: navigation
-          examples:
-          - navigation
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/ReadingIndex'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: navigation
-        id: navigation
-        state: changed
-        version: '1'
-        data:
-          folders: []
-          feeds: []
-          count: 0
-    ChangedFeedResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: feed
-          examples:
-          - feed
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/SubscriptionFeed'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: feed
-        id: example
-        state: changed
-        version: '1'
-        data:
-          id: example
-          title: example
-          folder_id: example
-          identity: example
-          original_urls: []
-          importance: normal
-          initial_days: 1
-          public_ai: null
-          history:
-            state: absent
-          kind: demo
-          connection: ready
-          transport: null
-    ChangedMaterialResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: material
-          examples:
-          - material
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/ReadingEntityMaterial'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: material
-        id: example
-        state: changed
-        version: '1'
-        data:
-          id: example
-          title: example
-          feed_id: example
-          source_url: https://example.test/post/1
-          published_at: null
-          source:
-            kind: demo
-            feed_id: example
-            source_url: https://example.test/post/1
-          source_position: null
-          originals: false
-          availability: available
-          content:
-            availability: available
-            reply_preview: null
-            text: example
-            revision_id: example
-            version: 1
-            completeness:
-              state: complete
-            loading: false
-            source_deleted: false
-            changed: false
-            description: example
-    ChangedFilterResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: filter
-          examples:
-          - filter
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/ReadingFilterData'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: filter
-        id: '["all","","newest",false]'
-        state: changed
-        version: '1'
-        data:
-          revision_id: '1'
-          filter:
-            attempt:
-              state: ready
-            result:
-              hidden: false
-              reason: example
-              removed: []
-              provenance:
-                kind: unknown
-                reason: not_recorded
-            diagnostic_message: null
-    ChangedThesesResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: theses
-          examples:
-          - theses
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/ReadingThesesData'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: theses
-        id: '["all","","newest",false]'
-        state: changed
-        version: '1'
-        data:
-          revision_id: '1'
-          theses:
-            attempt:
-              state: ready
-            result:
-              points: []
-              provenance:
-                kind: unknown
-                reason: not_recorded
-            diagnostic_message: null
-    ChangedMediaResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          const: media
-          examples:
-          - media
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: changed
-          examples:
-          - changed
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-        data:
-          $ref: '#/components/schemas/ReadingMediaData'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - data
-      examples:
-      - kind: media
-        id: '["all","","newest",false]'
-        state: changed
-        version: '1'
-        data:
-          revision_id: '1'
-          images: []
-          attachments: []
-    UnchangedReadingResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          $ref: '#/components/schemas/ReadingResourceKind'
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: unchanged
-          examples:
-          - unchanged
-        version:
-          $ref: '#/components/schemas/ReadingEntityVersion'
-      required:
-      - kind
-      - id
-      - state
-      - version
-      examples:
-      - kind: status
-        id: runtime
-        state: unchanged
-        version: '1'
-    UnavailableReadingResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          $ref: '#/components/schemas/ReadingResourceKind'
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: unavailable
-          examples:
-          - unavailable
-        version:
-          $ref: '#/components/schemas/ReadingKnownVersion'
-        reason:
-          type: string
-          enum:
-          - viewed
-          - not_found
-          - scope_removed
-          - runtime_stopped
-      required:
-      - kind
-      - id
-      - state
-      - version
-      - reason
-      examples:
-      - kind: material
-        id: fixture
-        state: unavailable
-        version: null
-        reason: viewed
-    FailedReadingResource:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          $ref: '#/components/schemas/ReadingResourceKind'
-        id:
-          type: string
-          minLength: 1
-        state:
-          type: string
-          const: failed
-          examples:
-          - failed
-        message:
-          type: string
-          minLength: 1
-      required:
-      - kind
-      - id
-      - state
-      - message
-      examples:
-      - kind: material
-        id: fixture
-        state: failed
-        message: Material unavailable
-    ReadingResource:
-      oneOf:
-      - $ref: '#/components/schemas/ChangedStatusResource'
-      - $ref: '#/components/schemas/ChangedNavigationResource'
-      - $ref: '#/components/schemas/ChangedFeedResource'
-      - $ref: '#/components/schemas/ChangedMaterialResource'
-      - $ref: '#/components/schemas/ChangedFilterResource'
-      - $ref: '#/components/schemas/ChangedThesesResource'
-      - $ref: '#/components/schemas/ChangedMediaResource'
-      - $ref: '#/components/schemas/UnchangedReadingResource'
-      - $ref: '#/components/schemas/UnavailableReadingResource'
-      - $ref: '#/components/schemas/FailedReadingResource'
-      examples:
-      - kind: status
-        id: runtime
-        state: unchanged
-        version: '1'
-    ReadingFrame:
-      type: object
-      additionalProperties: false
-      properties:
-        state:
-          type: string
-          const: current
-          examples:
-          - current
-        storage_id:
-          $ref: '#/components/schemas/ReadingStorageId'
-        resources:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReadingResource'
-      required:
-      - state
-      - storage_id
-      - resources
-      examples:
-      - state: current
-        storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
-        resources: []
-    ReadingReset:
-      type: object
-      additionalProperties: false
-      properties:
-        state:
-          type: string
-          const: reset
-          examples:
-          - reset
-        storage_id:
-          $ref: '#/components/schemas/ReadingStorageId'
-      required:
-      - state
-      - storage_id
-      examples:
-      - state: reset
-        storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
-    ReadingCheckResponse:
-      oneOf:
-      - $ref: '#/components/schemas/ReadingFrame'
-      - $ref: '#/components/schemas/ReadingReset'
-      discriminator:
-        propertyName: state
-        mapping:
-          current: '#/components/schemas/ReadingFrame'
-          reset: '#/components/schemas/ReadingReset'
-      examples:
-      - state: current
-        storage_id: 3f003741-d0c7-4e62-8d12-55fb652f404a
-        resources: []
     CollectionRequestFailure:
       type: object
       additionalProperties: false

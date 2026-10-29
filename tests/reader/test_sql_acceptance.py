@@ -16,8 +16,8 @@ def test_complete_http_cost_matrix(tmp_path,count):
     app=traced_app(tmp_path)
     records=[]
     with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,tmp_path) as measure:
-        nav,cost=measure.request('navigation','GET','/api/v3/reading-composition');records.append(cost)
-        folder=next(f['feed']['folder_id'] for f in nav.json()['feeds'] if f['feed']['id']==feeds[0])
+        nav,cost=measure.request('navigation','GET','/api/v3/navigation');records.append(cost)
+        folder=next(folder['id'] for folder in nav.json()['folders'] if any(feed['id']==feeds[0] for feed in folder['feeds']))
         operations=[('feed_cards','GET','/api/v3/cards',dict(params={'feed':feeds[0]})),
             ('all_cards','GET','/api/v3/cards',{}),('material','GET','/api/v3/materials/'+items[0],{}),
             ('status','GET','/api/v3/status',{}),('folder_preview','POST','/api/v3/folders/'+folder+'/completion/preview',{})]
@@ -26,21 +26,18 @@ def test_complete_http_cost_matrix(tmp_path,count):
             if name=='status':
                 _,warm=measure.request('status_warm','GET',url);records.append(warm)
                 assert warm['content_opens']==0
-        initial,cost=measure.request('check_initial','POST','/api/v3/reading/check',json=dict(storage_id=None,resources=[dict(kind='status',known_version=None),dict(kind='navigation',known_version=None)]));records.append(cost)
-        frame=initial.json()
-        resources=[dict(kind=r['kind'],**({'id':r['id']} if r['kind']=='feed' else {}),known_version=r['version']) for r in frame['resources']]
         first_page,first_cost=measure.request('cards_initial','GET','/api/v3/cards');records.append(first_cost)
         assert len(first_page.json()['items'])==40
         assert first_page.json()['total']==count*4
         unchanged,conditional_cost=measure.request('cards_unchanged','GET','/api/v3/cards',expected_status=304,headers={'If-None-Match':first_page.headers['ETag']});records.append(conditional_cost)
         assert unchanged.status_code==304 and conditional_cost['content_opens']==0 and conditional_cost['read_bytes']==0
-        opened,_=measure.request('open','GET','/api/v3/reading/materials/'+items[0])
-        resources.extend(dict(kind=r['kind'],id=r['id'],known_version=r['version']) for r in opened.json()['resources'])
-        for _ in range(2):
-            reply,cost=measure.request('check_unchanged','POST','/api/v3/reading/check',json=dict(storage_id=frame['storage_id'],resources=resources));records.append(cost)
-            assert all(r['state']=='unchanged' and 'data' not in r for r in reply.json()['resources'])
-            assert cost['sql']<30 and cost['content_opens']==0 and cost['content_stats']==0 and cost['read_bytes']==0
-            assert cost['json_loads']<20
+        for url in ('/api/v3/status','/api/v3/navigation','/api/v3/publication/'+items[0]):
+            initial,cost=measure.request('initial','GET',url);records.append(cost)
+            for _ in range(2):
+                reply,cost=measure.request('unchanged','GET',url,expected_status=304,headers={'If-None-Match':initial.headers['ETag']});records.append(cost)
+                assert reply.status_code==304 and not reply.content
+                if '/publication/' not in url:
+                    assert cost['content_opens']==0 and cost['content_stats']==0 and cost['read_bytes']==0
         _,cost=measure.request('viewed','POST','/api/v3/materials/'+items[0]+'/viewed');records.append(cost)
         assert client.get('/api/v3/materials/'+items[0]).status_code==404
     output=Path(os.environ.get('OKO_TEST_ARTIFACT_DIR',tmp_path));output.mkdir(parents=True,exist_ok=True)

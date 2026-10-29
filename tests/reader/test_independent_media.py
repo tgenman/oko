@@ -76,10 +76,10 @@ def test_viewed_cancels_a_media_job_and_rejects_its_late_file(tmp_path):
             cards = read_all_cards(client, '/api/v3/cards')
             assert len(cards)==1
             item = cards[0]['id']
-            assert client.get('/api/v3/status').status_code == 200
+            assert client.get('/api/v3/status/details').status_code == 200
             assert client.post('/api/v3/materials/'+item+'/viewed').status_code == 200
             release.set()
-            wait_for(client, lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+            wait_for(client, lambda: client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
             assert client.get('/api/v3/materials/'+item).status_code == 404
             assert not any(b'late-private-photo' in path.read_bytes() for path in root.rglob('*') if path.is_file())
         finally:
@@ -127,7 +127,7 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         failed = wait_for(client, lambda: (m if len((m := client.get('/api/v3/materials/'+item).json())['content']['attachments'])==1 and 'Не удалось загрузить вложение' in m['content']['completeness'].get('message','') else None))
         assert failed['content']['text']=='Readable text'
         assert calls == {'bad':1, 'good':1}
-        problems = client.get('/api/v3/status').json()['problems']['current']
+        problems = client.get('/api/v3/status/details').json()['problems']['current']
         assert all(affected['material_id']==item for problem in problems for affected in problem['affected'] if affected['kind']=='material')
     with TestClient(create_app(root, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Readable text'
@@ -139,7 +139,7 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         from datetime import datetime
         def doubled_delay():
             return any(datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp()>time.time()+offset[0]+119
-                for w in client.get('/api/v3/status').json()['work'] if w['phase']=='waiting' and w.get('retry_at'))
+                for w in client.get('/api/v3/status/details').json()['work'] if w['phase']=='waiting' and w.get('retry_at'))
         wait_for(client,doubled_delay)
         assert calls['good']==1
         offset[0] += 61
@@ -170,7 +170,7 @@ def test_permanent_file_failure_waits_for_manual_retry(tmp_path):
         item = wait_for(client,lambda:(cards[0]['id'] if (cards:=read_all_cards(client, '/api/v3/cards')) else None))
         wait_for(client,lambda:'Не удалось загрузить вложение' in client.get('/api/v3/materials/'+item).json()['content']['completeness'].get('message',''))
         assert len(calls)==1
-        problems = client.get('/api/v3/status').json()['problems']['current']
+        problems = client.get('/api/v3/status/details').json()['problems']['current']
         assert any({'kind':'material','material_id':item} in problem['affected'] for problem in problems)
         available[0]=True
         offset[0]+=600
@@ -197,7 +197,7 @@ def test_publication_fetch_uses_configured_retry_delay_and_keeps_saved_text(tmp_
         fail[0]=True
         client.post('/api/v3/materials/'+item+'/retry')
         def waiting():
-            state = client.get('/api/v3/status').json()
+            state = client.get('/api/v3/status/details').json()
             return state if any(w['phase']=='waiting' and w.get('retry_at') for w in state['work']) else None
         state=wait_for(client,waiting)
         deadline=next(datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp() for w in state['work'] if w['phase']=='waiting' and w.get('retry_at'))
@@ -224,7 +224,7 @@ def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
         limited[0]=True
         client.post('/api/v3/materials/'+item+'/retry')
         def deadline():
-            state=client.get('/api/v3/status').json()
+            state=client.get('/api/v3/status/details').json()
             dates=[datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp() for w in state['work'] if w['phase']=='waiting' and w.get('retry_at')]
             return max(dates) if dates else None
         before=wait_for(client,deadline)
@@ -503,7 +503,7 @@ def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
             item=read_all_cards(client, '/api/v3/cards')[0]['id']
             content=client.get('/api/v3/materials/'+item).json()['content']
             assert 'Article text' in content['text']
-            selective=client.get('/api/v3/reading/materials/'+item)
+            selective=client.get('/api/v3/publication/'+item)
             assert selective.status_code==200,selective.text
             assert 'Article text' in content['linked_content']['articles'][0]['text']
             assert 'Не удалось' not in content['linked_content']['articles'][0]['text']
@@ -602,7 +602,7 @@ def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
             broken[0]=False
             release.set()
             client.post('/api/v3/materials/'+item+'/retry')
-            wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+            wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
             ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
             assert client.get(ready['content']['attachments'][0]['url']).content==b'article-image'
         finally:
@@ -634,7 +634,7 @@ def test_media_source_wait_survives_restart_and_does_not_pause_another_host(tmp_
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
         client.post('/api/v3/collect',json={'scope':'feed','feed_id':connected['feed_id']})
-        status=client.get('/api/v3/status').json()
+        status=client.get('/api/v3/status/details').json()
         from datetime import datetime
         waits=[datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp() for w in status['work'] if w['phase']=='waiting' and w.get('retry_at')]
         assert waits and max(waits)>time.time()+100

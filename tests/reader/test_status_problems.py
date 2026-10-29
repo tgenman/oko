@@ -31,7 +31,7 @@ def test_source_failures_group_objects_and_retry_is_not_completion(tmp_path):
     with TestClient(create_app(tmp_path, token='test', source=source), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''})
         presence(client, 'reader')
-        state = wait_for(client, lambda: (state if len((state := client.get('/api/v3/status').json())['problems']['current']) and
+        state = wait_for(client, lambda: (state if len((state := client.get('/api/v3/status/details').json())['problems']['current']) and
                                          len(state['problems']['current']) == 1 and len(state['problems']['current'][0]['affected']) == 2 else None))
         problem = state['problems']['current'][0]
         assert problem['code'] == 'source_unavailable'
@@ -40,13 +40,13 @@ def test_source_failures_group_objects_and_retry_is_not_completion(tmp_path):
         assert {o['kind'] for o in problem['affected']} == {'material'}
         item = problem['affected'][0]['material_id']
         assert client.post('/api/v3/materials/' + item + '/retry').status_code == 200
-        retrying = client.get('/api/v3/status').json()['problems']
+        retrying = client.get('/api/v3/status/details').json()['problems']
         assert retrying['count'] == 1
         assert retrying['current'][0]['id'] == problem['id']
         source.fixed = True
         for obj in problem['affected']:
             client.post('/api/v3/materials/' + obj.get('material_id') + '/retry')
-        wait_for(client, lambda: client.get('/api/v3/status').json()['problems']['count'] == 0)
+        wait_for(client, lambda: client.get('/api/v3/status/details').json()['problems']['count'] == 0)
 
 
 def test_model_problem_history_survives_restart_and_expires_from_completion(tmp_path):
@@ -54,26 +54,26 @@ def test_model_problem_history_survives_restart_and_expires_from_completion(tmp_
     options = dict(token='test', codex_client=CodexService(), wall_clock=lambda: wall[0])
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
-        first = client.get('/api/v3/status').json()['problems']['current'][0]
+        first = client.get('/api/v3/status/details').json()['problems']['current'][0]
         wall[0] += 60
-        assert client.get('/api/v3/status').json()['problems']['current'][0]['created_at'] == first['created_at']
+        assert client.get('/api/v3/status/details').json()['problems']['current'][0]['created_at'] == first['created_at']
         configure_codex(client)
-        finished = client.get('/api/v3/status').json()['problems']['recent'][0]
+        finished = client.get('/api/v3/status/details').json()['problems']['recent'][0]
         assert finished['outcome'] == 'resolved'
         assert finished['finished_at'] == datetime.fromtimestamp(wall[0],timezone.utc).isoformat().replace('+00:00','Z')
         assert client.delete('/api/v3/diagnostics').status_code == 200
-        assert client.get('/api/v3/status').json()['problems']['recent'][0]['id'] == finished['id']
+        assert client.get('/api/v3/status/details').json()['problems']['recent'][0]['id'] == finished['id']
     wall[0] += 86399
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/v3/status').json()['problems']['recent'][0]['finished_at'] == finished['finished_at']
+        assert client.get('/api/v3/status/details').json()['problems']['recent'][0]['finished_at'] == finished['finished_at']
         wall[0] += 1
-        assert client.get('/api/v3/status').json()['problems']['recent'] == []
+        assert client.get('/api/v3/status/details').json()['problems']['recent'] == []
 
 
 def test_missing_model_is_one_current_problem_and_settings_fix_it(tmp_path):
     with TestClient(create_app(tmp_path, token='test', codex_client=CodexService()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
-        response = client.get('/api/v3/status')
+        response = client.get('/api/v3/status/details')
         assert response.status_code == 200
         problems = response.json()['problems']
         assert len(problems['current']) == 1
@@ -82,7 +82,7 @@ def test_missing_model_is_one_current_problem_and_settings_fix_it(tmp_path):
         assert problem['recovery'] == [{'kind':'configure_processor','processor_id':'codex'}]
         assert problems['count'] == 1
         configure_codex(client)
-        fixed = client.get('/api/v3/status').json()['problems']
+        fixed = client.get('/api/v3/status/details').json()['problems']
         assert fixed['current'] == []
         assert fixed['count'] == 0
 
@@ -94,17 +94,17 @@ def test_settings_error_is_durable_and_successful_retry_completes_it(tmp_path):
         response = client.patch('/api/v3/settings/oko/global', json={'theses':'invalid'})
         assert response.status_code == 422
         client.post('/api/v3/command-observations',json={'id':'invalid-setting','context':{'operation':'settings_patch','target':{'scope':'oko','owner':'global'},'keys':['theses']},'result':'failed'})
-        problems = client.get('/api/v3/status').json()['problems']
+        problems = client.get('/api/v3/status/details').json()['problems']
         assert problems['count'] == 1
         problem = problems['current'][0]
         assert problem['code'] == 'command_failed'
         assert problem['recovery'] == [{'kind':'change_setting','target':{'scope':'oko','owner':'global'},'keys':['theses']}]
         assert client.delete('/api/v3/diagnostics').status_code == 200
-        assert client.get('/api/v3/status').json()['problems']['count'] == 1
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 1
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/v3/status').json()['problems']['current'][0]['id'] == problem['id']
+        assert client.get('/api/v3/status/details').json()['problems']['current'][0]['id'] == problem['id']
         assert client.patch('/api/v3/settings/oko/global', json={'theses':False}).status_code == 200
-        result = client.get('/api/v3/status').json()['problems']
+        result = client.get('/api/v3/status/details').json()['problems']
         assert result['count'] == 0
         assert result['recent'][0]['outcome'] == 'resolved'
 
@@ -116,12 +116,12 @@ def test_lost_successful_reply_is_reconciled_and_only_failed_draft_can_be_abando
         response = client.post('/api/v3/command-observations', json={'id':'lost-reply','context':{'operation':'settings_patch','target':{'scope':'oko','owner':'global'},'keys':['theses']},'result':'unknown'})
         assert response.status_code == 200
         assert response.json()['outcome'] == 'succeeded'
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
         client.patch('/api/v3/settings/oko/global', json={'theses':'invalid'})
         client.post('/api/v3/command-observations',json={'id':'bad-setting','context':{'operation':'settings_patch','target':{'scope':'oko','owner':'global'},'keys':['theses']},'result':'failed'})
-        failed = client.get('/api/v3/status').json()['problems']['current'][0]
+        failed = client.get('/api/v3/status/details').json()['problems']['current'][0]
         assert client.post('/api/v3/problems/' + failed['id'] + '/abandon').status_code == 200
-        result = client.get('/api/v3/status').json()['problems']
+        result = client.get('/api/v3/status/details').json()['problems']
         assert result['count'] == 0
         assert result['recent'][0]['outcome'] == 'irrelevant'
 
@@ -148,7 +148,7 @@ def test_shared_youtube_pause_across_feeds_is_one_problem(tmp_path):
             client.patch('/api/v3/feeds/'+result.json()['feeds'][-1]['id'],json={'importance':'high'})
         presence(client, 'reader')
         wait_for(client,lambda:client.get('/api/v3/youtube').json()['admission']=='paused')
-        problems=wait_for(client,lambda:(p if len((p:=client.get('/api/v3/status').json()['problems'])['current'])>=1 and
+        problems=wait_for(client,lambda:(p if len((p:=client.get('/api/v3/status/details').json()['problems'])['current'])>=1 and
             len(next(x for x in p['current'] if x['code']=='youtube_rate_limited')['affected'])==2 else None))
         pause=next(p for p in problems['current'] if p['code']=='youtube_rate_limited')
         assert pause['state']=='retrying' and datetime.fromisoformat(pause['retry_at'].replace('Z','+00:00')).timestamp()==wall[0]+900
@@ -166,19 +166,19 @@ def test_viewed_material_scrubs_problem_objects_but_failed_delete_remains_curren
     with TestClient(create_app(tmp_path, token='test', source=DemoSource(), fault=fault, clock=clock), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         client.post('/api/v3/command-observations',json={'id':'unsupported-material-action','context':{'operation':'retry_material','material_id':item},'result':'failed'})
-        before = client.get('/api/v3/status').json()['problems']
+        before = client.get('/api/v3/status/details').json()['problems']
         assert any(p['affected'][0]['material_id'] == item for p in before['current'])
         assert client.post('/api/v3/problems/'+before['current'][0]['id']+'/abandon').status_code == 400
         failing[0] = True
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        result = client.get('/api/v3/status').json()['problems']
+        result = client.get('/api/v3/status/details').json()['problems']
         assert any(p['code'] == 'feed_delete_failed' for p in result['current'])
         assert all(obj.get('material_id') != item for p in result['current'] + result['recent'] for obj in p['affected'])
         old = next(p for p in result['recent'] if p['code'] == 'command_failed')
         assert old['outcome'] == 'irrelevant' and old['recovery'] == []
         failing[0] = False
         clock.now += 1.1
-        wait_for(client,lambda:not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status').json()['problems']['current']))
+        wait_for(client,lambda:not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
 
 
 def test_partial_material_is_visible_with_available_text(tmp_path):
@@ -189,7 +189,7 @@ def test_partial_material_is_visible_with_available_text(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         presence(client, 'reader')
         wait_for(client,lambda:len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all((client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards))
-        problems=client.get('/api/v3/status').json()['problems']
+        problems=client.get('/api/v3/status/details').json()['problems']
         assert problems['count']==2
         assert problems['current'][0]['code']=='material_incomplete'
         assert len(problems['current'][0]['affected'])==1
@@ -219,7 +219,7 @@ def test_late_unknown_action_cannot_restore_viewed_material_reference(tmp_path):
         assert result.status_code==200
         assert result.json()['outcome']=='abandoned'
         assert client.get('/api/v3/commands/late-unknown').json()['outcome']=='abandoned'
-        state=client.get('/api/v3/status').json()['problems']
+        state=client.get('/api/v3/status/details').json()['problems']
         assert all(obj.get('material_id')!=item for p in state['current']+state['recent'] for obj in p['affected'])
 
 
@@ -246,7 +246,7 @@ def test_late_server_failure_keeps_viewed_action_irrelevant_and_forgets_diagnost
         finally:
             released.set()
         assert request.result().status_code==500
-        state=client.get('/api/v3/status').json()['problems']
+        state=client.get('/api/v3/status/details').json()['problems']
         assert not any(p['code']=='command_failed' for p in state['current'])
         assert private not in client.get('/api/v3/diagnostics').text
         assert private not in (tmp_path/'debug.json').read_text()
@@ -280,6 +280,6 @@ def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
         presence(client, 'reader')
         wait_for(client,lambda:captions.calls==1 and len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and sum(client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')=='available' for card in cards)==1)
         waiting=next(card['id'] for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')!='available')
-        problems=client.get('/api/v3/status').json()['problems']
+        problems=client.get('/api/v3/status/details').json()['problems']
         assert not any(obj.get('material_id')==waiting for p in problems['current'] for obj in p['affected']),problems
         assert not any(p['code']=='youtube_rate_limited' for p in problems['current'])

@@ -3,39 +3,37 @@ import assert from 'node:assert/strict';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {addSources} from './connections';
-import type {ReadingCheckResponse} from '../../frontend/src/api/generated/types.gen';
 
-test('unchanged reading checks transmit versions and opening bypasses the poll', {timeout:30000}, async t=>{
+test('unchanged navigation and status return conditional 304s and opening bypasses the poll', {timeout:30000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   await api('settings/oko/global','PATCH',{theses:false});
   await addSources(api,[['https://a.test/feed','Synthetic','Folder']]);
-  const paths:string[]=[],frames:ReadingCheckResponse[]=[];
+  const paths:string[]=[],frames:{path:string;status:number;validator:string|undefined}[]=[];
   page.on('request',request=>{paths.push(new URL(request.url()).pathname);});
-  page.on('response',async response=>{if(new URL(response.url()).pathname==='/api/v3/reading/check'&&response.ok())try{frames.push(await response.json());}catch{/* A response cancelled by fixture teardown is not an application failure. */}});
+  page.on('response',response=>{
+    const path=new URL(response.url()).pathname;
+    if(['/api/v3/status','/api/v3/navigation'].includes(path))frames.push({path,status:response.status(),validator:response.request().headers()['if-none-match']});
+  });
   await page.goto(origin+'/#token='+token);
   await expect(page.locator('#cards button')).toHaveCount(1);
   await expect.poll(async()=>{const cards=(await api('cards')).items;return cards.length===1&&!cards[0].loading;}).toBe(true);
   await expect(page.locator('#cards .card-kind')).toHaveCount(0);
   const before=frames.length;
-  // A complete card can precede the final Runtime startup/status transition.
-  // Require two actually unchanged polls within the existing wait budget.
-  await expect.poll(()=>{
-    if(frames.length<before+2)return false;
-    return frames.slice(-2).every(frame=>frame.state==='current'&&frame.resources.every(resource=>resource.state==='unchanged'));
-  }).toBe(true);
-  const quiet=frames.slice(-2);
-  for(const frame of quiet){assert.equal(frame.state,'current');if(frame.state==='current')assert.ok(frame.resources.every(resource=>resource.state==='unchanged'));}
+  // Each subject independently confirms two unchanged conditional polls.
+  await expect.poll(()=>['/api/v3/status','/api/v3/navigation'].every(path=>
+    frames.slice(before).filter(frame=>frame.path===path&&frame.status===304&&!!frame.validator).length>=2
+  )).toBe(true);
   assert.ok(paths.includes('/api/v3/cards'));
   assert.ok(!paths.includes('/api/v3/reading-composition'));
   // A hung periodic request must not delay a direct open or its first paint.
   let release:(()=>void)|undefined;
-  await page.route('**/api/v3/reading/check',async route=>{await new Promise<void>(resolve=>{release=resolve;});await route.continue().catch(()=>{});});
+  await page.route('**/api/v3/status',async route=>{await new Promise<void>(resolve=>{release=resolve;});await route.continue().catch(()=>{});});
   await expect.poll(()=>!!release).toBe(true);
   await page.locator('#cards button').click();
   await expect(page.locator('#text')).toContainText('Открылась библиотека');
   assert.equal(paths.filter(path=>/^\/api\/v3\/publication\/[^/]+$/.test(path)).length,1);
   release?.();
-  await page.unroute('**/api/v3/reading/check');
+  await page.unroute('**/api/v3/status');
 });
 
 test('tabs recover missed reading changes and reconcile a local viewed action', {timeout:30000}, async t=>{
@@ -48,7 +46,7 @@ test('tabs recover missed reading changes and reconcile a local viewed action', 
   await expect(other.locator('#cards button')).toHaveCount(2);
   await page.locator('#cards button').first().click();
   await expect(page.locator('#text')).toContainText('Открылась библиотека');
-  await page.route('**/api/v3/reading/check',route=>route.abort('failed'));
+  await page.route('**/api/v3/status',route=>route.abort('failed'));
   await expect(page.locator('#collection-progress')).toContainText('Нет связи');
   const cards=(await api('cards')).items;
   await api('materials/'+cards[0].id+'/viewed','POST');
@@ -57,7 +55,7 @@ test('tabs recover missed reading changes and reconcile a local viewed action', 
   await expect(other.locator('#cards button')).toHaveCount(1);
   await expect(other.locator('#cards button')).toContainText('Renamed during disconnect');
   await expect(page.locator('#cards button')).toHaveCount(2);
-  await page.unroute('**/api/v3/reading/check');
+  await page.unroute('**/api/v3/status');
   await expect(page.locator('#cards button')).toHaveCount(1);
   await expect(page.locator('#cards button')).toContainText('Renamed during disconnect');
   await other.locator('#cards button').click();

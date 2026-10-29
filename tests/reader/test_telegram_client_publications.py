@@ -223,7 +223,7 @@ def test_native_auto_read_waits_for_saved_file_and_manual_mode_waits_for_view(tm
                     assert acknowledgements==[]
                     assert client.post('/api/v3/materials/'+card['id']+'/viewed').status_code==200
                 wait_for(client,lambda:acknowledgements==[11])
-                read=next(row for row in client.get('/api/v3/status').json()['telegram_reads'] if row['feed_id']==connected.json()['feed_id'])
+                read=next(row for row in client.get('/api/v3/status/details').json()['telegram_reads'] if row['feed_id']==connected.json()['feed_id'])
                 assert read['initial']=='10'
             finally:
                 release.set()
@@ -490,7 +490,7 @@ def test_partial_native_album_reload_keeps_saved_content_until_members_return(tm
         item=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))['id']
         partial[0]=True
         client.post('/api/v3/materials/'+item+'/retry')
-        wait_for(client,lambda:any('Часть альбома недоступна' in problem['message'] for problem in client.get('/api/v3/status').json()['problems']['current']))
+        wait_for(client,lambda:any('Часть альбома недоступна' in problem['message'] for problem in client.get('/api/v3/status/details').json()['problems']['current']))
         value=client.get('/api/v3/materials/'+item).json()
         assert value['content']['text']=='First saved part\n\nSecond saved part'
         assert value['source']['message_ids']==['11','12']

@@ -20,14 +20,14 @@ def test_postgres_restart_preserves_latest_receipts(tmp_path):
     store.db.close()
     for _ in range(2):
         with TestClient(traced_app(tmp_path), headers=HEADERS) as client:
-            assert client.get('/api/v3/status').status_code == 200
+            assert client.get('/api/v3/status/details').status_code == 200
             assert client.get('/api/v3/commands/old').json()['outcome'] == 'unknown'
             assert client.get('/api/v3/commands/latest').json()['outcome'] == 'succeeded'
             assert client.get('/api/v3/commands/other').json()['outcome'] == 'succeeded'
     with TestClient(traced_app(tmp_path), headers=HEADERS) as client:
         assert client.post(f'/api/v3/materials/{items[0]}/viewed').status_code == 200
         assert client.get('/api/v3/commands/latest').json()['outcome'] == 'succeeded'
-        problems = client.get('/api/v3/status').json()['problems']
+        problems = client.get('/api/v3/status/details').json()['problems']
         assert all(o.get('material_id') != items[0] for p in problems['current'] + problems['recent'] for o in p['affected'])
 
 

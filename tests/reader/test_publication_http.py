@@ -99,8 +99,8 @@ def test_storage_precondition_rejects_other_library_and_etag_tracks_identity(tmp
     _,items=library(tmp_path,[1])
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client:
-        check=client.post('/api/v3/reading/check',json={'storage_id':None,'resources':[{'kind':'status','known_version':None}]}).json()
-        storage=check['storage_id']
+        details=client.get('/api/v3/status/details')
+        storage=details.headers['X-Oko-Storage-Id']
         old=client.get('/api/v3/publication/'+items[0],headers={'X-Oko-Storage-Id':storage})
         assert old.status_code==200
         assert client.get('/api/v3/publication/'+items[0],headers={'X-Oko-Storage-Id':storage,'If-None-Match':old.headers['ETag']}).status_code==304

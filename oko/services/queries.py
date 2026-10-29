@@ -75,10 +75,6 @@ class ReadingQueries:
         return self._facts.material_feeds(identities)
 
     @repository_access
-    def navigation_versions(self) -> dict[str, Any]:
-        return self._facts.navigation_versions()
-
-    @repository_access
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
         return self._facts.linked_preview(identity)
 

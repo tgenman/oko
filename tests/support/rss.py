@@ -18,7 +18,7 @@ def import_feed(client, url='https://source.test/feed'):
 def wait_cards(client, count=1, *, idle=True):
     for _ in range(200):
         cards = read_all_cards(client, '/api/v3/cards')
-        if len(cards) == count and all(not c['loading'] for c in cards) and (not idle or not any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work'])):
+        if len(cards) == count and all(not c['loading'] for c in cards) and (not idle or not any(work['phase']=='collecting' for work in client.get('/api/v3/status/details').json()['work'])):
             return cards
         time.sleep(.02)
-    raise AssertionError(client.get('/api/v3/status').json())
+    raise AssertionError(client.get('/api/v3/status/details').json())

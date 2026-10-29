@@ -149,14 +149,15 @@ test('additional links copy exact bytes; missing and failed activity never becom
 
 test('initial settings failure keeps catalogue fields available and can be retried', {timeout:30000},async t=>{
  const {page,one}=await scenario(t);
- let fail=true;
- await page.route('**/api/v3/settings/feed/'+one.id,route=>fail?route.abort():route.continue());
+ let fail=true,reads=0;
+ await page.route('**/api/v3/settings/feed/'+one.id,route=>{reads++;return fail?route.abort():route.continue();});
  await page.reload();
  await page.locator('#feeds-open').click();await page.locator('#feed-tree').getByRole('button',{name:one.title,exact:true}).click();
  await expect(page.locator('#feed-title')).toHaveValue(one.title);
  await expect(page.locator('.feed-unread strong')).toHaveText('Unavailable');
  await page.locator('#feed-title').fill('Survives initial failure');
  await expect(page.locator('.feed-activity').getByRole('button',{name:'Retry',exact:true})).toBeVisible();
+ const initialReads=reads;await page.waitForTimeout(1500);expect(reads).toBe(initialReads);
  fail=false;await page.locator('.feed-activity').getByRole('button',{name:'Retry',exact:true}).click();
  await expect(page.getByRole('button',{name:'Connection and Options',exact:true})).toBeVisible();
  await expect(page.locator('#feed-title')).toHaveValue('Survives initial failure');

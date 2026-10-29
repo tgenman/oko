@@ -141,7 +141,7 @@ def test_failed_edit_can_be_discarded_without_undoing_saved_configuration(tmp_pa
         receipt = client.get('/api/v3/commands/bad-choice').json()
         assert receipt['outcome'] == 'failed'
         assert receipt['error']['code'] == 'processor_choice_invalid'
-        problem = next(p for p in client.get('/api/v3/status').json()['problems']['current'] if p['command_id'] == 'bad-choice')
+        problem = next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id'] == 'bad-choice')
         assert problem['code'] == 'command_failed'
         assert problem['recovery'] == [{'kind': 'configure_processor', 'processor_id': 'codex'}]
         reply = client.post('/api/v3/problems/' + problem['id'] + '/abandon')
@@ -309,7 +309,7 @@ def test_interval_command_outcomes_preserve_old_setting_keys(tmp_path):
         for outcome in ('failed', 'unknown'):
             response = client.post('/api/v3/command-observations', json={'id': 'interval-' + outcome, 'context': context, 'result': outcome})
             assert response.status_code == 200, response.text
-            problems = client.get('/api/v3/status').json()['problems']['current']
+            problems = client.get('/api/v3/status/details').json()['problems']['current']
             problem = next(problem for problem in problems if problem['command_id'] == 'interval-' + outcome)
             assert problem['affected'] == [{'kind': 'settings', 'target': {'scope': 'oko', 'owner': 'global'}}]
             assert problem['recovery'] == []  # A compatible general settings problem, without a new output enum.

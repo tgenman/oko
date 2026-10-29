@@ -67,7 +67,7 @@ def test_pending_deletion_survives_process_death(tmp_path: Path):
             presence(client, 'a')
             assert len(wait_cards(client, 2)) == 2
             for _ in range(100):
-                if not any(w['phase']=='deleting' for w in client.get('/api/v3/status').json()['work']):
+                if not any(w['phase']=='deleting' for w in client.get('/api/v3/status/details').json()['work']):
                     break
                 time.sleep(.02)
             assert not (tmp_path / 'content' / item).exists()
@@ -154,10 +154,10 @@ def test_folder_completion_survives_death_during_atomic_set_or_physical_delete(t
             assert read_all_cards(client, '/api/v3/cards') == []
             presence(client, 'b')
             for _ in range(150):
-                if not any(w['phase']=='deleting' for w in client.get('/api/v3/status').json()['work']):
+                if not any(w['phase']=='deleting' for w in client.get('/api/v3/status/details').json()['work']):
                     break
                 time.sleep(.02)
-            assert not any(w['phase']=='deleting' for w in client.get('/api/v3/status').json()['work'])
+            assert not any(w['phase']=='deleting' for w in client.get('/api/v3/status/details').json()['work'])
             for card in originals:
                 assert client.get('/api/v3/materials/' + card['id']).status_code == 404
                 assert not (tmp_path / 'content' / card['id']).exists()

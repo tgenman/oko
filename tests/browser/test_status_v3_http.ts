@@ -39,7 +39,7 @@ test('confirmed command failure is retained until its actual draft is discarded'
  const {page,api,origin,token}=await productionReader(t);
  const config={filter:{model:'synthetic',reasoning_effort:'low',fast:false},theses:{model:'synthetic',reasoning_effort:'low',fast:false}};
  await page.goto(origin+'/#token='+token);
- await expect.poll(async()=>{const state=await api('v3/status');return !!state&&typeof state==='object'&&'work_allowed'in state&&state.work_allowed===true;}).toBe(true);
+ await expect.poll(async()=>{const state=await api('v3/status/details');return !!state&&typeof state==='object'&&'work_allowed'in state&&state.work_allowed===true;}).toBe(true);
  await api('v3/processors/codex','PUT',config);
  await page.locator('#settings-open').click();
  await page.locator('#settings-dialog [data-settings-target="models"]').click();
@@ -49,8 +49,8 @@ test('confirmed command failure is retained until its actual draft is discarded'
  await expect(page.locator('#status-toggle')).toHaveText('Problems · 1');
  await page.locator('#codex-discard').click();
  await expect(page.locator('#status-toggle')).toHaveText('Status');
- await expect.poll(async()=>(await api('v3/status')).problems.count).toBe(0);
- const snapshot=await api('v3/status');
+ await expect.poll(async()=>(await api('v3/status/details')).problems.count).toBe(0);
+ const snapshot=await api('v3/status/details');
  expect(snapshot).toHaveProperty('problems.count',0);
  expect(snapshot).toHaveProperty('problems.recent.0.outcome','irrelevant');
 });
@@ -59,7 +59,7 @@ test('lost command response stays unknown until receipt reconciliation and is ne
  const {page,api,origin,token}=await productionReader(t);
  const config={filter:{model:'synthetic',reasoning_effort:'low',fast:false},theses:{model:'synthetic',reasoning_effort:'low',fast:false}};
  await page.goto(origin+'/#token='+token);
- await expect.poll(async()=>{const state=await api('v3/status');return !!state&&typeof state==='object'&&'work_allowed'in state&&state.work_allowed===true;}).toBe(true);
+ await expect.poll(async()=>{const state=await api('v3/status/details');return !!state&&typeof state==='object'&&'work_allowed'in state&&state.work_allowed===true;}).toBe(true);
  await api('v3/processors/codex','PUT',config);
  await page.locator('#settings-open').click();
  await page.locator('#settings-dialog [data-settings-target="models"]').click();
@@ -79,7 +79,7 @@ test('lost command response stays unknown until receipt reconciliation and is ne
 
 test('typed profile recovery selects the exact role',async()=>{
  const r=await fixtureReader();try{
-  const baseline=await r.api('v3/status');
+  const baseline=await r.api('v3/status/details');
   if(!baseline||typeof baseline!=='object')throw new Error('Missing RuntimeStatus');
   await r.start([]);
   await r.page.evaluate(base=>readerTransport.replies.set('/api/v3/status',{body:{...base,work_allowed:true,problems:{current:[{id:'role-problem',code:'profile_unavailable',command_id:null,title:'Profile',message:'Session unavailable',consequence:'Collection paused',affected:[{kind:'telegram_profile',role:'personal'}],recovery:[{kind:'configure_telegram_profile',role:'personal'}],created_at:new Date().toISOString(),state:'current'}],recent:[],count:1,updated_at:new Date().toISOString()}}}),baseline);
@@ -100,7 +100,7 @@ test('a status reply started before YouTube save cannot overwrite the saved conn
  await expect(page.locator('#youtube-mode')).toHaveValue('direct');
  let releaseOld:(()=>Promise<void>)|undefined;
  const waiting:import('playwright').Route[]=[];
- await page.route('**/api/v3/reading/check',async route=>{if(!releaseOld){const reply=await route.fetch();releaseOld=()=>route.fulfill({response:reply});}else waiting.push(route);});
+ await page.route('**/api/v3/status/details',async route=>{if(!releaseOld){const headers={...route.request().headers()};delete headers['if-none-match'];const reply=await route.fetch({headers});expect(reply.status()).toBe(200);releaseOld=()=>route.fulfill({response:reply});}else waiting.push(route);});
  await expect.poll(()=>Boolean(releaseOld)).toBe(true);
  await page.locator('#youtube-mode').selectOption('proxy');
  await page.locator('#youtube-address').fill('http://127.0.0.1:9999');
@@ -116,7 +116,7 @@ test('discard waits for the pending failure observation before clearing it',{tim
  const {page,api,origin,token}=await productionReader(t);
  const config={filter:{model:'synthetic',reasoning_effort:'low',fast:false},theses:{model:'synthetic',reasoning_effort:'low',fast:false}};
  await page.goto(origin+'/#token='+token);
- await expect.poll(async()=>(await api('v3/status')).work_allowed).toBe(true);
+ await expect.poll(async()=>(await api('v3/status/details')).work_allowed).toBe(true);
  await api('v3/processors/codex','PUT',config);
  await page.locator('#settings-open').click();await page.locator('#settings-dialog [data-settings-target="models"]').click();await page.locator('#settings-dialog [data-settings-target="codex"]').click();
  await page.route('**/api/v3/processors/codex',route=>route.request().method()==='PUT'?route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'processor_unavailable',message:'Rejected',details:{retry_at:null},diagnostic_id:null,command_id:null})}):route.continue());
@@ -124,6 +124,6 @@ test('discard waits for the pending failure observation before clearing it',{tim
  await page.route('**/api/v3/command-observations',async route=>{await new Promise<void>(resolve=>{release=resolve;});await route.continue();});
  await page.locator('#codex-save').click();await expect.poll(()=>!!release).toBe(true);
  await page.locator('#codex-discard').click();release?.();
- await expect.poll(async()=>(await api('v3/status')).problems.count).toBe(0);
- await expect.poll(async()=>(await api('v3/status')).problems.recent[0]?.outcome).toBe('irrelevant');
+ await expect.poll(async()=>(await api('v3/status/details')).problems.count).toBe(0);
+ await expect.poll(async()=>(await api('v3/status/details')).problems.recent[0]?.outcome).toBe('irrelevant');
 });

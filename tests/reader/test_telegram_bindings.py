@@ -89,7 +89,7 @@ def test_delete_reserves_claim_until_restart_cleanup_then_readd_has_fresh_id(tmp
         assert duplicate.status_code == 409
         assert duplicate.json()['details']['existing_feeds'][0]['feed_id'] == feed
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['connection'] == 'deleting'
-        status = client.get('/api/v3/status')
+        status = client.get('/api/v3/status/details')
         assert status.status_code == 200
         assert any(work['phase'] == 'deleting' for work in status.json()['work'])
         assert not tg.acks

@@ -26,9 +26,9 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
         material = client.get('/api/v3/materials/'+card['id']).json()
         assert material['content']['text'] == 'Own first line\n\nOwn paragraph'
         assert material['content']['reply_preview'] == dict(author='Reply author', text='Quoted context 🙂 …', source_url='https://t.me/fixture/10')
-        frame = client.get('/api/v3/reading/materials/'+card['id']).json()
-        entity = next(r['data'] for r in frame['resources'] if r['kind']=='material')
-        assert entity['content']['reply_preview'] == material['content']['reply_preview']
+        frame = client.get('/api/v3/publication/'+card['id']).json()
+        entity = frame
+        assert entity['reply_preview'] == material['content']['reply_preview']
         assert entity['title'] == card['title']
         assert material['content']['completeness']['state'] == 'complete'
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
@@ -140,6 +140,6 @@ def test_ai_can_process_reply_without_own_text_but_skips_metadata_only(tmp_path,
         presence(client,'reader')
         if expected_calls:
             wait_for(client,lambda: client.get('/api/v3/materials/'+card['id']).json()['theses']['result'])
-        wait_for(client,lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        wait_for(client,lambda: client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         assert len(tasks)==expected_calls
         assert all(task['sources'][0]['text']=='' and task['sources'][0]['reply_preview']['text']==fragment for task in tasks)

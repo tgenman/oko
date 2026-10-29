@@ -1,5 +1,4 @@
 """Batched reader facts over the existing PostgreSQL/file storage."""
-from oko.storage.database import expect_row
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -45,14 +44,6 @@ class ReaderFacts:
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
         return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT id , feed_id FROM items_read WHERE viewed = 0 AND id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
-
-    def navigation_versions(self) -> dict[str, Any]:
-        store=self.storage()
-        folders=store.subscriptions.folders()
-        versions=store.read_versions.batch({('folder',f['id']) for f in folders})
-        counts={row['folder']:row['visible'] for row in store.db.execute('SELECT * FROM reader_folder_counts')}
-        feeds=[dict(id=r['id'],count=r['visible'] or 0,has_unviewed=bool(r['unviewed'])) for r in store.db.execute('SELECT f . id , c . visible , c . unviewed FROM feeds f LEFT JOIN reader_feed_counts c ON c . feed = f . id ORDER BY f . rowid')]
-        return dict(folders=[dict(id=f['id'],title=f['title'],position=f['position'] or 0,count=counts.get(f['id'],0),version=str(versions['folder',f['id']]['version'])) for f in folders],feeds=feeds,count=expect_row(store.db.execute('SELECT count ( * ) FROM items_read i LEFT JOIN reader_visibility v ON v . item = i . id WHERE i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 AND EXISTS ( SELECT 1 FROM reading_memberships m WHERE m . publication_id = i . id )').fetchone())[0])
 
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
         store=self.storage()

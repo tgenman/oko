@@ -91,7 +91,7 @@ def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
         preview = client.post('/api/v3/folders/demo/completion/preview').json()
         assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 503
         assert read_all_cards(client, '/api/v3/cards') == []
-        assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status').json()['problems']['current'])
+        assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
     class Counting(DemoSource):
         calls = 0
         async def discover(self, cursor):

@@ -12,7 +12,7 @@ import {createReaderSession, type ReaderMessage} from '../reader-session';
 import {reportError, type createDebugPanel} from '../status/debug';
 import {errorMessage} from '../api/errors';
 import type {ReaderApi} from '../api/reader';
-import type {AffectedResource} from '../api/generated/types.gen';
+import type {AffectedResource,RuntimeStatus} from '../api/generated/types.gen';
 import type {createMenus} from '../settings/menus';
 import type {createStatusPanel} from '../status/panel';
 import type {createReaderActions} from '../status/actions';
@@ -39,9 +39,11 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   let currentOptions:ReadingListOptions|undefined;
   let moreLoading:{key:string;controller:AbortController;promise:Promise<void>}|undefined;
   let checking:AbortController|undefined;
+  let detailRequest:AbortController|undefined;
+  let detailsFailed=false,settingsAppliedRevision:number|undefined;
+  let settingsAppliedDetails:RuntimeStatus|undefined;
   let unavailable=false;
   let displayedList:string|undefined;
-  let settingsAppliedRevision:number|undefined;
   let contentEpoch = 0;
   let refreshSequence = 0;
   let stopped = false;
@@ -161,6 +163,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   function stopUi(message: string) {
     if(stopped)return;
     checking?.abort();
+    detailRequest?.abort();
     session.dispose();
     menus.stop();
     stopped = true;
@@ -190,6 +193,24 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     }
   }
   function refresh() {return session.refresh();}
+  function updateDetails() {
+    if(stopped||!statusPanel.isOpen()&&!menus.isOpen()){
+      detailRequest?.abort();detailRequest=undefined;return;
+    }
+    if(detailRequest)return;
+    const controller=new AbortController();detailRequest=controller;
+    const settingsRevision=menus.statusRevision();
+    void resources.refreshDetails(controller.signal).then(details=>{
+      if(controller.signal.aborted||stopped||!details)return;
+      if(statusPanel.isOpen())statusPanel.update(details.problems,details);
+      if(menus.isOpen()&&(details!==settingsAppliedDetails||detailsFailed||settingsAppliedRevision!==settingsRevision)){
+        menus.status(details,settingsRevision);settingsAppliedRevision=settingsRevision;settingsAppliedDetails=details;
+      }
+      detailsFailed=false;
+    }).catch(error=>{
+      if(!controller.signal.aborted&&!stopped){detailsFailed=true;if(statusPanel.isOpen())statusPanel.detailsFailed(errorMessage(error));}
+    }).finally(()=>{if(detailRequest===controller)detailRequest=undefined;});
+  }
   async function updateReader() {
     if (stopped) return;
     checking?.abort();
@@ -198,7 +219,6 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     const sequence = ++refreshSequence;
     const active = () => !stopped && epoch === contentEpoch && sequence === refreshSequence;
     const debugRevision = debug.revision();
-    const settingsRevision = menus.statusRevision();
     let statusAvailable = false;
     try {
       const selection=tree.selection;
@@ -208,24 +228,17 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       opened.refresh();
       const pageResult=pages.poll(options,list.visible(),list.atTop(),controller.signal)
         .then(page=>({page}),error=>({error}));
-      const frame=await resources.check(resources.plan(),controller.signal);
+      const reply=await resources.refresh(controller.signal);
       if(!active())return;
-      const accepted=resources.accept(frame);
-      if(accepted.reset){pages.clear();list.clear();opened.reset();void refresh();return;}
-      if(frame.state!=='current')return;
+      const accepted=resources.accept(reply);
+      if(accepted.reset){detailRequest?.abort();detailRequest=undefined;detailsFailed=false;settingsAppliedRevision=undefined;settingsAppliedDetails=undefined;actions.reset();statusPanel.reset();pages.clear();list.clear();opened.reset();void refresh();return;}
       opened.connected();
       const state=resources.status;
       if(!state)throw new Error('Reading status temporarily unavailable');
       const recovered=unavailable;unavailable=false;
       statusAvailable = true;
       onCollectionPoll();
-      const statusConfirmed=frame.resources.some(resource=>resource.kind==='status'&&(resource.state==='changed'||resource.state==='unchanged'));
-      // Local form actions can replace their own optimistic state after this
-      // server version was accepted. Reapply confirmed cached status for the
-      // new owner revision, without loading an unchanged form every poll.
-      if(statusConfirmed&&(recovered||accepted.changed.has('status')||settingsAppliedRevision!==settingsRevision)){
-        menus.status(state,settingsRevision);settingsAppliedRevision=settingsRevision;
-      }
+      updateDetails();
       if(recovered||accepted.changed.has('status')){
       debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
       if (state.runtime_state==='stopped') { stopUi('Oko stopped'); return; }
@@ -234,14 +247,13 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       workAllowed=state.work_allowed;
       menus.workAllowed(state.work_allowed);
       opened.workAllowed(state.work_allowed);
-      statusPanel.update(state.problems, state);
+      statusPanel.summary(state);
       debug.forgetMaterials(state.viewed_ids || []);
       statusPanel.forgetMaterials(state.viewed_ids || []);
       menus.sources(state.sources || []);
       }
-      // A lost command response can remain pending while server status stays
-      // unchanged. Every confirmed poll admits receipt reconciliation.
-      if(statusConfirmed)void actions.flush();
+      // Receipt reconciliation remains independent of the details panel.
+      void actions.flush();
       const navigation=resources.navigation();
       if(!navigation)throw new Error('Reading navigation temporarily unavailable');
       const navigationChanged=recovered||accepted.changed.has('navigation')||accepted.changed.has('feed');
@@ -253,7 +265,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
         if(tree.update(navigation,state.sources||[]))return;
         list.setArea(tree.selection,navigation);
       } else if(accepted.changed.has('status'))tree.update(navigation,state.sources||[]);
-      if(state.runtime_state==='unavailable'){opened.disconnected();list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable');return;}
+      if(state.runtime_state==='unavailable'){opened.disconnected();list.error('Storage unavailable');return;}
       const result=await pageResult;
       if(!active())return;
       if('error' in result)throw result.error;
@@ -292,7 +304,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
         progress('No connection to Oko');
       }
     },
-    onClosed: () => {newsActions.close(false); invalidate(); opened.clear(); list.clear();},
+    onClosed: () => {detailRequest?.abort();detailRequest=undefined;newsActions.close(false); invalidate(); opened.clear(); list.clear();},
     onCloseError: error => reportError(error, 'Closing tab'),
   });
   input('sort').onchange = () => {newsActions.close(false); void changed();};

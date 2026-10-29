@@ -48,7 +48,7 @@ test('folder deletion rechecks an empty folder when a feed arrives before confir
  await api('feeds/'+alpha.id,'PATCH',{folder_id:b.id});
  let release!:()=>void,freeze=false;const held=new Promise<void>(resolve=>{release=resolve;});t.after(()=>release());
  // Intercept before navigation so an in-flight poll cannot deliver a newer catalog.
- await page.route('**/api/v3/reading/check',async route=>{const response=await route.fetch();if(freeze)await held;await route.fulfill({response});});
+ await page.route('**/api/v3/navigation',async route=>{const response=await route.fetch();if(freeze)await held;await route.fulfill({response});});
  await page.goto(origin+'/#token='+token);await page.locator('#read-feeds-toggle').click();
  const row=page.locator('[data-folder="'+a.id+'"]');await row.click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await expect(page.locator('#folder-action-heading')).toHaveText('Delete Folder');
  freeze=true;

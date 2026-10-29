@@ -46,7 +46,7 @@ export class MenusOwner {
   async open(name:DialogName,trigger:HTMLElement|null=null,preferred?:string|null){if(this.stopped||name==='add'&&!this.workAllowed)return;if(!this.active)this.opener=trigger||document.activeElement as HTMLElement;const previous=this.active;this.leave();this.active=name;this.page='home';this.stack=[];this.settingsMessage='';
     if(preferred!==undefined)this.selected=preferred;this.currentPath=name==='settings'?'oko/global':name==='feeds'?this.selected:null;this.changed();
     if(previous&&previous!==name)(document.getElementById(previous+'-dialog')as HTMLDialogElement).close();const dialog=document.getElementById(name+'-dialog')as HTMLDialogElement;if(!dialog.open)dialog.showModal();
-    const action=this.menuOperations.begin('open');const revision=this.navigationRevision;const owner=this;try{await this.refresh();if(name==='add'){action.commit(()=>{for(const callback of this.onAddOpen)callback();});}else await action.commit(()=>this.loadSettings());if(name==='settings')action.commit(()=>{for(const callback of this.onPageChange)callback('settings-open');});}catch(error){action.commit(()=>{if(name==='add')this.addMessage=message(error);else this.settingsMessage=message(error);this.changed();});}return {get current(){return action.current&&revision===owner.navigationRevision;}};}
+    const action=this.menuOperations.begin('open');const revision=this.navigationRevision;const owner=this;try{await this.refresh();if(name==='add'){action.commit(()=>{for(const callback of this.onAddOpen)callback();});}else await action.commit(()=>this.loadSettings());if(name==='settings'&&revision===this.navigationRevision)action.commit(()=>{for(const callback of this.onPageChange)callback('settings-open');});}catch(error){action.commit(()=>{if(name==='add')this.addMessage=message(error);else this.settingsMessage=message(error);this.changed();});}return {get current(){return action.current&&revision===owner.navigationRevision;}};}
   async refresh():Promise<boolean>{
     const action=this.subscriptionOperations.begin('load',{abortable:true});
     try{const{data}=await settings.subscriptionList({client:this.api.client,signal:action.signal});if(!action.current)return false;
@@ -117,7 +117,7 @@ export class MenusOwner {
   status(state:RuntimeStatus,revision=this.statusGeneration){
     if(revision!==this.statusGeneration||this.stopped)return;
     this.histories=state.initial_histories;this.youtube=state.youtube;this.changed();
-    const path=this.currentPath;if(this.active==='feeds'&&this.page==='home'&&path?.startsWith('feed/')&&!this.settingsLoads.has(path)&&!this.saving.has(path+'/feed'))void this.loadSettings();
+    const path=this.currentPath;if(this.active==='feeds'&&this.page==='home'&&path?.startsWith('feed/')&&!this.settingsLoads.has(path)&&!this.settingsFailures.has(path)&&!this.saving.has(path+'/feed'))void this.loadSettings();
     if(this.deletions.size&&!this.deletionRefresh)this.deletionRefresh=this.refresh().then(applied=>{
       if(!applied)return;for(const id of this.deletions)if(!this.subscriptions.feeds.some(feed=>feed.id===id))this.finishRemoval(id);this.changed();
     }).catch(()=>{}).finally(()=>{this.deletionRefresh=null;});

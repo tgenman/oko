@@ -63,10 +63,10 @@ test('discarding a failed Telegram limit draft clears its command problem', {tim
  const input=page.getByRole('spinbutton',{name:'Requests per second',exact:true});
  await input.fill('4');await page.getByRole('button',{name:'Save',exact:true}).click();
  await expect(page.locator('#settings-message')).toHaveText('Synthetic failure');
- await expect.poll(async()=>(await api('status')).problems.current.filter(p=>p.code==='command_failed').length).toBe(1);
+ await expect.poll(async()=>(await api('status/details')).problems.current.filter(p=>p.code==='command_failed').length).toBe(1);
  await page.getByRole('button',{name:'Discard Change',exact:true}).click();
  await expect(input).toHaveValue('2');
- await expect.poll(async()=>(await api('status')).problems.current.filter(p=>p.code==='command_failed').length).toBe(0);
+ await expect.poll(async()=>(await api('status/details')).problems.current.filter(p=>p.code==='command_failed').length).toBe(0);
 });
 
 // Reset + newer-input/ABA combinations run against MenusOwner in Node.

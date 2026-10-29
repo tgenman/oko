@@ -175,11 +175,11 @@ def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path
     clock,source=Clock(),Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS) as client:
         wait_for(client,lambda:source.calls=={'1':1,'2':1})
-        wait_for(client,lambda:any(p['message']=='Network error' for p in client.get('/api/v3/status').json()['problems']['current']))
+        wait_for(client,lambda:any(p['message']=='Network error' for p in client.get('/api/v3/status/details').json()['problems']['current']))
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:source.calls['2']==2)
         assert source.calls['1']==1
-        status=client.get('/api/v3/status').json()
+        status=client.get('/api/v3/status/details').json()
         assert any(w['phase']=='waiting' and w['retry_at'] for w in status['work'])
         clock.now+=61
         wait_for(client,lambda:source.calls['1']==2)
@@ -202,7 +202,7 @@ def test_automatic_discovery_does_not_repeat_terminally_unavailable_material(tmp
     clock,source=Clock(),Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS) as client:
         wait_for(client,lambda:source.calls==1)
-        wait_for(client,lambda:any('удалена' in p['message'] for p in client.get('/api/v3/status').json()['problems']['current']))
+        wait_for(client,lambda:any('удалена' in p['message'] for p in client.get('/api/v3/status/details').json()['problems']['current']))
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:source.calls==2)
         clock.now+=901

@@ -60,9 +60,9 @@ def test_unchanged_status_does_not_rewrite_problems(tmp_path):
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
         tracing(client, app)
-        first = client.get('/api/v3/status')
+        first = client.get('/api/v3/status/details')
         assert first.status_code == 200
-        second = client.get('/api/v3/status')
+        second = client.get('/api/v3/status/details')
         assert second.status_code == 200
         assert not any(q.startswith('UPDATE reader_problems') for q in app.state.last_sql)
         assert first.json()['problems']['current'] == second.json()['problems']['current']
@@ -74,7 +74,7 @@ def test_unchanged_status_does_not_rewrite_problems(tmp_path):
                 store.db.execute("UPDATE items SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','true'::jsonb),'{extra,_reader,reason}',to_jsonb(''::text))::text WHERE id = %s",(items[0],))
                 store.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
         client.portal.call(change_fixture)
-        response = client.get('/api/v3/status')
+        response = client.get('/api/v3/status/details')
         assert response.status_code == 200
         assert not any(p['code'] == 'material_incomplete' for p in response.json()['problems']['current'])
         assert any(p['id'] == original_problem['id'] and p['outcome'] == 'resolved' for p in response.json()['problems']['recent'])
@@ -101,14 +101,14 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
         with TestClient(app, headers=HEADERS) as client:
             tracing(client, app)
             with measure_reads(app.state.host.require_store().db, enabled=lambda: request_sql.get() is not None) as work:
-                response = client.get('/api/v3/status')
+                response = client.get('/api/v3/status/details')
             assert response.status_code == 200
             problems = response.json()['problems']['current']
             assert len(problems) == 2999
             assert all(p['command_id'].startswith('new-') for p in problems)
             assert sum(p['title'] == 'Результат действия пока неизвестен' for p in problems) == 2
             assert work.rows < 60000, work
-            again = client.get('/api/v3/status')
+            again = client.get('/api/v3/status/details')
             assert len(again.json()['problems']['current']) == 2999
             assert not any(q.startswith('UPDATE reader_problems') for q in app.state.last_sql)
 

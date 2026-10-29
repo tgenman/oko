@@ -29,7 +29,7 @@ def test_web_connect_collects_text_and_links_without_client_or_read_sync(tmp_pat
         material = client.get('/api/v3/materials/'+cards[0]['id']).json()
         assert material['content']['text'] == 'Hello\nWorld [article](https://example.org/article?a=1&b=2)'
         assert (material['content']['completeness']['state']=='complete') is True
-        assert client.get('/api/v3/status').json()['telegram_reads'] == []
+        assert client.get('/api/v3/status/details').json()['telegram_reads'] == []
         assert all(url.startswith('https://t.me/') for url in requests)
 
 
@@ -68,7 +68,7 @@ def test_web_catchup_keeps_old_frontier_and_resumes_remaining_pages_after_restar
         assert len({c['id'] for c in cards}) == 5
         assert client.get('/api/v3/materials/'+old).status_code == 404
         assert (2,5) in calls and (2,3) in calls
-        assert client.get('/api/v3/status').json()['telegram_reads'] == []
+        assert client.get('/api/v3/status/details').json()['telegram_reads'] == []
 
 
 def test_recorded_album_anchors_are_one_web_publication(tmp_path):
@@ -270,7 +270,7 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
         client.post('/api/v3/materials/'+original['id']+'/retry')
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            state = client.get('/api/v3/status').json()
+            state = client.get('/api/v3/status/details').json()
             if any('200 МиБ' in error for error in [p['message'] for p in state['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')]):
                 break
             time.sleep(.02)
@@ -282,14 +282,14 @@ def test_failed_oversized_refresh_keeps_file_and_exposes_manual_problem(tmp_path
         assert any('200 МиБ' in str(problem) for problem in state['problems']['current'])
         assert any(intent['kind']=='retry_material' for p in state['problems']['current'] for intent in p['recovery'])
         from tests.support.reader import wait_for
-        wait_for(client,lambda:not any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']))
+        wait_for(client,lambda:not any(work['phase']=='collecting' for work in client.get('/api/v3/status/details').json()['work']))
         client.post('/api/v3/collect')
         time.sleep(.7)
         assert calls[0] == 2
         client.post('/api/v3/materials/'+original['id']+'/retry')
         wait_for(client,lambda:calls[0]==3)
         deadline = time.monotonic()+2
-        while time.monotonic()<deadline and any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']):
+        while time.monotonic()<deadline and any(work['phase']=='collecting' for work in client.get('/api/v3/status/details').json()['work']):
             time.sleep(.02)
         assert calls[0] == 3
 
@@ -369,7 +369,7 @@ def test_web_connect_view_and_remove_never_create_a_worker_or_register_read_sync
         assert connected.status_code==200,connected.text
         card=settled(client)[0]
         assert client.post('/api/v3/materials/'+card['id']+'/viewed').status_code==200
-        assert client.get('/api/v3/status').json()['telegram_reads']==[]
+        assert client.get('/api/v3/status/details').json()['telegram_reads']==[]
         assert client.delete('/api/v3/feeds/'+connected.json()['feed_id']).status_code==200
 
 
@@ -385,5 +385,5 @@ def test_malformed_web_record_does_not_discard_valid_neighbor_and_is_diagnosed(t
         assert result.status_code == 200, result.text
         card = settled(client)[0]
         assert client.get('/api/v3/materials/'+card['id']).json()['content']['text'] == 'Valid text'
-        state = client.get('/api/v3/status').json()
+        state = client.get('/api/v3/status/details').json()
         assert any(history['history']['progress']['warnings'] for history in state['initial_histories'])

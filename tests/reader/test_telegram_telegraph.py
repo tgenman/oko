@@ -384,7 +384,7 @@ def test_failed_article_and_image_keep_inline_links_and_http_reasons(tmp_path, a
         assert image['media_urls'] == []
         assert material['content']['completeness']['state'] == 'incomplete'
         assert '> [!load-error]' not in image['text']
-        status = client.get('/api/v3/status').json()
+        status = client.get('/api/v3/status/details').json()
         assert any(a.get('material_id') == material['id'] for p in status['problems']['current'] for a in p['affected'])
         feed = client.get('/api/v3/collection-status/' + material['feed_id']).json()
         assert feed['source']['operation_count'] == 0

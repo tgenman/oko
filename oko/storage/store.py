@@ -517,8 +517,9 @@ class Store:
         return header,text
 
     def material(self, item: str) -> dict[str, Any] | None:
-        row = self.db.execute('SELECT * FROM items_read WHERE id = %s AND viewed = 0', (item,)).fetchone()
-        material = self.saved_publication(row) if row and row['feed_id'] is not None else None
+        from oko.storage import material_read
+        row = material_read.item(self.db,item)
+        material = self.saved_publication(row) if row and not row['viewed'] and row['feed_id'] is not None else None
         if material and material['complete']:
             display = material['text']
             filtered = material['filter']

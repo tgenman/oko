@@ -15,13 +15,13 @@ HEADERS={'Authorization':'Bearer test'}
 def test_live_model_producer_has_domain_code_and_recovery_without_server_navigation(tmp_path):
     with TestClient(create_app(tmp_path,token='test',api_only=True),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
-        problem=client.get('/api/v3/status').json()['problems']['current'][0]
+        problem=client.get('/api/v3/status/details').json()['problems']['current'][0]
         assert problem['code']=='processor_not_configured'
         assert problem['recovery']==[{'kind':'configure_processor','processor_id':'codex'}]
         assert problem['affected']==[{'kind':'processor','processor_id':'codex'}]
         response=client.post('/api/v3/command-observations',json={'id':'setting-failed','context':{'operation':'settings_patch','target':{'scope':'oko','owner':'global'},'keys':['prompt_theses']},'result':'failed'})
         assert response.status_code==200,response.text
-        observed=next(p for p in client.get('/api/v3/status').json()['problems']['current'] if p['command_id']=='setting-failed')
+        observed=next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id']=='setting-failed')
         assert observed['recovery']==[{'kind':'change_setting','target':{'scope':'oko','owner':'global'},'keys':['prompt_theses']}]
     with database(tmp_path) as db:
         for (body,) in db.execute('SELECT body FROM reader_action_results UNION ALL SELECT body FROM reader_problems'):
@@ -42,12 +42,12 @@ def test_remote_exception_does_not_expand_public_codes_and_keeps_material_recove
     source=Unavailable()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        problem=wait_for(client,lambda:next((p for p in client.get('/api/v3/status').json()['problems']['current'] if p['code']=='source_unavailable'),None))
+        problem=wait_for(client,lambda:next((p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['code']=='source_unavailable'),None))
         assert problem['message']=='Saved source reason'
         material=problem['affected'][0]['material_id']
         assert problem['recovery']==[{'kind':'retry_material','material_ids':[material]}]
         assert 'UnexpectedExternalException' not in problem['code']
-        waiting=client.get('/api/v3/status').json()['work']
+        waiting=client.get('/api/v3/status/details').json()['work']
         assert any(w['phase']=='waiting' and w['reason']=='retry_scheduled' and w['retry_at'] for w in waiting)
 
 
@@ -109,13 +109,13 @@ def test_typed_conflict_recovery_never_proposes_reconnecting_an_existing_binding
         body=dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})
         created=client.post('/api/v3/telegram/connect',json=body).json()['feed_id']
         assert client.post('/api/v3/telegram/connect',json=body,headers={'X-Oko-Action':'duplicate'}).status_code==409
-        duplicate=next(p for p in client.get('/api/v3/status').json()['problems']['current'] if p['command_id']=='duplicate')
+        duplicate=next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id']=='duplicate')
         assert duplicate['code']=='duplicate_source'
         assert duplicate['affected']==[{'kind':'feed','feed_id':created}]
         assert duplicate['recovery']==[]
         network.user=202
         assert client.post('/api/v3/telegram/connect',json=dict(body,source_locator='@different'),headers={'X-Oko-Action':'identity'}).status_code==409
-        conflict=next(p for p in client.get('/api/v3/status').json()['problems']['current'] if p['command_id']=='identity')
+        conflict=next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id']=='identity')
         assert conflict['code']=='account_identity_mismatch'
         assert conflict['recovery']==[{'kind':'configure_telegram_profile','role':'personal'}]
         assert not any(r['kind']=='connect_source' for r in conflict['recovery'])
@@ -127,7 +127,7 @@ def test_unknown_collection_outcome_never_offers_a_mutating_recovery(tmp_path):
     with TestClient(create_app(tmp_path,token='test',api_only=True),headers=HEADERS) as client:
         response=client.post('/api/v3/command-observations',json={'id':'unknown-collect','context':{'operation':'collect','target':{'scope':'all'}},'result':'unknown'})
         assert response.status_code==200,response.text
-        p=next(p for p in client.get('/api/v3/status').json()['problems']['current'] if p['command_id']=='unknown-collect')
+        p=next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id']=='unknown-collect')
         assert p['code']=='command_outcome_unknown'
         assert p['recovery']==[]
         assert client.get('/api/v3/commands/unknown-collect').json()['outcome']=='unknown'

@@ -2,6 +2,7 @@ from tests.support.storage import analyze
 """Plans of real reader HTTP queries on an isolated synthetic PostgreSQL archive."""
 from contextvars import ContextVar
 
+import re
 import psycopg
 from fastapi.testclient import TestClient
 
@@ -35,7 +36,7 @@ def test_opened_material_does_not_scan_foreign_job_archive(postgres_url, tmp_pat
     def observed(db, query, params=None, **kwargs):
         result = execute(db, query, params, **kwargs)
         records = capture.get()
-        if records is not None and isinstance(query, str) and 'AS reader_item' in query:
+        if records is not None and isinstance(query, str) and re.search(r'\b(?:FROM|JOIN)\s+(?:jobs|media_files)\b', query, re.IGNORECASE):
             records.append((query, params))
         return result
 
@@ -52,10 +53,10 @@ def test_opened_material_does_not_scan_foreign_job_archive(postgres_url, tmp_pat
             capture.reset(token)
 
     with TestClient(app, headers=HEADERS) as client:
-        response = client.get('/api/v3/reading/materials/' + identity)
+        response = client.get('/api/v3/publication/' + identity)
         assert response.status_code == 200, response.text
-        material = next(resource['data'] for resource in response.json()['resources'] if resource['kind'] == 'material')
-        assert material['content']['text'] == 'Useful text'
+        material = response.json()
+        assert material['text'] == 'Useful text'
     assert statements, 'No material jobs query was observed at the HTTP boundary'
     with psycopg.connect(postgres_url, autocommit=True) as reader:
         for query, params in statements:

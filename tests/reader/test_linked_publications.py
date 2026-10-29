@@ -80,7 +80,7 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             value=wait_for(client,lambda:(value if 'Article body' in (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['text'] else None))
             assert media_started.wait(3)
             assert client.get('/api/v3/status').status_code==200
-            assert client.get('/api/v3/reading/materials/'+card['id']).status_code==200
+            assert client.get('/api/v3/publication/'+card['id']).status_code==200
             assert 'Own excerpt' in value['content']['text']
             assert value['content']['revision_id']!=initial['content']['revision_id']
             assert len(read_all_cards(client, '/api/v3/cards'))==1
@@ -254,7 +254,7 @@ def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_p
         card=wait_cards(client)[0]
         value=wait_for(client,lambda:(value if 'недоступна' in (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['completeness'].get('message','').lower() else None))
         assert value['content']['text']=='Own excerpt'
-        status=client.get('/api/v3/status')
+        status=client.get('/api/v3/status/details')
         assert status.status_code==200
         assert any(resource=={'kind':'material','material_id':card['id']} for problem in status.json()['problems']['current'] for resource in problem['affected'])
         missing[0]=False
@@ -313,7 +313,7 @@ def test_explicit_rss_replay_can_collect_a_previously_read_record_again(tmp_path
         presence(client,'rss')
         card=wait_cards(client)[0]
         client.post('/api/v3/materials/'+card['id']+'/viewed')
-        wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         assert read_all_cards(client, '/api/v3/cards')==[]
         client.post('/api/v3/collect')
         replayed=wait_cards(client)[0]
@@ -376,7 +376,7 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
             client.post('/api/v3/materials/'+card['id']+'/viewed')
             release.set()
             assert returned.wait(3)
-            wait_for(client,lambda:client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+            wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
             assert read_all_cards(client, '/api/v3/cards')==[]
             with database(root) as db:
                 assert not db.execute('SELECT 1 FROM publication_links').fetchone()

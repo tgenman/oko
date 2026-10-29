@@ -1,6 +1,6 @@
 import {randomId} from '../browser-platform';
 import type {CommandContext,Problem,ProblemSnapshot} from '../api/generated/types.gen';
-import {observeCommand,commandReceipt,abandonProblem} from '../api/generated/sdk.gen';
+import {observeCommand,commandReceipt,abandonProblem,statusDetails} from '../api/generated/sdk.gen';
 import type {ReaderApi} from '../api/reader';
 import {commandResources,isNavigation} from './recovery';
 export type VisibleProblem=Problem&{saved?:boolean};
@@ -28,12 +28,12 @@ export function createReaderActions({readerApi,onChanged}:{readerApi:ReaderApi;o
  }
  function matchesDraft(problem:Problem,path:string,field:string):boolean{if((field==='feed_refresh_minutes'||field==='telegram_http_rps')&&path==='settings/oko/global'&&!problem.recovery.length)return problem.affected.some(resource=>resource.kind==='settings'&&resource.target.scope==='oko');return problem.recovery.some(intent=>intent.kind==='change_setting'?path==='settings/'+intent.target.scope+'/'+intent.target.owner&&intent.keys.some(key=>key===field):intent.kind==='configure_processor'?path==='processors/'+intent.processor_id:false);}
  return {
-  beginCommand,flush,
+  beginCommand,flush,reset(){pending.clear();latest.clear();sequence++;},
   forgetMaterials(ids:string[]){const removed=new Set(ids);for(const[key,entry]of pending)if(entry.problem.affected.some(r=>r.kind==='material'&&removed.has(r.material_id)))pending.delete(key);},
   failed(request:Request|null,error:unknown){if(!request||latest.get(request.key)!==request.sequence)return;request.result=error&&typeof error==='object'&&'confirmed'in error&&error.confirmed?'failed':'unknown';pending.set(request.key,{request,problem:describe(request,request.result==='unknown')});onChanged();void flush();},
   succeeded(request:Request|null){if(request&&latest.get(request.key)===request.sequence){pending.delete(request.key);onChanged();}},
   merge(snapshot:ProblemSnapshot){const values=[...snapshot.current,...snapshot.recent];for(const[key,entry]of pending)if(values.some(p=>p.command_id===entry.request.id&&p.code!=='command_outcome_unknown'))pending.delete(key);const local=[...pending.values()].filter(entry=>!values.some(p=>p.command_id===entry.request.id)).map(entry=>entry.problem);const current=[...snapshot.current,...local];return {...snapshot,current,count:current.length};},
-  async discard(path:string,field:string,snapshot:ProblemSnapshot,_method?:string){await flush();try{snapshot=(await readerApi.status()).problems;}catch{/* Preserve the last observed outcome. */}const failed=snapshot.current.find(p=>p.code==='command_failed'&&matchesDraft(p,path,field));if(failed)await abandonProblem({client:readerApi.client,path:{identity:failed.id}});for(const[key,entry]of pending)if(entry.problem.command_id===failed?.command_id||entry.request.result==='failed'&&matchesDraft(entry.problem,path,field))pending.delete(key);onChanged();},
+  async discard(path:string,field:string,snapshot:ProblemSnapshot,_method?:string){await flush();try{snapshot=(await statusDetails({client:readerApi.client})).data.problems;}catch{/* Preserve the last observed outcome. */}const failed=snapshot.current.find(p=>p.code==='command_failed'&&matchesDraft(p,path,field));if(failed)await abandonProblem({client:readerApi.client,path:{identity:failed.id}});for(const[key,entry]of pending)if(entry.problem.command_id===failed?.command_id||entry.request.result==='failed'&&matchesDraft(entry.problem,path,field))pending.delete(key);onChanged();},
  };
 }
 export type ReaderActions=ReturnType<typeof createReaderActions>;

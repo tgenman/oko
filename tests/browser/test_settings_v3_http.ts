@@ -36,8 +36,7 @@ test('lost v3 settings response is reconciled without replay and keeps a newer d
   // Consume the changed server status while observations are still offline.
   // Recovery must also retry after a confirmed *unchanged* status frame.
   for(let i=0;i<2;i++)await page.waitForResponse(async response=>{
-    if(!response.url().endsWith('/api/v3/reading/check'))return false;
-    const frame=await response.json();return frame.resources?.some((r:{kind:string;state:string})=>r.kind==='status'&&r.state==='unchanged');
+    return response.url().endsWith('/api/v3/status')&&response.status()===304;
   });
   online=true;
   await expect(page.locator('#status-panel')).not.toContainText('Action outcome unknown',{timeout:8000});

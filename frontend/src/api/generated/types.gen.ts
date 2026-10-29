@@ -242,102 +242,6 @@ export type CardReadRequest = {
     ids: Array<MaterialId>;
 };
 
-export type ChangedFeedResource = {
-    data: SubscriptionFeed;
-    id: string;
-    kind: 'feed';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type ChangedFilterResource = {
-    data: ReadingFilterData;
-    id: string;
-    kind: 'filter';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type ChangedMaterialResource = {
-    data: ReadingEntityMaterial;
-    id: string;
-    kind: 'material';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type ChangedMediaResource = {
-    data: ReadingMediaData;
-    id: string;
-    kind: 'media';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type ChangedNavigationResource = {
-    data: ReadingIndex;
-    id: string;
-    kind: 'navigation';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type ChangedStatusResource = {
-    data: RuntimeStatus;
-    id: string;
-    kind: 'status';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type ChangedThesesResource = {
-    data: ReadingThesesData;
-    id: string;
-    kind: 'theses';
-    state: 'changed';
-    version: ReadingEntityVersion;
-};
-
-export type CheckFeed = {
-    id: FeedId;
-    kind: 'feed';
-    known_version: ReadingKnownVersion;
-};
-
-export type CheckFilter = {
-    id: MaterialId;
-    kind: 'filter';
-    known_version: ReadingKnownVersion;
-};
-
-export type CheckMaterial = {
-    id: MaterialId;
-    kind: 'material';
-    known_version: ReadingKnownVersion;
-};
-
-export type CheckMedia = {
-    id: MaterialId;
-    kind: 'media';
-    known_version: ReadingKnownVersion;
-};
-
-export type CheckNavigation = {
-    kind: 'navigation';
-    known_version: ReadingKnownVersion;
-};
-
-export type CheckStatus = {
-    kind: 'status';
-    known_version: ReadingKnownVersion;
-};
-
-export type CheckTheses = {
-    id: MaterialId;
-    kind: 'theses';
-    known_version: ReadingKnownVersion;
-};
-
 /**
  * BrowserError
  */
@@ -1318,13 +1222,6 @@ export type ExternalAttachment = {
     title: string | null;
 };
 
-export type FailedReadingResource = {
-    id: string;
-    kind: ReadingResourceKind;
-    message: string;
-    state: 'failed';
-};
-
 export type FeedActivity = {
     /**
      * Time this subscription was created in Oko. Null when the date is unknown.
@@ -1843,6 +1740,17 @@ export type MediaUnavailableErrorDetails = {
 
 export type MediaUrl = string;
 
+export type NavigationEntry = {
+    avatar_url: FeedAvatarUrl | null;
+    connection: string;
+    count: number;
+    has_unviewed: boolean;
+    id: FeedId;
+    kind: string;
+    telegram_access: 'web' | 'client' | 'unconfigured' | null;
+    title: string;
+};
+
 export type NavigationFeed = {
     count: number;
     feed: SubscriptionFeed;
@@ -1850,6 +1758,18 @@ export type NavigationFeed = {
      * True while any known publication in this feed is not viewed in Oko, including hidden, loading and unavailable publications. Independent of the visible count and Telegram read state.
      */
     has_unviewed: boolean;
+};
+
+export type NavigationFolder = {
+    count: number;
+    feeds: Array<NavigationEntry>;
+    id: FolderId;
+    title: string;
+};
+
+export type NavigationResponse = {
+    folders: Array<NavigationFolder>;
+    total: number;
 };
 
 export type NewFeedVerification = {
@@ -2212,33 +2132,6 @@ export type ReadingCard = ({
     availability: 'available';
 } & AvailableReadingCard);
 
-export type ReadingCheck = ({
-    kind: 'status';
-} & CheckStatus) | ({
-    kind: 'navigation';
-} & CheckNavigation) | ({
-    kind: 'feed';
-} & CheckFeed) | ({
-    kind: 'material';
-} & CheckMaterial) | ({
-    kind: 'filter';
-} & CheckFilter) | ({
-    kind: 'theses';
-} & CheckTheses) | ({
-    kind: 'media';
-} & CheckMedia);
-
-export type ReadingCheckRequest = {
-    resources: Array<ReadingCheck>;
-    storage_id: ReadingStorageId | null;
-};
-
-export type ReadingCheckResponse = ({
-    state: 'current';
-} & ReadingFrame) | ({
-    state: 'reset';
-} & ReadingReset);
-
 export type ReadingComposition = {
     count: number;
     feeds: Array<NavigationFeed>;
@@ -2251,19 +2144,6 @@ export type ReadingEntityMaterial = ({
     availability: 'pending';
 } & PendingReadingEntityMaterial);
 
-export type ReadingEntityVersion = string;
-
-export type ReadingFeedReference = {
-    count: number;
-    has_unviewed: boolean;
-    id: FeedId;
-};
-
-export type ReadingFilterData = {
-    filter: FilterState;
-    revision_id: RevisionId | null;
-};
-
 export type ReadingFolder = {
     count: number;
     id: FolderId;
@@ -2273,51 +2153,6 @@ export type ReadingFolder = {
     position: number;
     title: string;
 };
-
-export type ReadingFolderEntity = {
-    count: number;
-    id: FolderId;
-    /**
-     * Persisted ordering position; demo source legitimately uses -1.
-     */
-    position: number;
-    title: string;
-    version: ReadingEntityVersion;
-};
-
-export type ReadingFrame = {
-    resources: Array<ReadingResource>;
-    state: 'current';
-    storage_id: ReadingStorageId;
-};
-
-export type ReadingIndex = {
-    count: number;
-    feeds: Array<ReadingFeedReference>;
-    folders: Array<ReadingFolderEntity>;
-};
-
-export type ReadingKnownVersion = ReadingEntityVersion | null;
-
-export type ReadingMediaData = {
-    attachments: Array<Attachment>;
-    external_attachments?: Array<ExternalAttachment>;
-    images: Array<MediaUrl>;
-    /**
-     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-     */
-    post_web_unavailable?: boolean;
-    revision_id: RevisionId | null;
-};
-
-export type ReadingReset = {
-    state: 'reset';
-    storage_id: ReadingStorageId;
-};
-
-export type ReadingResource = ChangedStatusResource | ChangedNavigationResource | ChangedFeedResource | ChangedMaterialResource | ChangedFilterResource | ChangedThesesResource | ChangedMediaResource | UnchangedReadingResource | UnavailableReadingResource | FailedReadingResource;
-
-export type ReadingResourceKind = 'status' | 'navigation' | 'feed' | 'material' | 'filter' | 'theses' | 'media';
 
 export type ReadingStorageId = string;
 
@@ -2346,11 +2181,6 @@ export type ReadingTextContent = {
      */
     text: string;
     version: number;
-};
-
-export type ReadingThesesData = {
-    revision_id: RevisionId | null;
-    theses: ThesesState;
 };
 
 export type RecoveryChangeSetting = {
@@ -2709,6 +2539,34 @@ export type SourceUnavailableErrorDetails = {
 
 export type SourceUrl = string;
 
+export type StatusProblem = {
+    feed_id: FeedId | null;
+    id: string;
+    message: string;
+};
+
+export type StatusProgress = {
+    completed: number | null;
+    state: 'idle' | 'running';
+    total: number | null;
+};
+
+export type StatusSummary = {
+    active_client_sessions: number;
+    api_version: string;
+    collection: StatusProgress;
+    diagnostic_count: number;
+    diagnostic_persistence_error: string | null;
+    enabled: boolean;
+    lifetime: LifetimePolicy;
+    problems: Array<StatusProblem>;
+    processing: StatusProgress;
+    runtime_state: 'running' | 'disabled' | 'stopping' | 'stopped' | 'unavailable';
+    sources: Array<SourceState>;
+    viewed_ids: Array<MaterialId>;
+    work_allowed: boolean;
+};
+
 export type StorageChangedError = {
     code: 'storage_changed';
     command_id: null;
@@ -3035,21 +2893,6 @@ export type ThesesState = ThesesReadyState | ThesesAttemptState;
  * RFC 3339 timestamp with a mandatory timezone offset, normalized to UTC in responses.
  */
 export type Timestamp = string;
-
-export type UnavailableReadingResource = {
-    id: string;
-    kind: ReadingResourceKind;
-    reason: 'viewed' | 'not_found' | 'scope_removed' | 'runtime_stopped';
-    state: 'unavailable';
-    version: ReadingKnownVersion;
-};
-
-export type UnchangedReadingResource = {
-    id: string;
-    kind: ReadingResourceKind;
-    state: 'unchanged';
-    version: ReadingEntityVersion;
-};
 
 export type UnfinishedProcessingAttempt = ({
     state: 'queued';
@@ -5063,6 +4906,46 @@ export type ViewedResponses = {
 
 export type ViewedResponse = ViewedResponses[keyof ViewedResponses];
 
+export type NavigationData = {
+    body?: never;
+    headers?: {
+        'If-None-Match'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v3/navigation';
+};
+
+export type NavigationErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type NavigationError = NavigationErrors[keyof NavigationErrors];
+
+export type NavigationResponses = {
+    /**
+     * Read domain membership, counts and order for publication reading. This is a subject projection with no layout or navigation commands.
+     */
+    200: NavigationResponse;
+};
+
+export type NavigationResponse2 = NavigationResponses[keyof NavigationResponses];
+
 export type SetPowerData = {
     body: PowerRequest;
     headers?: {
@@ -5574,85 +5457,6 @@ export type ReadingCompositionResponses = {
 
 export type ReadingCompositionResponse = ReadingCompositionResponses[keyof ReadingCompositionResponses];
 
-export type CheckReadingData = {
-    body: ReadingCheckRequest;
-    path?: never;
-    query?: never;
-    url: '/api/v3/reading/check';
-};
-
-export type CheckReadingErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: StorageUnavailableError;
-};
-
-export type CheckReadingError = CheckReadingErrors[keyof CheckReadingErrors];
-
-export type CheckReadingResponses = {
-    /**
-     * Current per-entity data, unchanged markers or an explicit storage reset. Reading does not execute commands.
-     */
-    200: ReadingCheckResponse;
-};
-
-export type CheckReadingResponse = CheckReadingResponses[keyof CheckReadingResponses];
-
-export type ReadingMaterialData = {
-    body?: never;
-    path: {
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        item: string;
-    };
-    query?: never;
-    url: '/api/v3/reading/materials/{item}';
-};
-
-export type ReadingMaterialErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: StorageUnavailableError;
-};
-
-export type ReadingMaterialError = ReadingMaterialErrors[keyof ReadingMaterialErrors];
-
-export type ReadingMaterialResponses = {
-    /**
-     * Current per-entity data, unchanged markers or an explicit storage reset. Reading does not execute commands.
-     */
-    200: ReadingCheckResponse;
-};
-
-export type ReadingMaterialResponse = ReadingMaterialResponses[keyof ReadingMaterialResponses];
-
 export type FeedRefreshSettingsData = {
     body?: never;
     path?: never;
@@ -5880,6 +5684,9 @@ export type SettingsPatchResponse = SettingsPatchResponses[keyof SettingsPatchRe
 
 export type StatusData = {
     body?: never;
+    headers?: {
+        'If-None-Match'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/v3/status';
@@ -5910,10 +5717,50 @@ export type StatusResponses = {
     /**
      * Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client presence or start external work.
      */
-    200: RuntimeStatus;
+    200: StatusSummary;
 };
 
 export type StatusResponse = StatusResponses[keyof StatusResponses];
+
+export type StatusDetailsData = {
+    body?: never;
+    headers?: {
+        'If-None-Match'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v3/status/details';
+};
+
+export type StatusDetailsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type StatusDetailsError = StatusDetailsErrors[keyof StatusDetailsErrors];
+
+export type StatusDetailsResponses = {
+    /**
+     * Read runtime, lifetime and typed concurrent work snapshots. A status read does not create client presence or start external work.
+     */
+    200: RuntimeStatus;
+};
+
+export type StatusDetailsResponse = StatusDetailsResponses[keyof StatusDetailsResponses];
 
 export type StopData = {
     body?: never;

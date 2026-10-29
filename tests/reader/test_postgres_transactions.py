@@ -134,12 +134,10 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         item = card['id']
         material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None))
         assert 'Collected text' in material['content']['text']
-        frame = client.post('/api/v3/reading/check', json={'storage_id': None, 'resources': [
-            {'kind': 'navigation', 'known_version': None}
-        ]})
+        frame = client.get('/api/v3/navigation')
         assert frame.status_code == 200, frame.text
-        snapshot = frame.json()
-        assert snapshot['state'] == 'current'
+        storage_id = frame.headers['X-Oko-Storage-Id']
+        assert frame.json()['total'] == 1
         assert client.get('/api/v3/cards').json()['items'][0]['id'] == item
         media = material['content']['attachments'][0]['url']
         assert client.get(media).content == PNG
@@ -152,9 +150,9 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
     with TestClient(app(), headers=HEADERS) as restarted:
         assert [value['id'] for value in read_all_cards(restarted, '/api/v3/cards')] == [item]
         assert restarted.get(media).content == PNG
-        restored = restarted.get('/api/v3/reading/materials/' + item)
+        restored = restarted.get('/api/v3/publication/' + item)
         assert restored.status_code == 200, restored.text
-        assert restored.json()['storage_id'] == snapshot['storage_id']
+        assert restarted.get('/api/v3/status/details').headers['X-Oko-Storage-Id'] == storage_id
         assert restarted.get('/api/v3/subscriptions').json()['folders'][0]['title'] == 'Renamed library'
         fail_delete[0] = delete_fault
         viewed = restarted.post('/api/v3/materials/' + item + '/viewed')
@@ -274,7 +272,7 @@ def test_incompatible_schema_is_an_explicit_http_storage_failure(postgres_url, t
     with psycopg.connect(postgres_url, autocommit=True) as admin:
         admin.execute('DELETE FROM oko_schema_migrations WHERE version=3')
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
-        status = client.get('/api/v3/status')
+        status = client.get('/api/v3/status/details')
         assert status.status_code == 200, status.text
         assert status.json()['work'][0]['reason'] == 'storage_unavailable'
         assert client.get('/api/v3/cards').status_code == 503
@@ -348,15 +346,13 @@ def test_telegram_opened_material_has_all_reading_parts_after_restart(postgres_u
                 connect(client)
                 identity = settled(client)[0]['id']
                 assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-            response = client.get('/api/v3/reading/materials/' + identity)
+            response = client.get('/api/v3/publication/' + identity)
             assert response.status_code == 200, response.text
-            parts = {part['kind']: part for part in response.json()['resources']}
-            assert set(parts) == {'material', 'filter', 'theses', 'media'}
-            assert all(part['state'] == 'changed' for part in parts.values()), parts
-            material = parts['material']['data']
+            material = response.json()
+            assert {'filter', 'theses', 'media', 'text'} <= material.keys()
             assert material['source']['kind'] == 'telegram'
             assert material['source']['access']['kind'] == 'client'
-            assert material['content']['text'] == 'Текст канала'
+            assert material['text'] == 'Текст канала'
             assert 'rowid' not in material
 
 

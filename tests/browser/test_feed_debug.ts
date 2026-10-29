@@ -151,10 +151,10 @@ test('switch works with keyboard and clearing history rejects a late journal res
     expect(size!.width).toBeGreaterThan(size!.height);
     await r.page.evaluate(() => {
       readerTransport.held.set('/api/v3/diagnostics', true);
-      readerTransport.held.set('/api/v3/status', true);
+      readerTransport.held.set('/api/v3/status/details', true);
     });
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/diagnostics'));
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/status'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/status/details'));
     const old = (await r.api('diagnostics')).groups;
     // Release only the old GET; DELETE uses the normal transport immediately.
     await r.page.evaluate(() => readerTransport.held.delete('/api/v3/diagnostics'));
@@ -162,7 +162,7 @@ test('switch works with keyboard and clearing history rejects a late journal res
     await expect(r.page.locator('#debug-empty')).toBeVisible();
     await expect(r.page.locator('#debug-count')).toHaveText('0');
     await r.page.evaluate(groups => readerTransport.release('/api/v3/diagnostics', {groups, persistence_error: ''}), old);
-    await r.page.evaluate(() => readerTransport.release('/api/v3/status', {stage: 'Готово', errors: [], sources: [], ready_sources:1, total_sources:1, debug_count: 31, debug_persistence_error: 'old disk error'}));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/status/details', {stage: 'Готово', errors: [], sources: [], ready_sources:1, total_sources:1, debug_count: 31, debug_persistence_error: 'old disk error'}));
     await expect(r.page.locator('#debug-errors')).not.toContainText('old error');
     await expect(r.page.locator('#debug-count')).toHaveText('0');
     await expect(r.page.locator('#debug-status')).toHaveText('');

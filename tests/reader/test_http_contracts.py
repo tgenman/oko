@@ -38,11 +38,11 @@ def test_material_and_stopped_status_preserve_wire_fields(tmp_path):
         assert body['theses']['attempt']['state'] == 'disabled'
         assert body['theses']['result'] is None
         assert 'previous_versions' not in body['content']
-        status = client.get('/api/v3/status').json()
+        status = client.get('/api/v3/status/details').json()
         assert CONTRACTS['status'].dump_python(CONTRACTS['status'].validate_python(status), mode='json', by_alias=True, exclude_unset=True) == status
         assert status['runtime_state'] == 'running'
         client.post('/api/v3/stop')
-        stopped = client.get('/api/v3/status').json()
+        stopped = client.get('/api/v3/status/details').json()
         assert CONTRACTS['status'].dump_python(CONTRACTS['status'].validate_python(stopped), mode='json', by_alias=True, exclude_unset=True) == stopped
         assert stopped['runtime_state'] == 'stopped'
         assert stopped['youtube']['admission'] == 'ready'
@@ -54,6 +54,6 @@ def test_work_status_rejects_history_without_progress_fields(tmp_path):
     from pydantic import ValidationError
     from oko.reader.contracts import CONTRACTS
     with TestClient(create_app(tmp_path, token='test'), headers=HEADERS) as client:
-        status = client.get('/api/v3/status').json()
+        status = client.get('/api/v3/status/details').json()
         with pytest.raises(ValidationError):
             CONTRACTS['status'].validate_python({**status, 'initial_histories': [{}]})

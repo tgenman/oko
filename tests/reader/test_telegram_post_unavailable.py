@@ -31,14 +31,14 @@ def test_whole_post_restriction_is_saved_separately_without_errors_or_ai(tmp_pat
         cards = settled(client)
         url = '/api/v3/materials/'+cards[0]['id']
         material = client.get(url).json()
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
         assert material['content']['post_web_unavailable'] is True
         assert material['content']['completeness']['reason'] == 'post_web_unavailable'
         assert material['content']['text'] == ''
         assert material['content']['external_attachments'] == []
         assert material['content']['attachments'] == []
-        frame = client.post('/api/v3/reading/check', json=dict(storage_id=None, resources=[dict(kind='material',id=cards[0]['id'],known_version=None)])).json()
-        assert frame['resources'][0]['data']['content']['post_web_unavailable'] is True
+        frame = client.get('/api/v3/publication/'+cards[0]['id']).json()
+        assert frame['post_web_unavailable'] is True
         assert cards[0]['post_web_unavailable'] is True
         assert cards[0]['title'] == 'Пост доступен только в Telegram'
         assert material['filter']['attempt']['state'] == 'disabled'
@@ -51,7 +51,7 @@ def test_whole_post_restriction_is_saved_separately_without_errors_or_ai(tmp_pat
         configure_fast_web(client)
         material = client.get(url).json()
         assert material['content']['post_web_unavailable'] is True
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
 
 
 import pytest
@@ -78,7 +78,7 @@ def test_whole_post_marker_does_not_override_other_cases(tmp_path, text, media, 
         if media:
             assert content['external_attachments'][0]['kind'] == ('audio' if media == AUDIO else 'video')
         else:
-            assert client.get('/api/v3/status').json()['problems']['count'] > 0
+            assert client.get('/api/v3/status/details').json()['problems']['count'] > 0
 
 
 def test_previous_local_text_is_kept_when_whole_post_becomes_restricted(tmp_path):
@@ -96,7 +96,7 @@ def test_previous_local_text_is_kept_when_whole_post_becomes_restricted(tmp_path
         assert content['text'] == 'Saved own text'
         assert content['post_web_unavailable'] is True
         assert content['changed'] is False
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
 
 
 def test_later_content_is_collected_and_previous_version_keeps_post_restriction(tmp_path):
@@ -128,12 +128,12 @@ def test_unknown_unsupported_post_is_reclassified_only_after_source_confirmation
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         url = '/api/v3/materials/'+settled(client)[0]['id']
         assert client.get(url).json()['content']['post_web_unavailable'] is False
-        assert client.get('/api/v3/status').json()['problems']['count'] > 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] > 0
         confirmed[0] = True
         client.post(url+'/retry'); settled(client)
         assert client.get(url).json()['content']['post_web_unavailable'] is True
         assert client.get(url).json()['content']['changed'] is False
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
 
 
 @pytest.mark.parametrize('lost',[False,True])
@@ -155,12 +155,12 @@ def test_whole_post_restriction_keeps_local_video_but_does_not_hide_lost_file(tm
         client.post(url+'/retry');settled(client)
         content=client.get(url).json()['content']
         if lost:
-            assert client.get('/api/v3/status').json()['problems']['count']>0
+            assert client.get('/api/v3/status/details').json()['problems']['count']>0
         else:
             assert content['post_web_unavailable'] is True
             assert client.get(content['attachments'][0]['url']).content==b'saved-video'
             assert content['changed'] is False
-            assert client.get('/api/v3/status').json()['problems']['count']==0
+            assert client.get('/api/v3/status/details').json()['problems']['count']==0
 
 
 def test_restricted_post_does_not_hide_neighbour_failure_or_block_explicit_viewed(tmp_path):
@@ -174,7 +174,7 @@ def test_restricted_post_does_not_hide_neighbour_failure_or_block_explicit_viewe
         cards=settled(client,2)
         post=next(c for c in cards if c['post_web_unavailable'])
         broken=next(c for c in cards if not c['post_web_unavailable'])
-        problems=client.get('/api/v3/status').json()['problems']
+        problems=client.get('/api/v3/status/details').json()['problems']
         affected={obj['material_id'] for p in problems['current'] for obj in p['affected'] if obj['kind']=='material'}
         assert post['id'] not in affected
         assert broken['id'] in affected

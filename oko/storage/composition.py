@@ -158,9 +158,12 @@ class ReadingComposition:
     def material(self, identity: str) -> dict[str, Any] | None:
         material = self._store.material(identity)
         if material:
-            owners = self._store.subscriptions.feeds(material['feed_id'])
-            if owners:
-                return _reading_heading(material, owners[0], self._store.original(identity)[0] if material['complete'] else {})
+            from oko.storage import material_read
+            try:
+                owner,_ = material_read.feed(self._store.db,material['feed_id'])
+            except ValueError:
+                return material
+            return _reading_heading(material, owner, self._store.original(identity)[0] if material['complete'] else {})
         return material
 
     def members(self, identity: str) -> list[str]:

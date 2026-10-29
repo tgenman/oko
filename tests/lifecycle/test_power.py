@@ -112,8 +112,12 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
         assert 'Must never be accepted' not in client.get('/api/v3/materials/' + cards[0]['id']).text
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         client.post('/api/v3/collect')  # Explicit retry advances the interrupted fetch deadline.
-        ready = wait_for(client, lambda: [c for c in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available'])
+        # Card and publication are separate HTTP snapshots: the fetch may finish
+        # between them. Assert title and readiness from the same publication.
+        ready = wait_for(client, lambda: [publication for c in read_all_cards(client, '/api/v3/cards')
+            if (publication := client.get('/api/v3/publication/' + c['id']).json())['availability'] == 'available'])
         assert ready[0]['title'] == 'Fresh result'
+        assert ready[0]['text'] == 'Resumed successfully'
 
 
 def test_viewed_while_disabled_defers_telegram_acknowledgement_until_start(tmp_path):

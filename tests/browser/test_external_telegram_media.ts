@@ -30,7 +30,7 @@ test('external Telegram media show typed badges and cards without false download
  await expect(page.locator('#external-attachments a')).toHaveText('Слушать в Telegram ↗');
  await expect(page.locator('#external-attachments')).not.toContainText('слишком большое');
  await expect(page.locator('#retry')).toBeHidden();
- await expect.poll(async()=>{const status=await api('v3/status');return status.problems.count;}).toBe(0);
+ await expect.poll(async()=>{const status=await api('v3/status/details');return status.problems.count;}).toBe(0);
  await page.screenshot({path:artifactPath('external-audio-desktop.png')});
  const document=page.locator('[data-card]').filter({hasText:'External document post'});
  await expect(document.getByRole('img',{name:'Файл доступен в Telegram',exact:true})).toBeVisible();

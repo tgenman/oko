@@ -10,8 +10,8 @@ const root = path.resolve(__dirname, '../..');
 const ajv = new Ajv({allErrors:true,strict:false});
 addFormats(ajv);
 const routes: Record<string, string> = {
-  publication:'/api/v3/publication/{item}',reading_check:'/api/v3/reading/check',reading_material:'/api/v3/reading/materials/{item}',
-  navigation: '/api/v3/reading-composition', cards: '/api/v3/cards',
+  status_details:'/api/v3/status/details',publication:'/api/v3/publication/{item}',
+  navigation_subject: '/api/v3/navigation', navigation: '/api/v3/reading-composition', cards: '/api/v3/cards',
   material: '/api/v3/materials/{item}', status: '/api/v3/status',
   navigation_v3: '/api/v3/reading-composition', cards_v3: '/api/v3/cards', status_v3:'/api/v3/status',
   material_v3: '/api/v3/materials/{item}',
@@ -19,11 +19,11 @@ const routes: Record<string, string> = {
 const loaded = new Set<string>();
 const validators = new Map<string, ValidateFunction>();
 function contractFor(url: string, method = 'GET') {
-  if(method==='POST'&&new URL(url,'http://localhost').pathname==='/api/v3/reading/check')return 'reading_check';
   if (method !== 'GET') return null;
   const pathname = new URL(url, 'http://localhost').pathname;
   if(/^\/api\/v3\/publication\/[^/]+$/.test(pathname))return 'publication';
-  if(/^\/api\/v3\/reading\/materials\/[^/]+$/.test(pathname))return 'reading_material';
+  if (pathname === '/api/v3/navigation') return 'navigation_subject';
+  if (pathname === '/api/v3/status/details') return 'status_details';
   if (pathname === '/api/v3/status') return 'status_v3';
   if (pathname === '/api/v3/cards') return 'cards_v3';
   if (pathname === '/api/v3/reading-composition') return 'navigation_v3';
