@@ -429,3 +429,18 @@ def test_explicit_native_write_preserves_boolean_parameters(postgres_url, databa
         with transaction(writer):
             writer.execute_write('INSERT INTO synthetic_boolean_value(value) VALUES (%s)', (True,))
         assert reader.execute('SELECT value FROM synthetic_boolean_value').fetchone()[0] is True
+
+
+def test_storage_id_from_state_survives_reader_restart(postgres_url, tmp_path):
+    from uuid import UUID
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from tests.support.reader import HEADERS
+
+    def app():
+        return create_app(tmp_path, token='test', api_only=True, database_url=postgres_url)
+    with TestClient(app(), headers=HEADERS) as client:
+        first = client.get('/api/v3/status').headers['X-Oko-Storage-Id']
+        assert str(UUID(first)) == first
+    with TestClient(app(), headers=HEADERS) as client:
+        assert client.get('/api/v3/status').headers['X-Oko-Storage-Id'] == first

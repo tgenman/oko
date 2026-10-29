@@ -348,7 +348,11 @@ def restore_backup(root, identity, target, container):
 FOR s IN SELECT table_schema FROM information_schema.tables WHERE table_name='state'
 AND table_schema NOT IN ('pg_catalog','information_schema') LOOP
 EXECUTE format('INSERT INTO %I.state(key,value) VALUES (%L,%L) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',s,'work-enabled','false');
-EXECUTE format('UPDATE %I.reader_identity SET value=gen_random_uuid()::text WHERE id=1',s);
+IF to_regclass(format('%I.reader_identity',s)) IS NOT NULL THEN
+    EXECUTE format('UPDATE %I.reader_identity SET value=gen_random_uuid()::text WHERE id=1',s);
+ELSE
+    EXECUTE format('INSERT INTO %I.state(key,value) VALUES (%L,%L) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',s,'storage-id',to_json(gen_random_uuid()::text)::text);
+END IF;
 END LOOP; END $body$;"""
             execute('docker', 'exec', '-i', '-u', 'postgres', container, 'psql', '-U', 'postgres',
                     '-d', 'oko', '-v', 'ON_ERROR_STOP=1', input=statement.encode())

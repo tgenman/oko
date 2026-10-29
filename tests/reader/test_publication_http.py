@@ -107,7 +107,8 @@ def test_storage_precondition_rejects_other_library_and_etag_tracks_identity(tmp
         replacement=str(uuid4())
         def replace_identity():
             store=app.state.host.require_store()
-            with store.db:store.db.execute('UPDATE reader_identity SET value=%s WHERE id=1',(replacement,))
+            import json
+            with store.db:store.db.execute("UPDATE state SET value=%s WHERE key='storage-id'",(json.dumps(replacement),))
             store.read_versions.identity=replacement
         client.portal.call(replace_identity)
         changed=client.get('/api/v3/publication/'+items[0],headers={'X-Oko-Storage-Id':storage,'If-None-Match':old.headers['ETag']})

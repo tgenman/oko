@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import pytest
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -139,7 +140,8 @@ def test_restore_refuses_existing_target_before_remote_access(tmp_path):
     assert not (root / 'events').exists()
 
 
-def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disabled(tmp_path, postgres_url):
+@pytest.mark.parametrize('layout', ['legacy', 'state-text', 'state-jsonb'])
+def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disabled(tmp_path, postgres_url, layout):
     root, env = installation(tmp_path)
     assert run_backup(root, env, 'backup').returncode == 0
     target = tmp_path / 'recovered'
@@ -163,16 +165,24 @@ def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disa
         try:
             dsn = make_conninfo(postgres_url, dbname=name, options='')
             with psycopg.connect(dsn, autocommit=True) as restored:
-                restored.execute('CREATE TABLE state(key text PRIMARY KEY,value text)')
-                restored.execute('CREATE TABLE reader_identity(id integer PRIMARY KEY,value text)')
+                value_type = 'jsonb' if layout == 'state-jsonb' else 'text'
+                restored.execute(sql.SQL('CREATE TABLE state(key text PRIMARY KEY,value {})').format(sql.SQL(value_type)))
                 restored.execute('CREATE TABLE reader_entities(kind text,identity text,version bigint)')
                 restored.execute("INSERT INTO state VALUES ('work-enabled','true')")
-                restored.execute("INSERT INTO reader_identity VALUES (1,'previous-timeline')")
+                if layout == 'legacy':
+                    restored.execute('CREATE TABLE reader_identity(id integer PRIMARY KEY,value text)')
+                    restored.execute("INSERT INTO reader_identity VALUES (1,'previous-timeline')")
+                else:
+                    restored.execute("INSERT INTO state VALUES ('storage-id',%s)", ('"previous-timeline"',))
                 restored.execute("INSERT INTO reader_entities VALUES ('card','saved',42)")
                 restored.execute((root / 'restore-work-disabled.sql').read_text())
-                assert restored.execute('SELECT value FROM reader_identity').fetchone()[0] != 'previous-timeline'
+                if layout == 'legacy':
+                    identity = restored.execute('SELECT value FROM reader_identity').fetchone()[0]
+                else:
+                    identity = restored.execute("SELECT value::jsonb #>> '{}' FROM state WHERE key='storage-id'").fetchone()[0]
+                assert identity != 'previous-timeline'
                 assert restored.execute('SELECT version FROM reader_entities').fetchone()[0] == 42
-                assert restored.execute('SELECT value FROM state').fetchone()[0] == 'false'
+                assert restored.execute("SELECT value::text FROM state WHERE key='work-enabled'").fetchone()[0] == 'false'
         finally:
             admin.execute(sql.SQL('DROP DATABASE {}').format(sql.Identifier(name)))
 

@@ -84,3 +84,15 @@
   passed 151 files; `npm run api:check` passed; settings-owner Node suite passed
   109 tests. An earlier sandboxed Node attempt could not inspect processes and
   did not run; the authorized retry passed.
+- Migration 007 moves the existing UUID from `reader_identity` into `state`
+  as a JSON string and removes the old table. Tests cover an existing UUID,
+  a conflicting value, an invalid UUID, rollback and restart. Restore tests
+  cover legacy `reader_identity`, text `state`, and JSONB `state`, using separate
+  synthetic databases; restore creates a new identity and disables work.
+- Migration/transaction/HTTP/backup suites passed 62 Python tests. A separate
+  startup/browser/CLI run passed 19 tests and failed one stale CLI expectation
+  (`version 6` after migration 7); after correcting the expectation, the affected
+  4-test CLI suite passed. The PostgreSQL browser screenshot was inspected.
+- A fresh schema migrated through version 7 has 43 tables and 149 application
+  triggers, measured from the PostgreSQL catalog. This is an intermediate result,
+  not the target of 20 tables and zero application triggers.

@@ -21,7 +21,7 @@ class ReaderVersions:
         self._next_action_cleanup = float('-inf')
         self.db.before_commit=lambda: self.flush_reading_state(self.db)
         with self.db:
-            self.db.execute('INSERT INTO reader_identity VALUES ( 1 , %s ) ON CONFLICT DO NOTHING', (str(uuid.uuid4()),))
+            self.db.execute("INSERT INTO state(key,value) VALUES ('storage-id',%s) ON CONFLICT DO NOTHING", (json.dumps(str(uuid.uuid4())),))
             for kind, identity in [('status', 'runtime'), ('navigation', 'navigation')]:
                 self.db.execute('INSERT INTO reader_entities VALUES ( %s , %s , 1 , %s ) ON CONFLICT DO NOTHING', (kind, identity, store.wall_clock()))
             for kind, table in [('feed','feeds'),('folder','folders'),('card','items'),('material','items'),('filter','items'),('theses','items'),('media','items')]:
@@ -32,7 +32,11 @@ class ReaderVersions:
             self.db.execute('UPDATE reader_feed_counts SET visible = 0 WHERE unviewed = 0 AND visible != 0')
             self.db.execute('INSERT INTO reader_folder_counts SELECT f . id , coalesce ( sum ( c . visible ) , 0 ) FROM folders f LEFT JOIN feeds s ON s . folder_id = f . id LEFT JOIN reader_feed_counts c ON c . feed = s . id GROUP BY f . id ON CONFLICT ( folder ) DO UPDATE SET visible = excluded . visible WHERE reader_folder_counts . visible IS DISTINCT FROM excluded . visible')
             self.db.execute("INSERT INTO reader_job_time SELECT id , next , CASE WHEN next <= %s OR status != 'pending' THEN 1 ELSE 0 END FROM jobs WHERE kind IN ( 'fetch' , 'filter' , 'theses' ) ON CONFLICT ( job ) DO NOTHING", (store.clock(),))
-        self.identity = str(expect_row(self.db.execute('SELECT value FROM reader_identity WHERE id = 1').fetchone())[0])
+        identity = json.loads(expect_row(self.db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone())[0])
+        if not isinstance(identity, str):
+            raise ValueError('Invalid storage identity')
+        uuid.UUID(identity)
+        self.identity = identity
         with self.db:
             self.db.membership_feeds={r[0] for r in self.db.execute('SELECT id FROM feeds')}
             self.db.membership_folders={r[0] for r in self.db.execute('SELECT id FROM folders')}

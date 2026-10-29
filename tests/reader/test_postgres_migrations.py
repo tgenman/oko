@@ -160,3 +160,38 @@ def test_membership_upgrade_rejects_missing_old_owner_atomically(connections):
             migrate(db, MIGRATIONS)
         assert db.execute("SELECT feed_id FROM items WHERE id='missing'").fetchone() == ('feed',)
         verify(db, MIGRATIONS[:5])
+
+
+def test_storage_identity_migrates_without_changing_existing_identity(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:6])
+        db.execute("INSERT INTO reader_identity VALUES (1, '4c50e13d-2af6-4e4b-b994-cd47881b92ac')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT value::jsonb #>> '{}' FROM state WHERE key='storage-id'").fetchone() == ('4c50e13d-2af6-4e4b-b994-cd47881b92ac',)
+        assert db.execute("SELECT to_regclass('reader_identity')").fetchone() == (None,)
+        verify(db, MIGRATIONS)
+
+
+def test_storage_identity_migration_rejects_conflicting_state_atomically(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:6])
+        db.execute("INSERT INTO reader_identity VALUES (1, '4c50e13d-2af6-4e4b-b994-cd47881b92ac')")
+        db.execute("INSERT INTO state VALUES ('storage-id', '\"different\"')")
+        with pytest.raises(psycopg.errors.RaiseException, match='conflicts with reader identity'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT value FROM reader_identity WHERE id=1').fetchone() == ('4c50e13d-2af6-4e4b-b994-cd47881b92ac',)
+        assert db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone() == ('"different"',)
+        verify(db, MIGRATIONS[:6])
+
+
+def test_storage_identity_migration_rejects_invalid_identity(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:6])
+        db.execute("INSERT INTO reader_identity VALUES (1, 'not-a-uuid')")
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid reader identity'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT value FROM reader_identity WHERE id=1').fetchone() == ('not-a-uuid',)
+        verify(db, MIGRATIONS[:6])
