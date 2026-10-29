@@ -388,3 +388,33 @@ def test_data_changing_cte_is_committed_or_rolled_back_with_owned_transaction(da
             assert writer.execute_write(query, ('cte', 'committed')).fetchone()[0] == 'cte'
             assert reader.execute("SELECT value FROM state WHERE key='cte'").fetchone() is None
         assert reader.execute("SELECT value FROM state WHERE key='cte'").fetchone()[0] == 'committed'
+
+
+def test_read_snapshot_is_consistent_and_rejects_writes(database):
+    import psycopg
+    from oko.storage.transaction import read_snapshot
+
+    with database() as writer, database() as reader:
+        with transaction(writer):
+            writer.execute("INSERT INTO state VALUES ('snapshot','before')")
+        with read_snapshot(reader):
+            assert reader.execute("SELECT value FROM state WHERE key='snapshot'").fetchone()[0] == 'before'
+            with transaction(writer):
+                writer.execute("UPDATE state SET value='after' WHERE key='snapshot'")
+            assert reader.execute("SELECT value FROM state WHERE key='snapshot'").fetchone()[0] == 'before'
+        assert reader.execute("SELECT value FROM state WHERE key='snapshot'").fetchone()[0] == 'after'
+        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction), read_snapshot(reader):
+            reader.execute("UPDATE state SET value='wrong' WHERE key='snapshot'")
+        assert reader.execute("SELECT value FROM state WHERE key='snapshot'").fetchone()[0] == 'after'
+
+
+def test_read_snapshot_cannot_schedule_a_write_commit_callback(database):
+    from oko.storage.transaction import read_snapshot
+
+    with database() as db:
+        effects = []
+        with pytest.raises(RuntimeError, match='read-only'), read_snapshot(db):
+            db.after_commit(lambda: effects.append('unexpected'))
+        with transaction(db):
+            db.execute("INSERT INTO state VALUES ('later','write')")
+        assert effects == []

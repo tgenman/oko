@@ -53,6 +53,7 @@ class PostgresConnection:
         self.access_lock = RLock()
         self._trace: Callable[[str], None] | None = None
         self.transaction_depth = 0
+        self._read_only = False
         self.transaction_failed = False
         self.commit_callbacks: list[Callable[[], None]] = []
         self.rollback_callbacks: list[Callable[[], None]] = []
@@ -95,6 +96,25 @@ class PostgresConnection:
             self._db.execute("SELECT set_config('oko.clock',%s,false),set_config('oko.wall',%s,false)",
                              (str(self._clock()), str(self._wall_clock())))
 
+    def begin_read(self) -> None:
+        if self.in_transaction:
+            raise RuntimeError('Unowned transaction at read entry')
+        if self._trace:
+            self._trace('BEGIN READ ONLY')
+        self._db.execute('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        self._read_only = True
+
+    def finish_read(self, *, success: bool) -> None:
+        if self._trace:
+            self._trace('COMMIT' if success else 'ROLLBACK')
+        try:
+            if success:
+                self._db.commit()
+            else:
+                self._db.rollback()
+        finally:
+            self._read_only = False
+
     def execute(self, query: str, parameters: Sequence[Any] | Mapping[str, Any] = ()) -> psycopg.Cursor[Record]:
         # Match repository implicit DML transactions while keeping plain reads idle.
         compiled = query
@@ -132,6 +152,8 @@ class PostgresConnection:
         return self
 
     def after_commit(self, callback: Callable[[], None]) -> None:
+        if self._read_only:
+            raise RuntimeError('Callbacks are not allowed in a read-only snapshot')
         if self.transaction_depth:
             self.commit_callbacks.append(callback)
         else:
@@ -142,6 +164,8 @@ class PostgresConnection:
             self.before_commit()
 
     def after_rollback(self, callback: Callable[[], None]) -> None:
+        if self._read_only:
+            raise RuntimeError('Callbacks are not allowed in a read-only snapshot')
         if not self.in_transaction:
             raise RuntimeError('Rollback callback requires an active transaction')
         self.rollback_callbacks.append(callback)
