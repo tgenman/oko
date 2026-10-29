@@ -425,7 +425,7 @@ class Store:
         if not material.collection_error or not self.subscriptions.history.member(item):
             self.subscriptions.history.saved(item,material.full)
         if not material.collection_error:
-            self.db.execute('DELETE FROM source_deleted WHERE item = %s',(item,))
+            self.publications.set_source_deleted([item], False)
 
 
     def folder_contents(self, folder: str) -> FolderContents:
@@ -486,7 +486,7 @@ class Store:
             self.problems.forget_materials(set(items), self.wall_clock())
             for item in items:
                 self.filters.forget(item)
-                self.db.execute('DELETE FROM source_deleted WHERE item = %s',(item,))
+                self.publications.set_source_deleted([item], False)
                 if self.publications.owns(item):
                     self.publications.forget(item)
                 self.db.execute('DELETE FROM thesis_inputs WHERE item = %s', (item,))
@@ -673,5 +673,5 @@ class Store:
 
 
     def mark_source_removed(self, item: str) -> None:
-        self.db.execute('INSERT INTO source_deleted VALUES ( %s ) ON CONFLICT DO NOTHING',(item,))
+        self.publications.set_source_deleted([item], True)
         publication_links.notify_parents(self,item)

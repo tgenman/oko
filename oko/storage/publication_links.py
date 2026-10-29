@@ -89,7 +89,7 @@ def prune(store: 'Store', candidates: set[str]) -> None:
     for start in range(0, len(items), 400):
         batch = items[start:start+400]
         marks = ','.join('%s' for _ in batch)
-        store.db.execute(f'DELETE FROM source_deleted WHERE item IN ( {marks} )', batch)
+        store.publications.set_source_deleted(batch, False)
         store.db.execute(f'DELETE FROM filter_inputs WHERE item IN ( {marks} )', batch)
         store.db.execute(f'DELETE FROM thesis_inputs WHERE item IN ( {marks} )', batch)
         store.db.execute(f'UPDATE items SET viewed = 1 , complete = 0 WHERE id IN ( {marks} )', batch)

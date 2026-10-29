@@ -128,16 +128,16 @@ class JobRepository:
             if not active:
                 self.enqueue_discovery(feed)
                 self.store.db.execute("UPDATE jobs SET status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running'", (self.store.wall_clock(),self.store.wall_clock(),discovery))
-            for row in self.store.db.execute("SELECT i . id , i . members , j . error , j . status FROM unviewed_items_by_feed i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i . feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
+            for row in self.store.db.execute("SELECT i . id , i . members , i . source_deleted , j . error , j . status FROM unviewed_items_by_feed i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i . feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
                 material = self.store.material(row['id'])
-                unavailable = self.store.db.execute('SELECT 1 FROM source_deleted WHERE item = %s', (row['id'],)).fetchone()
+                unavailable = row['source_deleted']
                 manifest=SourceManifest.model_validate_json(json.dumps(self.store.original(row['id'])[0]['source_manifest'])) if material and material.get('complete') and self.store.original(row['id'])[0].get('source_manifest') else None
                 if material and not row['error'] and not unavailable and (material.get('full',False) or expected_incomplete(manifest)) and not self.store._needs_collection(row['id']):
                     continue
                 if row['members'] != '[]' and material and material.get('full',False):
                     continue
                 if row['error'] or unavailable or not material or not material.get('full',False):
-                    self.store.db.execute("UPDATE jobs SET manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR item IN ( SELECT item FROM source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
+                    self.store.db.execute("UPDATE jobs SET manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR EXISTS ( SELECT 1 FROM items i WHERE i.id=jobs.item AND i.source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
             for kind in ('filter','theses'):
                 for row in self.store.db.execute('SELECT j . item FROM jobs j JOIN items_by_feed i ON i . id = j . item WHERE i . feed_id = %s AND j . kind = %s AND j . error IS NOT NULL',(feed,kind)).fetchall():
                     self.retry_processing(row[0],kind)

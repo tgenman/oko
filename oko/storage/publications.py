@@ -46,9 +46,26 @@ class Publications:
     @reading_value
     def source_deleted(self,item: str) -> bool:
         snapshot=material_read.current(self.store.db)
-        if snapshot and item in snapshot.items:
-            return bool(snapshot.items[item]['source_deleted'])
-        return self.store.db.execute('SELECT 1 FROM source_deleted WHERE item = %s',(item,)).fetchone() is not None
+        if snapshot:
+            row = snapshot.items.get(item) or snapshot.related_items.get(item)
+            if row is not None:
+                return bool(row['source_deleted'])
+        row = self.store.db.execute('SELECT source_deleted FROM items WHERE id=%s', (item,)).fetchone()
+        return bool(row and row[0])
+
+    def set_source_deleted(self, identities: list[str], deleted: bool) -> None:
+        """Change source markers and reader freshness in the caller's transaction."""
+        ordered = sorted(set(identities))
+        literal = 'TRUE' if deleted else 'FALSE'
+        for start in range(0, len(ordered), 400):
+            batch = ordered[start:start+400]
+            changed = [row[0] for row in self.store.db.execute(
+                f'UPDATE items SET source_deleted={literal} WHERE id=ANY(%s) AND source_deleted IS DISTINCT FROM {literal} RETURNING id', (batch,))]
+            if not changed:
+                continue
+            now = self.store.wall_clock()
+            self.store.db.execute("INSERT INTO reader_entities SELECT 'material',unnest(%s::text[]),1,%s ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed", (changed, now))
+            self.store.db.execute("INSERT INTO reader_entities VALUES ('status','runtime',1,%s) ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed", (now,))
 
     def feed(self, feed: str) -> bool:
         return self.store.db.execute("SELECT 1 FROM feeds WHERE id = %s AND adapter IN ( 'telegram_web_adapter' , 'telegram_client_adapter' , 'rss_adapter' , 'youtube_adapter' )", (feed,)).fetchone() is not None
@@ -100,7 +117,8 @@ class Publications:
         db=self.store.db
         db.execute("UPDATE feeds SET cursor = '' WHERE id = %s",(feed,))
         db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0 )",(feed,))
-        db.execute('DELETE FROM source_deleted WHERE item IN ( SELECT id FROM items_by_feed WHERE feed_id = %s )',(feed,))
+        marked = [row[0] for row in db.execute('SELECT id FROM items_by_feed WHERE feed_id=%s AND source_deleted', (feed,))]
+        self.set_source_deleted(marked, False)
         db.execute("UPDATE items SET status = 'pending_collection' WHERE id IN (SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0)",(feed,))
         db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,))
 
@@ -233,7 +251,7 @@ class Publications:
         """Called in the accepting transaction, after durable media preparation."""
         content, media = prepared
         store = self.store
-        store.db.execute('DELETE FROM source_deleted WHERE item = %s',(item,))
+        self.set_source_deleted([item], False)
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)

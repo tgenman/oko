@@ -444,3 +444,33 @@ def test_storage_id_from_state_survives_reader_restart(postgres_url, tmp_path):
         assert str(UUID(first)) == first
     with TestClient(app(), headers=HEADERS) as client:
         assert client.get('/api/v3/status').headers['X-Oko-Storage-Id'] == first
+
+
+def test_source_deletion_and_reader_freshness_roll_back_together(postgres_url, tmp_path):
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from tests.support.reader import HEADERS
+    from tests.support.worker_library import worker_library
+
+    store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
+    store.set_work_enabled(False)
+    store.db.close()
+    app = create_app(tmp_path, token='test', api_only=True, database_url=postgres_url)
+    with TestClient(app, headers=HEADERS) as client:
+        path = '/api/v3/publication/' + item
+        before = client.get(path)
+        assert before.status_code == 200 and before.json()['source_deleted'] is False
+        def mark(fail):
+            current = app.state.host.require_store()
+            with transaction(current.db):
+                current.publications.set_source_deleted([item], True)
+                if fail:
+                    raise RuntimeError('synthetic rollback')
+        with pytest.raises(RuntimeError, match='synthetic rollback'):
+            client.portal.call(mark, True)
+        assert client.get(path, headers={'If-None-Match': before.headers['ETag']}).status_code == 304
+        client.portal.call(mark, False)
+        after = client.get(path, headers={'If-None-Match': before.headers['ETag']})
+        assert after.status_code == 200 and after.json()['source_deleted'] is True
+        client.portal.call(mark, False)
+        assert client.get(path, headers={'If-None-Match': after.headers['ETag']}).status_code == 304

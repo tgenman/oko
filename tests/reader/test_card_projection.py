@@ -38,6 +38,7 @@ def test_card_keeps_linked_preview_without_mutating_opened_material(tmp_path):
     store.settings_changed()
     with store.db:
         row = dict(store.db.execute('SELECT * FROM items WHERE id=%s', (item,)).fetchone())
+        row.pop('source_deleted')  # New synthetic publications start as present.
         content = json.loads(row['content'])
         content['blocks'] = [dict(type='text', role='body', text='Linked body')]
         content['extra']['_reader'].update(title='Article', changed=True,
@@ -79,7 +80,7 @@ def test_cards_page_keeps_membership_and_card_in_one_snapshot(tmp_path, postgres
         assert [card['id'] for card in initial.json()['items']] == [item]
         entered, release = threading.Event(), threading.Event()
         def trace(query):
-            if 'SELECT i . * , d . item AS source_deleted' in query and not entered.is_set():
+            if 'SELECT i . * , coalesce ( v . hidden' in query and not entered.is_set():
                 entered.set()
                 assert release.wait(5)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))

@@ -131,6 +131,7 @@ def test_open_publication_keeps_parent_and_linked_article_in_one_snapshot(tmp_pa
         store.set_work_enabled(False)
         with store.db:
             row = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+            row.pop('source_deleted')  # New synthetic publications start as present.
             child_content = json.loads(row['content'])
             child_content['blocks'][0]['text'] = 'Child before'
             child = dict(row, id='snapshot-child', source_id='snapshot-child', external_id='snapshot-child',

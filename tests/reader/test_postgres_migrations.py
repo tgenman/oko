@@ -312,3 +312,30 @@ def test_feed_details_migration_rejects_conflicting_data(connections, conflict):
             migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('feed_details')").fetchone() == ('feed_details',)
         verify(db, MIGRATIONS[:9])
+
+
+def test_source_deletion_migration_preserves_marker_in_publication(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:10])
+        db.execute("INSERT INTO items(id,platform,external_id) VALUES ('gone','rss','gone'),('present','rss','present')")
+        db.execute("INSERT INTO source_deleted VALUES ('gone')")
+        migrate(db, MIGRATIONS)
+        assert db.execute('SELECT id,source_deleted FROM items_read ORDER BY id').fetchall() == [('gone', True), ('present', False)]
+        assert db.execute("SELECT to_regclass('source_deleted')").fetchone() == (None,)
+        names = ['reader_v_deleted_delete','reader_v_deleted_insert','reader_v_deleted_update']
+        assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname = ANY(%s)', (names,)).fetchone() == (0,)
+        functions = ['oko_trigger_reader_v_deleted_delete','oko_trigger_reader_v_deleted_insert','oko_trigger_reader_v_deleted_update']
+        assert db.execute('SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname = ANY(%s)', (functions,)).fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+def test_source_deletion_migration_rejects_orphan_marker(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:10])
+        db.execute("INSERT INTO source_deleted VALUES ('missing')")
+        with pytest.raises(psycopg.errors.RaiseException, match='orphan source deletion'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT item FROM source_deleted').fetchone() == ('missing',)
+        verify(db, MIGRATIONS[:10])

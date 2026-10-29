@@ -103,6 +103,7 @@ def test_compact_cards_batch_links_and_processing_permissions(postgres_url, tmp_
     store.processing.background = True
     with store.db:
         template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (first,)).fetchone())
+        template.pop('source_deleted')  # New synthetic publications start as present.
         fields = list(template)
         for n in range(1, count):
             identity = f'{n:032x}'
@@ -137,6 +138,7 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
     store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters=''))
     with store.db:
         template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+        template.pop('source_deleted')  # New synthetic publications start as present.
         fields = list(template)
         children = []
         for n in range(linked_count):
@@ -188,6 +190,7 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
     store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters='', theses=False))
     with store.db:
         template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+        template.pop('source_deleted')  # New synthetic publications start as present.
         fields = list(template)
         for n in range(count):
             identity = parent if n == 0 else f'{n+1:032x}'

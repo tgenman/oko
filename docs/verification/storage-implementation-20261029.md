@@ -136,3 +136,14 @@
 - Catalog measurement on an empty database migrated through version 10: 39
   tables and 144 non-internal triggers. Times remain double precision in this
   transitional schema; the final design still requires timestamptz conversion.
+- Migration 011 moves source-deletion markers into `items.source_deleted`,
+  rejects orphan markers and removes the old table plus three triggers/functions.
+  Python writes the marker and reader freshness in the same transaction. Existing
+  transitional views expose the new column; they remain scheduled for removal.
+- The first affected Python run passed 131 tests and failed one fixture that copied
+  the new boolean through a legacy integer adapter. Fresh synthetic publications
+  now use the column default; the affected 24-test reading/query-cost suite passed.
+  Tests also cover orphan rollback, HTTP deletion/recovery and conditional GETs.
+  Four Playwright linked-publication/unavailable-source scenarios passed.
+- Catalog measurement on an empty database migrated through version 11: 38 tables
+  and 141 non-internal triggers. The application and target schema are not complete.

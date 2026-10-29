@@ -15,4 +15,5 @@ MIGRATIONS = (
     Migration(8, 'feed-avatars', (Path(__file__).parent / 'postgres' / '008-feed-avatars.sql').read_text()),
     Migration(9, 'collection-status', (Path(__file__).parent / 'postgres' / '009-collection-status.sql').read_text()),
     Migration(10, 'feed-details', (Path(__file__).parent / 'postgres' / '010-feed-details.sql').read_text()),
+    Migration(11, 'source-deletion', (Path(__file__).parent / 'postgres' / '011-source-deletion.sql').read_text()),
 )
