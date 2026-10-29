@@ -14,4 +14,5 @@ MIGRATIONS = (
     Migration(7, 'storage-identity', (Path(__file__).parent / 'postgres' / '007-storage-identity.sql').read_text()),
     Migration(8, 'feed-avatars', (Path(__file__).parent / 'postgres' / '008-feed-avatars.sql').read_text()),
     Migration(9, 'collection-status', (Path(__file__).parent / 'postgres' / '009-collection-status.sql').read_text()),
+    Migration(10, 'feed-details', (Path(__file__).parent / 'postgres' / '010-feed-details.sql').read_text()),
 )

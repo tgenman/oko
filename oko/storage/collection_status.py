@@ -120,7 +120,7 @@ class CollectionStatus:
             # Job kinds are disjoint, so these branches cannot duplicate an operation.
             selected = f"SELECT {fields} , CASE WHEN j . item = '' THEN 'demo' ELSE j . item END AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , i . feed_id AS feed FROM jobs j JOIN unviewed_items_by_feed i ON i . id = j . item WHERE j . kind = 'fetch' AND i . viewed = 0 AND i . feed_id IN ( {marks} ) UNION ALL SELECT {fields} , i . feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN unviewed_items_by_feed i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i . viewed = 0 AND i . feed_id IN ( {marks} )"
             jobs.extend(self.db.execute(f"SELECT {outer_fields}, {attempt_fields} FROM ( {selected} ) j WHERE ( j . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR j . status = 'done' AND j . error IS NOT NULL ) AND coalesce ( j . problem_code , '' ) != 'source-deleted'", (discoveries + batch + batch)).fetchall())
-            for row in self.db.execute(f'SELECT f . id , d . updated , {result_fields} FROM feeds f LEFT JOIN feed_details d ON d . feed = f . id WHERE f . id IN ( {marks} )', batch):
+            for row in self.db.execute(f'SELECT f.id, f.last_discovery_at AS updated, {result_fields} FROM feeds f WHERE f.id IN ( {marks} )', batch):
                 if details:
                     result = dict(row['result_data']) if row['result_data'] else {}
                 else:

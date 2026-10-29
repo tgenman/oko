@@ -61,7 +61,7 @@ class Publications:
 
     def configure_feed(self, feed: str) -> None:
         store = self.store
-        row = store.db.execute('SELECT transport,kind,original_urls,created_at,config,telegram_username,telegram_peer FROM feeds WHERE id = %s', (feed,)).fetchone()
+        row = store.db.execute('SELECT transport,kind,original_urls,config,telegram_username,telegram_peer FROM feeds WHERE id = %s', (feed,)).fetchone()
         binding = store.subscriptions.telegram.binding(feed)
         transport=row['transport'] or row['kind'] if row else None
         if row and transport in ('rss','youtube'):
@@ -73,27 +73,21 @@ class Publications:
                 ref=feed_reference(url)
                 platform,external_id,adapter='youtube',ref.key.external_id,'youtube_adapter'
                 url=ref.url
-            details=store.subscriptions.details.snapshot(feed)
-            store.db.execute("UPDATE feeds SET platform = %s , external_id = %s , url = %s , description = %s , created_at = %s , adapter = %s , config = '{}' , enabled = %s WHERE id = %s",
-                (platform,external_id,url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),adapter,
-                 int(row['transport'] is not None),feed))
+            store.db.execute("UPDATE feeds SET platform = %s , external_id = %s , url = %s , adapter = %s , config = '{}' , enabled = %s WHERE id = %s",
+                (platform,external_id,url,adapter,int(row['transport'] is not None),feed))
             return
         if row and binding and binding['kind']=='client' and json.loads(row['config']).get('source_kind')=='channel':
             config={**json.loads(row['config']),**binding}
             url='https://t.me/'+row['telegram_username'] if row['telegram_username'] else 'https://t.me/c/'+str(-row['telegram_peer']-1000000000000)
-            details=store.subscriptions.details.snapshot(feed)
-            store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_client_adapter' , config = %s WHERE id = %s",
-                (str(row['telegram_peer']),url,details['description'] or '',details['created'] or row['created_at'] or store.wall_clock(),json.dumps(config),
-                 feed))
+            store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , adapter = 'telegram_client_adapter' , config = %s WHERE id = %s",
+                (str(row['telegram_peer']),url,json.dumps(config),feed))
             return
         if not row or not binding or binding['kind'] != 'web':
             return
         url = reference('https://t.me/s/'+binding['username']).url
-        details = store.subscriptions.details.snapshot(feed)
         external_id = str(row['telegram_peer']) if row['telegram_peer'] is not None else url
-        store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , description = %s , created_at = %s , adapter = 'telegram_web_adapter' , config = %s WHERE id = %s",
-            (external_id, url, details['description'] or '', details['created'] or row['created_at'] or store.wall_clock(), json.dumps({**json.loads(row['config']),**binding}),
-             feed))
+        store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , adapter = 'telegram_web_adapter' , config = %s WHERE id = %s",
+            (external_id, url, json.dumps({**json.loads(row['config']),**binding}), feed))
 
     def identify(self, item: str, ref: ExternalReference) -> None:
         row = expect_row(self.store.db.execute('SELECT * FROM items_read WHERE id = %s', (item,)).fetchone())

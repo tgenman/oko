@@ -275,3 +275,40 @@ def test_collection_status_migration_rejects_ambiguous_data(connections, invalid
             migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('collection_attempts'),to_regclass('collection_results')").fetchone() == ('collection_attempts', 'collection_results')
         verify(db, MIGRATIONS[:8])
+
+
+def test_feed_details_migration_preserves_missing_empty_and_saved_values(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:9])
+        db.execute("INSERT INTO feeds(id,description,created_at) VALUES ('missing','',NULL),('empty','',10),('saved','Saved',20),('detail-only','',NULL)")
+        db.execute("INSERT INTO feed_details(feed,created,modified,updated,marked_read,description) VALUES ('missing',NULL,NULL,NULL,NULL,NULL),('empty',10,11,12,13,''),('saved',20,21,22,23,'Saved'),('detail-only',30,31,32,33,'Only in details')")
+        migrate(db, MIGRATIONS)
+        rows = db.execute('SELECT id,description,created_at,modified_at,last_discovery_at,last_viewed_at FROM feeds ORDER BY id').fetchall()
+        assert rows == [('detail-only','Only in details',30,31,32,33), ('empty','',10,11,12,13), ('missing',None,None,None,None,None), ('saved','Saved',20,21,22,23)]
+        assert db.execute("SELECT to_regclass('feed_details')").fetchone() == (None,)
+        verify(db, MIGRATIONS)
+
+
+@pytest.mark.parametrize('conflict', ['orphan', 'description', 'created', 'missing-description', 'missing-created', 'nonfinite'])
+def test_feed_details_migration_rejects_conflicting_data(connections, conflict):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:9])
+        db.execute("INSERT INTO feeds(id,description,created_at) VALUES ('feed','old',10)")
+        if conflict == 'orphan':
+            db.execute("INSERT INTO feed_details(feed,description) VALUES ('missing','orphan')")
+        elif conflict == 'description':
+            db.execute("INSERT INTO feed_details(feed,created,description) VALUES ('feed',10,'different')")
+        elif conflict == 'created':
+            db.execute("INSERT INTO feed_details(feed,created,description) VALUES ('feed',20,'old')")
+        elif conflict == 'missing-description':
+            db.execute("INSERT INTO feed_details(feed,created,description) VALUES ('feed',10,NULL)")
+        elif conflict == 'missing-created':
+            db.execute("INSERT INTO feed_details(feed,created,description) VALUES ('feed',NULL,'old')")
+        else:
+            db.execute("INSERT INTO feed_details(feed,created,modified,description) VALUES ('feed',10,'NaN'::float8,'old')")
+        with pytest.raises(psycopg.errors.RaiseException, match='conflicting feed details'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('feed_details')").fetchone() == ('feed_details',)
+        verify(db, MIGRATIONS[:9])

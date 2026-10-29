@@ -266,7 +266,7 @@ class Store:
                 self.subscriptions.details.record(feed,'updated')
             self.subscriptions.details.description(feed,description)
             self.fault('before_discovery_commit')
-            self.db.execute('UPDATE feeds SET cursor = %s , description = COALESCE ( %s , description ) WHERE id = %s',(cursor,description,feed))
+            self.db.execute('UPDATE feeds SET cursor = %s WHERE id = %s',(cursor,feed))
 
         return effects
 

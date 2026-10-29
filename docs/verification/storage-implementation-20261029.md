@@ -123,3 +123,16 @@
 - Catalog measurement on an empty database migrated through version 9: 40 tables
   and 144 non-internal triggers. `collection_attempt` is transitional; the final
   target still requires the designed job fields and trigger-free schema.
+- Migration 010 moves `feed_details` into `feeds` and removes the former table.
+  The target schema now keeps `description` nullable: NULL means not observed,
+  while an empty string means the source explicitly supplied an empty description.
+  Tests cover both cases, detail-only values, conflicting copies, orphan records
+  and non-finite timestamps; ambiguous data aborts the transaction.
+- The affected feed/collection/migration/Telegram suites passed 66 Python tests;
+  after adding migration edge cases, the 31-test migration suite passed again.
+  Shared publications, folder management, pipeline and production-PostgreSQL
+  browser checks passed 17 tests; 6 Playwright feed/collection scenarios passed.
+  Desktop/mobile collection and PostgreSQL reader screenshots were inspected.
+- Catalog measurement on an empty database migrated through version 10: 39
+  tables and 144 non-internal triggers. Times remain double precision in this
+  transitional schema; the final design still requires timestamptz conversion.
