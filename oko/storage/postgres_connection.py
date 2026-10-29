@@ -20,7 +20,7 @@ from oko.storage.postgres_schema import MIGRATIONS
 
 
 @lru_cache(maxsize=2048)
-def _command(query: str) -> str:
+def _command(query: str, *, allow_write_cte: bool = False) -> str:
     """Validate transaction ownership without translating the SQL dialect."""
     tokens = re.findall(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|--[^\n]*|/\*[\s\S]*?\*/|[A-Za-z_]\w*|;", query)
     words: list[str] = [token.upper() for token in tokens if not token.startswith(("'", '"', '--', '/*'))]
@@ -31,7 +31,7 @@ def _command(query: str) -> str:
     command = words[0]
     if command not in ('SELECT', 'WITH', 'INSERT', 'UPDATE', 'DELETE'):
         raise ValueError('Use the owned transaction interface; schema changes require migrations')
-    if command == 'WITH' and any(word in ('INSERT', 'UPDATE', 'DELETE') for word in words[1:]):
+    if command == 'WITH' and not allow_write_cte and any(word in ('INSERT', 'UPDATE', 'DELETE') for word in words[1:]):
         raise ValueError('Data-changing CTEs must use an explicit repository write')
     return command
 
@@ -105,6 +105,16 @@ class PostgresConnection:
         if self._trace:
             self._trace(compiled)
         return self._db.execute(compiled, bound or None)
+
+    def execute_write(self, query: str, parameters: Sequence[Any] | Mapping[str, Any] = ()) -> psycopg.Cursor[Record]:
+        """Execute a native write, including a data-changing CTE, under its owner."""
+        if not self.transaction_depth:
+            raise RuntimeError('An owned transaction is required for an explicit write')
+        _command(query, allow_write_cte=True)
+        bound = {key: int(value) if isinstance(value, bool) else value for key, value in parameters.items()} if isinstance(parameters, Mapping) else tuple(int(value) if isinstance(value, bool) else value for value in parameters)
+        if self._trace:
+            self._trace(query)
+        return self._db.execute(query, bound or None)
 
     def executemany(self, query: str, parameters: Sequence[Sequence[Any]]) -> None:
         compiled = query

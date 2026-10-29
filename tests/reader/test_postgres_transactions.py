@@ -372,3 +372,19 @@ def test_saved_source_statuses_survive_locale_aware_collation(postgres_url, tmp_
         assert store.source_statuses() == [dict(feed_id='demo', error='Synthetic saved failure')]
     finally:
         store.db.close()
+
+
+def test_data_changing_cte_is_committed_or_rolled_back_with_owned_transaction(database):
+    with database() as writer, database() as reader:
+        query = "WITH inserted AS (INSERT INTO state VALUES (%s, %s) RETURNING key) SELECT key FROM inserted"
+        with pytest.raises(RuntimeError, match='owned transaction'):
+            writer.execute_write(query, ('cte', 'unowned'))
+        with pytest.raises(RuntimeError, match='rollback'), transaction(writer):
+            assert writer.execute_write(query, ('cte', 'rolled back')).fetchone()[0] == 'cte'
+            assert reader.execute("SELECT value FROM state WHERE key='cte'").fetchone() is None
+            raise RuntimeError('rollback')
+        assert reader.execute("SELECT value FROM state WHERE key='cte'").fetchone() is None
+        with transaction(writer):
+            assert writer.execute_write(query, ('cte', 'committed')).fetchone()[0] == 'cte'
+            assert reader.execute("SELECT value FROM state WHERE key='cte'").fetchone() is None
+        assert reader.execute("SELECT value FROM state WHERE key='cte'").fetchone()[0] == 'committed'
