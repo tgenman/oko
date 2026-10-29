@@ -117,7 +117,7 @@ export class MenusOwner {
   status(state:RuntimeStatus,revision=this.statusGeneration){
     if(revision!==this.statusGeneration||this.stopped)return;
     this.histories=state.initial_histories;this.youtube=state.youtube;this.changed();
-    const path=this.currentPath;if(this.active==='feeds'&&this.page==='home'&&path?.startsWith('feed/')&&!this.settingsLoads.has(path)&&!this.saving.has(path+'/feed'))void this.loadSettings();
+    const path=this.currentPath;if(this.active==='feeds'&&this.page==='home'&&path?.startsWith('feed/')&&!this.settingsLoads.has(path)&&!this.settingsFailures.has(path)&&!this.saving.has(path+'/feed'))void this.loadSettings();
     if(this.deletions.size&&!this.deletionRefresh)this.deletionRefresh=this.refresh().then(applied=>{
       if(!applied)return;for(const id of this.deletions)if(!this.subscriptions.feeds.some(feed=>feed.id===id))this.finishRemoval(id);this.changed();
     }).catch(()=>{}).finally(()=>{this.deletionRefresh=null;});

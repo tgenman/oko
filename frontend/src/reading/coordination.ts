@@ -40,6 +40,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   let moreLoading:{key:string;controller:AbortController;promise:Promise<void>}|undefined;
   let checking:AbortController|undefined;
   let detailRequest:AbortController|undefined;
+  let detailsFailed=false,settingsAppliedRevision:number|undefined;
   let unavailable=false;
   let displayedList:string|undefined;
   let contentEpoch = 0;
@@ -198,12 +199,15 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     if(detailRequest)return;
     const controller=new AbortController();detailRequest=controller;
     const settingsRevision=menus.statusRevision();
-    void resources.refreshDetails(controller.signal).then(details=>{
+    void resources.refreshDetails(controller.signal).then(({data:details,changed})=>{
       if(controller.signal.aborted||stopped||!details)return;
-      if(statusPanel.isOpen())statusPanel.update(details.problems,details);
-      if(menus.isOpen())menus.status(details,settingsRevision);
+      if(statusPanel.isOpen()&&(changed||detailsFailed))statusPanel.update(details.problems,details);
+      if(menus.isOpen()&&(changed||detailsFailed||settingsAppliedRevision!==settingsRevision)){
+        menus.status(details,settingsRevision);settingsAppliedRevision=settingsRevision;
+      }
+      detailsFailed=false;
     }).catch(error=>{
-      if(!controller.signal.aborted&&!stopped&&statusPanel.isOpen())statusPanel.detailsFailed(errorMessage(error));
+      if(!controller.signal.aborted&&!stopped){detailsFailed=true;if(statusPanel.isOpen())statusPanel.detailsFailed(errorMessage(error));}
     }).finally(()=>{if(detailRequest===controller)detailRequest=undefined;});
   }
   async function updateReader() {
@@ -226,7 +230,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       const reply=await resources.refresh(controller.signal);
       if(!active())return;
       const accepted=resources.accept(reply);
-      if(accepted.reset){detailRequest?.abort();detailRequest=undefined;actions.reset();statusPanel.reset();pages.clear();list.clear();opened.reset();void refresh();return;}
+      if(accepted.reset){detailRequest?.abort();detailRequest=undefined;detailsFailed=false;settingsAppliedRevision=undefined;actions.reset();statusPanel.reset();pages.clear();list.clear();opened.reset();void refresh();return;}
       opened.connected();
       const state=resources.status;
       if(!state)throw new Error('Reading status temporarily unavailable');

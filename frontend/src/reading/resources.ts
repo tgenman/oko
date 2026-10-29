@@ -50,7 +50,7 @@ export function createReadingResources(api:ReaderApi) {
     if(storageId!==identity||(reply.response?.headers.get('X-Oko-Storage-Id')||identity)!==identity)throw new Error('Storage changed while reading status details');
     const value=accepted(reply);
     if(value){details=value;detailsTag=reply.response?.headers.get('etag')??undefined;}
-    return details;
+    return {data:details,changed:value!==undefined};
   }
 
   function navigation():Navigation|undefined {
