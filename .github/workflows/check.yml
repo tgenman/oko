@@ -56,11 +56,13 @@ jobs:
           name: ci-shard-plan
           path: .scratch/ci-shards/plan.json
           if-no-files-found: error
+          overwrite: true
       - uses: actions/upload-artifact@v4
         with:
           name: checked-frontend
           path: oko/frontend_build/
           if-no-files-found: error
+          overwrite: true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -256,3 +258,4 @@ jobs:
           name: ci-coverage-audit
           path: .scratch/ci-shards/
           if-no-files-found: error
+          overwrite: true
