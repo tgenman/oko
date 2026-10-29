@@ -142,7 +142,8 @@ def test_readiness_waits_for_viewed_publication_cleanup(tmp_path):
 
 def test_empty_dispatch_with_linked_articles_grows_linearly(tmp_path):
     costs=[]
-    for count in (26,400):
+    sizes=(26,400)
+    for count in sizes:
         feeds,_=build_library(tmp_path/str(count),[count])
         store=Store(tmp_path/str(count),lambda _:None)
         try:
@@ -158,7 +159,10 @@ def test_empty_dispatch_with_linked_articles_grows_linearly(tmp_path):
             costs.append(steps)
         finally:
             store.db.close()
-    assert costs[1]<=costs[0]*25,costs
+    # PostgreSQL can prove an empty small input without scanning a row, while
+    # another plan scans the larger input once. Zero is not a growth baseline.
+    # One row per root is still linear; the bound continues to reject n² joins.
+    assert costs[1]<=max(costs[0],sizes[0])*25,costs
 
 
 def test_idle_media_dispatch_does_not_scan_all_saved_media(tmp_path):
