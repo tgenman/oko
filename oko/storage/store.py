@@ -88,8 +88,7 @@ class Store:
                 (root / name).mkdir(exist_ok=True)
             with self.db:
                 collection_jobs.interrupt(self)
-                self.db.execute("UPDATE execution_settings SET generation = generation + 1 WHERE job IN ( SELECT id FROM jobs WHERE status = 'running' )")
-                self.db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE status = 'running'")
+                self.db.execute("UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
                 self.db.execute("UPDATE jobs SET next = 0 WHERE status = 'pending'")
             collection_jobs.recover(self)
             self.recover_files()

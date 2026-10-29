@@ -339,3 +339,42 @@ def test_source_deletion_migration_rejects_orphan_marker(connections):
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT item FROM source_deleted').fetchone() == ('missing',)
         verify(db, MIGRATIONS[:10])
+
+
+def test_execution_settings_migration_preserves_attempt_provenance(connections):
+    import json
+    from oko.storage.postgres_schema import MIGRATIONS
+    parameters = {'processor':'codex','model':'synthetic','reasoning_effort':'low','fast':False}
+    with connections() as db:
+        migrate(db, MIGRATIONS[:11])
+        job = db.execute("INSERT INTO jobs(kind,item,generation) VALUES ('filter','item',3) RETURNING id").fetchone()[0]
+        db.execute('INSERT INTO execution_settings VALUES (%s,%s,%s,%s)', (job, 2, 'signature', json.dumps(parameters)))
+        migrate(db, MIGRATIONS)
+        assert db.execute('SELECT execution_settings FROM jobs WHERE id=%s', (job,)).fetchone() == ({'generation':2,'signature':'signature','parameters':parameters},)
+        assert db.execute("SELECT to_regclass('execution_settings')").fetchone() == (None,)
+        verify(db, MIGRATIONS)
+
+
+@pytest.mark.parametrize('invalid', ['orphan', 'generation', 'signature', 'parameters', 'invalid-json'])
+def test_execution_settings_migration_rejects_invalid_records(connections, invalid):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:11])
+        job = db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','item') RETURNING id").fetchone()[0]
+        db.execute('INSERT INTO execution_settings VALUES (%s,%s,%s,%s)',
+                   (job + 1000 if invalid == 'orphan' else job,
+                    None if invalid == 'generation' else 1,
+                    None if invalid == 'signature' else 'signature',
+                    '[]' if invalid == 'parameters' else '{' if invalid == 'invalid-json' else '{}'))
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid execution settings'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('execution_settings')").fetchone() == ('execution_settings',)
+        verify(db, MIGRATIONS[:11])
+
+
+def test_job_execution_settings_rejects_incomplete_snapshots(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS)
+        with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
+            db.execute("INSERT INTO jobs(kind,item,execution_settings) VALUES ('filter','broken','{}')")

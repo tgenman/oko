@@ -147,3 +147,16 @@
   Four Playwright linked-publication/unavailable-source scenarios passed.
 - Catalog measurement on an empty database migrated through version 11: 38 tables
   and 141 non-internal triggers. The application and target schema are not complete.
+- Migration 012 moves execution provenance from `execution_settings` into a
+  JSONB job field and removes the table. It rejects orphaned, incomplete or
+  malformed snapshots atomically. The transitional JSON holds the captured
+  generation, signature and actual parameters; final job conversion remains.
+- Synthetic tests show an interrupted attempt's recorded parameters remain
+  available, while a subsequent attempt uses the current Codex model after either
+  a failure or restart. The original affected run had 127 passes and one failure:
+  an old test expected the previous model choice to be reused. That assertion was
+  updated to the agreed future-attempt rule; the complete 32-test worker
+  transaction suite then passed. Three Playwright model/processing scenarios
+  passed and the model settings screenshot was inspected.
+- Catalog measurement on an empty database migrated through version 12: 37 tables
+  and 141 non-internal triggers. Schema replacement and trigger removal continue.

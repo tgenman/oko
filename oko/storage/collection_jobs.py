@@ -23,8 +23,7 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             continue
         until = (max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay'])) if backoff
             else row['retry_at'] if row['wait_scope'] else None)
-        store.db.execute('UPDATE execution_settings SET generation = %s WHERE job = %s AND generation = %s',(row['generation']+1,row['id'],row['generation']))
-        store.db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 , retry_at = %s , next = %s WHERE id = %s",
+        store.db.execute("UPDATE jobs SET status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
 
 

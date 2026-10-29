@@ -270,7 +270,7 @@ def test_uncommitted_result_is_invisible_to_an_independent_reader(tmp_path):
     store.db.close()
 
 
-def test_recovery_keeps_execution_choice_for_the_interrupted_pass(tmp_path):
+def test_recovery_preserves_old_choice_without_reusing_it_for_a_new_attempt(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
@@ -285,7 +285,9 @@ def test_recovery_keeps_execution_choice_for_the_interrupted_pass(tmp_path):
     with reopened.jobs.transaction(lambda:True):
         new=reopened.jobs.claim_processing('filter',reopened.clock()+3601)
         assert new and new.generation>old.generation
-        assert reopened.jobs.origin(new,prepared.signature)==chosen
+        assert reopened.jobs.origin(new,prepared.signature) is None
+        saved = reopened.db.execute('SELECT execution_settings FROM jobs WHERE id=%s', (new.id,)).fetchone()[0]
+        assert saved['generation'] == old.generation and saved['parameters'] == chosen
     reopened.db.close()
 
 

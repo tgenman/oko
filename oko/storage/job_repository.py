@@ -262,8 +262,7 @@ class JobRepository:
             sequence = self.store.db.execute("SELECT value FROM state WHERE key = 'job-dispatch-generation'").fetchone()
             generation = max(row['generation'], int(sequence[0]) if sequence else 0) + 1
             self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
-            self.store.db.execute('UPDATE execution_settings SET generation = %s WHERE job = %s AND generation = %s', (generation, row['id'], row['generation']))
-            self.store.db.execute("UPDATE jobs SET status = 'running' , attempt = attempt + 1 , generation = %s WHERE id = %s", (generation, row['id']))
+            self.store.db.execute("UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
         current = expect_row(self.store.db.execute('SELECT * FROM jobs WHERE id = %s', (row['id'],)).fetchone())
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
@@ -295,30 +294,30 @@ class JobRepository:
             # A configuration cancellation is not a failed discovery request.
             self.store.db.execute(f"UPDATE jobs SET status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection}",params)
             collection_jobs.interrupt(self.store,feeds,backoff=False)
-            self.store.db.execute(f'UPDATE execution_settings SET generation = generation + 1 WHERE job IN ( SELECT id FROM jobs WHERE {selection} )', params)
-            self.store.db.execute(f"UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE {selection}", params)
+            self.store.db.execute(f"UPDATE jobs SET status='pending', generation=generation+1 WHERE {selection}", params)
 
 
     def saved_execution(self, job: Job, signature: str) -> dict[str, Any] | None:
-        row = self.store.db.execute('SELECT * FROM execution_settings WHERE job = %s AND generation = %s AND signature = %s',
-                              (job.id, job.generation, signature)).fetchone()
-        return json.loads(row['parameters']) if row else None
-
+        row = self.store.db.execute("SELECT execution_settings->'parameters' FROM jobs WHERE id=%s AND execution_settings->>'generation'=%s::text AND execution_settings->>'signature'=%s",
+                                    (job.id, job.generation, signature)).fetchone()
+        return dict(row[0]) if row and row[0] is not None else None
 
     def save_execution(self, job: Job, signature: str, origin: dict[str, Any]) -> None:
         with self.store.db:
-            self.store.db.execute('INSERT INTO execution_settings VALUES ( %s , %s , %s , %s ) ON CONFLICT ( job ) DO UPDATE SET generation = excluded . generation , signature = excluded . signature , parameters = excluded . parameters',
-                            (job.id, job.generation, signature, json.dumps(origin)))
-
+            changed = self.store.db.execute("""UPDATE jobs SET execution_settings=jsonb_build_object(
+                'generation',%s::bigint,'signature',%s::text,'parameters',%s::jsonb)
+                WHERE id=%s AND generation=%s AND status='running'""",
+                (job.generation, signature, json.dumps(origin), job.id, job.generation)).rowcount
+            if changed != 1:
+                raise JobRejected('Attempt no longer owns this job')
 
     def forget_execution(self, kind: str, item: str) -> None:
         with self.store.db:
-            self.store.db.execute('DELETE FROM execution_settings WHERE job IN ( SELECT id FROM jobs WHERE kind = %s AND item = %s )', (kind, item))
-
+            self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE kind=%s AND item=%s', (kind, item))
 
     def execution_provenance(self, job: Job) -> dict[str, Any] | None:
-        row = self.store.db.execute('SELECT parameters FROM execution_settings WHERE job = %s AND generation = %s', (job.id, job.generation)).fetchone()
-        return json.loads(row[0]) if row else None
+        row = self.store.db.execute("SELECT execution_settings->'parameters' FROM jobs WHERE id=%s AND execution_settings->>'generation'=%s::text", (job.id, job.generation)).fetchone()
+        return dict(row[0]) if row and row[0] is not None else None
 
 
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
@@ -584,7 +583,6 @@ class JobRepository:
         self.store.fault('before_feed_claim_release')
         with self.store.db:
             owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
-            self.store.db.execute(f'DELETE FROM execution_settings WHERE job IN (SELECT id FROM jobs WHERE item = %s OR item IN ({owned}))', (feed, feed))
             self.store.db.execute(f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
             self.store.db.execute(f'DELETE FROM items WHERE id IN ({owned})', (feed,))
             self.store.db.execute("DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
@@ -607,7 +605,7 @@ class JobRepository:
                 shutil.rmtree(path)
         self.store.fault('after_delete_files')
         with self.store.db:
-            self.store.db.execute('DELETE FROM execution_settings WHERE job IN ( SELECT id FROM jobs WHERE item = %s )', (job.item,))
+            self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE item=%s AND execution_settings IS NOT NULL', (job.item,))
             self.finish(job)
             self.store.db.execute('DELETE FROM items WHERE id = %s AND viewed = 1 AND platform IS NOT NULL ',(job.item,))
 

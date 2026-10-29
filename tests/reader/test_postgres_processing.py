@@ -419,3 +419,113 @@ def test_failed_in_flight_stage_is_blocked_after_disabling(postgres_url, tmp_pat
                        for problem in details.json()['problems']['current'])
         finally:
             release.set()
+
+
+def test_interrupted_attempt_provenance_is_not_reused_by_next_claim(postgres_url, tmp_path):
+    from oko.storage.job_repository import JobRepository
+
+    store, item, execution, tasks = worker_library(tmp_path, database_url=postgres_url)
+    origin = {'processor':'codex','model':'synthetic','reasoning_effort':'low','fast':False}
+    try:
+        worker = workers(execution, tasks)[0]
+        with store.jobs.transaction(lambda: True):
+            worker.service.reconcile()
+            store.jobs.reconcile('filter', worker.service.candidates('filter'))
+            job = store.jobs.claim_processing('filter', store.clock())
+            assert job is not None
+            prepared = worker.service.prepare(item, 'filter')
+            assert prepared.input is not None
+            signature = prepared.input.signature
+            store.jobs.save_execution(job, signature, origin)
+        assert JobRepository(store).saved_execution(job, signature) == origin
+    finally:
+        store.db.close()
+    restarted = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        job = restarted.jobs.next_job(restarted.clock() + 3601, ai_only=True, processing_kind='filter')
+        assert job is not None
+        assert JobRepository(restarted).saved_execution(job, signature) is None
+        previous = restarted.db.execute('SELECT execution_settings FROM jobs WHERE id=%s', (job.id,)).fetchone()[0]
+        assert previous['parameters'] == origin and previous['generation'] < job.generation
+    finally:
+        restarted.db.close()
+
+
+def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_path):
+    import json
+    from oko.execution import Execution
+    from oko.processing.execution import CodexSettings
+    from oko.subscriptions.subscriptions import FeedPatch, Overrides
+    from oko.workers.control import JobControl
+    from oko.workers.processing import FilterWorker
+    from tests.reader.test_codex_settings import Models, configuration
+
+    class Recording(Models):
+        async def complete(self, prompt, schema, directory, choice):
+            self.inputs.append(choice.model)
+            return json.dumps({'hidden':False, 'reason':'', 'removed':[]})
+
+    store, item, execution, tasks = worker_library(tmp_path, database_url=postgres_url)
+    try:
+        store.subscriptions.update_feed('demo', FeedPatch(public_ai=True))
+        store.subscriptions.update_settings('oko', 'global', Overrides(processor='codex'))
+        store.settings_changed()
+        store.configure_codex(CodexSettings.model_validate(configuration()))
+        worker = workers(execution, tasks)[0]
+        with store.jobs.transaction(lambda: True):
+            worker.service.reconcile()
+            store.jobs.reconcile('filter', worker.service.candidates('filter'))
+            job = store.jobs.claim_processing('filter', store.clock())
+            assert job is not None
+            prepared = worker.service.prepare(item, 'filter')
+            assert prepared.input is not None
+            store.jobs.save_execution(job, prepared.input.signature,
+                {'processor':'codex','model':'test-small','reasoning_effort':'low','fast':False})
+        store.configure_codex(CodexSettings.model_validate(configuration('test-large', 'high')))
+    finally:
+        store.db.close()
+    restarted = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    execution = Execution(lambda: True)
+    execution._store = restarted
+    tasks = JobControl(execution, {}, None, restarted.clock)
+    model = Recording()
+    worker = FilterWorker(execution, tasks, lambda: restarted.clock() + 3601, model, None)
+    try:
+        asyncio.run(pass_worker(worker, tasks))
+        assert model.inputs == ['test-large']
+        assert saved(restarted, item)['filtered_content']
+    finally:
+        restarted.db.close()
+
+
+def test_retry_after_failure_uses_model_selected_for_next_attempt(postgres_url, tmp_path):
+    import json
+    from oko.processing.contracts import ProcessingError
+    from oko.processing.execution import CodexSettings
+    from oko.subscriptions.subscriptions import FeedPatch, Overrides
+    from oko.workers.processing import FilterWorker
+    from tests.reader.test_codex_settings import Models, configuration
+
+    class FailingOnce(Models):
+        async def complete(self, prompt, schema, directory, choice):
+            self.inputs.append(choice.model)
+            if len(self.inputs) == 1:
+                raise ProcessingError('synthetic temporary failure')
+            return json.dumps({'hidden':False, 'reason':'', 'removed':[]})
+
+    store, item, execution, tasks = worker_library(tmp_path, database_url=postgres_url)
+    try:
+        store.subscriptions.update_feed('demo', FeedPatch(public_ai=True))
+        store.subscriptions.update_settings('oko', 'global', Overrides(processor='codex'))
+        store.settings_changed()
+        store.configure_codex(CodexSettings.model_validate(configuration()))
+        model = FailingOnce()
+        worker = FilterWorker(execution, tasks, lambda: store.clock() + 3601, model, None)
+        asyncio.run(pass_worker(worker, tasks))
+        assert model.inputs == ['test-small']
+        store.configure_codex(CodexSettings.model_validate(configuration('test-large', 'high')))
+        asyncio.run(pass_worker(worker, tasks))
+        assert model.inputs == ['test-small', 'test-large']
+        assert saved(store, item)['filtered_content']
+    finally:
+        store.db.close()
