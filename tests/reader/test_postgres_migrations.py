@@ -232,3 +232,46 @@ def test_avatar_migration_rejects_invalid_data_without_losing_it(connections, in
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT image,mime,digest FROM telegram_avatars WHERE feed=%s', ('feed',)).fetchone() == (image, mime, digest)
         verify(db, MIGRATIONS[:7])
+
+
+def test_collection_status_migration_preserves_attempts_and_feed_results(connections):
+    import json
+    from oko.storage.postgres_schema import MIGRATIONS
+    attempt = {'attempt_id': '1:2', 'started_at': 123.0, 'last_error': {'message': 'synthetic'}}
+    result = {'success_at': 456.0, 'last_error': {'message': 'earlier'}}
+    with connections() as db:
+        migrate(db, MIGRATIONS[:8])
+        db.execute("INSERT INTO feeds(id,kind) VALUES ('feed','rss')")
+        job = db.execute("INSERT INTO jobs(kind,item) VALUES ('discover','feed') RETURNING id").fetchone()[0]
+        db.execute('INSERT INTO collection_attempts VALUES (%s,%s,%s)', (job, 'feed', json.dumps(attempt)))
+        db.execute('INSERT INTO collection_results VALUES (%s,%s)', ('feed', json.dumps(result)))
+        migrate(db, MIGRATIONS)
+        assert db.execute('SELECT feed_id, collection_attempt FROM jobs WHERE id=%s', (job,)).fetchone() == ('feed', attempt)
+        assert db.execute("SELECT last_collection_result FROM feeds WHERE id='feed'").fetchone() == (result,)
+        db.execute("INSERT INTO jobs(kind,item,feed_id) VALUES ('filter','publication','feed')")
+        assert db.execute("SELECT to_regclass('collection_attempts'),to_regclass('collection_results')").fetchone() == (None, None)
+        names = ('collection_feed_deleted', 'collection_job_deleted')
+        assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname = ANY(%s)', (list(names),)).fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+@pytest.mark.parametrize('invalid', ['orphan-job', 'orphan-feed', 'orphan-result', 'bad-attempt', 'bad-result', 'invalid-json', 'wrong-kind'])
+def test_collection_status_migration_rejects_ambiguous_data(connections, invalid):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:8])
+        db.execute("INSERT INTO feeds(id,kind) VALUES ('feed','rss')")
+        job = db.execute('INSERT INTO jobs(kind,item) VALUES (%s,%s) RETURNING id',
+                         ('filter' if invalid == 'wrong-kind' else 'discover', 'feed')).fetchone()[0]
+        if invalid in ('bad-result', 'orphan-result'):
+            db.execute('INSERT INTO collection_results VALUES (%s,%s)',
+                       ('missing' if invalid == 'orphan-result' else 'feed', '[]' if invalid == 'bad-result' else '{}'))
+        else:
+            db.execute('INSERT INTO collection_attempts VALUES (%s,%s,%s)',
+                       (job + 1000 if invalid == 'orphan-job' else job,
+                        'missing' if invalid == 'orphan-feed' else 'feed',
+                        '[]' if invalid == 'bad-attempt' else '{' if invalid == 'invalid-json' else '{}'))
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid collection status'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('collection_attempts'),to_regclass('collection_results')").fetchone() == ('collection_attempts', 'collection_results')
+        verify(db, MIGRATIONS[:8])

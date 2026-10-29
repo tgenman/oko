@@ -167,9 +167,9 @@ def test_collection_summary_batches_attempts_and_details_ignore_other_feeds(tmp_
                              traceback='Synthetic traceback\n' * 1000, source='server', message_truncated=False,
                              traceback_truncated=False, resolved=False, requests=[], request_count=0)
                 store.db.execute("UPDATE jobs SET status = 'failed' , error = 'Synthetic failure' WHERE id = %s", (job['id'],))
-                store.db.execute('INSERT INTO collection_attempts ( job , feed , data ) VALUES ( %s , %s , %s )',
-                    (job['id'], feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
-                        finished_at=1800000001., elapsed_seconds=1., last_error=error))))
+                store.db.execute('UPDATE jobs SET feed_id=%s, collection_attempt=%s::jsonb WHERE id=%s',
+                    (feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
+                        finished_at=1800000001., elapsed_seconds=1., last_error=error)), job['id']))
         store.db.close()
         app = traced_app(root)
         with TestClient(app, headers=HEADERS) as client, ReadingMeasurements(client, app, root) as measure:
@@ -229,9 +229,9 @@ def test_postgres_collection_details_are_bounded_and_keep_diagnostics(postgres_u
                              traceback='Synthetic traceback\n' * 1000, source='server', message_truncated=False,
                              traceback_truncated=False, resolved=False, requests=[], request_count=0)
                 store.db.execute("UPDATE jobs SET status = 'failed' , error = 'Synthetic failure' WHERE id = %s", (job['id'],))
-                store.db.execute('INSERT INTO collection_attempts ( job , feed , data ) VALUES ( %s , %s , %s )',
-                    (job['id'], feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
-                        finished_at=1800000001., elapsed_seconds=1., last_error=error))))
+                store.db.execute('UPDATE jobs SET feed_id=%s, collection_attempt=%s::jsonb WHERE id=%s',
+                    (feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
+                        finished_at=1800000001., elapsed_seconds=1., last_error=error)), job['id']))
         store.db.close()
         app = traced_app(tmp_path, database_url=postgres_url, **clock.options())
         with TestClient(app, headers=HEADERS) as client:

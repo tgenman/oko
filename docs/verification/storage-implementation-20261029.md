@@ -109,3 +109,17 @@
 - Catalog measurement on an empty database migrated through version 8: 42 tables
   and 146 non-internal triggers. The other application triggers and target schema
   transition remain unfinished.
+- Migration 009 moves collection attempts to `jobs.feed_id` and a transitional
+  JSONB attempt field, and per-feed results to `feeds.last_collection_result`.
+  It rejects orphaned jobs/feeds, invalid JSON, non-object data and unexpected job
+  kinds without dropping source tables. The two collection cleanup triggers and
+  their functions are removed; feed deletion clears retained job diagnostics in
+  Python. A partial index bounds lookup of retained attempts by feed.
+- The first HTTP retry/error run found JSONB booleans returned as `true`/`false`
+  instead of legacy `0`/`1`; after correction the affected tests passed. Full
+  collection/migration/retention/metrics suites passed 55 Python tests, including
+  existing summary/detail limits up to 1000 synthetic feeds. Two collection-status
+  Playwright tests passed; desktop and mobile screenshots were inspected.
+- Catalog measurement on an empty database migrated through version 9: 40 tables
+  and 144 non-internal triggers. `collection_attempt` is transitional; the final
+  target still requires the designed job fields and trigger-free schema.
