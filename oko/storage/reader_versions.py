@@ -41,6 +41,21 @@ class ReaderVersions:
         for kind in ('filter','theses'):
             self.db.execute(self._bump(kind,'%s'),(item,))
 
+    def memberships_changed(self, identities: list[str]) -> None:
+        ordered = sorted(set(identities))
+        if not ordered:
+            return
+        now = self.store.wall_clock()
+        for start in range(0,len(ordered),400):
+            batch = ordered[start:start+400]
+            self.db.execute("""INSERT INTO reader_entities(kind,identity,version,changed)
+                SELECT kind,item,1,%s FROM unnest(ARRAY['material','card','filter','theses']) kind
+                CROSS JOIN unnest(%s::text[]) item
+                ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed""", (now,batch))
+            self.db.execute('INSERT INTO processing_dirty(item) SELECT unnest(%s::text[]) ON CONFLICT DO NOTHING', (batch,))
+        for kind in ('navigation','status'):
+            self.db.execute(self._bump(kind, "'navigation'" if kind=='navigation' else "'runtime'"))
+
 
 
 

@@ -206,6 +206,7 @@ class Store:
         with self.db:
             history_items=[]
             saved_items: set[str] = set()
+            added_memberships: list[str] = []
             envelope=HistoryEnvelope.decode(cursor,adapter='client' if namespace=='telegram' else 'web') if namespace in ('telegram','telegram-web') else None
             selection=json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
             enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
@@ -226,6 +227,7 @@ class Store:
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known))
                 membership=self.db.execute('INSERT INTO feed_publications (feed_id, publication_id) VALUES ( %s , %s ) ON CONFLICT DO NOTHING RETURNING publication_id',(feed,item)).fetchone()
                 if membership:
+                    added_memberships.append(item)
                     saved_items.add(item)
                 self.read_sync.mark_feed(feed)
                 if publication.adapter_reference is None:
@@ -256,6 +258,7 @@ class Store:
                         saved_items.add(item)
                         effects.fetch[item]=True
                     effects.fetch.setdefault(item,False)
+            self.read_versions.memberships_changed(added_memberships)
             if envelope or 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
                 if envelope:
@@ -480,7 +483,8 @@ class Store:
                 batch = members[start:start+400]
                 marks = ','.join('%s' for _ in batch)
                 self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch)
-                self.db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ( {marks} )', batch)
+                removed = [row[0] for row in self.db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ( {marks} ) RETURNING publication_id', batch)]
+                self.read_versions.memberships_changed(removed)
             publication_links.prune(self, set(members))
             for item, row in rows.items():
                 if row['feed_id'] is not None:
@@ -500,7 +504,8 @@ class Store:
                 self.db.execute("UPDATE items SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s", (feed,))
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
-            self.db.execute('DELETE FROM feed_publications WHERE feed_id = %s',(feed,))
+            removed = [row[0] for row in self.db.execute('DELETE FROM feed_publications WHERE feed_id = %s RETURNING publication_id',(feed,))]
+            self.read_versions.memberships_changed(removed)
             for item in shared:
                 self.read_sync.mark_item(item)
             publication_links.prune(self,set(shared))

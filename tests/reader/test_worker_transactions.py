@@ -398,6 +398,33 @@ def test_removing_other_shared_feed_keeps_selected_running_job(tmp_path):
         store.db.close()
 
 
+def test_membership_removal_records_effects_and_rolls_back_together(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed
+    store,item,_,_ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.read_versions.memberships_changed([item])
+            store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
+        before = store.read_versions.version('status','runtime')['version']
+        def remove():
+            store.remove_feed(second)
+            assert store.read_versions.version('status','runtime')['version'] > before
+            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone()
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                remove()
+                raise ValueError('synthetic rollback')
+        assert store.read_versions.version('status','runtime')['version'] == before
+        assert store.db.execute('SELECT 1 FROM feed_publications WHERE feed_id=%s AND publication_id=%s', (second,item)).fetchone()
+        assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+        with transaction(store.db):
+            remove()
+    finally:
+        store.db.close()
+
+
 def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     async def scenario():

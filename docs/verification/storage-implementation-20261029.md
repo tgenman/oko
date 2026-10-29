@@ -369,3 +369,12 @@
   The affected migration, worker, collection, linked/shared, reader and startup
   suites passed 207 tests; types and four browser scenarios passed. A linked
   publication screenshot was inspected. Version 24 has 23 tables and 94 triggers.
+- Migration 025 removes three membership-effect triggers/functions. The page,
+  viewed, feed removal and cleanup owners record affected reader versions and
+  transitional processing signals in their transaction, batching page effects.
+  A rollback test covers membership, status version and signal together.
+- The first broad run passed 213 tests and found one historical migration test
+  expecting a removed trigger after all upgrades. That test now pins the old
+  migration it documents; 163 affected tests then passed. Types and five
+  Playwright scenarios passed, and a shared-publication screenshot was inspected.
+  Version 25 has 23 tables and 91 non-internal triggers; dirty queues remain.

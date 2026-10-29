@@ -128,7 +128,7 @@ def test_membership_upgrade_preserves_primary_and_pending_cleanup(connections):
         db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('first','shared'),('second','shared')")
         db.execute("INSERT INTO items(id,feed_id,viewed,platform,external_id) VALUES ('cleaning','first',1,'youtube','old')")
         db.execute("INSERT INTO jobs(kind,item,payload) VALUES ('delete','cleaning','{\"other\":\"preserved\"}')")
-        migrate(db, MIGRATIONS)
+        migrate(db, MIGRATIONS[:6])
         assert db.execute("SELECT feed_id FROM items_read WHERE id='shared'").fetchone() == ('second',)
         assert db.execute("SELECT feed_id FROM items_read WHERE id='cleaning'").fetchone() == ('first',)
         assert db.execute("SELECT payload::jsonb->>'other' FROM jobs WHERE kind='delete' AND item='cleaning'").fetchone() == ('preserved',)
@@ -631,4 +631,17 @@ def test_publication_processing_triggers_are_removed(connections):
         migrate(db, MIGRATIONS[:23])
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('processing_item_added','processing_item_changed')").fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+def test_membership_effect_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:24])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        db.execute("INSERT INTO items(id) VALUES ('item')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('feed','item')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('membership_owner_changed','reader_v_shared_insert','reader_v_shared_delete')").fetchone() == (0,)
+        assert db.execute("SELECT feed_id,publication_id FROM feed_publications").fetchall() == [('feed','item')]
         verify(db, MIGRATIONS)
