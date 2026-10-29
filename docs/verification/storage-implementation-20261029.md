@@ -203,3 +203,17 @@
   113 Python tests; 11 Playwright status/navigation scenarios passed.
 - Catalog measurement on an empty database migrated through version 15: 33 tables
   and 129 non-internal triggers. The target remains 20 tables and zero triggers.
+- Migration 016 removes three time-derived reader tables and their seven
+  triggers/functions. Conditional responses now account for pending job deadlines,
+  YouTube pause expiry and problem retention directly, using one clock snapshot
+  per request. A partial job index bounds the deadline lookup.
+- Four HTTP tests cover time transitions without background writes. The first
+  affected run passed 125 tests and failed two ETag tests while startup recovery
+  was still creating Jobs. The two steady-state tests were corrected to wait for
+  that independently tested recovery; the affected HTTP suites then passed 21
+  tests. The initial run also passed the migration, transaction and 20,000-job
+  archive checks. Types and 10 Playwright scenarios passed; the YouTube settings
+  screenshot was inspected.
+- Catalog measurement after version 16: 30 tables and 122 non-internal triggers.
+  Remaining projections, direct event-driven scheduling and the target physical
+  schema are unfinished; status reconciliation still writes during GET.

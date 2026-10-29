@@ -20,6 +20,7 @@ from oko.reader import snapshots as facts
 from oko.reader.generated import models as wire
 from oko.reader.lifetime import Lifetime
 from oko.application.reader import ReaderApplication
+from oko.storage.reading import stable_reader_time
 
 
 class ApiError(Exception):
@@ -103,11 +104,13 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
     def status_tag(details: bool) -> str:
         nonlocal status_storage,status_version,status_changed
         queries=runtime.final_queries if runtime.has_storage and runtime._error is None else None
+        boundaries = None
         if queries is not None:
             status_storage=queries.versions.identity
             version=queries.versions.version('status','runtime')
             if version is not None:status_version=version['version'];status_changed=version['changed']
-        stamp=json.dumps([status_storage,status_version,details,metadata()],sort_keys=True,separators=(',',':')).encode()
+            boundaries = queries.versions.time_boundaries()
+        stamp=json.dumps([status_storage,status_version,details,metadata(),boundaries],sort_keys=True,separators=(',',':')).encode()
         return '"'+hashlib.sha256(stamp).hexdigest()+'"'
 
     def status_response(request: Request, details: bool) -> Response:
@@ -140,12 +143,16 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
     @app.get('/api/v3/status', dependencies=[Depends(no_query)])
     @read_locked(runtime.execution)
     async def status(request: Request) -> Response:
-        return status_response(request,False)
+        now, wall = runtime._clock(), runtime._wall_clock()
+        with stable_reader_time(wall-now, now, wall):
+            return status_response(request,False)
 
     @app.get('/api/v3/status/details', dependencies=[Depends(no_query)])
     @read_locked(runtime.execution)
     async def status_details(request: Request) -> Response:
-        return status_response(request,True)
+        now, wall = runtime._clock(), runtime._wall_clock()
+        with stable_reader_time(wall-now, now, wall):
+            return status_response(request,True)
 
     def status_data() -> wire.RuntimeStatus:
         if final_status is not None and runtime.stopped:return final_status
@@ -191,14 +198,14 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
         lease=lifetime.lease_seconds if lifetime.mode!='explicit' else None,
         grace=lifetime.grace_seconds if lifetime.mode!='explicit' else None,
         renew=lifetime.renew_after_seconds if lifetime.mode!='explicit' else None)
-    runtime.reader_advance=lambda: runtime.queries.versions.advance(metadata())
+    runtime.reader_advance=lambda: runtime.queries.versions.advance()
 
     async def finish_status() -> None:
         nonlocal final_status,status_storage
         if runtime.has_storage:
             queries=runtime.final_queries
             status_storage=queries.versions.identity
-            queries.versions.advance(metadata())
+            queries.versions.advance()
             final_status=status_data()
             version=queries.versions.version('status','runtime')
             if version is not None:final_status.problems.updated_at=timestamp(version['changed'])

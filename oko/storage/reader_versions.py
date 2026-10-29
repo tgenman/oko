@@ -7,8 +7,7 @@ from oko.storage.database import expect_row, Connection, Row
 import json
 from oko.storage.transaction import begin_write
 import uuid
-from typing import Any, TYPE_CHECKING
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -31,7 +30,6 @@ class ReaderVersions:
             # SUM's synthetic LEFT JOIN row is not an actual publication.
             self.db.execute('UPDATE reader_feed_counts SET visible = 0 WHERE unviewed = 0 AND visible != 0')
             self.db.execute('INSERT INTO reader_folder_counts SELECT f . id , coalesce ( sum ( c . visible ) , 0 ) FROM folders f LEFT JOIN feeds s ON s . folder_id = f . id LEFT JOIN reader_feed_counts c ON c . feed = s . id GROUP BY f . id ON CONFLICT ( folder ) DO UPDATE SET visible = excluded . visible WHERE reader_folder_counts . visible IS DISTINCT FROM excluded . visible')
-            self.db.execute("INSERT INTO reader_job_time SELECT id , next , CASE WHEN next <= %s OR status != 'pending' THEN 1 ELSE 0 END FROM jobs WHERE kind IN ( 'fetch' , 'filter' , 'theses' ) ON CONFLICT ( job ) DO NOTHING", (store.clock(),))
         identity = json.loads(expect_row(self.db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone())[0])
         if not isinstance(identity, str):
             raise ValueError('Invalid storage identity')
@@ -100,15 +98,11 @@ class ReaderVersions:
             result.update({(r['kind'],r['identity']):r for r in rows})
         return result
 
-    def advance(self, metadata: dict[str, Any], now: float | None = None, wall: float | None = None) -> None:
+    def advance(self, now: float | None = None, wall: float | None = None) -> None:
         now=self.store.clock() if now is None else now
         wall=self.store.wall_clock() if wall is None else wall
         with self.db:
-            self.db.execute('UPDATE reader_job_time SET ready = 1 WHERE ready = 0 AND deadline <= %s',(now,))
-            self.db.execute('INSERT INTO reader_youtube_time SELECT 1 , CASE WHEN blocked_until > %s THEN 1 ELSE 0 END FROM youtube_access WHERE id = 1 ON CONFLICT ( id ) DO UPDATE SET paused = excluded . paused WHERE reader_youtube_time . paused IS DISTINCT FROM excluded . paused',(wall,))
             self.db.execute('DELETE FROM reader_problems WHERE rowid IN ( SELECT rowid FROM reader_problems WHERE finished <= %s ORDER BY finished LIMIT 200 )',(wall-86400,))
             if now >= self._next_action_cleanup:
                 self.store.problems.cleanup_receipts(wall - 86400)
                 self._next_action_cleanup=now+60
-            body=json.dumps(metadata,sort_keys=True,separators=(',',':'))
-            self.db.execute('INSERT INTO reader_runtime VALUES ( 1 , %s ) ON CONFLICT ( id ) DO UPDATE SET body = excluded . body WHERE reader_runtime . body IS DISTINCT FROM excluded . body',(body,))

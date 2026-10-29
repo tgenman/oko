@@ -1,6 +1,6 @@
 from oko.execution import read_locked
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
-from oko.storage.reading import reading_snapshot
+from oko.storage.reading import reading_snapshot, stable_reader_time
 from oko.storage.transaction import read_snapshot
 import hashlib
 import json
@@ -178,7 +178,9 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         target=dict(scope='folder',folder_id=folder) if folder is not None else dict(scope='feed',feed_id=feed) if feed is not None else dict(scope='all')
         options=dict(target=target,sort=sort,show_hidden=scalar_boolean(request,'show_hidden'))
         current=runtime.queries
-        with read_snapshot(runtime.require_store().db), reading_snapshot():
+        store=runtime.require_store()
+        now, wall=store.clock(), store.wall_clock()
+        with read_snapshot(store.db), stable_reader_time(wall-now, now, wall), reading_snapshot():
             page=current.page(options,request.query_params.get('cursor'),limit)
             if page is None:return JSONResponse({'code':'cursor_expired'},status_code=409)
             identities,total=page

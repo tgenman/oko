@@ -494,3 +494,22 @@ def test_receipt_cleanup_migration_rejects_inconsistent_projection(connections):
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT count(*) FROM reader_action_results').fetchone() == (2,)
         verify(db, MIGRATIONS[:14])
+
+
+def test_time_projection_migration_preserves_jobs_and_youtube_deadlines(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:15])
+        db.execute("INSERT INTO jobs(kind,item,status,next) VALUES ('fetch','item','pending',123)")
+        db.execute("UPDATE youtube_access SET blocked_until=456 WHERE id=1")
+        db.execute("INSERT INTO reader_runtime VALUES (1,'{}')")
+        db.execute("INSERT INTO reader_youtube_time VALUES (1,1)")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT next FROM jobs WHERE kind='fetch' AND item='item'").fetchone() == (123,)
+        assert db.execute('SELECT blocked_until FROM youtube_access WHERE id=1').fetchone() == (456,)
+        assert db.execute("SELECT to_regclass('reader_job_time'),to_regclass('reader_youtube_time'),to_regclass('reader_runtime')").fetchone() == (None,None,None)
+        names = ['reader_v_job_time_insert','reader_v_job_time_update','reader_v_job_time_delete','reader_v_time_ready','reader_v_youtube_time','reader_v_runtime','reader_v_runtime_first']
+        assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname=ANY(%s)', (names,)).fetchone() == (0,)
+        functions = ['oko_trigger_' + name for name in names]
+        assert db.execute('SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname=ANY(%s)', (functions,)).fetchone() == (0,)
+        verify(db, MIGRATIONS)

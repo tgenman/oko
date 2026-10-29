@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from typing import Any
 from oko.storage.store import Store
 from oko.storage import material_read, publication_links
+from oko.storage.reading import reader_now
 
 class ReaderFacts:
     def __init__(self, storage: Callable[[], Store]) -> None:
@@ -24,11 +25,16 @@ class ReaderFacts:
         with self.storage().db.access_lock, material_read.material_inputs(self.storage().db, identities, include_subtitles=include_subtitles):
             yield
 
-    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None]]:
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None, float | None]]:
         if not identities:
             return {}
-        rows=self.storage().db.execute("SELECT i.id, i.xmin::text AS row_generation, e.version FROM items i LEFT JOIN reader_entities e ON e.kind='card' AND e.identity=i.id WHERE i.id = ANY(%s)", (identities,))
-        return {row['id']:(row['row_generation'],row['version']) for row in rows}
+        store = self.storage()
+        rows=store.db.execute("""SELECT i.id, i.xmin::text AS row_generation, e.version,
+            CASE WHEN j.status='pending' AND j.next>%s THEN j.next ELSE NULL END AS future_deadline
+            FROM items i LEFT JOIN reader_entities e ON e.kind='card' AND e.identity=i.id
+            LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id WHERE i.id=ANY(%s)""",
+            (reader_now(store.clock()), identities))
+        return {row['id']:(row['row_generation'],row['version'],row['future_deadline']) for row in rows}
 
     def feed_resources(self, identities: set[str] | None = None) -> dict[str, tuple[dict[str, Any], dict[str, Any] | None]]:
         subscriptions = self.storage().subscriptions

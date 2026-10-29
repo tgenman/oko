@@ -1,6 +1,7 @@
 from tests.support.collection_acceptance import discovered
 """Bound HTTP reading work independently of machine speed and background work."""
 from contextvars import ContextVar
+import time
 
 from oko.collection.contracts import Material, Publication
 from tests.support.storage import Store
@@ -11,6 +12,13 @@ from tests.support.source import publication_packet
 
 
 request_sql: ContextVar[list[str] | None] = ContextVar('reading_sql', default=None)
+
+
+def wait_for_recovery(app):
+    deadline = time.monotonic() + 60
+    while app.state.host.require_store().processing.recovering:
+        assert time.monotonic() < deadline, 'Initial PostgreSQL recovery did not finish'
+        time.sleep(.02)
 
 
 def library(root, counts):

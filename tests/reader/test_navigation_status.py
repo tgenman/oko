@@ -1,7 +1,7 @@
 """Subject-specific navigation and status through the public HTTP interface."""
 from fastapi.testclient import TestClient
 from tests.support.reader import HEADERS
-from tests.support.reading_cost import library, traced_app
+from tests.support.reading_cost import library, traced_app, wait_for_recovery
 
 
 def test_navigation_returns_folders_feeds_and_conditional_response(tmp_path):
@@ -27,7 +27,9 @@ def test_navigation_returns_folders_feeds_and_conditional_response(tmp_path):
 
 def test_compact_status_and_details_revalidate_independently(tmp_path):
     library(tmp_path, [1])
-    with TestClient(traced_app(tmp_path), headers=HEADERS) as client:
+    app=traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        wait_for_recovery(app)
         first = client.get('/api/v3/status')
         assert first.status_code == 200
         body = first.json()

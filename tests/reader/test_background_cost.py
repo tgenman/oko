@@ -132,10 +132,15 @@ def test_processing_backfill_does_not_scan_unrelated_completed_archive(tmp_path,
                                 [(f'old-{n}',) for n in range(20000)])
             if saved_inputs:
                 store.db.execute("INSERT INTO jobs(kind,item,status,input_snapshot) VALUES ('filter','synthetic-saved-input','done',%s::jsonb)", ('{\"signature\":\"synthetic-signature\"}',))
+            store.db.execute("INSERT INTO jobs(kind,item,status,next) VALUES ('filter','synthetic-due','pending',10)")
             analyze(store.db)
         with measure_reads(store.db) as work:
             store.jobs.backfill_processing_inputs()
         assert work.rows < 1000, 'Backfill scanned completed jobs without matching saved inputs'
+        with measure_reads(store.db) as deadlines:
+            due = store.db.execute("SELECT next FROM jobs WHERE status='pending' AND kind IN ('fetch','filter','theses') AND next>%s ORDER BY next LIMIT 1", (0,)).fetchone()
+        assert due[0] == 10
+        assert deadlines.rows < 1000, 'Deadline lookup scanned the completed archive'
     finally:
         store.db.close()
 

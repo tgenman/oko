@@ -41,8 +41,20 @@ class VersionQueries:
         return dict(row) if row else None
 
     @repository_access
-    def advance(self, metadata: dict[str, Any]) -> None:
-        self._storage().read_versions.advance(metadata)
+    def time_boundaries(self) -> tuple[float | None, float | None, float | None]:
+        from oko.storage.reading import reader_now, reader_wall
+        store = self._storage()
+        wall = reader_wall(store.wall_clock())
+        row = store.db.execute("""SELECT
+            (SELECT next FROM jobs WHERE status='pending' AND kind IN ('fetch','filter','theses') AND next>%s ORDER BY next LIMIT 1),
+            (SELECT blocked_until FROM youtube_access WHERE id=1 AND blocked_until>%s),
+            (SELECT finished FROM reader_problems WHERE finished>%s ORDER BY finished LIMIT 1)""",
+            (reader_now(store.clock()), wall, wall-86400)).fetchone()
+        return (row[0], row[1], row[2]) if row else (None, None, None)
+
+    @repository_access
+    def advance(self) -> None:
+        self._storage().read_versions.advance()
 
 
 class ReadingQueries:
@@ -142,7 +154,7 @@ class ReadingQueries:
         return self._storage().reading.page(options, cursor, limit)
 
     @repository_access
-    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None]]:
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None, float | None]]:
         return self._facts.card_validators(identities)
 
     @repository_access
