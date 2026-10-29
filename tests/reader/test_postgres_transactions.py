@@ -418,3 +418,14 @@ def test_read_snapshot_cannot_schedule_a_write_commit_callback(database):
         with transaction(db):
             db.execute("INSERT INTO state VALUES ('later','write')")
         assert effects == []
+
+
+def test_explicit_native_write_preserves_boolean_parameters(postgres_url, database):
+    import psycopg
+
+    with psycopg.connect(postgres_url, autocommit=True) as admin:
+        admin.execute('CREATE TABLE synthetic_boolean_value(value boolean NOT NULL)')
+    with database() as writer, database() as reader:
+        with transaction(writer):
+            writer.execute_write('INSERT INTO synthetic_boolean_value(value) VALUES (%s)', (True,))
+        assert reader.execute('SELECT value FROM synthetic_boolean_value').fetchone()[0] is True

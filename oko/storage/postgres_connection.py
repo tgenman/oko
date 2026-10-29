@@ -131,10 +131,9 @@ class PostgresConnection:
         if not self.transaction_depth:
             raise RuntimeError('An owned transaction is required for an explicit write')
         _command(query, allow_write_cte=True)
-        bound = {key: int(value) if isinstance(value, bool) else value for key, value in parameters.items()} if isinstance(parameters, Mapping) else tuple(int(value) if isinstance(value, bool) else value for value in parameters)
         if self._trace:
             self._trace(query)
-        return self._db.execute(query, bound or None)
+        return self._db.execute(query, parameters or None)
 
     def executemany(self, query: str, parameters: Sequence[Sequence[Any]]) -> None:
         compiled = query
