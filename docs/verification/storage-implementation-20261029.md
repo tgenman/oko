@@ -25,3 +25,4 @@
 - Запущенный `./scripts/check python types` прошёл contracts и types, но Python
   наборы прерваны: checkout изменялся во время выполнения. Итоговый runner нужен
   на зафиксированном снимке после интеграции; этот запуск не считается успешным.
+- `./scripts/check python --files tests/reader/test_storage_redesign_schema.py tests/reader/test_postgres_transactions.py`: contracts и 20 тестов прошли. Проверочный SQL создаёт 20 целевых таблиц без прикладных триггеров и откатывается; это не SQL миграции.
