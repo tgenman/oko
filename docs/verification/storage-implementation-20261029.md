@@ -337,3 +337,21 @@
   98 tests, types and two Playwright scenarios; a screenshot was inspected.
   The initial candidate race and atomic selection by the first successful claim
   are not implemented yet, so this is not completion of the first-started rule.
+- The shared-publication path now prepares possible first filter and summary
+  Jobs from participating feeds. The winning claim locks the publication and
+  saves the selected feed with the claim; the other stage is blocked if needed
+  later or cancelled if not applicable. Rollback removes the choice, and restart
+  keeps it. Candidate admission considers public-AI permission and configured
+  processor; unavailable candidates do not establish a feed, and a later
+  configuration change can admit them.
+- Removing the selected feed now revokes its unfinished generation and clears
+  the context; removing another membership leaves an independent running Job
+  intact. Late responses from the removed feed are rejected. Outdated saved
+  filter/summary results and provenance remain stored but are not treated as
+  current after rules change.
+- Regressions first showed missing candidate Jobs, an inadmissible choice,
+  incorrect competing-stage states and overwritten old results. The final
+  affected run passed 151 Python tests and types; four Playwright scenarios
+  passed and a shared-publication screenshot was inspected. The dirty queues,
+  full event-driven settings path, all-trigger removal, final schema and
+  independent project review remain unfinished.

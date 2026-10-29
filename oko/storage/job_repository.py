@@ -45,14 +45,21 @@ class JobRepository:
         db=self.store.db
         for item,signature,satisfied,revision in candidates:
             db.execute('DELETE FROM processing_stage_dirty WHERE kind = %s AND item = %s',(kind,item))
-            job=db.execute("SELECT status,payload,input_snapshot->>'signature' AS signature FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
+            job=db.execute("SELECT status,payload,problem_code,input_snapshot->>'signature' AS signature FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
             previous=job['signature'] if job else None
             enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
             if previous is not None and previous==signature and job and json.loads(job['payload']).get('input_revision')==revision:
                 # Reconsider blocked work only on an input/settings event. Running
                 # attempts are allowed to finish when the switch is turned off.
                 if job['status'] == 'blocked' and enabled:
-                    db.execute("UPDATE jobs SET status='pending' WHERE kind=%s AND item=%s AND status='blocked'", (kind, item))
+                    if json.loads(job['payload']).get('preclaim_blocked') and not processing_input.can_start(
+                            self.store,item,processing_input.processing_feed(self.store,item,kind)):
+                        continue
+                    db.execute("""UPDATE jobs SET status='pending',
+                        error=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE error END,
+                        problem_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE problem_code END,
+                        payload=(payload::jsonb-'preclaim_blocked')::text
+                        WHERE kind=%s AND item=%s AND status='blocked'""", (kind, item))
                     self.store.publications.status(item)
                 elif job['status'] == 'pending' and not enabled:
                     db.execute("UPDATE jobs SET status='blocked' WHERE kind=%s AND item=%s AND status='pending'", (kind, item))
@@ -61,6 +68,10 @@ class JobRepository:
             if signature is None and previous is None and (job is None or job[0]=='cancelled'):
                 continue
             if signature is None:
+                if kind=='theses' and job and job['status']=='blocked' and processing_input.stage_enabled(self.store,item,'theses'):
+                    filtering = db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+                    if filtering and filtering['status'] in ('pending','running'):
+                        continue
                 db.execute("UPDATE jobs SET status='cancelled', generation=generation+1, error=NULL, problem_code=NULL, input_snapshot=NULL WHERE kind=%s AND item=%s",(kind,item))
                 if kind == 'filter' and previous is not None:
                     self._processing_input_changed([item])
@@ -196,7 +207,8 @@ class JobRepository:
         if ai_only:
             query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items_read i WHERE i.id=jobs.item AND i.platform IS NOT NULL
                 AND NOT ((jobs.kind='filter' AND i.status IN ('pending_filtering','filter_out'))
-                      OR (jobs.kind='theses' AND i.status IN ('pending_summary','ready'))))"""
+                      OR (jobs.kind='theses' AND (i.status IN ('pending_summary','ready')
+                          OR (i.status='pending_filtering' AND i.processing_metadata::jsonb->'_pass'->>'feed_id' IS NULL)))))"""
             if self.store.processing.background:
                 query += """ AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=jobs.item)
                     AND NOT EXISTS (SELECT 1 FROM processing_stage_dirty d WHERE d.item=jobs.item AND d.kind=jobs.kind)"""
@@ -243,7 +255,60 @@ class JobRepository:
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *available, *dependencies) if media_only else (now, *('' if f == 'demo' else f for f in available), *available, *dependencies)
         row = self.store.db.execute(query, params).fetchone()
+        if ai_only and row is not None and row['kind'] in ('filter','theses'):
+            if not self.store.db.in_transaction:
+                with self.store.db:
+                    self.store.db.begin()
+                    return self._claim(self._select_processing_feed(row))
+            row = self._select_processing_feed(row)
         return self._claim(row)
+
+    def _select_processing_feed(self, job: Row) -> Row | None:
+        """Choose shared-publication rules in the same transaction as its claim."""
+        db = self.store.db
+        item = db.execute('SELECT processing_metadata FROM items WHERE id=%s FOR UPDATE', (job['item'],)).fetchone()
+        if item is None:
+            return job
+        owners = db.execute('SELECT feed_id FROM feed_publications WHERE publication_id=%s ORDER BY feed_id', (job['item'],)).fetchall()
+        if len(owners) < 2:
+            return job
+        current = db.execute("SELECT * FROM jobs WHERE id=%s AND status='pending'", (job['id'],)).fetchone()
+        if current is None:
+            return None
+        metadata = json.loads(item['processing_metadata'])
+        selected = metadata.get('_pass', {}).get('feed_id')
+        if selected not in {owner[0] for owner in owners}:
+            chosen = processing_input.processing_feed(self.store, job['item'], job['kind'])
+            content = processing_input.content(self.store,job['item'])
+            has_input = any(block.get('text','').strip() for block in processing_input.blocks(content))
+            if has_input and not processing_input.can_start(self.store,job['item'],chosen):
+                rules = processing_input.live_settings(self.store,job['item'],chosen)
+                config = self.store.processor_config()
+                processor = rules['values']['processor']
+                denied = not rules['public_ai'] and (processor=='codex' or
+                    config is not None and processor in ('llamacpp','llamacpp:'+config.model) and not config.local_execution)
+                code = 'ai-permission' if denied else 'processor-config'
+                message = ('Запрещена публичная AI-обработка; выберите локальную модель' if denied
+                           else 'Ожидание выбранного обработчика; настройте модель')
+                db.execute("""UPDATE jobs SET status='pending',next=%s,error=%s,problem_code=%s,
+                    payload=jsonb_set(payload::jsonb,'{preclaim_blocked}','true'::jsonb)::text
+                    WHERE id=%s AND status='pending'""", (0 if denied else self.store.clock()+30,message,code,job['id']))
+                return None
+            metadata['_pass'] = dict(feed_id=chosen)
+            db.execute('UPDATE items SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata,ensure_ascii=False),job['item']))
+            self.store.processing.reconcile_accepted_item(job['item'])
+            if job['kind']=='filter' and processing_input.stage_enabled(self.store,job['item'],'theses'):
+                db.execute("""INSERT INTO jobs(kind,item,status) VALUES ('theses',%s,'blocked')
+                    ON CONFLICT(kind,item) DO UPDATE SET status='blocked'
+                    WHERE jobs.status IN ('pending','cancelled')""", (job['item'],))
+            elif job['kind']=='theses':
+                db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1
+                    WHERE kind='filter' AND item=%s AND status IN ('pending','blocked')""", (job['item'],))
+                db.execute('DELETE FROM processing_dirty WHERE item=%s', (job['item'],))
+            current = db.execute("SELECT * FROM jobs WHERE id=%s AND status='pending'", (job['id'],)).fetchone()
+            if current is None:
+                raise JobRejected('Selected processing candidate is no longer eligible')
+        return current
 
     def _media_candidate(self, now: float, feeds: list[str], dependencies: list[str], captions: bool) -> Row | None:
         # Avoid walking every publication and media file when no due download
@@ -528,7 +593,9 @@ class JobRepository:
     def remove_feed(self, feed: str, members: set[str]) -> None:
         db=self.store.db
         for item in members:
-            db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 WHERE item = %s AND kind IN ( 'fetch' , 'filter' , 'theses' )",(item,))
+            db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 WHERE item = %s AND kind = 'fetch'",(item,))
+            db.execute("""UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1
+                WHERE item = %s AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM feed_publications WHERE publication_id=%s)""",(item,item))
             db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE kind = 'download_media' AND status = 'running' AND item IN ( SELECT id FROM media_files WHERE publication_id = %s )",(item,))
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE item = %s AND kind NOT IN ( 'delete' , 'feed-delete' )",(feed,))
         self.reconcile_cleanup()

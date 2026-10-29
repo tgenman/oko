@@ -492,6 +492,12 @@ class Store:
     def remove_feed(self, feed: str) -> None:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
+            selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN items i ON i.id=m.publication_id
+                WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
+            if selected:
+                self.db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
+                    WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
+                self.db.execute("UPDATE items SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s", (feed,))
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
             self.db.execute('DELETE FROM feed_publications WHERE feed_id = %s',(feed,))
@@ -646,6 +652,9 @@ class Store:
         # Future execution choice does not invalidate inputs or cancel work.
         with self.db:
             self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
+            self.db.execute("""UPDATE jobs SET status='pending',next=0,error=NULL,problem_code=NULL,
+                payload=(payload::jsonb-'preclaim_blocked')::text
+                WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
 
     @reading_value
     def processor_config(self) -> ProcessorConfig | None:

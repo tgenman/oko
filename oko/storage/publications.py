@@ -295,9 +295,7 @@ class Publications:
         store.db.execute('UPDATE items SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
-        if not same:
-            store.db.execute("UPDATE items SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' WHERE id = %s", (item,))
-        elif previous:
+        if same and previous:
             filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(filtered_row[0])
             if filtered:
@@ -387,14 +385,8 @@ class Publications:
             row = material_read.item(self.store.db,item)
             if row is None or row['platform'] is None:
                 return False
-            signatures = (('filter', 'filter', 'filtered_content', self.store.filters.signature(item)),
-                          ('theses', 'summary', 'summarized_content', self.store.processing.theses.signature(item)))
             current = publication_input.input_hash(self.store,item) if row['feed_id'] is not None and not row['viewed'] else None
         metadata = json.loads(row['processing_metadata'])
-        for kind, operation, column, signature in signatures:
-            if operation in metadata and metadata[operation].get('signature',metadata[operation].get('input_hash')) != signature:
-                metadata.pop(operation)
-                self.store.db.execute(f"UPDATE items SET {column} = '{{}}' WHERE id = %s AND {column} IS DISTINCT FROM '{{}}'", (item,))
         if row['feed_id'] is not None and not row['viewed']:
             if metadata.get('_revision_input')!=current:
                 metadata['_revision_input']=current

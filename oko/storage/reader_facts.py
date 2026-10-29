@@ -63,7 +63,8 @@ class ReaderFacts:
         return [row['id'] for row in self.storage().db.execute('SELECT id FROM items_read WHERE viewed = 1')]
 
     def feed_members(self, identity: str) -> set[str]:
-        return {row[0] for row in self.storage().db.execute('SELECT id FROM items_by_feed WHERE feed_id = %s', (identity,))}
+        return {row[0] for row in self.storage().db.execute('''SELECT publication_id FROM feed_publications WHERE feed_id=%s
+            UNION SELECT id FROM items_by_feed WHERE feed_id=%s''', (identity,identity))}
 
     def deletion_feeds(self) -> set[str]:
         return {row[0] for row in self.storage().db.execute("SELECT DISTINCT feed_id FROM items_read WHERE id IN ( SELECT item FROM jobs WHERE kind = 'delete' AND status != 'done' )")}

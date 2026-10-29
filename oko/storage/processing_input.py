@@ -44,7 +44,7 @@ def _reading_content(store: 'Store', item: str) -> dict[str, Any]:
 def selected_content(store: 'Store', item: str, kind: str) -> dict[str, Any]:
     selected=content(store,item)
     row=store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone()
-    if kind=='theses' and row and row[0]!='{}' and 'youtube' not in selected.get('extra',{}):
+    if kind=='theses' and row and row[0]!='{}' and 'youtube' not in selected.get('extra',{}) and store.filters.read(item)['status']=='done':
         selected=json.loads(row[0])
     return selected
 
@@ -83,7 +83,7 @@ def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) ->
 
 
 @reading_value
-def processing_feed(store: 'Store', item: str) -> str:
+def processing_feed(store: 'Store', item: str, kind: str | None = None) -> str:
     row = material_read.item(store.db, item)
     if row is None:
         raise ValueError('Publication not found')
@@ -93,12 +93,38 @@ def processing_feed(store: 'Store', item: str) -> str:
             'SELECT 1 FROM feed_publications WHERE feed_id=%s AND publication_id=%s', (chosen,item)).fetchone())
         if belongs:
             return chosen
+    if kind in ('filter','theses'):
+        owners = store.db.execute('''SELECT feed_id FROM feed_publications WHERE publication_id=%s
+            ORDER BY is_primary DESC,feed_id''', (item,)).fetchall()
+        if len(owners)>1:
+            candidates = []
+            for owner in owners:
+                feed = owner[0]
+                values = store.subscriptions.effective('feed',feed,details=False)['effective']
+                filtering = bool(values['filter_enabled']['value'] and values['prompt_filters']['value'].strip())
+                if kind=='filter' and filtering or kind=='theses' and values['theses']['value'] and not filtering:
+                    candidates.append(str(feed))
+            for feed in candidates:
+                if can_start(store,item,feed):
+                    return feed
+            if candidates:
+                return candidates[0]
     return store.item_feed(item)
 
 
+def can_start(store: 'Store', item: str, feed: str) -> bool:
+    rules = live_settings(store,item,feed)
+    processor = rules['values']['processor']
+    if processor == 'codex':
+        return bool(rules['public_ai'] and store.codex_config())
+    config = store.processor_config()
+    return bool(config and processor in ('llamacpp','llamacpp:'+config.model)
+                and (config.local_execution or rules['public_ai']))
+
+
 @reading_value
-def live_settings(store: 'Store', item: str) -> dict[str, Any]:
-    feed=processing_feed(store,item)
+def live_settings(store: 'Store', item: str, feed: str | None = None) -> dict[str, Any]:
+    feed=feed or processing_feed(store,item)
     current=store.subscriptions.effective('feed',feed,details=False)
     allowed=current['feed']['public_ai']
     inputs = material_read.current(store.db)
@@ -114,7 +140,7 @@ def stage_enabled(store: 'Store', item: str, kind: str) -> bool:
     row = material_read.item(store.db, item)
     if row is None or row['feed_id'] is None:
         return False
-    values = store.subscriptions.effective('feed', processing_feed(store,item), details=False)['effective']
+    values = store.subscriptions.effective('feed', processing_feed(store,item,kind), details=False)['effective']
     if kind == 'filter':
         return bool(values['filter_enabled']['value'] and values['prompt_filters']['value'].strip())
     if kind == 'theses':
@@ -132,12 +158,13 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
     if not row or row['viewed'] or row['feed_id'] is None or not row['complete'] or row['content']=='{}':
         return None
-    current=store.subscriptions.effective('feed',processing_feed(store,item),details=False)
+    feed=processing_feed(store,item,kind)
+    current=store.subscriptions.effective('feed',feed,details=False)
     values={key:value['value'] for key,value in current['effective'].items()}
     youtube=row['platform']=='youtube'
     if kind=='filter' and not values['prompt_filters'].strip():
         return None
-    rules=live_settings(store,item)
+    rules=live_settings(store,item,feed)
     selected_content=saved_content(row['content']) if youtube else _reading_content(store,item)
     if youtube and selected_content.get('extra',{}).get('youtube',{}).get('captions')=='available' and not youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content)):
         return None
@@ -147,7 +174,10 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
                     digest=selected_content.get('extra',{}).get('youtube',{}).get('captions_digest'))]
               if youtube else blocks(selected_content))
     if kind=='theses':
-        filtered=store.filters.read(item)
+        metadata=json.loads(row['processing_metadata'])
+        unselected=not metadata.get('_pass',{}).get('feed_id')
+        first_without_filter=unselected and feed!=row['feed_id'] and not (values['filter_enabled'] and values['prompt_filters'].strip())
+        filtered=({'status':'off','hidden':False} if first_without_filter else store.filters.read(item))
         if filtered['status'] not in ('off','done') or filtered['hidden']:
             return None
         if filtered['status']=='done' and row['platform']!='youtube':

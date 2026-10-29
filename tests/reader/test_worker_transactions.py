@@ -228,6 +228,341 @@ def test_saved_processing_feed_is_used_instead_of_display_owner(tmp_path):
         store.db.close()
 
 
+@pytest.mark.parametrize('first_kind', ['filter','theses'])
+def test_shared_publication_offers_each_possible_first_stage(tmp_path, first_kind):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
+            store.processing.reconcile_accepted_item(item)
+            jobs = {row['kind']:row['status'] for row in store.db.execute("SELECT kind,status FROM jobs WHERE item=%s AND kind IN ('filter','theses')", (item,))}
+            assert jobs == {'filter':'pending','theses':'pending'}
+        before = saved(store,item)['processing_metadata']
+        def claim():
+            expected = second if first_kind == 'theses' else 'demo'
+            job = store.jobs.claim_processing(first_kind, store.clock())
+            assert job is not None and job.item == item
+            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == expected
+            other_kind = 'filter' if first_kind == 'theses' else 'theses'
+            other = store.db.execute('SELECT status FROM jobs WHERE item=%s AND kind=%s', (item,other_kind)).fetchone()[0]
+            assert other == ('cancelled' if first_kind == 'theses' else 'blocked')
+            from oko.storage.processing_state import ProcessingRepository
+            prepared = ProcessingRepository(store).prepare(item,first_kind)
+            assert prepared.input is not None
+            assert prepared.input.request.operation == first_kind
+            store.jobs.save_input(job,prepared.input)
+            assert store.db.execute('SELECT input_snapshot->>\'feed_id\' FROM jobs WHERE id=%s', (job.id,)).fetchone()[0] == expected
+            if first_kind == 'filter':
+                from oko.services.processing import ProcessingService
+                store.processing.reconcile_item(item)
+                service = ProcessingService(lambda:store)
+                store.jobs.reconcile('theses',service.candidates('theses',item=item))
+                assert store.db.execute("SELECT status FROM jobs WHERE item=%s AND kind='theses'", (item,)).fetchone()[0] == 'blocked'
+        with pytest.raises(ValueError, match='synthetic rollback'):
+            with transaction(store.db):
+                claim()
+                raise ValueError('synthetic rollback')
+        assert saved(store,item)['processing_metadata'] == before
+        with transaction(store.db):
+            claim()
+        store.db.close()
+        store = Store(tmp_path, lambda _:None)
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == (second if first_kind == 'theses' else 'demo')
+    finally:
+        store.db.close()
+
+
+def test_summary_worker_can_start_shared_publication_from_second_feed(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Second feed summary rules'))
+            store.processing.reconcile_accepted_item(item)
+        asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
+        result = saved(store,item)
+        assert result['summarized_content']['points']
+        assert result['processing_metadata']['_pass']['feed_id'] == second
+        assert result['processing_metadata']['_pass']['settings']['values']['prompt_theses'] == 'Second feed summary rules'
+        job = store.db.execute("SELECT status,input_snapshot->>'feed_id' FROM jobs WHERE kind='theses' AND item=%s", (item,)).fetchone()
+        assert job[:] == ('done',second)
+        store.db.close()
+        store = Store(tmp_path,lambda _:None)
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+        assert saved(store,item)['summarized_content']['points']
+    finally:
+        store.db.close()
+
+
+def test_shared_filter_winner_keeps_its_feed_for_summary_after_restart(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
+            store.processing.reconcile_accepted_item(item)
+        asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'demo'
+        store.db.close()
+        store = Store(tmp_path,lambda _:None)
+        execution._store=store
+        asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
+        result = saved(store,item)
+        assert result['summarized_content']['points']
+        assert result['processing_metadata']['_pass']['feed_id'] == 'demo'
+        assert result['processing_metadata']['_pass']['settings']['values']['prompt_theses'] != 'Other feed rules'
+    finally:
+        store.db.close()
+
+
+def test_competing_workers_commit_one_shared_processing_context(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    async def scenario():
+        calls = []
+        store,item,execution,tasks = worker_library(tmp_path)
+        try:
+            second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+            with transaction(store.db):
+                store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+                store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
+                store.processing.reconcile_accepted_item(item)
+            filter_worker, summary_worker = workers(execution,tasks,transport(calls,theses=True))
+            await asyncio.gather(filter_worker.tick(),summary_worker.tick())
+            if tasks._ai:
+                await tasks._ai
+            chosen = saved(store,item)['processing_metadata']['_pass']['feed_id']
+            assert chosen in ('demo',second)
+            assert len([call for call in calls if call.url.path=='/v1/chat/completions']) == 1
+            completed = store.db.execute("SELECT kind,input_snapshot->>'feed_id' AS feed FROM jobs WHERE item=%s AND kind IN ('filter','theses') AND status='done'", (item,)).fetchall()
+            assert len(completed)==1 and completed[0]['feed']==chosen
+        finally:
+            store.db.close()
+    asyncio.run(scenario())
+
+
+def test_removing_selected_secondary_feed_revokes_its_running_job(tmp_path):
+    from oko.storage.reader_facts import ReaderFacts
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
+            store.processing.reconcile_accepted_item(item)
+        with transaction(store.db):
+            job = store.jobs.claim_processing('theses',store.clock())
+            assert job is not None
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+        members = ReaderFacts(lambda:store).feed_members(second)
+        assert item in members
+        with transaction(store.db):
+            store.remove_feed(second)
+            store.jobs.remove_feed(second,members)
+            metadata = saved(store,item)['processing_metadata']
+            current = store.db.execute('SELECT status,generation FROM jobs WHERE id=%s', (job.id,)).fetchone()
+            assert metadata.get('_pass',{}).get('feed_id') != second
+            assert current['status'] != 'running' and current['generation'] > job.generation
+    finally:
+        store.db.close()
+
+
+def test_removing_other_shared_feed_keeps_selected_running_job(tmp_path):
+    from oko.storage.reader_facts import ReaderFacts
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
+            store.processing.reconcile_accepted_item(item)
+        with transaction(store.db):
+            job = store.jobs.claim_processing('filter',store.clock())
+            assert job is not None
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'demo'
+        members = ReaderFacts(lambda:store).feed_members(second)
+        with transaction(store.db):
+            store.remove_feed(second)
+            store.jobs.remove_feed(second,members)
+        assert store.jobs.valid(job)
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'demo'
+    finally:
+        store.db.close()
+
+
+def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        native = transport([],theses=True)
+        async def model(request):
+            if request.url.path=='/v1/chat/completions':
+                entered.set()
+                await release.wait()
+            return native.handler(request)
+        store,item,execution,tasks = worker_library(tmp_path)
+        try:
+            second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+            with transaction(store.db):
+                store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+                store.subscriptions.update_settings('feed','demo',Overrides(filter_enabled=False))
+                store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=True))
+                store.processing.reconcile_accepted_item(item)
+            worker = workers(execution,tasks,httpx.MockTransport(model))[0]
+            await worker.tick()
+            await asyncio.wait_for(entered.wait(),2)
+            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+            with transaction(store.db):
+                store.remove_feed(second)
+                store.jobs.remove_feed(second,{item})
+            release.set()
+            await tasks._ai
+            result = saved(store,item)
+            assert result['filtered_content'] == {}
+            assert result['processing_metadata'].get('_pass',{}).get('feed_id') != second
+        finally:
+            store.db.close()
+    asyncio.run(scenario())
+
+
+def test_removing_selected_feed_preserves_its_saved_summary(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store,item,execution,tasks = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Second feed rules'))
+            store.processing.reconcile_accepted_item(item)
+        asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
+        before = saved(store,item)
+        assert before['summarized_content']['points']
+        with transaction(store.db):
+            store.remove_feed(second)
+            store.jobs.remove_feed(second,{item})
+        store.processing.sync()
+        after = saved(store,item)
+        assert after['summarized_content'] == before['summarized_content']
+        assert after['processing_metadata']['summary'] == before['processing_metadata']['summary']
+        assert after['processing_metadata'].get('_pass',{}).get('feed_id') != second
+    finally:
+        store.db.close()
+
+
+def test_first_claim_skips_feed_whose_public_processor_is_not_permitted(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed','demo',Overrides(processor='codex'))
+            store.subscriptions.update_settings('feed',second,Overrides(processor='llamacpp'))
+            store.processing.reconcile_accepted_item(item)
+        with transaction(store.db):
+            job = store.jobs.claim_processing('filter',store.clock())
+            assert job is not None
+            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+    finally:
+        store.db.close()
+
+
+def test_no_feed_is_chosen_when_every_candidate_is_disallowed(tmp_path):
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.subscriptions.update_settings('feed','demo',Overrides(processor='codex'))
+            store.subscriptions.update_settings('feed',second,Overrides(processor='codex'))
+            store.processing.reconcile_accepted_item(item)
+        with transaction(store.db):
+            assert store.jobs.claim_processing('filter',store.clock()) is None
+            assert not saved(store,item)['processing_metadata'].get('_pass')
+        with transaction(store.db):
+            store.subscriptions.update_settings('feed',second,Overrides(processor='llamacpp'))
+            store.settings_changed('feed',second)
+            store.processing.reconcile_accepted_item(item)
+            job = store.jobs.claim_processing('filter',store.clock())
+            assert job is not None
+            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+    finally:
+        store.db.close()
+
+
+def test_unconfigured_processor_does_not_choose_feed_and_configuration_unblocks(tmp_path):
+    from oko.processing.execution import CodexChoice, CodexSettings
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+        with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+            store.db.execute('UPDATE feeds SET public_ai=1 WHERE id IN (%s,%s)', ('demo',second))
+            store.subscriptions.update_settings('feed','demo',Overrides(processor='codex'))
+            store.subscriptions.update_settings('feed',second,Overrides(processor='codex'))
+            store.processing.reconcile_accepted_item(item)
+        with transaction(store.db):
+            assert store.jobs.claim_processing('filter',store.clock()) is None
+            assert not saved(store,item)['processing_metadata'].get('_pass')
+            assert store.db.execute("SELECT problem_code FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0] == 'processor-config'
+        choice = CodexChoice(model='synthetic',reasoning_effort='low',fast=False)
+        with transaction(store.db):
+            store.configure_codex(CodexSettings(filter=choice,theses=choice))
+            assert store.jobs.claim_processing('filter',store.clock()) is not None
+            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'demo'
+    finally:
+        store.db.close()
+
+
+def test_stale_filter_result_is_preserved_when_rules_change(tmp_path):
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
+        before = saved(store,item)
+        assert before['filtered_content'] and before['processing_metadata']['filter']['signature']
+        with transaction(store.db):
+            store.subscriptions.update_settings('feed','demo',Overrides(prompt_filters='Different rules'))
+            store.settings_changed('feed','demo')
+            store.processing.reconcile_accepted_item(item)
+            after = saved(store,item)
+            assert after['filtered_content'] == before['filtered_content']
+            assert after['processing_metadata']['filter'] == before['processing_metadata']['filter']
+            assert store.filters.read(item)['status'] != 'done'
+    finally:
+        store.db.close()
+
+
+def test_stale_summary_is_preserved_but_not_treated_as_current(tmp_path):
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
+        asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
+        before = saved(store,item)
+        assert before['summarized_content']['points']
+        with transaction(store.db):
+            store.subscriptions.update_settings('feed','demo',Overrides(prompt_theses='Different summary rules'))
+            store.settings_changed('feed','demo')
+            store.processing.reconcile_accepted_item(item)
+            after = saved(store,item)
+            assert after['summarized_content'] == before['summarized_content']
+            assert after['processing_metadata']['summary'] == before['processing_metadata']['summary']
+            assert store.processing.theses.read(item) is None
+    finally:
+        store.db.close()
+
+
 def test_disabled_admission_never_begins_and_next_transaction_is_usable(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     statements=[]
