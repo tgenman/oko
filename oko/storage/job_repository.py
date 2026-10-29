@@ -386,7 +386,7 @@ class JobRepository:
         if revision != self.store.read_sync._configuration:
             configs = self.store.subscriptions.feeds(transport='telegram')
         else:
-            pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_dirty')]
+            pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_state WHERE needs_sync')]
             if not pending:
                 return
             configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed, transport='telegram')]
@@ -400,7 +400,7 @@ class JobRepository:
                 # Claim this marker before yielding. New observations during the
                 # pass can insert another marker and must not be erased at its end.
                 with db:
-                    db.execute('DELETE FROM telegram_read_dirty WHERE feed = %s', (feed,))
+                    db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed = %s AND needs_sync', (feed,))
                 if config['auto_read']:
                     identities = [row[0] for row in db.execute('SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND complete = 1 AND viewed = 0', (feed,))]
                     size = 8 if self.store.processing.background else 256
@@ -445,8 +445,6 @@ class JobRepository:
                             if state['signature'] != signature:
                                 db.execute('UPDATE telegram_read_state SET signature = %s WHERE feed = %s', (signature, feed))
                                 db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'read' , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , next = 0 , error = NULL , generation = jobs . generation + 1", (feed,))
-                    if not self.store.processing.background:
-                        db.execute('DELETE FROM telegram_read_dirty WHERE feed = %s', (feed,))
                 yield
                 if self.store.subscriptions.source_revision() != revision:
                     return
@@ -455,8 +453,8 @@ class JobRepository:
         # Deleted and non-Telegram feeds need no read-frontier work.
         with db:
             if cleared:
-                db.execute('DELETE FROM telegram_read_dirty WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )', (json.dumps(cleared),))
-            db.execute("DELETE FROM telegram_read_dirty WHERE NOT EXISTS ( SELECT 1 FROM feeds WHERE id = telegram_read_dirty . feed AND transport = 'telegram' AND connection != 'deleting' )")
+                db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )', (json.dumps(cleared),))
+            db.execute("UPDATE telegram_read_state SET needs_sync=false WHERE needs_sync AND NOT EXISTS ( SELECT 1 FROM feeds WHERE id = telegram_read_state.feed AND transport = 'telegram' AND connection IS DISTINCT FROM 'deleting' )")
         self.store.read_sync._configuration = revision
 
 

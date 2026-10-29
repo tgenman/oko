@@ -16,7 +16,7 @@ def test_private_database_file_runs_cli_without_sqlite(postgres_url, tmp_path):
     check = subprocess.run([sys.executable, '-m', 'oko.storage.postgres_migrations', '--check',
                             '--database-url-file', str(credential)], cwd=root, capture_output=True, text=True, timeout=20)
     assert check.returncode == 0, check.stdout + check.stderr
-    assert 'version 16' in check.stdout
+    assert 'version 17' in check.stdout
     assert postgres_url not in check.stdout + check.stderr
     data = tmp_path / 'reader'
     process = launch(data, api_only=True, database_url_file=credential)

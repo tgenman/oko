@@ -189,11 +189,36 @@ def test_reobserving_unchanged_page_schedules_read_frontier_check(tmp_path):
             store = app.state.host.require_store()
             with store.db:
                 cursor = store.db.execute('SELECT cursor FROM feeds WHERE id = %s', (feed,)).fetchone()[0]
-                store.db.execute('DELETE FROM telegram_read_dirty WHERE feed = %s', (feed,))
+                store.db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed = %s', (feed,))
                 store.read_sync.observed(feed, (), cursor)
-                return store.db.execute('SELECT 1 FROM telegram_read_dirty WHERE feed = %s', (feed,)).fetchone() is not None
+                return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed = %s', (feed,)).fetchone()[0]
 
         assert client.portal.call(observe)
+
+
+def test_new_read_sync_signal_survives_an_in_progress_pass(tmp_path):
+    network = ReadTelegram()
+    app = create_app(tmp_path, token='test', telegram_client=network)
+    with TestClient(app, headers=H) as client:
+        presence(client, 'test')
+        feed = connect(client, count=2)['id']
+        settled(client, 2)
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+
+        async def check():
+            async with app.state.host.execution._actions:
+                store = app.state.host.require_store()
+                with store.db:
+                    store.read_sync.mark_feed(feed)
+                store.read_sync._configuration = store.subscriptions.source_revision()
+                steps = store.jobs.sync_reads_steps()
+                next(steps)
+                with store.db:
+                    store.read_sync.mark_feed(feed)
+                list(steps)
+                return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0]
+
+        assert client.portal.call(check)
 
 
 def test_unknown_ack_result_recovers_without_content_after_restart(tmp_path):

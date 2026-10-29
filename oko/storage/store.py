@@ -221,6 +221,7 @@ class Store:
                 self.db.execute('INSERT INTO items ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known))
                 self.db.execute('INSERT INTO feed_publications (feed_id, publication_id) VALUES ( %s , %s ) ON CONFLICT DO NOTHING',(feed,item))
+                self.read_sync.mark_feed(feed)
                 if publication.adapter_reference is None:
                     raise ValueError('Adapter did not return a publication external key')
                 rank=orders.get(publication.adapter_reference.key)
@@ -409,6 +410,7 @@ class Store:
             self.db.execute('UPDATE items SET complete = 1 WHERE id = %s',(item,))
             if material.members:
                 self.db.execute('UPDATE items SET members = %s WHERE id = %s',(json.dumps(material.members),item))
+            self.read_sync.mark_item(item)
             for row in prepared[1]:
                 old=old_media.get(row['id'])
                 if row['status']=='ready' and old and not (row['resource_identity'] is not None and old['source_locator']!=row['source_locator']):
@@ -478,6 +480,8 @@ class Store:
             self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s", (feed,))
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
             self.db.execute('DELETE FROM feed_publications WHERE feed_id = %s',(feed,))
+            for item in shared:
+                self.read_sync.mark_item(item)
             publication_links.prune(self,set(shared))
             for item in shared:
                 self._remember_cleanup_owner(item, feed)

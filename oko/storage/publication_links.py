@@ -75,7 +75,7 @@ def text(store: 'Store', item: str) -> str:
 def notify_parents(store: 'Store', item: str) -> None:
     for row in store.db.execute('SELECT source_publication_id FROM publication_links WHERE target_publication_id = %s',(item,)).fetchall():
         store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(row[0],))
-        store.db.execute('INSERT INTO telegram_read_dirty SELECT feed_id FROM items_read WHERE id = %s AND feed_id IS NOT NULL ON CONFLICT DO NOTHING',(row[0],))
+        store.read_sync.mark_item(row[0])
         store.publications.reconcile(row[0])
         store.read_versions.linked_changed(row[0])
 

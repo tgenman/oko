@@ -513,3 +513,19 @@ def test_time_projection_migration_preserves_jobs_and_youtube_deadlines(connecti
         functions = ['oko_trigger_' + name for name in names]
         assert db.execute('SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname=ANY(%s)', (functions,)).fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_telegram_sync_migration_preserves_pending_feeds(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:16])
+        db.execute("INSERT INTO feeds(id,kind,transport,connection) VALUES ('ready','telegram','telegram','ready'),('new','telegram','telegram','ready'),('rss','rss','rss','ready')")
+        db.execute("INSERT INTO telegram_read_state(feed,since,initial,confirmed) VALUES ('ready',100,5,7)")
+        db.execute("INSERT INTO telegram_read_dirty(feed) VALUES ('new'),('rss') ON CONFLICT DO NOTHING")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT since,initial,confirmed,needs_sync FROM telegram_read_state WHERE feed='ready'").fetchone() == (100,5,7,True)
+        assert db.execute("SELECT since,needs_sync FROM telegram_read_state WHERE feed='new'").fetchone() == (None,True)
+        assert db.execute("SELECT to_regclass('telegram_read_dirty')").fetchone() == (None,)
+        names = ['telegram_read_initial_added','telegram_read_initial_changed','telegram_read_item_added','telegram_read_item_changed','telegram_read_member_insert','telegram_read_member_update']
+        assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname=ANY(%s)', (names,)).fetchone() == (0,)
+        verify(db, MIGRATIONS)

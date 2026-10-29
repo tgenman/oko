@@ -62,6 +62,26 @@ def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
     assert client.get(media).content==PNG
 
 
+def test_deleting_primary_marks_remaining_telegram_membership_for_read_sync(shared):
+    client, feeds, _, _ = shared
+    item = read_all_cards(client, '/api/v3/cards')[0]['id']
+    primary = client.get('/api/v3/publication/' + item).json()['feed_id']
+    remaining = next(feed['id'] for feed in feeds if feed['id'] != primary)
+    assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
+
+    async def remove():
+        async with client.app.state.host.execution._actions:
+            store = client.app.state.host.require_store()
+            with store.db:
+                store.db.execute("UPDATE feeds SET transport='telegram' WHERE id=%s", (remaining,))
+                store.read_sync.mark_feed(remaining)
+                store.db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed=%s', (remaining,))
+            store.remove_feed(primary)
+            return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed=%s', (remaining,)).fetchone()[0]
+
+    assert client.portal.call(remove)
+
+
 def test_deleting_secondary_feed_preserves_primary_and_shared_media(shared):
     client,feeds,_,_=shared
     item=read_all_cards(client, '/api/v3/cards')[0]['id']

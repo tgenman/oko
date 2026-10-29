@@ -193,7 +193,7 @@ class MediaFiles:
                 (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,media_id))
             store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
-            store.db.execute('INSERT INTO telegram_read_dirty SELECT feed_id FROM items_read WHERE id = %s AND feed_id IS NOT NULL ON CONFLICT DO NOTHING',(download.publication_id,))
+            store.read_sync.mark_item(download.publication_id)
             store.read_versions.media_changed(download.publication_id)
             if subtitles:
                 store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(download.publication_id,))

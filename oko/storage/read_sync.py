@@ -31,13 +31,24 @@ class ReadSync:
 
     def pending(self) -> bool:
         return (self._configuration != self.store.subscriptions.source_revision()
-                or self.store.db.execute('SELECT 1 FROM telegram_read_dirty LIMIT 1').fetchone() is not None)
+                or self.store.db.execute('SELECT 1 FROM telegram_read_state WHERE needs_sync LIMIT 1').fetchone() is not None)
+
+    def mark_feed(self, feed: str) -> None:
+        self.store.db.execute("""INSERT INTO telegram_read_state(feed, needs_sync)
+            SELECT id, true FROM feeds WHERE id=%s AND transport='telegram' AND connection IS DISTINCT FROM 'deleting'
+            ON CONFLICT(feed) DO UPDATE SET needs_sync=true WHERE NOT telegram_read_state.needs_sync""", (feed,))
+
+    def mark_item(self, item: str) -> None:
+        self.store.db.execute("""INSERT INTO telegram_read_state(feed, needs_sync)
+            SELECT DISTINCT f.id, true FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id
+            WHERE m.publication_id=%s AND f.transport='telegram' AND f.connection IS DISTINCT FROM 'deleting'
+            ON CONFLICT(feed) DO UPDATE SET needs_sync=true WHERE NOT telegram_read_state.needs_sync""", (item,))
 
 
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:
         db = self.store.db
         envelope = HistoryEnvelope.decode(cursor, adapter='client')
-        db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , %s ) ON CONFLICT DO NOTHING',
+        db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , %s ) ON CONFLICT (feed) DO UPDATE SET since=COALESCE(telegram_read_state.since,excluded.since)',
                    (feed, envelope.selection.since))
         selection = envelope.selection
         if selection.scan_complete and selection.oldest:
@@ -45,13 +56,15 @@ class ReadSync:
         db.execute('UPDATE telegram_read_state SET signature = NULL WHERE feed = %s', (feed,))
         # Re-observing an unchanged page still requires checking the remote
         # read frontier. Member upserts alone may not change any row.
-        db.execute('INSERT INTO telegram_read_dirty (feed) VALUES (%s) ON CONFLICT DO NOTHING', (feed,))
+        self.mark_feed(feed)
         db.executemany('INSERT INTO telegram_read_members ( feed , member ) VALUES ( %s , %s ) ON CONFLICT ( feed , member ) DO UPDATE SET missing = 0',
                        [(feed, member) for member in members])
 
     def eligible(self, feed: str, members: list[int], reason: str) -> None:
         self.store.db.executemany('INSERT INTO telegram_read_members ( feed , member , eligible , reason ) VALUES ( %s , %s , 1 , %s ) ON CONFLICT ( feed , member ) DO UPDATE SET eligible = 1 , reason = excluded . reason',
                                   [(feed, member, reason) for member in members])
+        if members:
+            self.mark_feed(feed)
 
     def request(self, feed: str) -> dict[str, Any] | None:
         configs = self.store.subscriptions.feeds(feed, transport='telegram')
@@ -67,7 +80,7 @@ class ReadSync:
         if history and history['mode'] == 'count' and (not history['frozen'] or not history.get('scan_complete', True)):
             return None
         state = self.store.db.execute('SELECT * FROM telegram_read_state WHERE feed = %s', (feed,)).fetchone()
-        if not state or config['transport'] != 'telegram' or config['auto_read'] is None:
+        if not state or state['since'] is None or config['transport'] != 'telegram' or config['auto_read'] is None:
             return None
         if not binding or binding['kind'] != 'client' or config['connection'] == 'deleting':
             return None
@@ -117,6 +130,8 @@ class ReadSync:
     def completed(self, feed: str, plan: ReadPlan, confirmed: int) -> None:
         self.store.db.executemany('UPDATE telegram_read_members SET missing = 1 WHERE feed = %s AND member = %s',[(feed,member) for member in plan.missing])
         self.store.db.execute('UPDATE telegram_read_state SET initial = COALESCE ( initial , %s ) , confirmed = oko_max ( confirmed , %s ) , waiting = %s , error = NULL WHERE feed = %s',(plan.initial,confirmed,plan.waiting,feed))
+        if plan.missing:
+            self.mark_feed(feed)
 
     def failed(self, feed: str, label: str) -> None:
         with self.store.db:

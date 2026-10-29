@@ -217,3 +217,17 @@
 - Catalog measurement after version 16: 30 tables and 122 non-internal triggers.
   Remaining projections, direct event-driven scheduling and the target physical
   schema are unfinished; status reconciliation still writes during GET.
+- Migration 017 moves outstanding Telegram read-sync markers into indexed
+  `telegram_read_state.needs_sync`, removes the old table and six triggers, and
+  preserves pending markers, including feeds not yet observed. Python marks
+  affected feeds within the same transactions as collection, media, viewing and
+  membership changes. A new marker during a running pass survives its completion.
+- The first migration test failed before the new column existed; after the
+  migration the affected Telegram, web, migration, CLI and transaction suites
+  passed 115 tests. A new shared-owner deletion test found a missed marker and
+  passed after the fix; the shared-publication, startup and bounded-background
+  suites then passed 26 tests. Types and 8 Playwright scenarios passed; a
+  synthetic Telegram publication screenshot was inspected.
+- Catalog measurement after version 17: 29 tables and 116 non-internal triggers.
+  The current read-sync pass still has the legacy saved-content scan and the
+  target separate saved/viewed eligibility facts remain unfinished.
