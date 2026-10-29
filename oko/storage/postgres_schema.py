@@ -12,4 +12,5 @@ MIGRATIONS = (
     Migration(5, 'remove-telegram-source-claims', (Path(__file__).parent / 'postgres' / '005-remove-telegram-source-claims.sql').read_text()),
     Migration(6, 'publication-memberships', (Path(__file__).parent / 'postgres' / '006-publication-memberships.sql').read_text()),
     Migration(7, 'storage-identity', (Path(__file__).parent / 'postgres' / '007-storage-identity.sql').read_text()),
+    Migration(8, 'feed-avatars', (Path(__file__).parent / 'postgres' / '008-feed-avatars.sql').read_text()),
 )

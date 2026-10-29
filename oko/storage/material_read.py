@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from oko.storage.reading import reading_value, saved_content
-from oko.storage.feed_facts import feed_facts
+from oko.storage.feed_facts import feed_facts, READER_FEED_COLUMNS
 import json
 
 
@@ -40,8 +40,9 @@ def current(db: Database) -> Inputs | None:
 
 
 _ITEM = 'SELECT i . * , d . item AS source_deleted , coalesce ( v . hidden , 0 ) AS reader_hidden FROM items_read i LEFT JOIN source_deleted d ON d . item = i . id LEFT JOIN reader_visibility v ON v . item = i . id'
-_FEED = 'SELECT f . * , b . binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b . feed = f . id'
-_BATCH_FEED = '''SELECT f.*, b.binding AS reader_binding,
+_FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
+_FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
+_BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,
     COALESCE((SELECT jsonb_agg(jsonb_build_array(s.scope, s.owner, s.field, s.value))
               FROM settings s WHERE (s.scope = 'oko' AND s.owner = 'global')
                  OR (s.scope = 'folder' AND s.owner = f.folder_id)

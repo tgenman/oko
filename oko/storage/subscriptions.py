@@ -2,7 +2,7 @@ from oko.storage.database import INTEGRITY_ERRORS
 from oko.storage.database import expect_row, Connection, Row
 from oko.storage.reading import reading_value
 from oko.storage.settings_repository import SettingsRepository
-from oko.storage.feed_facts import feed_facts
+from oko.storage.feed_facts import feed_facts, READER_FEED_COLUMNS
 import json
 import re
 import secrets
@@ -25,7 +25,7 @@ class SubscriptionRepository:
 
         self.settings = SettingsRepository(db)
         self.details = FeedDetails(db, wall_clock)
-        self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
+        self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'), wall_clock=wall_clock)
 
 
     def source_revision(self) -> int:
@@ -87,7 +87,7 @@ class SubscriptionRepository:
         if transport is not None:
             conditions.append('transport = %s')
             parameters.append(transport)
-        query = 'SELECT * FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
+        query = 'SELECT ' + ','.join(READER_FEED_COLUMNS) + ' FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
         return self._feeds(list(self.db.execute(query,parameters)))
 
     def feeds_many(self, identities: set[str]) -> list[dict[str, Any]]:
@@ -95,7 +95,7 @@ class SubscriptionRepository:
         ids = sorted(identities)
         for start in range(0, len(ids), 400):
             batch = ids[start:start+400]
-            rows.extend(self.db.execute(f"SELECT * FROM feeds WHERE id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY rowid", batch))
+            rows.extend(self.db.execute(f"SELECT {','.join(READER_FEED_COLUMNS)} FROM feeds WHERE id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY rowid", batch))
         return self._feeds(rows)
 
     def _feeds(self, rows: list[Row]) -> list[dict[str, Any]]:
@@ -109,12 +109,11 @@ class SubscriptionRepository:
         bindings=self.telegram.bindings(identities)
         profiles=self.telegram.profiles() if any(b['kind']=='client' for b in bindings.values()) else {}
         histories=self.history.statuses(identities)
-        avatars={row['feed']:row['digest'] for row in self.db.execute('SELECT feed , digest FROM telegram_avatars WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )',(json.dumps(identities),))}
         batch={}
         for row in rows:
             binding=bindings.get(row['id'])
             profile=profiles.get(binding['role']) if binding and binding['kind']=='client' else None
-            batch[row['id']]=self._feed_value(row,binding,histories.get(row['id']),avatars.get(row['id']),profile)
+            batch[row['id']]=self._feed_value(row,binding,histories.get(row['id']),row['avatar_digest'],profile)
         previous=self._feed_batch
         self._feed_batch=batch
         try:
@@ -128,13 +127,12 @@ class SubscriptionRepository:
     def _feed(self, identity: str) -> dict[str, Any]:
         if self._feed_batch is not None and identity in self._feed_batch:
             return self._feed_batch[identity]
-        row=self.db.execute('SELECT * FROM feeds WHERE id = %s',(identity,)).fetchone()
+        row=self.db.execute('SELECT '+','.join(READER_FEED_COLUMNS)+' FROM feeds WHERE id = %s',(identity,)).fetchone()
         if row is None:
             raise LookupError('Фид не найден')
         binding=self.telegram.binding(identity)
-        avatar=self.db.execute('SELECT digest FROM telegram_avatars WHERE feed = %s',(identity,)).fetchone() if row['kind']=='telegram' else None
         profile=self.telegram.profile(binding['role']) if binding and binding['kind']=='client' else None
-        return self._feed_value(row,binding,self.history.status(identity),avatar[0] if avatar else None,profile)
+        return self._feed_value(row,binding,self.history.status(identity),row['avatar_digest'],profile)
 
     @staticmethod
     def _feed_value(row: Row, binding: dict[str,Any] | None, history: dict[str,Any] | None,

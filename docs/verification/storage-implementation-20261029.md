@@ -96,3 +96,16 @@
 - A fresh schema migrated through version 7 has 43 tables and 149 application
   triggers, measured from the PostgreSQL catalog. This is an intermediate result,
   not the target of 20 tables and zero application triggers.
+- Migration 008 moves Telegram avatar bytes, MIME and digest into feeds and
+  drops `telegram_avatars` and its three trigger functions. Preflight rejects
+  orphaned, oversized, invalid-format or digest-mismatched avatars atomically.
+  Python updates feed/status reader versions in the same transaction as an avatar
+  change; the navigation path selects the digest without loading avatar bytes.
+- The avatar/migration/Telegram/navigation/transaction and existing publication
+  cost suites passed 85 Python tests. The production PostgreSQL browser test and
+  the avatar Playwright scenario passed; their screenshots were inspected.
+  An initial test accidentally counted matching triggers in all test schemas;
+  restricting the catalog query to the current schema fixed the test.
+- Catalog measurement on an empty database migrated through version 8: 42 tables
+  and 146 non-internal triggers. The other application triggers and target schema
+  transition remain unfinished.

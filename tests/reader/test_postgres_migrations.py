@@ -195,3 +195,40 @@ def test_storage_identity_migration_rejects_invalid_identity(connections):
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT value FROM reader_identity WHERE id=1').fetchone() == ('not-a-uuid',)
         verify(db, MIGRATIONS[:6])
+
+
+def test_avatar_migration_moves_bytes_and_removes_table_and_triggers(connections):
+    import hashlib
+    from oko.storage.postgres_schema import MIGRATIONS
+    image = b'\x89PNG\r\n\x1a\nsynthetic-avatar'
+    digest = hashlib.sha256(image).hexdigest()
+    with connections() as db:
+        migrate(db, MIGRATIONS[:7])
+        db.execute("INSERT INTO feeds(id,kind) VALUES ('feed','telegram')")
+        db.execute('INSERT INTO telegram_avatars VALUES (%s,%s,%s,%s)', ('feed', image, 'image/png', digest))
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT avatar_image, avatar_mime, avatar_digest FROM feeds WHERE id='feed'").fetchone() == (image, 'image/png', digest)
+        assert db.execute("SELECT to_regclass('telegram_avatars')").fetchone() == (None,)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'reader_v_telegram_avatars_%' AND NOT t.tgisinternal").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname IN ('oko_trigger_reader_v_telegram_avatars_delete','oko_trigger_reader_v_telegram_avatars_insert','oko_trigger_reader_v_telegram_avatars_update')").fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+@pytest.mark.parametrize('invalid', ['orphan', 'digest', 'oversize', 'mime'])
+def test_avatar_migration_rejects_invalid_data_without_losing_it(connections, invalid):
+    import hashlib
+    from oko.storage.postgres_schema import MIGRATIONS
+    image = b'\x89PNG\r\n\x1a\nsynthetic-avatar'
+    if invalid == 'oversize':
+        image += b'x' * (128 * 1024)
+    digest = hashlib.sha256(image).hexdigest() if invalid != 'digest' else 'wrong'
+    mime = 'image/png' if invalid != 'mime' else 'image/jpeg'
+    with connections() as db:
+        migrate(db, MIGRATIONS[:7])
+        if invalid != 'orphan':
+            db.execute("INSERT INTO feeds(id,kind) VALUES ('feed','telegram')")
+        db.execute('INSERT INTO telegram_avatars VALUES (%s,%s,%s,%s)', ('feed', image, mime, digest))
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid stored avatar'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT image,mime,digest FROM telegram_avatars WHERE feed=%s', ('feed',)).fetchone() == (image, mime, digest)
+        verify(db, MIGRATIONS[:7])

@@ -61,7 +61,7 @@ class Publications:
 
     def configure_feed(self, feed: str) -> None:
         store = self.store
-        row = store.db.execute('SELECT * FROM feeds WHERE id = %s', (feed,)).fetchone()
+        row = store.db.execute('SELECT transport,kind,original_urls,created_at,config,telegram_username,telegram_peer FROM feeds WHERE id = %s', (feed,)).fetchone()
         binding = store.subscriptions.telegram.binding(feed)
         transport=row['transport'] or row['kind'] if row else None
         if row and transport in ('rss','youtube'):

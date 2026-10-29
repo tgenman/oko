@@ -11,6 +11,7 @@ import hashlib
 import binascii
 import re
 import secrets
+import time
 from oko.storage.transaction import begin_write
 from typing import Any
 from collections.abc import Callable
@@ -49,9 +50,10 @@ def locator(value: str) -> tuple[str, str | int]:
 
 
 class TelegramAccess:
-    def __init__(self, db: Database, modified: Callable[[str], None] = lambda _: None) -> None:
+    def __init__(self, db: Database, modified: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
         self.db = db
         self.modified = modified
+        self.wall_clock = wall_clock
         # No executescript here: migrations and their ownership rows are atomic.
         with db:
             begin_write(db)
@@ -168,7 +170,7 @@ class TelegramAccess:
                       auto_read: bool | None, subscriptions: Any) -> dict[str,Any]:
         """Apply verified channel access inside Runtime's acceptance transaction."""
         subscriptions.check_owner('feed',feed)
-        row=expect_row(self.db.execute('SELECT * FROM feeds WHERE id = %s',(feed,)).fetchone())
+        row=expect_row(self.db.execute('SELECT kind,transport,connection,telegram_peer,telegram_account,auto_read FROM feeds WHERE id = %s',(feed,)).fetchone())
         previous=self.binding(feed)
         if row['kind']!='telegram' or row['transport']=='rss' or row['connection']=='deleting' or not previous:
             raise TelegramConflict('access_immutable',dict(feed_id=feed),'Способ доступа этого фида изменить нельзя')
@@ -221,7 +223,7 @@ class TelegramAccess:
         if 'avatar' not in info:
             return
         if info['avatar'] is None:
-            self.db.execute('DELETE FROM telegram_avatars WHERE feed = %s', (feed,))
+            self._set_avatar(feed, None, None, None)
             return
         try:
             encoded = info['avatar']
@@ -233,10 +235,18 @@ class TelegramAccess:
         mime = ('image/jpeg' if image.startswith(b'\xff\xd8\xff') else 'image/png' if image.startswith(b'\x89PNG\r\n\x1a\n') else 'image/webp' if image[:4] == b'RIFF' and image[8:12] == b'WEBP' else None)
         if not mime or len(image) > 128*1024:
             return
-        self.db.execute('INSERT INTO telegram_avatars VALUES ( %s , %s , %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET image = excluded . image , mime = excluded . mime , digest = excluded . digest',
-                        (feed, image, mime, hashlib.sha256(image).hexdigest()))
+        self._set_avatar(feed, image, mime, hashlib.sha256(image).hexdigest())
+
+    def _set_avatar(self, feed: str, image: bytes | None, mime: str | None, digest: str | None) -> None:
+        changed = self.db.execute('UPDATE feeds SET avatar_image=%s, avatar_mime=%s, avatar_digest=%s WHERE id=%s AND avatar_digest IS DISTINCT FROM %s',
+                                  (image, mime, digest, feed, digest)).rowcount
+        if changed:
+            now = self.wall_clock()
+            for kind, identity in (('feed', feed), ('status', 'runtime')):
+                self.db.execute('INSERT INTO reader_entities VALUES (%s,%s,1,%s) ON CONFLICT (kind,identity) DO UPDATE SET version=reader_entities.version+1, changed=excluded.changed',
+                                (kind, identity, now))
 
     def release(self, feed: str) -> None:
-        self.db.execute('DELETE FROM telegram_avatars WHERE feed = %s', (feed,))
+        self._set_avatar(feed, None, None, None)
         self.db.execute('DELETE FROM telegram_claim_owners WHERE feed = %s', (feed,))
         self.db.execute('DELETE FROM telegram_bindings WHERE feed = %s', (feed,))
