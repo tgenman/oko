@@ -10,7 +10,8 @@ def library(root, database_url, count):
         for number in range(1, count):
             identity = f'{number:032x}'
             row = dict(template, id=identity, source_id='completion:'+identity, external_id='completion:'+identity)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[field] for field in fields))
+            marks = ['%s::integer::boolean' if field == 'source_deleted' else '%s' for field in fields]
+            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join(marks)+')', tuple(row[field] for field in fields))
             store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
     store.db.close()
 

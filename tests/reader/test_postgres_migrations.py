@@ -564,3 +564,15 @@ def test_telegram_saved_backfill_is_scheduled_for_legacy_client_feeds(connection
         assert db.execute("SELECT since,saved_backfill_after FROM telegram_read_state WHERE feed='client'").fetchone() == (123,'')
         assert db.execute("SELECT count(*) FROM telegram_read_state WHERE feed='web'").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_unused_reader_lists_and_originals_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:19])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        db.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('feed','feed','originals','false')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('reader_lists'),to_regclass('reader_originals')").fetchone() == (None,None)
+        assert db.execute("SELECT value FROM settings WHERE scope='feed' AND owner='feed' AND field='originals'").fetchone() == ('false',)
+        verify(db, MIGRATIONS)

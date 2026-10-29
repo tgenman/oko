@@ -90,6 +90,21 @@ def test_feed_rename_changes_navigation_and_sql_rollback_keeps_it(tmp_path):
         assert response.status_code==304 and not response.content
 
 
+def test_originals_inheritance_changes_publication_etag(tmp_path):
+    feeds, items = library(tmp_path, [1])
+    app = traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first = client.get('/api/v3/publication/'+items[0])
+        assert first.json()['originals'] is True
+        assert client.patch('/api/v3/settings/oko/global', json={'originals':False}).status_code == 200
+        changed = client.get('/api/v3/publication/'+items[0], headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code == 200 and changed.json()['originals'] is False
+        assert client.patch('/api/v3/settings/feed/'+feeds[0], json={'originals':True}).status_code == 200
+        override = client.get('/api/v3/publication/'+items[0], headers={'If-None-Match':changed.headers['ETag']})
+        assert override.status_code == 200 and override.json()['originals'] is True
+
+
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
     _,items=library(tmp_path,[1])
     clock=[0.0]
@@ -253,6 +268,7 @@ def test_failed_viewed_write_keeps_the_card_page_unchanged(tmp_path):
     library(tmp_path,[2])
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
         initial=client.get('/api/v3/cards')
         identity=initial.json()['items'][0]['id']
         def install():

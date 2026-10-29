@@ -265,3 +265,15 @@
   and withholding external calls while backfill is incomplete. Types and two
   Playwright scenarios passed; a synthetic client-publication screenshot was
   inspected. The full redesign and its independent review remain outstanding.
+- Migration 020 removes the unused reader-list and inherited-originals
+  projections and six related triggers/functions. The current publication HTTP
+  response derives the inherited setting directly; changing the global value and
+  adding a feed override both change the response and ETag.
+- The initial affected run passed 123 tests and exposed four failures in an old
+  synthetic fixture passing a boolean as an integer, plus an ETag test racing
+  startup recovery. After fixing the fixture and isolating steady-state testing,
+  both affected suites passed 25 tests. Types and 8 Playwright settings, tree and
+  reading scenarios passed; a settings screenshot was inspected.
+- Catalog measurement after version 20: 27 tables and 110 non-internal triggers.
+  Remaining work includes direct processing Jobs, first-started feed selection,
+  remaining reader projections and the final schema, checks and review.
