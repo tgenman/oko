@@ -319,3 +319,14 @@
   verifies both generation change and rollback. The linked, worker, processing
   and reader suites passed 75 tests, types and two browser scenarios passed; the
   synthetic linked RSS screenshot was inspected. Other dirty-queue producers remain.
+- An attempted synchronous per-publication reconciliation on global settings
+  changes passed 113 functional/cost tests but failed three slow-recovery tests:
+  two HTTP requests timed out and a simulated recovery failure became a 500 on
+  the settings request. That implementation was reverted; all six startup and
+  responsiveness tests then passed. Settings still use the transitional dirty
+  queue, and their atomic, responsive replacement needs a bounded design.
+- Complete publications accepted from a discovery page now receive their
+  processing Jobs before the page transaction commits. A regression test first
+  demonstrated the missing Job and now checks both commit and rollback. The
+  affected worker, collection, startup and reading/cost suites passed 108 tests;
+  types and two Playwright scenarios passed, and a screenshot was inspected.

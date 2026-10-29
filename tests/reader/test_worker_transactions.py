@@ -155,6 +155,31 @@ def test_changed_linked_article_updates_parent_job_in_same_transaction(tmp_path)
         store.db.close()
 
 
+def test_discovered_complete_publication_gets_job_in_same_transaction(tmp_path):
+    from oko.collection.contracts import Publication
+    from tests.support.source import publication_packet
+    store, _, _, _ = worker_library(tmp_path)
+    try:
+        store.processing.background = True
+        store.jobs.enqueue_discovery()
+        job = store.jobs.next_job(store.clock())
+        assert job is not None and job.kind == 'discover'
+        packet = publication_packet(Publication('two','https://example.org/two',101), Material('Second','Synthetic new text'), needs_fetch=False)
+        with pytest.raises(ValueError, match='synthetic rollback'):
+            with transaction(store.db):
+                store.collect_discovery([packet], '{}')
+                item = store.db.execute("SELECT id FROM items WHERE source_id='demo:two'").fetchone()[0]
+                assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[0] == 'pending'
+                raise ValueError('synthetic rollback')
+        assert store.db.execute("SELECT id FROM items WHERE source_id='demo:two'").fetchone() is None
+        with transaction(store.db):
+            store.collect_discovery([packet], '{}')
+            item = store.db.execute("SELECT id FROM items WHERE source_id='demo:two'").fetchone()[0]
+            assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[0] == 'pending'
+    finally:
+        store.db.close()
+
+
 def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))

@@ -272,6 +272,8 @@ class Store:
                 self.read_sync.observed(feed,tuple(member for publication in publications for member in publication.members),cursor)
                 for item in saved_items:
                     self.read_sync.saved_publication(item)
+            for item in saved_items:
+                self.processing.reconcile_accepted_item(item)
             if successful:
                 self.subscriptions.details.record(feed,'updated')
             self.subscriptions.details.description(feed,description)
